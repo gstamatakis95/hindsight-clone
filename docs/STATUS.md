@@ -7,14 +7,14 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 
 | WP | Title | State | Branch | PR | Blockers | Open CCRs | LOW findings |
 |----|-------|-------|--------|----|----------|-----------|--------------|
-| WP-00 | Contracts and scaffold | fixing review round 1 | wp/WP-00-contracts | 17fe418 | review: 6 HIGH | WP-00-1 (approved, pending apply) | see log |
-| WP-01 | Postgres adapter | waiting | — | — | WP-00 | — | — |
-| WP-02 | Fakes | waiting | — | — | WP-00 | — | — |
-| WP-03 | Gateway and S3 adapters | waiting | — | — | WP-00 | — | — |
-| WP-04 | Config, routing, time, prompts | waiting | — | — | WP-00 | — | — |
-| WP-05 | Worker runtime | waiting | — | — | WP-00 | — | — |
-| WP-06 | Server shell | waiting | — | — | WP-00 | — | — |
-| WP-07 | Eval harness | waiting | — | — | WP-00 | — | — |
+| WP-00 | Contracts and scaffold | merged (0374c87, tag contracts-v1) | wp/WP-00-contracts | f5ab75f | — | WP-00-1 approved + applied | see carried-forward |
+| WP-01 | Postgres adapter | ready | — | — | — | — | — |
+| WP-02 | Fakes | ready | — | — | — | — | — |
+| WP-03 | Gateway and S3 adapters | ready | — | — | — | — | — |
+| WP-04 | Config, routing, time, prompts | ready | — | — | — | — | — |
+| WP-05 | Worker runtime | ready | — | — | — | — | — |
+| WP-06 | Server shell | ready | — | — | — | — | — |
+| WP-07 | Eval harness | ready | — | — | — | — | — |
 | WP-08 | Retain engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-09 | Recall engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-10 | Consolidation engine | waiting | — | — | WP-02, WP-04 | — | — |
@@ -55,3 +55,23 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - Deferred to WP-01/WP-02 acceptance: porttest coverage gaps from review round 2 (tenant isolation on new write
   ports, R8 edge cases, tombstoned-bank Fail, Enqueue/Upgrade race). Ruling: internal/porttest is not a frozen
   path; WP-01 may add tests there in new files.
+- 2026-10-10 WP-00 review round 3 on f5ab75f: MERGE (all round-2 HIGHs fixed; no CRITICAL/HIGH).
+- 2026-10-10 merged wp/WP-00-contracts into main (merge commit 0374c87), tagged contracts-v1. Contracts frozen.
+  Gates on main: go build, go vet, make lint, make test pass.
+- 2026-10-10 main fix: go.mod `ignore ./third_party` (the git-ignored Hindsight clone has Go examples that broke
+  `go build ./...` in checkouts that have it). .claude/ (agent worktrees) git-ignored.
+- 2026-10-10 user checkpoint: Phase 1 awaits the user's go-ahead.
+
+## Carried forward (not blocking; assign as acceptance items)
+
+- WP-12/WP-05: the refresh pause reconcile must key on the latest *terminal* refresh op (FAILED and newer than the
+  last success), not the latest op, or a quickly re-enqueued refresh hides the failure (SPEC 2003). Exact
+  idempotence may need mental_model_history.operation_id (CCR if wanted).
+- WP-01/WP-02: porttest gaps from round 2 (tenant isolation on new write ports, Fail(cause, retryAt) on a
+  cancel-requested row ends CANCELLED, tombstoned-bank Fail, Enqueue/Upgrade race); adapter obligations in
+  port docs (READ COMMITTED, sorted advisory locks, joined row FOR UPDATE, bank FOR KEY SHARE).
+- WP-13: check Alive immediately before Blob.DeletePrefix in the bank deleter (narrow fencing window).
+- Known gaps accepted (low): co-occurrence counts not decremented on Detach/PruneOrphans; Dirty doesn't purge
+  non-live rows; Validate allows Match=EXACT with groups; GraphQuery direction unstated; non-object Upgrade
+  payload / empty-key dedupe not rejected; ifacedoc gen/ skip not root-anchored; Complete/Fail have no
+  worker token (fencing via heartbeat only).

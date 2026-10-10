@@ -123,3 +123,6 @@ __pycache__/
 
 # Tool binaries built by make (mockery)
 .bin/
+
+# Claude Code agent worktrees
+.claude/
