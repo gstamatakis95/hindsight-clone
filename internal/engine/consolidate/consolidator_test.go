@@ -88,18 +88,19 @@ func (e *env) wantBatches(want ...[]string) {
 	}
 }
 
-// TestRunHalvesDownToPoisonUnit: a failing batch is halved until the poison unit fails alone; the next
-// successful call parks it, and every other unit is stamped.
+// TestRunHalvesDownToPoisonUnit: a failing batch is halved until the poison unit fails alone; after the
+// batch a health probe succeeds, the unit fails again when retried alone, and only then is it parked.
+// Every other unit is stamped.
 func TestRunHalvesDownToPoisonUnit(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(4)})
 	e.fact("f1", "Alpha ships on Monday", "x")
 	e.fact("f2", "Beta ships on Tuesday", "x")
 	e.fact("f3", "Poison fact", "x")
 	e.fact("f4", "Gamma ships on Friday", "x")
-	e.script(fail(), e.createEach("f1", "f2"), fail(), fail(), e.createEach("f4"))
+	e.script(fail(), e.createEach("f1", "f2"), fail(), fail(), e.createEach("f4"), ok(reply(nil, nil)), fail())
 	res := e.run(autoJob())
 	e.wantBatches([]string{"f1", "f2", "f3", "f4"}, []string{"f1", "f2"}, []string{"f3", "f4"}, []string{"f3"},
-		[]string{"f4"})
+		[]string{"f4"}, []string{}, []string{"f3"})
 	if u := e.unit("f3"); u.ConsolidationFailedAt == nil || u.ConsolidatedAt != nil {
 		t.Fatalf("poison unit: failed_at %v consolidated_at %v, want parked only", u.ConsolidationFailedAt,
 			u.ConsolidatedAt)
@@ -117,27 +118,42 @@ func TestRunHalvesDownToPoisonUnit(t *testing.T) {
 	}
 }
 
-// TestRunPoisonLastLeafParkedOnRetry: a poison unit that fails alone as the last call of its batch is not
-// parked (nothing succeeded after it, so it may be an outage): the run fails after committing the rest,
-// and the retry, where it leads a batch, parks it.
-func TestRunPoisonLastLeafParkedOnRetry(t *testing.T) {
+// TestRunPoisonLastLeafParkedByProbe: a poison unit that fails alone as the last call of the run is parked
+// once the health probe (a CONSOLIDATE call with no facts) succeeds.
+func TestRunPoisonLastLeafParkedByProbe(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(2)})
 	e.fact("f1", "Alpha ships", "x")
 	e.fact("f2", "Poison fact", "x")
-	e.script(fail(), e.createEach("f1"), fail())
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
-		t.Fatalf("err = %v, want ErrUnavailable", err)
-	}
-	if e.unit("f1").ConsolidatedAt == nil || e.unit("f2").ConsolidationFailedAt != nil {
-		t.Fatal("want f1 stamped and f2 neither stamped nor parked")
-	}
-	e.fact("f3", "Gamma ships", "x")
-	e.llm.Reset()
-	e.script(fail(), fail(), e.createEach("f3"))
+	e.script(fail(), e.createEach("f1"), fail(), ok(reply(nil, nil)), fail())
 	res := e.run(autoJob())
-	e.wantBatches([]string{"f2", "f3"}, []string{"f2"}, []string{"f3"})
-	if e.unit("f2").ConsolidationFailedAt == nil || e.unit("f3").ConsolidatedAt == nil || res.Processed != 2 {
-		t.Fatalf("retry = %+v; want f2 parked and f3 stamped", res)
+	e.wantBatches([]string{"f1", "f2"}, []string{"f1"}, []string{"f2"}, []string{}, []string{"f2"})
+	if e.unit("f1").ConsolidatedAt == nil || e.unit("f2").ConsolidationFailedAt == nil || res.Processed != 2 || res.More {
+		t.Fatalf("result %+v; want f1 stamped, f2 parked, nothing more", res)
+	}
+}
+
+// TestRunLonePoisonParked: a poison unit that is the bank's only unconsolidated unit is parked by the
+// probe, so the job terminates instead of retrying forever.
+func TestRunLonePoisonParked(t *testing.T) {
+	e := newEnv(t, domain.BankConfig{})
+	e.fact("p", "Poison fact", "x")
+	e.script(fail(), ok(reply(nil, nil)), fail())
+	if res := e.run(autoJob()); res.More || e.unit("p").ConsolidationFailedAt == nil {
+		t.Fatalf("result %+v; want p parked", res)
+	}
+}
+
+// TestRunPoisonAloneInScopeDoesNotBlockOthers: a poison unit alone in scope a is parked on the first run
+// and scope b still consolidates.
+func TestRunPoisonAloneInScopeDoesNotBlockOthers(t *testing.T) {
+	e := newEnv(t, domain.BankConfig{})
+	e.fact("p", "Poison fact", "a")
+	e.fact("f1", "Bob rows", "b")
+	e.script(fail(), ok(reply(nil, nil)), fail(), e.createEach("f1"))
+	e.run(autoJob())
+	e.wantBatches([]string{"p"}, []string{}, []string{"p"}, []string{"f1"})
+	if e.unit("p").ConsolidationFailedAt == nil || e.unit("f1").ConsolidatedAt == nil {
+		t.Fatal("want p parked and f1 stamped")
 	}
 }
 
@@ -156,7 +172,7 @@ func TestRunOutageDoesNotPark(t *testing.T) {
 			t.Errorf("%s was stamped or parked during an outage", id)
 		}
 	}
-	e.wantBatches([]string{"f1", "f2"}, []string{"f1"}, []string{"f2"})
+	e.wantBatches([]string{"f1", "f2"}, []string{"f1"}, []string{"f2"}, []string{})
 }
 
 // TestRunOutageMidRunDoesNotPark: an outage that starts after earlier calls succeeded still parks

@@ -21,6 +21,8 @@ const maxSourcesPerObservation = 20
 type decision struct {
 	actions []ConsolidationAction
 	usage   []port.Usage
+	// incomplete reports that part of the decision was dropped, so the batch's facts are not stamped.
+	incomplete bool
 }
 
 // consolidateResponse is the CONSOLIDATE response (prompts consolidate_system.schema.json).
@@ -68,8 +70,24 @@ func (c *consolidator) decide(
 	if err != nil {
 		return dec, err
 	}
-	dec.actions = mergeUpdates(dec.actions)
+	dec.actions, dec.incomplete = firstUpdates(dec.actions)
 	return dec, c.embed(ctx, dec.actions)
+}
+
+// probe is the health probe: one CONSOLIDATE call with no facts and no observations (the empty enum
+// allows no action), made with the failing scope's config and so its binding; its only signal is whether
+// that model answers.
+func (c *consolidator) probe(ctx context.Context, s port.ScopeKey, cfg domain.BankConfig) (port.Usage, error) {
+	req, err := c.consolidateRequest(ctx, s, cfg, nil, nil, nil)
+	if err != nil {
+		return port.Usage{}, err
+	}
+	var out consolidateResponse
+	usage, err := c.d.LLM.Structured(ctx, req, &out)
+	if err != nil {
+		return usage, fmt.Errorf("consolidate: probe: %w", err)
+	}
+	return usage, nil
 }
 
 // related returns the scope's existing observations near the batch's facts: per fact, the semantic and

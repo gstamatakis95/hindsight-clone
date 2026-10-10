@@ -8,11 +8,11 @@
 
 ## Decision
 - **Refresh triggers.**
-  - **Which models.** After a run that changed observations, the final tx enqueues a refresh for every
-    model that meets all of these:
-    - it has `refresh_after_consolidation`;
-    - it is not `auto_refresh_paused`;
-    - a changed scope reaches it.
+  - **Which models, and when.** The run lists the bank's models once, outside any tx, and keeps those
+    with `refresh_after_consolidation` that are not `auto_refresh_paused`. Every apply tx that writes an
+    observation then enqueues a refresh for each of them its scope reaches, in the same tx as the write
+    (after `tx.Seq`). A run that fails or is killed after a scope committed has therefore already queued
+    that scope's refreshes (review H4); later batches join the queued refresh.
 
     Cron models are skipped, since the two triggers are exclusive.
   - **Reach.** A scope reaches a model by the model's tag groups (AND-ed) when they are set. Otherwise it

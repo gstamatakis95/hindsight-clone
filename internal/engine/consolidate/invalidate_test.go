@@ -170,6 +170,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 	if e.unit("f1").ConsolidatedAt != nil {
 		t.Fatal("f1 not reset")
 	}
+	e.wantPending(domain.OperationKindConsolidate, 0) // ClearScopes leaves the enqueue to its caller
 	scopes := e.scopesTx(func(tx port.Tx) ([]port.ScopeKey, error) {
 		return inv.ClearDocumentUnits(t.Context(), tx, bank, "d1")
 	})
@@ -178,7 +179,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 		t.Fatalf("after ClearDocumentUnits(d1): %v, scopes %v", ids, scopes)
 	}
 	if n := len(e.jobs(domain.OperationKindConsolidate)); n != 1 {
-		t.Fatalf("pending consolidate = %d, want 1 (deduplicated)", n)
+		t.Fatalf("pending consolidate = %d, want 1 (from ClearDocumentUnits)", n)
 	}
 }
 

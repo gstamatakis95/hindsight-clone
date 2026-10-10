@@ -13,96 +13,180 @@ import (
 type applyInput struct {
 	scope   port.ScopeKey
 	actions []ConsolidationAction
-	batch   []port.UnitID // the batch's facts
-	stamp   []port.UnitID // the facts whose last scope this is: stamped in this transaction
+	// incomplete reports that decide dropped part of the decision (mergeUpdates): nothing is stamped.
+	incomplete bool
+	batch      []port.UnitID               // the batch's facts
+	stamp      []port.UnitID               // the facts whose last scope this is: stamped in this transaction
+	expect     map[port.UnitID]domain.Unit // the facts as planned (seq and tags)
+	cited      map[port.UnitID][]port.ScopeKey
+	refresh    []domain.MentalModel // models this scope reaches: refreshed when the batch writes
+	mm         *domain.MentalModelConfig
+}
+
+// applyOutput is what one apply transaction committed.
+type applyOutput struct {
+	wrote     bool          // an observation was written
+	stamped   []port.UnitID // facts stamped consolidated
+	unsettled []port.UnitID // facts whose decision did not fully land: not stamped this run
 }
 
 // apply writes one batch's decision in one short transaction with no model call: tx.Seq, then each
 // action (observation row stamped with the seq, evidence with exact quotes, an observation_versions row),
-// then consolidated_at on the facts this scope finishes. Facts removed since decide (invalidated,
-// replaced) are dropped from the evidence and the stamps. It reports whether an observation was written.
-func (c *consolidator) apply(ctx context.Context, in applyInput) (bool, error) {
-	var wrote bool
+// the refreshes of the models the scope reaches, then consolidated_at on the facts this scope finishes.
+//
+// A fact edited, retagged or removed since it was planned (different seq or tags, or gone) is not live.
+// An action citing a fact that is not live, or updating an observation that is gone or left the scope, is
+// skipped whole (never rewritten or trimmed), and then no fact of the batch is stamped: the next run
+// re-decides them (decision 1000).
+func (c *consolidator) apply(ctx context.Context, in applyInput) (applyOutput, error) {
+	var out applyOutput
 	err := c.d.Store.InTx(ctx, func(tx port.Tx) error {
-		wrote = false
+		out = applyOutput{}
 		now := c.d.Clock.Now()
-		facts, err := tx.GetUnits(ctx, in.scope.BankRef, in.batch)
+		// Seq first, every time: it locks the bank row, so no edit or retag can commit between the
+		// re-read below and the stamp (writers of the bank serialize on that row).
+		seq, err := tx.Seq(ctx, in.scope.BankRef)
 		if err != nil {
-			return fmt.Errorf("re-read facts: %w", err)
+			return fmt.Errorf("seq: %w", err)
 		}
-		live := map[port.UnitID]domain.Unit{}
-		for _, f := range facts {
-			live[f.ID] = f
+		live, err := liveFacts(ctx, tx, in.scope.BankRef, in.batch, in.expect)
+		if err != nil {
+			return err
 		}
-		var seq int64
-		for _, a := range in.actions {
-			ev := liveEvidence(a.Evidence, live)
-			if len(ev) == 0 {
-				continue
-			}
-			if seq == 0 {
-				if seq, err = tx.Seq(ctx, in.scope.BankRef); err != nil {
-					return fmt.Errorf("seq: %w", err)
-				}
-			}
-			a.Evidence = ev
-			if err := c.write(ctx, tx, in.scope, a, live, seq, now); err != nil {
+		var complete bool
+		if out.wrote, complete, err = c.writeActions(ctx, tx, in, live, seq, now); err != nil {
+			return err
+		}
+		complete = complete && !in.incomplete
+		if out.wrote {
+			if err := enqueueRefreshes(ctx, tx, in.scope.BankRef, in.mm, in.refresh, now); err != nil {
 				return err
 			}
-			wrote = true
 		}
-		var stamp []port.UnitID
-		for _, id := range in.stamp {
-			if _, ok := live[id]; ok {
-				stamp = append(stamp, id)
+		for _, id := range in.batch {
+			if _, ok := live[id]; !complete || !ok {
+				out.unsettled = append(out.unsettled, id)
 			}
 		}
-		if len(stamp) == 0 {
+		if !complete {
 			return nil
 		}
-		return tx.Units().MarkConsolidated(ctx, stamp, now)
+		if out.stamped, err = stampable(ctx, tx, in.stamp, live, in.cited); err != nil {
+			return err
+		}
+		if len(out.stamped) == 0 {
+			return nil
+		}
+		return tx.Units().MarkConsolidated(ctx, out.stamped, now)
 	})
 	if err != nil {
-		return false, fmt.Errorf("consolidate: apply in scope %q: %w", in.scope.String(), err)
+		return applyOutput{}, fmt.Errorf("consolidate: apply in scope %q: %w", in.scope.String(), err)
 	}
-	return wrote, nil
+	return out, nil
 }
 
-// liveEvidence keeps the evidence whose fact is still live.
-func liveEvidence(ev []domain.Evidence, live map[port.UnitID]domain.Unit) []domain.Evidence {
-	var out []domain.Evidence
-	for _, e := range ev {
-		if _, ok := live[e.Unit]; ok {
-			out = append(out, e)
+// writeActions writes every action that can land, stamped with seq, and reports whether one was written
+// and whether every action landed.
+func (c *consolidator) writeActions(
+	ctx context.Context, tx port.Tx, in applyInput, live map[port.UnitID]domain.Unit, seq int64, now time.Time,
+) (wrote, complete bool, err error) {
+	complete = true
+	for _, a := range in.actions {
+		obs, ok, err := c.target(ctx, tx, in.scope, a, live)
+		if err != nil {
+			return false, false, err
+		}
+		if !ok {
+			complete = false
+			continue
+		}
+		if err := writeObservation(ctx, tx, obs, a, seq, now); err != nil {
+			return false, false, err
+		}
+		wrote = true
+	}
+	return wrote, complete, nil
+}
+
+// liveFacts re-reads ids and keeps those unchanged since they were planned: same seq and same tags. An
+// edit or a retag bumps the seq, so a changed fact is treated as gone.
+func liveFacts(
+	ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID, expect map[port.UnitID]domain.Unit,
+) (map[port.UnitID]domain.Unit, error) {
+	facts, err := tx.GetUnits(ctx, b, ids)
+	if err != nil {
+		return nil, fmt.Errorf("re-read facts: %w", err)
+	}
+	live := map[port.UnitID]domain.Unit{}
+	for _, f := range facts {
+		if p, ok := expect[f.ID]; ok && p.Seq == f.Seq && domain.SameTagSet(p.Tags, f.Tags) {
+			live[f.ID] = f
 		}
 	}
-	return out
+	return live, nil
 }
 
-// write applies one action. An update whose observation is gone or left the scope is written as a new
-// observation instead, so the facts' knowledge is not dropped.
-func (c *consolidator) write(
-	ctx context.Context, tx port.Tx, s port.ScopeKey, a ConsolidationAction,
-	live map[port.UnitID]domain.Unit, seq int64, now time.Time,
-) error {
+// stampable returns those of ids that are live and still cited in every scope the plan skipped because
+// it already cited them (a concurrent clear may have removed that observation since).
+func stampable(
+	ctx context.Context, tx port.Tx, ids []port.UnitID, live map[port.UnitID]domain.Unit,
+	cited map[port.UnitID][]port.ScopeKey,
+) ([]port.UnitID, error) {
+	var out []port.UnitID
+	for _, id := range ids {
+		if _, ok := live[id]; !ok {
+			continue
+		}
+		still := true
+		for _, k := range cited[id] {
+			ok, err := tx.Evidence().Cites(ctx, k, id)
+			if err != nil {
+				return nil, fmt.Errorf("cites %s in scope %q: %w", id, k.String(), err)
+			}
+			if !ok {
+				still = false
+				break
+			}
+		}
+		if still {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+// target returns the observation an action writes: the existing one for an update (re-read in tx), a new
+// one for a create. ok is false when the action must be skipped: a cited fact is not live, or the update's
+// observation is gone or left the scope.
+func (c *consolidator) target(
+	ctx context.Context, tx port.Tx, s port.ScopeKey, a ConsolidationAction, live map[port.UnitID]domain.Unit,
+) (domain.Unit, bool, error) {
+	if len(a.Evidence) == 0 {
+		return domain.Unit{}, false, nil
+	}
+	for _, e := range a.Evidence {
+		if _, ok := live[e.Unit]; !ok {
+			return domain.Unit{}, false, nil
+		}
+	}
 	if a.Kind == ActionUpdate {
 		cur, err := tx.GetUnits(ctx, s.BankRef, []port.UnitID{a.ObservationID})
 		if err != nil {
-			return fmt.Errorf("re-read observation %s: %w", a.ObservationID, err)
+			return domain.Unit{}, false, fmt.Errorf("re-read observation %s: %w", a.ObservationID, err)
 		}
-		if len(cur) == 1 && cur[0].Type == domain.FactTypeObservation && domain.SameTagSet(cur[0].Tags, s.Tags) {
-			return writeObservation(ctx, tx, cur[0], a, seq, now)
+		ok := len(cur) == 1 && cur[0].Type == domain.FactTypeObservation && domain.SameTagSet(cur[0].Tags, s.Tags)
+		if !ok {
+			return domain.Unit{}, false, nil
 		}
+		return cur[0], true, nil
 	}
-	obs := domain.Unit{
-		ID: c.d.NewID(), Bank: s.BankRef, Type: domain.FactTypeObservation, Tags: s.Tags, Version: 0,
-	}
+	obs := domain.Unit{ID: c.d.NewID(), Bank: s.BankRef, Type: domain.FactTypeObservation, Tags: s.Tags}
 	for _, e := range a.Evidence {
 		obs.OccurredStart = earliest(obs.OccurredStart, live[e.Unit].OccurredStart)
 		obs.OccurredEnd = latest(obs.OccurredEnd, live[e.Unit].OccurredEnd)
 		obs.MentionedAt = latest(obs.MentionedAt, live[e.Unit].MentionedAt)
 	}
-	return writeObservation(ctx, tx, obs, a, seq, now)
+	return obs, true, nil
 }
 
 // writeObservation upserts obs with the action's text and embedding at the next version (1 for a new

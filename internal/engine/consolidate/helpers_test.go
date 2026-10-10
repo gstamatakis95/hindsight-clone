@@ -210,6 +210,12 @@ func (e *env) fact(id, text string, tags ...string) {
 // observation inserts an observation of scope tags citing sources (which it stamps consolidated).
 func (e *env) observation(id, text string, tags []string, sources ...string) {
 	e.t.Helper()
+	e.seedObservation(id, text, tags, true, sources...)
+}
+
+// seedObservation inserts an observation of scope tags citing sources, stamping them when stamp is set.
+func (e *env) seedObservation(id, text string, tags []string, stamp bool, sources ...string) {
+	e.t.Helper()
 	e.tx(func(tx port.Tx) error {
 		ctx := e.t.Context()
 		seq, err := tx.Seq(ctx, bank)
@@ -230,7 +236,7 @@ func (e *env) observation(id, text string, tags []string, sources ...string) {
 			ev = append(ev, domain.Evidence{Unit: port.UnitID(s), Quote: e.texts[port.UnitID(s)]})
 			ids = append(ids, port.UnitID(s))
 		}
-		if err := tx.Evidence().Add(ctx, port.UnitID(id), ev); err != nil {
+		if err := tx.Evidence().Add(ctx, port.UnitID(id), ev); err != nil || !stamp {
 			return err
 		}
 		return tx.Units().MarkConsolidated(ctx, ids, e.clock.Now())

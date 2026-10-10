@@ -604,6 +604,90 @@ func (mock *ObservationClearer) DocumentUnitsCalls() []struct {
 	return calls
 }
 
+// Ensure that DocumentScopeReader does implement consolidate.DocumentScopeReader.
+// If this is not the case, regenerate this file with mockery.
+var _ consolidate.DocumentScopeReader = &DocumentScopeReader{}
+
+// DocumentScopeReader is a mock implementation of consolidate.DocumentScopeReader.
+//
+//	func TestSomethingThatUsesDocumentScopeReader(t *testing.T) {
+//
+//		// make and configure a mocked consolidate.DocumentScopeReader
+//		mockedDocumentScopeReader := &DocumentScopeReader{
+//			ItemScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (*domain.ObservationScopes, error) {
+//				panic("mock out the ItemScopes method")
+//			},
+//		}
+//
+//		// use mockedDocumentScopeReader in code that requires consolidate.DocumentScopeReader
+//		// and then make assertions.
+//
+//	}
+type DocumentScopeReader struct {
+	// ItemScopesFunc mocks the ItemScopes method.
+	ItemScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (*domain.ObservationScopes, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// ItemScopes holds details about calls to the ItemScopes method.
+		ItemScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// Doc is the doc argument value.
+			Doc port.DocumentID
+		}
+	}
+	lockItemScopes sync.RWMutex
+}
+
+// ItemScopes calls ItemScopesFunc.
+func (mock *DocumentScopeReader) ItemScopes(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (*domain.ObservationScopes, error) {
+	if mock.ItemScopesFunc == nil {
+		panic("DocumentScopeReader.ItemScopesFunc: method is nil but DocumentScopeReader.ItemScopes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		B:   b,
+		Doc: doc,
+	}
+	mock.lockItemScopes.Lock()
+	mock.calls.ItemScopes = append(mock.calls.ItemScopes, callInfo)
+	mock.lockItemScopes.Unlock()
+	return mock.ItemScopesFunc(ctx, tx, b, doc)
+}
+
+// ItemScopesCalls gets all the calls that were made to ItemScopes.
+// Check the length with:
+//
+//	len(mockedDocumentScopeReader.ItemScopesCalls())
+func (mock *DocumentScopeReader) ItemScopesCalls() []struct {
+	Ctx context.Context
+	Tx  port.Tx
+	B   port.BankRef
+	Doc port.DocumentID
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
+	}
+	mock.lockItemScopes.RLock()
+	calls = mock.calls.ItemScopes
+	mock.lockItemScopes.RUnlock()
+	return calls
+}
+
 // Ensure that Checkpointer does implement consolidate.Checkpointer.
 // If this is not the case, regenerate this file with mockery.
 var _ consolidate.Checkpointer = &Checkpointer{}

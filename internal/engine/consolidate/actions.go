@@ -93,46 +93,20 @@ func (c *consolidator) dedup(
 	return usage, nil
 }
 
-// mergeUpdates collapses updates of the same observation into one (the last text, the union of the
-// evidence), so one batch writes each observation once. Creates keep their order.
-func mergeUpdates(actions []ConsolidationAction) []ConsolidationAction {
-	out := make([]ConsolidationAction, 0, len(actions))
-	at := map[port.UnitID]int{}
+// firstUpdates keeps the first update (or dedup merge) of each observation and drops the later ones, so
+// one batch writes each observation once and no evidence is attached to a text that doesn't state it.
+// dropped reports a drop: the batch's facts are then left unstamped and re-decided by the next run.
+func firstUpdates(actions []ConsolidationAction) (out []ConsolidationAction, dropped bool) {
+	seen := map[port.UnitID]bool{}
 	for _, a := range actions {
-		if a.Kind != ActionUpdate {
-			out = append(out, a)
-			continue
-		}
-		i, ok := at[a.ObservationID]
-		if !ok {
-			at[a.ObservationID] = len(out)
-			out = append(out, a)
-			continue
-		}
-		prev := out[i]
-		prev.Evidence = unionEvidence(prev.Evidence, a.Evidence)
-		if prev.Text != a.Text {
-			prev.Text, prev.Embedding = a.Text, a.Embedding
-		}
-		out[i] = prev
-	}
-	return out
-}
-
-// unionEvidence appends the units of b not already in a.
-func unionEvidence(a, b []domain.Evidence) []domain.Evidence {
-	out := append([]domain.Evidence(nil), a...)
-	for _, e := range b {
-		dup := false
-		for _, x := range out {
-			if x.Unit == e.Unit {
-				dup = true
-				break
+		if a.Kind == ActionUpdate {
+			if seen[a.ObservationID] {
+				dropped = true
+				continue
 			}
+			seen[a.ObservationID] = true
 		}
-		if !dup {
-			out = append(out, e)
-		}
+		out = append(out, a)
 	}
-	return out
+	return out, dropped
 }

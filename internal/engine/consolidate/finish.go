@@ -24,29 +24,33 @@ type RefreshPayload struct {
 	ModelID port.MentalModelID `json:"model_id"`
 }
 
-// finish runs the final transaction: stamps the planned units that had no scope left to decide, checks
-// whether unconsolidated units remain and if so enqueues the continuation (DedupePending), enqueues
-// refreshes of the models the changed scopes reach, and appends CONSOLIDATION_COMPLETED.
+// finish runs the final transaction: stamps the planned units that had no scope left to decide (still
+// unchanged and still cited), checks whether unconsolidated units remain and if so enqueues the
+// continuation, and appends CONSOLIDATION_COMPLETED.
 func (r *run) finish(ctx context.Context) error {
-	models, err := r.refreshCandidates(ctx)
-	if err != nil {
-		return err
-	}
-	var stamp []port.UnitID
+	var want []port.UnitID
 	for _, id := range r.done {
-		if !r.parked[id] {
-			stamp = append(stamp, id)
+		if !r.parked[id] && !r.unsettled[id] {
+			want = append(want, id)
 		}
 	}
 	var more bool
-	err = r.c.d.Store.InTx(ctx, func(tx port.Tx) error {
+	var stamped []port.UnitID
+	err := r.c.d.Store.InTx(ctx, func(tx port.Tx) error {
 		now := r.c.d.Clock.Now()
 		seq, err := tx.Seq(ctx, r.job.Bank)
 		if err != nil {
 			return fmt.Errorf("seq: %w", err)
 		}
-		if len(stamp) > 0 {
-			if err := tx.Units().MarkConsolidated(ctx, stamp, now); err != nil {
+		live, err := liveFacts(ctx, tx, r.job.Bank, want, r.units)
+		if err != nil {
+			return err
+		}
+		if stamped, err = stampable(ctx, tx, want, live, r.cited); err != nil {
+			return err
+		}
+		if len(stamped) > 0 {
+			if err := tx.Units().MarkConsolidated(ctx, stamped, now); err != nil {
 				return fmt.Errorf("stamp: %w", err)
 			}
 		}
@@ -55,12 +59,9 @@ func (r *run) finish(ctx context.Context) error {
 			return fmt.Errorf("unconsolidated units: %w", err)
 		}
 		if more = len(left) > 0; more {
-			if _, _, err := tx.Queue().Enqueue(ctx, r.continuation()); err != nil {
+			if _, _, err := tx.Queue().Enqueue(ctx, NewJob(r.job.Bank, r.payload.Scopes, r.job.Overrides)); err != nil {
 				return fmt.Errorf("enqueue continuation: %w", err)
 			}
-		}
-		if err := r.enqueueRefreshes(ctx, tx, models, now); err != nil {
-			return err
 		}
 		return tx.Events().Append(ctx, domain.LifecycleEvent{
 			Seq: seq, Type: domain.EventTypeConsolidationCompleted, Bank: r.job.Bank, At: now, OperationID: r.job.ID,
@@ -69,28 +70,15 @@ func (r *run) finish(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("consolidate: finish: %w", err)
 	}
-	r.processed += len(stamp)
+	r.processed += len(stamped)
 	r.more = more
 	return nil
 }
 
-// continuation is the next run of this job: same scopes and overrides, DedupePending (a self-continuation
-// joins a queued consolidate; one with overrides never joins, as Queue documents).
-func (r *run) continuation() port.Job {
-	payload := r.job.Payload
-	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	return port.Job{
-		Bank: r.job.Bank, Kind: domain.OperationKindConsolidate, SerialKey: SerialKey,
-		Payload: payload, Overrides: r.job.Overrides, Dedupe: port.DedupePending,
-	}
-}
-
-// refreshCandidates lists the bank's models with refresh_after_consolidation, not paused, whose scope a
-// changed scope reaches. It reads outside the final transaction.
+// refreshCandidates lists, once per run and outside any transaction, the bank's models with
+// refresh_after_consolidation that are not paused.
 func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, error) {
-	if r.c.d.Models == nil || len(r.changed) == 0 {
+	if r.c.d.Models == nil {
 		return nil, nil
 	}
 	all, err := r.c.d.Models.MentalModels(ctx, r.job.Bank)
@@ -99,17 +87,22 @@ func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, erro
 	}
 	var out []domain.MentalModel
 	for _, m := range all {
-		if !m.Spec.Trigger.RefreshAfterConsolidation || m.AutoRefreshPaused {
-			continue
-		}
-		for _, s := range r.changed {
-			if modelReaches(m, s.Tags) {
-				out = append(out, m)
-				break
-			}
+		if m.Spec.Trigger.RefreshAfterConsolidation && !m.AutoRefreshPaused {
+			out = append(out, m)
 		}
 	}
 	return out, nil
+}
+
+// reaching returns the run's refresh candidates that scope s reaches.
+func (r *run) reaching(s port.ScopeKey) []domain.MentalModel {
+	var out []domain.MentalModel
+	for _, m := range r.models {
+		if modelReaches(m, s.Tags) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // modelReaches reports whether observations of a scope with tags fall in model m's scope: its tag
@@ -139,10 +132,13 @@ func modelReaches(m domain.MentalModel, tags []string) bool {
 	return domain.MatchTags(tags, m.Spec.Tags, mode)
 }
 
-// enqueueRefreshes queues one refresh per model, due after refresh_debounce_seconds or at the end of
-// the model's interval floor, whichever is later; a model with a queued refresh joins it.
-func (r *run) enqueueRefreshes(ctx context.Context, tx port.Tx, models []domain.MentalModel, now time.Time) error {
-	mm := r.cfg.MentalModels
+// enqueueRefreshes queues one refresh per model in the caller's tx (which already took tx.Seq), due after
+// refresh_debounce_seconds or at the end of the model's interval floor, whichever is later. A model with
+// a queued refresh joins it (refresh_mental_model always dedupes as pending).
+func enqueueRefreshes(
+	ctx context.Context, tx port.Tx, b port.BankRef, mm *domain.MentalModelConfig, models []domain.MentalModel,
+	now time.Time,
+) error {
 	if mm == nil {
 		mm = &domain.MentalModelConfig{}
 	}
@@ -163,7 +159,7 @@ func (r *run) enqueueRefreshes(ctx context.Context, tx port.Tx, models []domain.
 			return fmt.Errorf("refresh payload: %w", err)
 		}
 		_, _, err = tx.Queue().Enqueue(ctx, port.Job{
-			Bank: r.job.Bank, Kind: domain.OperationKindRefreshMentalModel,
+			Bank: b, Kind: domain.OperationKindRefreshMentalModel,
 			SerialKey: refreshSerialPrefix + string(m.Spec.ID), Payload: payload, RunAt: runAt,
 			Dedupe: port.DedupePending,
 		})

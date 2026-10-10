@@ -8,8 +8,10 @@
 // schema, new texts are embedded and each create is checked for a near-duplicate (Deduper: cosine >=
 // dedup_threshold, then DEDUP_CHECK). One short transaction per batch then calls tx.Seq, writes the
 // observations, their evidence and observation_versions rows, and stamps the units whose last scope it
-// was. A failing call is halved; a unit that fails alone is parked. A final transaction enqueues the
-// continuation while units remain and the refreshes of stale models in the changed scopes.
+// was, and enqueues refreshes of the models the scope reaches. Facts changed since the plan are never
+// quoted or stamped. A failing call is halved; a unit that fails alone is parked only after a health probe
+// on its scope's binding succeeds and a retry alone fails again. A final transaction enqueues the
+// continuation while units remain.
 //
 // StrategyMatcher picks the per-scope ConsolidationStrategy (it also serves config.NewResolver), and
 // Invalidator clears derived observations so their sources are re-consolidated after edits,

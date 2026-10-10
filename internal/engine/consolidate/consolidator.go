@@ -64,6 +64,9 @@ type ConsolidatorDeps struct {
 	Counter ObservationCounter
 	// Models lists mental models for the refresh triggers; nil = no triggers.
 	Models ModelLister
+	// DocScopes reads a document's item-level observation_scopes (WP-15's Document.ObservationScopes);
+	// nil = fall back to the document's overrides, then the run's default (decision 1003).
+	DocScopes DocumentScopeReader
 	// Tokens counts tokens for the source-fact budgets; nil = about four characters per token.
 	Tokens recall.TokenCounter
 	// Checkpoint returns the run's checkpoint (progress + cancel check) between scopes and batches;
@@ -121,9 +124,12 @@ func (c *consolidator) Run(ctx context.Context, j port.Job) (ConsolidationResult
 	if cfg.EnableObservations != nil && !*cfg.EnableObservations {
 		return ConsolidationResult{}, nil
 	}
-	r := &run{c: c, job: j, cfg: cfg, filter: payloadScopes(j.Bank, p)}
+	r := &run{c: c, job: j, cfg: cfg, payload: p, filter: payloadScopes(j.Bank, p)}
 	if c.d.Checkpoint != nil {
 		r.check = c.d.Checkpoint(j)
+	}
+	if r.models, err = r.refreshCandidates(ctx); err != nil {
+		return ConsolidationResult{}, err
 	}
 	if err := r.plan(ctx); err != nil {
 		return ConsolidationResult{}, err

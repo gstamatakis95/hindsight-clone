@@ -42,6 +42,13 @@ type ObservationClearer interface {
 	DocumentUnits(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error)
 }
 
+// DocumentScopeReader reads a retain item's observation_scopes, which WP-15 stores in its own document
+// column (domain.Document.ObservationScopes); until then it is consumer-declared here (decision 1003).
+type DocumentScopeReader interface {
+	// ItemScopes returns doc's item-level observation_scopes; nil when the item set none.
+	ItemScopes(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (*domain.ObservationScopes, error)
+}
+
 // Checkpointer reports a run's progress and stops it once its operation is cancelled or its bank is
 // deleted; worker.Checkpoint satisfies it.
 type Checkpointer interface {

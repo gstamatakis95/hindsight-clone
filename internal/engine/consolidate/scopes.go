@@ -45,7 +45,9 @@ func (scopeExpander) Expand(b port.BankRef, tags []string, s domain.ObservationS
 	case domain.ScopeModeAllCombinations:
 		limit := domain.DefaultMaxCombinations
 		if s.MaxCombinations != nil {
-			limit = *s.MaxCombinations
+			if limit = *s.MaxCombinations; limit <= 0 {
+				return nil, fmt.Errorf("%w: max_combinations must be positive, got %d", domain.ErrInvalidArgument, limit)
+			}
 		}
 		subsets, err := combinations(tags, limit)
 		if err != nil {
@@ -81,8 +83,9 @@ func scopeKeys(b port.BankRef, sets [][]string) []port.ScopeKey {
 	return out
 }
 
-// combinations returns every non-empty subset of tags (each sorted, as tags are), smallest first, then
-// in lexicographic order. More than limit subsets is domain.ErrTooManyScopes; limit <= 0 allows none.
+// combinations returns every non-empty subset of tags, each in the order tags gives (sorted when tags
+// is normalized). Subsets are ordered by size, then lexicographically: ["a"], ["b"], ["a","b"]. Expand
+// re-sorts its result by ScopeKey.String. More than limit subsets is domain.ErrTooManyScopes.
 func combinations(tags []string, limit int) ([][]string, error) {
 	n := len(tags)
 	if n == 0 {
