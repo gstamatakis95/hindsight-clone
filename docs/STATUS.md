@@ -85,3 +85,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   response), WP-07 (read it).
 - 2026-10-10 env: a stale golangci-lint v1 in ~/go/bin shadows Homebrew's v2.14; run make with
   PATH="/opt/homebrew/bin:$PATH". Running workers told.
+- 2026-10-10 WP-05 handed in (9a9d8fe, rebased on f7f0488); reviewer spawned.
