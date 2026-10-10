@@ -8,7 +8,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP | Title | State | Branch | PR | Blockers | Open CCRs | LOW findings |
 |----|-------|-------|--------|----|----------|-----------|--------------|
 | WP-00 | Contracts and scaffold | merged (0374c87, tag contracts-v1) | wp/WP-00-contracts | f5ab75f | — | WP-00-1 approved + applied | see carried-forward |
-| WP-01 | Postgres adapter | merged (991ae7d); follow-up in progress | wp/WP-01-postgres | dbbd51b | — | — | follow-up list (see log) |
+| WP-01 | Postgres adapter | merged (991ae7d + follow-up) | wp/WP-01-postgres | 9d189fa | — | — | LOWs in log |
 | WP-02 | Fakes | merged | wp/WP-02-fakes | 0d2775e | — | — | 2 cosmetic LOW |
 | WP-03 | Gateway and S3 adapters | merged (8dd2090 + follow-up) | wp/WP-03-gateway-s3 | 20fab3d | — | — | 5 LOW accepted (see log) |
 | WP-04 | Config, routing, time, prompts | merged (756d945 + follow-up) | wp/WP-04-config-prompts | fb9fa38 | — | WP-04-1 approved + applied | — |
@@ -176,3 +176,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   - WP-08: Chunks.Committed also returns the previous completed retain's hashes, and DeleteByDocument doesn't
     delete chunks. Retain must tell "committed in this retain" from leftovers, or an interrupted re-retain
     loses facts.
+- 2026-10-10 WP-01 follow-up 9d189fa merged; full gates pass. WP-01 done. PHASE 1 COMPLETE (WP-01..07).
+  Notes: InTx retries the whole fn up to 3 times on 40P01/40001, so an InTx fn must have no side effects outside
+  the tx (engine WPs). A row Claim fails as undecodable gets no OPERATION_FAILED event. The fake now runs the
+  gap suites; the porttest placeholders are gone.
