@@ -139,3 +139,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
     turn an empty repeated override field into an explicit clear outside a FieldMask.
   - WP-08: map extraction fact_type "assistant" to domain.FactTypeExperience.
   - WP-10: inject the per-batch fact-id enum, minItems and maxItems into the consolidation schema per call.
+- 2026-10-10 WP-02 round-1 fixes in at 0d2775e (internal/jsonschema extracted from the gateway); narrow round-2 review spawned.
