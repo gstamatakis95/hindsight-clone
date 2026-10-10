@@ -50,39 +50,36 @@ func (e *env) linkCounts(ids []port.UnitID, kind domain.LinkKind) map[port.UnitI
 	return out
 }
 
-// TestLinkerCapsHold: no unit, old or new, ends up with more temporal or semantic neighbours than its cap,
-// across two linking rounds; links are symmetric, and causal links follow the cause map.
+// TestLinkerCapsHold: the cap bounds the linked unit's own pass only. In a dense cluster of 30 similar units
+// no unit is starved (each gets at least cap temporal and semantic neighbours); a unit linked alone into the
+// full bank gets exactly cap pairs; links are symmetric, and causal links follow the cause map.
 func TestLinkerCapsHold(t *testing.T) {
 	e := newEnv(t, 0)
 	at := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
-	capN := 2
+	capN := 3
 	cfg := domain.BankConfig{Retain: &domain.RetainTuning{
 		TemporalLinkCap: &capN, SemanticLinkK: &capN, SemanticLinkMinSimilarity: ptr(0.1),
 	}}
-	var all []port.UnitID
-	for round, prefix := range []string{"a", "b"} {
-		us := e.seedUnits(prefix, 6, at)
-		causes := CauseMap{}
-		if round == 0 {
-			causes[us[1].ID] = []port.UnitID{us[0].ID}
-		}
-		e.inTx(func(tx port.Tx) error {
-			return NewLinker().LinkWith(e.ctx, tx, testBank, us, causes, cfg)
-		})
-		for _, u := range us {
-			all = append(all, u.ID)
-		}
-		for _, kind := range []domain.LinkKind{domain.LinkSemantic, domain.LinkTemporal} {
-			total := 0
-			for id, n := range e.linkCounts(all, kind) {
-				if n%2 != 0 || n/2 > capN {
-					t.Errorf("round %d: %s has %d %s links, want an even count of at most %d pairs", round, id, n, kind, capN)
-				}
-				total += n
+	kinds := []domain.LinkKind{domain.LinkSemantic, domain.LinkTemporal}
+	us := e.seedUnits("a", 30, at)
+	causes := CauseMap{us[1].ID: {us[0].ID}}
+	e.inTx(func(tx port.Tx) error { return NewLinker().LinkWith(e.ctx, tx, testBank, us, causes, cfg) })
+	ids := make([]port.UnitID, 0, len(us))
+	for _, u := range us {
+		ids = append(ids, u.ID)
+	}
+	for _, kind := range kinds {
+		for id, n := range e.linkCounts(ids, kind) {
+			if n%2 != 0 || n/2 < capN {
+				t.Errorf("%s has %d %s links, want an even count of at least %d pairs", id, n, kind, capN)
 			}
-			if total == 0 {
-				t.Errorf("round %d: no %s links at all", round, kind)
-			}
+		}
+	}
+	late := e.seedUnits("z", 1, at)
+	e.inTx(func(tx port.Tx) error { return NewLinker().LinkWith(e.ctx, tx, testBank, late, nil, cfg) })
+	for _, kind := range kinds {
+		if n := e.linkCounts([]port.UnitID{"z0"}, kind)["z0"]; n != 2*capN {
+			t.Errorf("z0 has %d %s links, want exactly %d pairs from its own pass", n, kind, capN)
 		}
 	}
 	n := e.linkCounts([]port.UnitID{"a0", "a1", "a2"}, domain.LinkCausal)
@@ -107,9 +104,12 @@ func TestLinkerTimelessAndBankConfig(t *testing.T) {
 	us := e.seedUnits("t", 4, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	e.inTx(func(tx port.Tx) error { return NewLinker().Link(e.ctx, tx, testBank, us, nil) })
 	for id, n := range e.linkCounts([]port.UnitID{"t0", "t1", "t2", "t3"}, domain.LinkTemporal) {
-		if n > 2 {
-			t.Errorf("%s has %d temporal links, bank cap is 1 neighbour", id, n)
+		if n < 2 || n > 4 {
+			t.Errorf("%s has %d temporal links, want 1-2 neighbours (bank cap 1 per unit's own pass)", id, n)
 		}
+	}
+	if n := e.linkCounts([]port.UnitID{"t0"}, domain.LinkTemporal)["t0"]; n != 2 {
+		t.Errorf("t0 (linked first, alone in its pass) has %d temporal links, want exactly the bank cap of 1 pair", n)
 	}
 	timeless := e.seedUnits("x", 2, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	for i := range timeless {

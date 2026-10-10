@@ -108,6 +108,18 @@ type IngestorDeps struct {
 	Clock port.Clock
 	// NewID generates document ids; nil = uuid.NewString.
 	NewID func() string
+	// ScopesWriter stores an item's observation scopes on its document; nil = not stored. It stands in until
+	// WP-15 adds domain.Document.ObservationScopes to DocumentRepo.Upsert (decision 808).
+	ScopesWriter DocumentScopesWriter
+}
+
+// DocumentScopesWriter stores a retain item's observation_scopes on its document, in the caller's transaction.
+// Once WP-15 lands it becomes setting domain.Document.ObservationScopes on DocumentRepo.Upsert.
+type DocumentScopesWriter interface {
+	// SetObservationScopes stores s (nil = none) on document doc of b.
+	SetObservationScopes(
+		ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes,
+	) error
 }
 
 // ingestor is the Ingestor.
@@ -143,14 +155,14 @@ func (i *ingestor) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 	if len(req.Items) == 0 {
 		return IngestResult{}, fmt.Errorf("%w: retain needs at least one item", domain.ErrInvalidArgument)
 	}
-	base, err := i.bankConfig(ctx, req.Bank)
+	base, known, err := i.bankConfig(ctx, req.Bank)
 	if err != nil {
 		return IngestResult{}, err
 	}
 	plans := make([]*itemPlan, len(req.Items))
 	seen := map[port.DocumentID]bool{}
 	for k, it := range req.Items {
-		if plans[k], err = i.plan(ctx, req, it, base); err != nil {
+		if plans[k], err = i.plan(ctx, req, it, base, known); err != nil {
 			return IngestResult{}, fmt.Errorf("item %d: %w", k, err)
 		}
 		if seen[plans[k].doc] {
@@ -172,34 +184,34 @@ func (i *ingestor) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 	return i.runInline(ctx, req.Bank, plans, res)
 }
 
-// bankConfig returns the bank's effective config, creating an unknown bank with tenant defaults first.
-func (i *ingestor) bankConfig(ctx context.Context, b port.BankRef) (domain.BankConfig, error) {
+// bankConfig returns the bank's effective config, and whether the bank exists. An unknown bank is not created
+// here (validation must store nothing); its config for validation is the tenant level, and the write
+// transaction creates it. The server level only adds defaults that cannot fail validation.
+func (i *ingestor) bankConfig(ctx context.Context, b port.BankRef) (domain.BankConfig, bool, error) {
 	cfg, err := i.d.Config.Effective(ctx, b)
 	if !errors.Is(err, domain.ErrNotFound) {
-		return cfg, err
+		return cfg, err == nil, err
 	}
-	if err := i.d.Store.InTx(ctx, func(tx port.Tx) error {
-		_, err := tx.Banks().Ensure(ctx, b)
+	var tenant domain.BankConfig
+	err = i.d.Store.InTx(ctx, func(tx port.Tx) error {
+		var err error
+		tenant, err = tx.Banks().TenantConfig(ctx, b.Tenant)
 		return err
-	}); err != nil {
-		return domain.BankConfig{}, err
-	}
-	return i.d.Config.Effective(ctx, b)
+	})
+	return tenant, false, err
 }
 
 // plan validates one item and builds its document payload. Nothing is stored.
 func (i *ingestor) plan(
-	ctx context.Context, req IngestRequest, it IngestItem, base domain.BankConfig,
+	ctx context.Context, req IngestRequest, it IngestItem, base domain.BankConfig, known bool,
 ) (*itemPlan, error) {
 	overrides, err := i.mergeOverrides(req.Overrides, it.Overrides)
 	if err != nil {
 		return nil, err
 	}
-	cfg := base
-	if overrides != nil {
-		if cfg, err = i.d.Config.Effective(ctx, req.Bank, *overrides); err != nil {
-			return nil, err
-		}
+	cfg, err := i.itemConfig(ctx, req.Bank, base, known, overrides)
+	if err != nil {
+		return nil, err
 	}
 	if cfg.ExtractionMode == domain.ExtractionModeCustom && strings.TrimSpace(cfg.CustomExtractionPrompt) == "" {
 		return nil, fmt.Errorf("%w: extraction mode custom needs custom_extraction_prompt", domain.ErrInvalidArgument)
@@ -208,7 +220,7 @@ func (i *ingestor) plan(
 	if err := i.checkFanout(req.Bank, tags, scopeMode(it.ObservationScopes, cfg)); err != nil {
 		return nil, err
 	}
-	oh, err := OverridesHash(overrides)
+	oh, err := NoopHash(overrides, it.ObservationScopes)
 	if err != nil {
 		return nil, err
 	}
@@ -223,6 +235,8 @@ func (i *ingestor) plan(
 		ForceReextract: it.ForceReextract, SkipConsolidation: req.SkipConsolidation,
 	}
 	p.BlobKey = domain.DocumentBlobKey(req.Bank, doc, p.ContentHash)
+	t := tuningOf(cfg)
+	p.ChunkMaxTokens, p.ChunkOverlapTokens, p.StructuredChunkMaxTokens = t.chunkMax, t.chunkOverlap, t.structuredMax
 	if !it.Timeless {
 		at := i.d.Clock.Now().UTC()
 		if it.Timestamp != nil {
@@ -231,6 +245,22 @@ func (i *ingestor) plan(
 		p.Timestamp = &at
 	}
 	return &itemPlan{doc: doc, content: it.Content, overrides: overrides, oh: oh, payload: p}, nil
+}
+
+// itemConfig is an item's effective config: the resolver's for a known bank, else the tenant level merged with
+// the item's overrides.
+func (i *ingestor) itemConfig(
+	ctx context.Context, b port.BankRef, base domain.BankConfig, known bool, overrides *domain.BankConfig,
+) (domain.BankConfig, error) {
+	switch {
+	case overrides == nil:
+		return base, nil
+	case known:
+		return i.d.Config.Effective(ctx, b, *overrides)
+	case i.d.Merge == nil:
+		return domain.BankConfig{}, fmt.Errorf("%w: retain: no config merger wired", domain.ErrUnavailable)
+	}
+	return i.d.Merge(base, *overrides), nil
 }
 
 // mergeOverrides merges request < item overrides; nil when neither is set.
@@ -324,6 +354,9 @@ func (i *ingestor) write(ctx context.Context, req IngestRequest, plans []*itemPl
 		if changed == 0 {
 			return nil
 		}
+		if _, err := tx.Banks().Ensure(ctx, req.Bank); err != nil { // a write to an unknown bank creates it
+			return err
+		}
 		if _, err := tx.Seq(ctx, req.Bank); err != nil { // Seq before Enqueue (lock order with ReclaimStale)
 			return err
 		}
@@ -335,6 +368,12 @@ func (i *ingestor) write(ctx context.Context, req IngestRequest, plans []*itemPl
 				ID: p.doc, Bank: req.Bank, Overrides: p.overrides, Tags: p.payload.Tags, BlobKey: p.payload.BlobKey,
 			}); err != nil {
 				return err
+			}
+			if i.d.ScopesWriter != nil {
+				err := i.d.ScopesWriter.SetObservationScopes(ctx, tx, req.Bank, p.doc, p.payload.ObservationScopes)
+				if err != nil {
+					return fmt.Errorf("retain: store observation scopes: %w", err)
+				}
 			}
 		}
 		if !req.RunAsync {
@@ -407,6 +446,9 @@ func (i *ingestor) runInline(
 			Payload: payload, Overrides: p.overrides,
 		})
 		usage = append(usage, out.Usage...)
+		if err == nil && out.Superseded {
+			err = ErrSuperseded
+		}
 		if err != nil {
 			return IngestResult{}, fmt.Errorf("retain document %s: %w", p.doc, err)
 		}

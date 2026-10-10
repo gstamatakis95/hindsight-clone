@@ -89,7 +89,12 @@ func chunkTexts(text string, o ChunkOptions, count TokenCounter) []string {
 	if lines, ok := jsonlLines(text); ok {
 		return packStructured(lines, "", "\n", "", o, count)
 	}
-	return withOverlap(splitRecursive(text, o.MaxTokens, separators, count), o.OverlapTokens, count)
+	// Leave room for the overlap so a chunk plus the tail prepended to it stays within MaxTokens.
+	budget := o.MaxTokens
+	if o.OverlapTokens > 0 && o.OverlapTokens < o.MaxTokens {
+		budget -= o.OverlapTokens
+	}
+	return withOverlap(splitRecursive(text, budget, separators, count), o.OverlapTokens, o.MaxTokens, count)
 }
 
 // conversationTurns returns the compacted objects of a JSON array whose elements are all objects.
@@ -131,30 +136,29 @@ func jsonlLines(text string) ([]string, bool) {
 	return lines, len(lines) >= 2
 }
 
-// packStructured packs whole units (turns or lines) into chunks of at most o.MaxTokens, wrapping each chunk
-// in open/close and joining units with sep. A unit over o.StructuredMaxTokens is split as text within
-// min(StructuredMaxTokens, MaxTokens); a unit between the two budgets is kept whole as its own overflow.
+// packStructured packs whole units (turns or lines) into chunks of at most o.MaxTokens, counted on the whole
+// chunk: open + units joined with sep + closing. A unit whose wrapped form is over o.StructuredMaxTokens is
+// split as text within min(StructuredMaxTokens, MaxTokens); one between the two budgets is kept whole as its
+// own overflow chunk.
 func packStructured(units []string, open, sep, closing string, o ChunkOptions, count TokenCounter) []string {
 	var out, cur []string
-	size := 0
+	wrap := func(us []string) string { return open + strings.Join(us, sep) + closing }
 	flush := func() {
 		if len(cur) > 0 {
-			out = append(out, open+strings.Join(cur, sep)+closing)
-			cur, size = nil, 0
+			out = append(out, wrap(cur))
+			cur = nil
 		}
 	}
 	for _, u := range units {
-		n := count.Count(u)
-		if n > o.StructuredMaxTokens {
+		if count.Count(open+u+closing) > o.StructuredMaxTokens {
 			flush()
 			out = append(out, splitRecursive(u, min(o.StructuredMaxTokens, o.MaxTokens), separators, count)...)
 			continue
 		}
-		if size+n > o.MaxTokens && len(cur) > 0 {
+		if len(cur) > 0 && count.Count(wrap(append(cur[:len(cur):len(cur)], u))) > o.MaxTokens {
 			flush()
 		}
 		cur = append(cur, u)
-		size += n
 	}
 	flush()
 	return out
@@ -162,33 +166,42 @@ func packStructured(units []string, open, sep, closing string, o ChunkOptions, c
 
 // splitRecursive is Hindsight's sentence-aware split: cut text at the first separator present, pack the
 // pieces greedily within maxTokens and recurse with the remaining separators into any piece still over
-// budget. Chunks are whitespace-trimmed; empty ones are dropped.
+// budget. Chunks are whitespace-trimmed; empty ones are dropped. The budget is checked on the joined buffer:
+// size sums the pieces' counts as an upper bound (a subadditive counter such as ApproxTokens never counts
+// joined text higher than its parts) and is replaced by the exact count of the buffer whenever the sum
+// passes maxTokens, so packing stays linear-ish even when splitting into single characters.
 func splitRecursive(text string, maxTokens int, seps []string, count TokenCounter) []string {
 	sep, rest := pickSeparator(text, seps)
-	var out, buf []string
+	var out []string
+	var buf strings.Builder
 	size := 0
 	flush := func() {
-		if packed := strings.TrimSpace(strings.Join(buf, "")); packed != "" {
+		if packed := strings.TrimSpace(buf.String()); packed != "" {
 			out = append(out, packed)
 		}
-		buf, size = nil, 0
+		buf.Reset()
+		size = 0
 	}
 	for _, piece := range splitKeep(text, sep) {
 		n := count.Count(piece)
-		if n < maxTokens {
-			if len(buf) > 0 && size+n > maxTokens {
-				flush()
+		if n > maxTokens {
+			flush()
+			if len(rest) > 0 {
+				out = append(out, splitRecursive(piece, maxTokens, rest, count)...)
+			} else if p := strings.TrimSpace(piece); p != "" {
+				out = append(out, p)
 			}
-			buf = append(buf, piece)
-			size += n
 			continue
 		}
-		flush()
-		if len(rest) > 0 {
-			out = append(out, splitRecursive(piece, maxTokens, rest, count)...)
-		} else if p := strings.TrimSpace(piece); p != "" {
-			out = append(out, p)
+		if size+n > maxTokens && buf.Len() > 0 {
+			if exact := count.Count(buf.String() + piece); exact <= maxTokens {
+				size = exact - n // exact already includes piece; n is added back below
+			} else {
+				flush()
+			}
 		}
+		buf.WriteString(piece)
+		size += n
 	}
 	flush()
 	return out
@@ -234,8 +247,9 @@ func splitKeep(text, sep string) []string {
 	return out
 }
 
-// withOverlap prefixes every chunk after the first with about overlap trailing tokens of the chunk before.
-func withOverlap(chunks []string, overlap int, count TokenCounter) []string {
+// withOverlap prefixes every chunk after the first with about overlap trailing tokens of the chunk before,
+// never letting the prefixed chunk exceed maxTokens.
+func withOverlap(chunks []string, overlap, maxTokens int, count TokenCounter) []string {
 	if overlap <= 0 || len(chunks) < 2 {
 		return chunks
 	}
@@ -244,7 +258,11 @@ func withOverlap(chunks []string, overlap int, count TokenCounter) []string {
 	for i := 1; i < len(chunks); i++ {
 		words := strings.Fields(chunks[i-1])
 		start := len(words)
-		for start > 0 && count.Count(strings.Join(words[start-1:], " ")) <= overlap {
+		for start > 0 {
+			tail := strings.Join(words[start-1:], " ")
+			if count.Count(tail) > overlap || count.Count(tail+" "+chunks[i]) > maxTokens {
+				break
+			}
 			start--
 		}
 		if tail := strings.Join(words[start:], " "); tail != "" {

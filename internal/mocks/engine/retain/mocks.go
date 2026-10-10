@@ -457,6 +457,96 @@ func (mock *Ingestor) IngestCalls() []struct {
 	return calls
 }
 
+// Ensure that DocumentScopesWriter does implement retain.DocumentScopesWriter.
+// If this is not the case, regenerate this file with mockery.
+var _ retain.DocumentScopesWriter = &DocumentScopesWriter{}
+
+// DocumentScopesWriter is a mock implementation of retain.DocumentScopesWriter.
+//
+//	func TestSomethingThatUsesDocumentScopesWriter(t *testing.T) {
+//
+//		// make and configure a mocked retain.DocumentScopesWriter
+//		mockedDocumentScopesWriter := &DocumentScopesWriter{
+//			SetObservationScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes) error {
+//				panic("mock out the SetObservationScopes method")
+//			},
+//		}
+//
+//		// use mockedDocumentScopesWriter in code that requires retain.DocumentScopesWriter
+//		// and then make assertions.
+//
+//	}
+type DocumentScopesWriter struct {
+	// SetObservationScopesFunc mocks the SetObservationScopes method.
+	SetObservationScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes) error
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// SetObservationScopes holds details about calls to the SetObservationScopes method.
+		SetObservationScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// Doc is the doc argument value.
+			Doc port.DocumentID
+			// S is the s argument value.
+			S *domain.ObservationScopes
+		}
+	}
+	lockSetObservationScopes sync.RWMutex
+}
+
+// SetObservationScopes calls SetObservationScopesFunc.
+func (mock *DocumentScopesWriter) SetObservationScopes(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes) error {
+	if mock.SetObservationScopesFunc == nil {
+		panic("DocumentScopesWriter.SetObservationScopesFunc: method is nil but DocumentScopesWriter.SetObservationScopes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
+		S   *domain.ObservationScopes
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		B:   b,
+		Doc: doc,
+		S:   s,
+	}
+	mock.lockSetObservationScopes.Lock()
+	mock.calls.SetObservationScopes = append(mock.calls.SetObservationScopes, callInfo)
+	mock.lockSetObservationScopes.Unlock()
+	return mock.SetObservationScopesFunc(ctx, tx, b, doc, s)
+}
+
+// SetObservationScopesCalls gets all the calls that were made to SetObservationScopes.
+// Check the length with:
+//
+//	len(mockedDocumentScopesWriter.SetObservationScopesCalls())
+func (mock *DocumentScopesWriter) SetObservationScopesCalls() []struct {
+	Ctx context.Context
+	Tx  port.Tx
+	B   port.BankRef
+	Doc port.DocumentID
+	S   *domain.ObservationScopes
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
+		S   *domain.ObservationScopes
+	}
+	mock.lockSetObservationScopes.RLock()
+	calls = mock.calls.SetObservationScopes
+	mock.lockSetObservationScopes.RUnlock()
+	return calls
+}
+
 // Ensure that LabelResolver does implement retain.LabelResolver.
 // If this is not the case, regenerate this file with mockery.
 var _ retain.LabelResolver = &LabelResolver{}

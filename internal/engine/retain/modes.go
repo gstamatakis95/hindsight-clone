@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/prompts"
+	"strings"
 )
 
 // ExtractionStrategy produces facts for one mode; Extractor picks one per document.
@@ -62,7 +63,8 @@ func Chunks() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeChunks, verbatim: true}
 }
 
-// Custom extracts with BankConfig.CustomExtractionPrompt as the guidelines.
+// Custom extracts with BankConfig.CustomExtractionPrompt as the guidelines; a blank prompt falls back to the
+// concise template.
 func Custom() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeCustom, tmpl: prompts.ExtractCustom, llm: true}
 }
@@ -76,10 +78,15 @@ func (s *strategy) NeedsLLM() bool { return s.llm }
 // KeepsChunkText implements ExtractionStrategy.
 func (s *strategy) KeepsChunkText() bool { return s.verbatim }
 
-// Prompt implements ExtractionStrategy. Chunks mode has no prompt (domain.ErrInvalidArgument).
+// Prompt implements ExtractionStrategy. Chunks mode has no prompt (domain.ErrInvalidArgument); custom mode
+// with a blank CustomExtractionPrompt renders the concise template.
 func (s *strategy) Prompt(cfg domain.BankConfig, in ExtractInput) (ExtractPrompt, error) {
 	if !s.llm {
 		return ExtractPrompt{}, fmt.Errorf("%w: extraction mode %s makes no call", domain.ErrInvalidArgument, s.mode)
+	}
+	tmpl := s.tmpl
+	if s.mode == domain.ExtractionModeCustom && strings.TrimSpace(cfg.CustomExtractionPrompt) == "" {
+		tmpl = prompts.ExtractConcise
 	}
 	data := prompts.ExtractData{
 		CustomPrompt:     cfg.CustomExtractionPrompt,
@@ -93,17 +100,17 @@ func (s *strategy) Prompt(cfg domain.BankConfig, in ExtractInput) (ExtractPrompt
 		Hints:            in.Hints,
 		Text:             in.Text,
 	}
-	system, err := prompts.Render(s.tmpl, data)
+	system, err := prompts.Render(tmpl, data)
 	if err != nil {
-		return ExtractPrompt{}, fmt.Errorf("retain: render %s: %w", s.tmpl, err)
+		return ExtractPrompt{}, fmt.Errorf("retain: render %s: %w", tmpl, err)
 	}
 	user, err := prompts.Render(prompts.ExtractUser, data)
 	if err != nil {
 		return ExtractPrompt{}, fmt.Errorf("retain: render %s: %w", prompts.ExtractUser, err)
 	}
-	schema, err := prompts.ExtractSchema(s.tmpl, data.OptionalDimensions)
+	schema, err := prompts.ExtractSchema(tmpl, data.OptionalDimensions)
 	if err != nil {
-		return ExtractPrompt{}, fmt.Errorf("retain: schema %s: %w", s.tmpl, err)
+		return ExtractPrompt{}, fmt.Errorf("retain: schema %s: %w", tmpl, err)
 	}
-	return ExtractPrompt{Name: s.tmpl, System: system, User: user, Schema: schema}, nil
+	return ExtractPrompt{Name: tmpl, System: system, User: user, Schema: schema}, nil
 }

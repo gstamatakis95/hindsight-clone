@@ -5,6 +5,8 @@ import (
 	"math"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -12,8 +14,9 @@ import (
 
 // EntityResolver maps a fact's free-form entity mentions to existing or new entities.
 type EntityResolver interface {
-	// Resolve scores candidates by name similarity + co-occurrence overlap + temporal proximity and
-	// merges a mention into the best candidate at or above the threshold, else creates an entity. It
+	// Resolve gates candidates (same kind, trigram floor, word-by-word agreement), scores the rest by name
+	// similarity + co-occurrence overlap + temporal proximity and merges a mention into the best candidate
+	// at or above the threshold, else creates an entity. It
 	// runs inside the chunk batch's transaction and makes no model call. It returns one id per distinct
 	// name, in mention order (mentions first, then hints).
 	Resolve(ctx context.Context, tx port.Tx, b port.BankRef, in ResolveInput) ([]port.EntityID, error)
@@ -50,6 +53,11 @@ const (
 	temporalDays       = 7.0
 	maxEntityNameRune  = 512
 	defaultCandidates  = 10
+	// mergeMinSimilarity is the trigram floor a candidate must reach before it is scored at all
+	// (Hindsight's DEFAULT_ENTITY_MERGE_MIN_SIMILARITY).
+	mergeMinSimilarity = 0.3
+	// minTokenSimilarity is the sequence ratio at which two words count as the same word.
+	minTokenSimilarity = 0.6
 )
 
 // entityResolver is the EntityResolver over EntityRepo.
@@ -93,7 +101,7 @@ func (r *entityResolver) Resolve(
 	ids := make([]port.EntityID, 0, len(names))
 	seen := map[port.EntityID]bool{}
 	for i, n := range names {
-		id, err := r.resolveOne(ctx, tx, b, n, cands[i], nearby(cands, i), in)
+		id, err := r.resolveOne(ctx, tx, b, n, cands[i], nearby(names, cands, i), len(names)-1, in)
 		if err != nil {
 			return nil, err
 		}
@@ -105,15 +113,19 @@ func (r *entityResolver) Resolve(
 	return ids, nil
 }
 
-// resolveOne merges n into its best candidate or creates a new entity.
+// resolveOne merges n into its best candidate or creates a new entity. others are the existing entities of
+// the fact's other names; nOthers is how many other names the fact has (the co-occurrence denominator).
 func (r *entityResolver) resolveOne(
 	ctx context.Context, tx port.Tx, b port.BankRef, n nameIn, cands []domain.EntityCandidate,
-	others []port.EntityID, in ResolveInput,
+	others []port.EntityID, nOthers int, in ResolveInput,
 ) (port.EntityID, error) {
 	var best *domain.EntityCandidate
 	bestScore := 0.0
 	for i := range cands {
 		c := &cands[i]
+		if !mergeable(n, *c) {
+			continue
+		}
 		if n.literal {
 			if strings.EqualFold(c.Entity.CanonicalName, n.name) {
 				best, bestScore = c, 1
@@ -128,11 +140,11 @@ func (r *entityResolver) resolveOne(
 				return "", err
 			}
 		}
-		if s := scoreCandidate(*c, n.name, cooc, len(others), in.At); s > bestScore {
+		if s := scoreCandidate(*c, n.name, cooc, nOthers, in.At); s > bestScore {
 			best, bestScore = c, s
 		}
 	}
-	if best != nil && math.Round(bestScore*1e6)/1e6 >= in.Threshold {
+	if best != nil && meetsThreshold(bestScore, in.Threshold) {
 		return touchEntity(ctx, tx, best.Entity, in.At)
 	}
 	e := domain.Entity{Bank: b, CanonicalName: n.name, Kind: n.kind}
@@ -143,11 +155,37 @@ func (r *entityResolver) resolveOne(
 	return tx.Entities().Upsert(ctx, e)
 }
 
+// meetsThreshold compares a score with the merge threshold inclusively, on the score rounded to 6 places, so
+// equal scores compare equal whichever signals produced them (0.3 + 0.3 and 0.4 + 0.2 both reach 0.6).
+func meetsThreshold(score, threshold float64) bool {
+	return math.Round(score*1e6)/1e6 >= threshold
+}
+
+// mergeable applies the merge gates before scoring. An identical name always passes, whatever its kind (as in
+// Hindsight: "Kubernetes" extracted once as a technology and once as a concept is one entity). A fuzzy match
+// must have the same kind when both are known (case-insensitive), reach mergeMinSimilarity and agree word by
+// word (tokensCompatible). Co-occurrence and recency can never merge a name that fails.
+func mergeable(n nameIn, c domain.EntityCandidate) bool {
+	if identicalName(c, n.name) {
+		return true
+	}
+	if n.kind != "" && c.Entity.Kind != "" && !strings.EqualFold(n.kind, c.Entity.Kind) {
+		return false
+	}
+	return c.NameSimilarity >= mergeMinSimilarity && tokensCompatible(n.name, c.Entity.CanonicalName)
+}
+
+// identicalName reports whether the candidate's name is the mention's: equal case-insensitively, or with
+// identical trigram sets (the same words, differing only in case, punctuation or decoration).
+func identicalName(c domain.EntityCandidate, name string) bool {
+	return strings.EqualFold(c.Entity.CanonicalName, name) || c.NameSimilarity >= 1
+}
+
 // scoreCandidate is Hindsight's score: an identical name (case-insensitive, or identical trigrams) is 1;
 // otherwise 0.5 x name similarity + 0.3 x the share of the fact's other entities the candidate co-occurs with
 // + 0.2 x temporal proximity (last seen within 7 days of at, linear falloff).
 func scoreCandidate(c domain.EntityCandidate, name string, cooc, others int, at time.Time) float64 {
-	if strings.EqualFold(c.Entity.CanonicalName, name) || c.NameSimilarity >= 1 {
+	if identicalName(c, name) {
 		return 1
 	}
 	score := c.NameSimilarity * nameWeight
@@ -181,13 +219,21 @@ func touchEntity(ctx context.Context, tx port.Tx, e domain.Entity, at time.Time)
 	return tx.Entities().Upsert(ctx, e)
 }
 
-// nearby returns the best candidate of every other name: the fact's other entities as far as they already
-// exist, for the co-occurrence signal.
-func nearby(cands [][]domain.EntityCandidate, self int) []port.EntityID {
+// nearby returns, for every other name, the existing entity it would merge into on the name alone: its first
+// candidate that passes the gates and has an identical name. These are the fact's other entities for the
+// co-occurrence signal. As in Hindsight, which matches co-occurring entities by name, a merely similar
+// entity does not count.
+func nearby(names []nameIn, cands [][]domain.EntityCandidate, self int) []port.EntityID {
 	var out []port.EntityID
 	for i, cs := range cands {
-		if i != self && len(cs) > 0 {
-			out = append(out, cs[0].Entity.ID)
+		if i == self {
+			continue
+		}
+		for _, c := range cs {
+			if mergeable(names[i], c) && identicalName(c, names[i].name) {
+				out = append(out, c.Entity.ID)
+				break
+			}
 		}
 	}
 	return out
@@ -222,4 +268,100 @@ func mergeNames(in ResolveInput) []nameIn {
 		add(h.Text, h.Type, in.Literal)
 	}
 	return out
+}
+
+// Word and number patterns for tokensCompatible (Hindsight's TRGM_WORD and _DIGIT_RUN).
+var (
+	wordRE  = regexp.MustCompile(`[\p{L}\p{N}]+`)
+	digitRE = regexp.MustCompile(`\p{Nd}+(?:\.\p{Nd}+)*`)
+)
+
+// tokensCompatible is Hindsight's _tokens_are_compatible: whether two names agree word by word. Names that
+// each carry a number the other lacks are different things ("Room 101" / "Room 102", "UA123" / "UA124").
+// Otherwise single-word names pass (the whole-name floor already judged them), and for multi-word names every
+// word of the shorter name must match a word of the longer one (tokensMatch), so a long shared word cannot
+// drown out a different short one ("John Smith" / "Jane Smith").
+func tokensCompatible(a, b string) bool {
+	na, nb := numbersIn(a), numbersIn(b)
+	if hasOther(na, nb) && hasOther(nb, na) {
+		return false
+	}
+	ta, tb := wordRE.FindAllString(strings.ToLower(a), -1), wordRE.FindAllString(strings.ToLower(b), -1)
+	if len(ta) < 2 && len(tb) < 2 {
+		return true
+	}
+	short, rest := ta, tb
+	if len(ta) > len(tb) {
+		short, rest = tb, ta
+	}
+	for _, w := range short {
+		if !slices.ContainsFunc(rest, func(o string) bool { return tokensMatch(w, o) }) {
+			return false
+		}
+	}
+	return true
+}
+
+// tokensMatch reports whether two words are plausibly the same word: equal, one a prefix of the other (an
+// abbreviation), or a sequence ratio of at least minTokenSimilarity.
+func tokensMatch(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a) ||
+		sequenceRatio([]rune(a), []rune(b)) >= minTokenSimilarity
+}
+
+// hasOther reports whether a holds a number b lacks.
+func hasOther(a, b map[string]bool) bool {
+	for n := range a {
+		if !b[n] {
+			return true
+		}
+	}
+	return false
+}
+
+// numbersIn returns the numbers in a name, normalized: leading zeros dropped ("UA0123" gives 123) and an
+// all-zero fraction dropped ("4.0" gives 4, while "3.10" stays distinct from "3.1").
+func numbersIn(name string) map[string]bool {
+	out := map[string]bool{}
+	for _, run := range digitRE.FindAllString(name, -1) {
+		parts := strings.Split(run, ".")
+		if parts[0] = strings.TrimLeft(parts[0], "0"); parts[0] == "" {
+			parts[0] = "0"
+		}
+		if len(parts) == 2 && strings.Trim(parts[1], "0") == "" {
+			parts = parts[:1]
+		}
+		out[strings.Join(parts, ".")] = true
+	}
+	return out
+}
+
+// sequenceRatio is Python's difflib.SequenceMatcher(None, a, b).ratio() for short strings (no junk
+// heuristic): 2M / (len(a) + len(b)), M the runes in the Ratcliff/Obershelp matching blocks.
+func sequenceRatio(a, b []rune) float64 {
+	if len(a)+len(b) == 0 {
+		return 1
+	}
+	return 2 * float64(matchedRunes(a, b)) / float64(len(a)+len(b))
+}
+
+// matchedRunes counts the runes in the matching blocks: the longest common run (earliest in a, then in b),
+// plus the matches to its left and to its right, recursively.
+func matchedRunes(a, b []rune) int {
+	bi, bj, bk := 0, 0, 0
+	for i := range a {
+		for j := range b {
+			k := 0
+			for i+k < len(a) && j+k < len(b) && a[i+k] == b[j+k] {
+				k++
+			}
+			if k > bk {
+				bi, bj, bk = i, j, k
+			}
+		}
+	}
+	if bk == 0 {
+		return 0
+	}
+	return bk + matchedRunes(a[:bi], b[:bj]) + matchedRunes(a[bi+bk:], b[bj+bk:])
 }

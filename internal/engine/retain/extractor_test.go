@@ -159,3 +159,39 @@ func TestExtractorCustomAndErrors(t *testing.T) {
 		t.Errorf("gateway failure: %v", err)
 	}
 }
+
+func TestExtractorCustomBlankPromptUsesConcise(t *testing.T) {
+	llm := fake.NewLLM()
+	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
+	cfg := extractCfg(domain.ExtractionModeCustom)
+	cfg.CustomExtractionPrompt = "  \n\t "
+	facts, _, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), ExtractInput{Text: "x", Config: cfg})
+	if err != nil || len(facts) != 1 {
+		t.Fatalf("facts = %+v, %v", facts, err)
+	}
+	if calls := llm.Calls(); len(calls) != 1 || calls[0].Name != prompts.ExtractConcise {
+		t.Errorf("calls = %+v, want one %s call", calls, prompts.ExtractConcise)
+	}
+}
+
+func TestExtractorSpaceSeparatedDateAndDuplicateCauses(t *testing.T) {
+	llm := fake.NewLLM()
+	cause := fact("It rained")
+	cause.FactKind, cause.OccurredStart = "event", ptr("2024-05-01 14:30:00")
+	effect := fact("The game was cancelled")
+	effect.CausedBy = []int{0, 0, 0}
+	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, cause, effect))
+	facts, _, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), ExtractInput{
+		Text: "x", Config: extractCfg(domain.ExtractionModeConcise),
+	})
+	if err != nil || len(facts) != 2 {
+		t.Fatalf("facts = %+v, %v", facts, err)
+	}
+	at := time.Date(2024, 5, 1, 14, 30, 0, 0, time.UTC)
+	if !sameTime(facts[0].OccurredStart, &at) {
+		t.Errorf("occurred_start = %v, want %v", facts[0].OccurredStart, at)
+	}
+	if len(facts[1].Causes) != 1 || facts[1].Causes[0] != 0 {
+		t.Errorf("causes = %v, want [0]", facts[1].Causes)
+	}
+}

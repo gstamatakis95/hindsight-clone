@@ -54,10 +54,10 @@ func (*labelResolver) Resolve(
 }
 
 // matchLabel finds l's declaration and returns the canonical key and value and whether it is written to
-// tags; ok is false for an undeclared key, an empty value or a value outside a fixed list.
+// tags; ok is false for an undeclared key, an empty or placeholder value or a value outside a fixed list.
 func matchLabel(defs []domain.EntityLabel, l domain.Label) (key, value string, toTags, ok bool) {
 	key, value = strings.TrimSpace(l.Key), strings.TrimSpace(l.Value)
-	if key == "" || value == "" {
+	if key == "" || emptyLabelValue(value) {
 		return "", "", false, false
 	}
 	group, field, isField := strings.Cut(key, ":")
@@ -80,6 +80,16 @@ func matchLabel(defs []domain.EntityLabel, l domain.Label) (key, value string, t
 		return key, canon, def.WriteToTags || parentTags, valid
 	}
 	return "", "", false, false
+}
+
+// emptyLabelValue reports whether a trimmed label value is blank or a placeholder the model writes for "no
+// value" (N/A, none, null, case-insensitive).
+func emptyLabelValue(v string) bool {
+	switch strings.ToLower(v) {
+	case "", "n/a", "none", "null":
+		return true
+	}
+	return false
 }
 
 // fieldDef returns the map label's field declaration, matched case-insensitively.

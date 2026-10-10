@@ -39,8 +39,9 @@ type linker struct{}
 var _ Linker = (*linker)(nil)
 
 // NewLinker returns the Linker. Temporal and semantic links are symmetric and written in both directions
-// (as in Hindsight), so the forward-only graph arm reaches a neighbour from either end; a unit's cap counts
-// its neighbours (links touching it / 2). Causal links run cause -> effect and are not capped (decision 806).
+// (as in Hindsight), so the forward-only graph arm reaches a neighbour from either end. The cap bounds the
+// linked unit's own pass, counting its neighbours (links touching it / 2); a neighbour's side is not capped.
+// Causal links run cause -> effect and are not capped (decision 806).
 func NewLinker() Linker { return &linker{} }
 
 // Link implements Linker.
@@ -127,7 +128,9 @@ func (r *linkRun) neighbours(ctx context.Context, u port.UnitID, kind domain.Lin
 	return (n + 1) / 2, nil
 }
 
-// connect writes the symmetric pair u <-> v when neither is at capLimit; it reports whether u still has room.
+// connect writes the symmetric pair u <-> v while u (the unit being linked) is below capLimit; it reports
+// whether u still has room. Only u's side is capped, as in Hindsight's _cap_links_per_unit: a neighbour at
+// its cap still takes the pair, so later units in a dense cluster are not starved of links.
 func (r *linkRun) connect(
 	ctx context.Context, u, v port.UnitID, kind domain.LinkKind, w float64, capLimit int,
 ) (bool, error) {
@@ -138,10 +141,6 @@ func (r *linkRun) connect(
 	nu, err := r.neighbours(ctx, u, kind)
 	if err != nil || nu >= capLimit {
 		return false, err
-	}
-	nv, err := r.neighbours(ctx, v, kind)
-	if err != nil || nv >= capLimit {
-		return true, err
 	}
 	w = math.Max(0, math.Min(1, w))
 	err = r.tx.Links().Insert(ctx, []domain.Link{

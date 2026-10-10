@@ -39,6 +39,24 @@ type DocumentPayload struct {
 	ForceReextract bool `json:"force_reextract,omitempty"`
 	// SkipConsolidation suppresses the consolidate job after the retain.
 	SkipConsolidation bool `json:"skip_consolidation,omitempty"`
+	// ChunkMaxTokens, ChunkOverlapTokens and StructuredChunkMaxTokens pin the chunking resolved at ingest, so a
+	// config change between attempts cannot move chunk boundaries under a resuming job; 0 = resolve now.
+	ChunkMaxTokens int `json:"chunk_max_tokens,omitempty"`
+	// ChunkOverlapTokens is the pinned overlap (see ChunkMaxTokens).
+	ChunkOverlapTokens int `json:"chunk_overlap_tokens,omitempty"`
+	// StructuredChunkMaxTokens is the pinned structured limit (see ChunkMaxTokens).
+	StructuredChunkMaxTokens int `json:"structured_chunk_max_tokens,omitempty"`
+}
+
+// pinTuning applies the payload's pinned chunking to t.
+func (p DocumentPayload) pinTuning(t tuning) tuning {
+	if p.ChunkMaxTokens > 0 {
+		t.chunkMax, t.chunkOverlap, t.structuredMax = p.ChunkMaxTokens, p.ChunkOverlapTokens, p.StructuredChunkMaxTokens
+		if t.structuredMax <= 0 {
+			t.structuredMax = t.chunkMax
+		}
+	}
+	return t
 }
 
 // PayloadHint is one entity hint in a DocumentPayload (domain.EntityHint with JSON names).
@@ -107,6 +125,21 @@ func OverridesHash(o *domain.BankConfig) (string, error) {
 		return "", fmt.Errorf("retain: hash overrides: %w", err)
 	}
 	return hashText(string(raw)), nil
+}
+
+// NoopHash is the hash stamped as the document's overrides_hash and compared by the no-op check: the
+// overrides' hash, extended with the item's observation scopes when it set any, so a retain that only changes
+// the scopes is not "unchanged".
+func NoopHash(o *domain.BankConfig, scopes *domain.ObservationScopes) (string, error) {
+	oh, err := OverridesHash(o)
+	if err != nil || scopes == nil {
+		return oh, err
+	}
+	raw, err := json.Marshal(scopes)
+	if err != nil {
+		return "", fmt.Errorf("retain: hash scopes: %w", err)
+	}
+	return hashText(oh + "\x00" + string(raw)), nil
 }
 
 // DocumentSerialKey is the serial key of a document's jobs (retain_document, rederive, retag): "doc:{id}".

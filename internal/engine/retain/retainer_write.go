@@ -37,6 +37,9 @@ func (r *retainer) processBatch(
 		return nil, usage, err
 	}
 	rn.replaced = true
+	for _, c := range pb.chunks {
+		rn.owned = append(rn.owned, c.Index)
+	}
 	ids := make([]port.UnitID, len(pb.facts))
 	for i, f := range pb.facts {
 		ids[i] = f.unitID
@@ -68,7 +71,9 @@ func (r *retainer) prepare(
 			}
 			causes := make([]int, 0, len(f.Causes))
 			for _, c := range f.Causes {
-				causes = append(causes, base+c)
+				if c >= 0 && base+c < len(pb.facts) { // only earlier facts of this chunk
+					causes = append(causes, base+c)
+				}
 			}
 			pb.facts = append(pb.facts, preparedFact{
 				fact: f, unitID: port.UnitID(r.d.NewID()), chunkID: c.ID, causes: causes,
@@ -123,6 +128,9 @@ func (r *retainer) commitBatch(ctx context.Context, rn *run, pb *preparedBatch) 
 	return r.d.Store.InTx(ctx, func(tx port.Tx) error {
 		seq, err := tx.Seq(ctx, rn.j.Bank)
 		if err != nil {
+			return err
+		}
+		if err := r.checkOwner(ctx, tx, rn); err != nil {
 			return err
 		}
 		if replace {
@@ -240,6 +248,9 @@ func (r *retainer) complete(ctx context.Context, rn *run) error {
 	err := r.d.Store.InTx(ctx, func(tx port.Tx) error {
 		seq, err := tx.Seq(ctx, b)
 		if err != nil {
+			return err
+		}
+		if err := r.checkOwner(ctx, tx, rn); err != nil {
 			return err
 		}
 		if replace {

@@ -256,11 +256,13 @@ func dimension(s *string) string {
 // remapCauses keeps the caused_by indexes that point at earlier, kept facts, mapped to output indexes.
 func remapCauses(causedBy []int, self int, index map[int]int) []int {
 	var out []int
+	seen := map[int]bool{}
 	for _, c := range causedBy {
 		if c < 0 || c >= self {
 			continue
 		}
-		if o, ok := index[c]; ok && len(out) < maxCauses {
+		if o, ok := index[c]; ok && !seen[o] && len(out) < maxCauses {
+			seen[o] = true
 			out = append(out, o)
 		}
 	}
@@ -268,7 +270,9 @@ func remapCauses(causedBy []int, self int, index map[int]int) []int {
 }
 
 // timeLayouts are the date formats accepted from the model, most specific first.
-var timeLayouts = []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02"}
+var timeLayouts = []string{
+	time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02T15:04", "2006-01-02",
+}
 
 // parseTime parses an ISO 8601 date or timestamp (UTC when no zone is given); anything else is nil.
 func parseTime(s string) *time.Time {

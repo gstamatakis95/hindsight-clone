@@ -2,6 +2,7 @@ package retain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"memd/internal/domain"
@@ -32,6 +33,10 @@ type RetainResult struct { //nolint:revive // stutter: name fixed by the spec
 	UnitIDs []port.UnitID
 	// Unchanged reports a no-op: same content and overrides hash as the last completed retain.
 	Unchanged bool
+	// Superseded reports that a newer retain of the document took over (its blob or overrides replaced this
+	// run's, or it rewrote a chunk this run committed). The run stopped without completing the document;
+	// whatever it committed before was replaced by, or is replaced by, the newer retain (decision 807).
+	Superseded bool
 	// ChunksTotal is the number of chunks the document split into.
 	ChunksTotal int
 	// ChunksSkipped counts chunks already committed with a matching hash (a resumed retain).
@@ -98,16 +103,26 @@ func NewRetainer(d RetainerDeps) Retainer {
 	return &retainer{d: d}
 }
 
+// ErrSuperseded is returned by a sync Retain whose document was taken over by a newer retain while it ran
+// (ABORTED: the client may retry). Async runs end without error and report RetainResult.Superseded.
+var ErrSuperseded = fmt.Errorf("%w: a newer retain of the document took over", domain.ErrConflict)
+
+// errSuperseded aborts a write transaction of a superseded run.
+var errSuperseded = errors.New("retain: run superseded")
+
 // run is one ProcessDocument call's state.
 type run struct {
 	j         port.Job
 	p         DocumentPayload
 	cfg       domain.BankConfig
 	t         tuning
-	oh        string
+	oh        string // no-op hash: overrides + item scopes (stamped on the document)
+	ownOH     string // hash of the job's overrides alone, compared with the document's stored overrides
 	tags      []string
-	mentioned *time.Time // the units' mention time; nil when timeless
-	replaced  bool       // the document's old units are gone (this run, or an earlier attempt of it, replaced them)
+	hashes    map[int]string // this run's salted hash per chunk index
+	owned     []int          // chunk indexes this run (or an earlier attempt of it) committed
+	mentioned *time.Time     // the units' mention time; nil when timeless
+	replaced  bool           // the document's old units are gone (this run, or an earlier attempt of it, replaced them)
 }
 
 // ProcessDocument implements Retainer.
@@ -126,12 +141,33 @@ func (r *retainer) ProcessDocument(ctx context.Context, j port.Job) (RetainResul
 		res.Unchanged = true
 		return res, nil
 	}
+	if superseded, err := r.docSuperseded(doc, rn); err != nil || superseded {
+		res.Superseded = superseded
+		return res, err
+	}
 	chunks, err := r.chunks(ctx, rn)
 	if err != nil {
 		return res, err
 	}
-	rn.replaced = anyCommitted(committed, chunks)
+	committed = trustedCommitted(committed, chunks, doc)
+	rn.adopt(committed, chunks)
 	res.ChunksTotal, res.Scopes = len(chunks), r.scopes(rn)
+	err = r.processChunks(ctx, rn, chunks, committed, &res)
+	if err == nil {
+		err = r.complete(ctx, rn)
+	}
+	res.UnitsCreated, res.Usage = len(res.UnitIDs), SumUsage(res.Usage)
+	if errors.Is(err, errSuperseded) {
+		res.Superseded, res.UnitsCreated, res.UnitIDs = true, 0, nil
+		return res, nil
+	}
+	return res, err
+}
+
+// processChunks extracts and commits every chunk this run has not committed yet, batch by batch.
+func (r *retainer) processChunks(
+	ctx context.Context, rn *run, chunks []domain.Chunk, committed map[int]string, res *RetainResult,
+) error {
 	for start := 0; start < len(chunks); start += r.d.BatchChunks {
 		batch := chunks[start:min(start+r.d.BatchChunks, len(chunks))]
 		pending := uncommitted(committed, batch)
@@ -139,21 +175,17 @@ func (r *retainer) ProcessDocument(ctx context.Context, j port.Job) (RetainResul
 		if len(pending) == 0 {
 			continue
 		}
-		if err := r.checkpoint(ctx, j.ID, start, len(chunks)); err != nil {
-			return res, err
+		if err := r.checkpoint(ctx, rn.j.ID, start, len(chunks)); err != nil {
+			return err
 		}
 		ids, usage, err := r.processBatch(ctx, rn, pending)
 		res.Usage = append(res.Usage, usage...)
 		if err != nil {
-			return res, err
+			return err
 		}
 		res.UnitIDs = append(res.UnitIDs, ids...)
 	}
-	if err := r.complete(ctx, rn); err != nil {
-		return res, err
-	}
-	res.UnitsCreated, res.Usage = len(res.UnitIDs), SumUsage(res.Usage)
-	return res, nil
+	return nil
 }
 
 // start decodes the job and resolves its config.
@@ -170,11 +202,18 @@ func (r *retainer) start(ctx context.Context, j port.Job) (*run, error) {
 	if err != nil {
 		return nil, err
 	}
-	oh, err := OverridesHash(j.Overrides)
+	oh, err := NoopHash(j.Overrides, p.ObservationScopes)
 	if err != nil {
 		return nil, err
 	}
-	rn := &run{j: j, p: p, cfg: cfg, t: tuningOf(cfg), oh: oh, tags: domain.NormalizeTags(p.Tags)}
+	ownOH, err := OverridesHash(j.Overrides)
+	if err != nil {
+		return nil, err
+	}
+	rn := &run{
+		j: j, p: p, cfg: cfg, t: p.pinTuning(tuningOf(cfg)), oh: oh, ownOH: ownOH,
+		tags: domain.NormalizeTags(p.Tags),
+	}
 	switch {
 	case p.Timeless:
 	case p.Timestamp != nil:
@@ -227,22 +266,82 @@ func (r *retainer) chunks(ctx context.Context, rn *run) ([]domain.Chunk, error) 
 	chunks := ChunkWith(string(raw), ChunkOptions{
 		MaxTokens: rn.t.chunkMax, OverlapTokens: rn.t.chunkOverlap, StructuredMaxTokens: rn.t.structuredMax,
 	}, r.d.Tokens)
+	rn.hashes = make(map[int]string, len(chunks))
 	for i := range chunks {
 		chunks[i].Bank, chunks[i].DocumentID = rn.j.Bank, rn.p.DocumentID
 		chunks[i].ContentHash = runHash(runKey, chunks[i].ContentHash)
+		rn.hashes[chunks[i].Index] = chunks[i].ContentHash
 	}
 	return chunks, nil
 }
 
-// anyCommitted reports whether some chunk of this run is already committed, i.e. an earlier attempt of the
-// run already replaced the document's old units.
-func anyCommitted(committed map[int]string, chunks []domain.Chunk) bool {
+// trustedCommitted keeps the committed chunk hashes only when this run's first chunk is among them and the
+// document is still in flight; otherwise nothing of this run is trusted to be committed and the run starts
+// over with a full replacement. Rows at indexes past the current content's chunks are dropped.
+func trustedCommitted(committed map[int]string, chunks []domain.Chunk, doc domain.Document) map[int]string {
+	if len(chunks) == 0 || doc.ExtractedAt != nil || committed[0] != chunks[0].ContentHash {
+		return nil
+	}
+	out := make(map[int]string, len(chunks))
 	for _, c := range chunks {
-		if committed[c.Index] == c.ContentHash {
-			return true
+		if h, ok := committed[c.Index]; ok {
+			out[c.Index] = h
 		}
 	}
-	return false
+	return out
+}
+
+// adopt records the chunks this run already committed; if there are any, an earlier attempt of the run
+// already replaced the document's old units.
+func (rn *run) adopt(committed map[int]string, chunks []domain.Chunk) {
+	for _, c := range chunks {
+		if committed[c.Index] == c.ContentHash {
+			rn.owned = append(rn.owned, c.Index)
+		}
+	}
+	rn.replaced = len(rn.owned) > 0
+}
+
+// docSuperseded reports whether a newer retain owns the document: its stored blob key, tags or overrides are
+// no longer this run's (an older run of the same content must not write its tags over newer ones).
+func (r *retainer) docSuperseded(doc domain.Document, rn *run) (bool, error) {
+	if doc.BlobKey != rn.p.BlobKey || !domain.SameTagSet(doc.Tags, rn.tags) {
+		return true, nil
+	}
+	oh, err := OverridesHash(doc.Overrides)
+	if err != nil {
+		return false, err
+	}
+	return oh != rn.ownOH, nil
+}
+
+// checkOwner runs inside a write transaction, after Tx.Seq has row-locked the bank (so it cannot race
+// another retain's write): it fails with errSuperseded when a newer retain owns the document or rewrote a
+// chunk this run committed.
+func (r *retainer) checkOwner(ctx context.Context, tx port.Tx, rn *run) error {
+	doc, err := tx.Documents().Get(ctx, rn.j.Bank, rn.p.DocumentID)
+	if err != nil {
+		return err
+	}
+	if superseded, err := r.docSuperseded(doc, rn); err != nil || superseded {
+		if err != nil {
+			return err
+		}
+		return errSuperseded
+	}
+	if len(rn.owned) == 0 {
+		return nil
+	}
+	committed, err := tx.Chunks().Committed(ctx, rn.j.Bank, rn.p.DocumentID)
+	if err != nil {
+		return err
+	}
+	for _, i := range rn.owned {
+		if committed[i] != rn.hashes[i] {
+			return errSuperseded
+		}
+	}
+	return nil
 }
 
 // uncommitted returns the chunks of batch this run has not committed yet.

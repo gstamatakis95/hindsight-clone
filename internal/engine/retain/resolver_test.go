@@ -2,6 +2,7 @@ package retain
 
 import (
 	"fmt"
+	"math"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -133,6 +134,194 @@ func TestEntityResolverMergesHintsAndCreatesOnce(t *testing.T) {
 	})
 	if len(first) != 2 || !slices.Equal(first, second) {
 		t.Fatalf("first %v second %v, want the same two entities", first, second)
+	}
+}
+
+// seedKindEntity creates an entity of the given kind last seen at seen; with partner set, a unit mentions
+// both so they co-occur.
+func (e *env) seedKindEntity(name, kind, partner string, seen time.Time) port.EntityID {
+	e.t.Helper()
+	var id port.EntityID
+	e.inTx(func(tx port.Tx) error {
+		ents := []port.EntityID{}
+		for _, n := range []string{name, partner} {
+			if n == "" {
+				continue
+			}
+			k := ""
+			if n == name {
+				k = kind
+			}
+			eid, err := tx.Entities().Upsert(e.ctx, domain.Entity{Bank: testBank, CanonicalName: n, Kind: k, LastSeen: &seen})
+			if err != nil {
+				return err
+			}
+			ents = append(ents, eid)
+		}
+		id = ents[0]
+		if partner == "" {
+			return nil
+		}
+		u := domain.Unit{ID: "seed-" + port.UnitID(name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
+		if err := tx.Units().Insert(e.ctx, []domain.Unit{u}); err != nil {
+			return err
+		}
+		return tx.Entities().Attach(e.ctx, u.ID, ents)
+	})
+	return id
+}
+
+// TestEntityResolverMergeGates covers the gates applied before scoring: a candidate that differs word by
+// word, by number or by kind never merges, however recent and co-occurring it is.
+func TestEntityResolverMergeGates(t *testing.T) {
+	seen := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	at := seen.Add(24 * time.Hour)
+	tests := []struct {
+		name                string
+		seed, kind, partner string
+		mentions            []Mention
+		merge               bool
+	}{
+		{
+			"different first name splits despite co-occurrence and recency", "John Smith", "", "Acme",
+			[]Mention{{Name: "Jane Smith"}, {Name: "Acme"}},
+			false,
+		},
+		{
+			"different number splits despite co-occurrence and recency", "Room 101", "", "Acme",
+			[]Mention{{Name: "Room 102"}, {Name: "Acme"}},
+			false,
+		},
+		{
+			"abbreviated word merges with co-occurrence and recency", "Acme Corporation", "", "Bob Stone",
+			[]Mention{{Name: "Acme Corp"}, {Name: "Bob Stone"}},
+			true,
+		},
+		{
+			"identical name of another kind merges", "Kubernetes", "technology", "",
+			[]Mention{{Name: "Kubernetes", Kind: "concept"}},
+			true,
+		},
+		{
+			"similar name of another kind splits", "Alice Chen", "person", "Bob Stone",
+			[]Mention{{Name: "Alicia Chen", Kind: "organization"}, {Name: "Bob Stone"}},
+			false,
+		},
+		{
+			"identical name of the same kind merges (case-insensitive)", "Alice Chen", "person", "",
+			[]Mention{{Name: "Alice Chen", Kind: "Person"}},
+			true,
+		},
+		{
+			"unknown mention kind merges", "Alice Chen", "person", "Bob Stone",
+			[]Mention{{Name: "Alicia Chen"}, {Name: "Bob Stone"}},
+			true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, 0)
+			seeded := e.seedKindEntity(tc.seed, tc.kind, tc.partner, seen)
+			in := ResolveInput{Mentions: tc.mentions, At: at, Threshold: DefaultEntityMatchThreshold}
+			var ids []port.EntityID
+			e.inTx(func(tx port.Tx) error {
+				var err error
+				ids, err = NewEntityResolver(ResolverConfig{}).Resolve(e.ctx, tx, testBank, in)
+				return wrap(err)
+			})
+			if len(ids) != len(tc.mentions) {
+				t.Fatalf("ids %v, want %d", ids, len(tc.mentions))
+			}
+			if got := ids[0] == seeded; got != tc.merge {
+				t.Errorf("merged = %v, want %v (ids %v, seeded %s)", got, tc.merge, ids, seeded)
+			}
+		})
+	}
+}
+
+// TestEntityResolverNearbyNeedsIdenticalName checks a fact's other name counts towards co-occurrence only
+// through an entity it would itself merge into by name: "Acme Labs" co-occurs with "Acme" but is not it.
+func TestEntityResolverNearbyNeedsIdenticalName(t *testing.T) {
+	seen := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	e := newEnv(t, 0)
+	alice := e.seedKindEntity("Alice Chen", "", "Acme Labs", seen)
+	in := ResolveInput{
+		Mentions: []Mention{{Name: "Alicia Chen"}, {Name: "Acme"}}, At: seen.Add(24 * time.Hour),
+		Threshold: DefaultEntityMatchThreshold,
+	}
+	var ids []port.EntityID
+	e.inTx(func(tx port.Tx) error {
+		var err error
+		ids, err = NewEntityResolver(ResolverConfig{}).Resolve(e.ctx, tx, testBank, in)
+		return wrap(err)
+	})
+	if len(ids) == 0 || ids[0] == alice {
+		t.Errorf("ids %v: Alicia Chen merged into %s through a merely similar co-occurring entity", ids, alice)
+	}
+}
+
+// TestScoreCandidateThreshold checks the merge threshold is inclusive on the rounded score, whichever signals
+// produce it.
+func TestScoreCandidateThreshold(t *testing.T) {
+	at := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
+	cand := func(sim float64, seen *time.Time) domain.EntityCandidate {
+		return domain.EntityCandidate{Entity: domain.Entity{CanonicalName: "Alice Chen", LastSeen: seen}, NameSimilarity: sim}
+	}
+	tests := []struct {
+		name       string
+		c          domain.EntityCandidate
+		cooc, nOth int
+		merge      bool
+	}{
+		{"0.3 name + 0.3 co-occurrence is exactly 0.6 and merges", cand(0.6, nil), 1, 1, true},
+		{"0.4 name + 0.2 recency is 0.6 and merges", cand(0.8, &at), 0, 0, true},
+		{"0.295 name + 0.3 co-occurrence splits", cand(0.59, nil), 1, 1, false},
+		{"0.3 name + co-occurrence with 1 of 2 other names splits", cand(0.6, nil), 1, 2, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := scoreCandidate(tc.c, "Alicia Chen", tc.cooc, tc.nOth, at)
+			if got := meetsThreshold(s, DefaultEntityMatchThreshold); got != tc.merge {
+				t.Errorf("score %v: merge = %v, want %v", s, got, tc.merge)
+			}
+		})
+	}
+}
+
+// TestResolverTokensCompatible pins the word-by-word gate on Hindsight's own examples.
+func TestResolverTokensCompatible(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{"John Smith", "Jane Smith", false},
+		{"Room 101", "Room 102", false},
+		{"UA123", "UA124", false},
+		{"UA0123", "UA123", true},
+		{"Version 4.0", "Version 4", true},
+		{"Python 3.10", "Python 3.1", false},
+		{"Q3 earnings", "Q3 2024 earnings", true},
+		{"Boeing 737 MAX", "Boeing 737 MAX 8", true},
+		{"Python", "Python 3", true},
+		{"Nick", "Nicolas", true},
+		{"Acme Corp", "Acme Corporation", true},
+		{"São Paulo", "Sao Paulo", true},
+		{"Dr Waler", "Dr Wall", true},
+		{"Ann Arbor", "Ann Arbour", true},
+		{"Alice", "Alice Chen", true},
+	}
+	for _, tc := range tests {
+		if got := tokensCompatible(tc.a, tc.b); got != tc.want {
+			t.Errorf("tokensCompatible(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		a, b string
+		want float64
+	}{{"john", "jane", 0.5}, {"são", "sao", 2.0 / 3}, {"abcd", "bcda", 0.75}, {"", "", 1}} {
+		if got := sequenceRatio([]rune(tc.a), []rune(tc.b)); math.Abs(got-tc.want) > 1e-9 {
+			t.Errorf("sequenceRatio(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
 	}
 }
 
