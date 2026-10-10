@@ -3,12 +3,14 @@ package curate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"memd/internal/domain"
 	"memd/internal/engine/retain"
 	"memd/internal/fake"
 	"memd/internal/port"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -36,8 +38,9 @@ func newEnv(t *testing.T) *env {
 	fs := fake.NewStore(clock)
 	e := &env{
 		t: t, ctx: context.Background(), clock: clock, fake: fs, store: &auditStore{Store: fs},
-		emb: fake.NewEmbedder(fake.EmbedSimilar), citing: &citingStub{}, linker: &linkerStub{},
+		emb: fake.NewEmbedder(fake.EmbedSimilar), linker: &linkerStub{},
 	}
+	e.citing = &citingStub{cites: map[port.UnitID][]port.UnitID{"o1": {"f1", "f2"}}, store: e.store}
 	e.seed()
 	return e
 }
@@ -102,7 +105,10 @@ func (e *env) inTx(fn func(tx port.Tx) error) {
 
 // curator returns a Curator over the env with the refresh stub.
 func (e *env) curator() Curator {
-	return NewCurator(CuratorDeps{Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{}})
+	return NewCurator(CuratorDeps{
+		Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{}, Resolver: resolverStub{},
+		Config: configStub{},
+	})
 }
 
 // rederiver returns a Rederiver over the env.
@@ -111,7 +117,7 @@ func (e *env) rederiver(emb port.Embedder) Rederiver {
 		emb = e.emb
 	}
 	return NewRederiver(RederiverDeps{
-		Store: e.store, Embedder: emb, Resolver: resolverStub{}, Linker: e.linker, Config: configStub{},
+		Store: e.store, Embedder: emb, Linker: e.linker,
 	})
 }
 
@@ -187,10 +193,14 @@ type auditStore struct {
 	port.Store
 	mu     sync.Mutex
 	audits []domain.AuditEntry
+	// open counts transactions in flight, so stubs can assert they are not called inside one.
+	open atomic.Int32
 }
 
 // InTx wraps the transaction so Units().AppendAudit is recorded.
 func (s *auditStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
+	s.open.Add(1)
+	defer s.open.Add(-1)
 	return s.Store.InTx(ctx, func(tx port.Tx) error { return fn(auditTx{Tx: tx, s: s}) })
 }
 
@@ -224,15 +234,31 @@ func (u auditUnits) AppendAudit(ctx context.Context, a domain.AuditEntry) error 
 	return u.UnitRepo.AppendAudit(ctx, a)
 }
 
-// citingStub maps cited unit ids to the models citing them.
+// citingStub maps cited unit ids to the models citing them; cites is the seeded evidence (observation ->
+// the facts it cites), so it follows CCR WP-13-1: models citing ids or an observation citing one of ids.
+// It fails when called while a transaction of store is open.
 type citingStub struct {
-	by map[port.UnitID][]port.MentalModelID
+	by    map[port.UnitID][]port.MentalModelID
+	cites map[port.UnitID][]port.UnitID
+	store *auditStore
 }
 
-// ModelsCiting returns the models citing any of ids.
+// ModelsCiting returns the models citing any of ids or any observation citing one of ids.
 func (c *citingStub) ModelsCiting(_ context.Context, _ port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error) {
+	if c.store != nil && c.store.open.Load() > 0 {
+		return nil, errors.New("ModelsCiting called while a transaction is open")
+	}
+	all := slices.Clone(ids)
+	for obs, facts := range c.cites {
+		for _, f := range facts {
+			if slices.Contains(ids, f) {
+				all = append(all, obs)
+				break
+			}
+		}
+	}
 	var out []port.MentalModelID
-	for _, id := range ids {
+	for _, id := range all {
 		out = append(out, c.by[id]...)
 	}
 	return out, nil

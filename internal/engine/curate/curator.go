@@ -48,8 +48,8 @@ type UpdateMemoryRequest struct {
 // CitingModels finds the mental models whose source_ids cite units. It is the port.Reader method proposed
 // in CCR WP-13-1; port.Reader satisfies it once the CCR lands.
 type CitingModels interface {
-	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids, ordered by
-	// id. An unknown or tombstoned bank is domain.ErrNotFound.
+	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids or any
+	// observation that cites one of ids, ordered by id. An unknown or tombstoned bank is domain.ErrNotFound.
 	ModelsCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error)
 }
 
@@ -79,6 +79,11 @@ type CuratorDeps struct {
 	Citing CitingModels
 	// Refresh enqueues those refreshes in the invalidate's transaction.
 	Refresh RefreshQueuer
+	// Resolver resolves an edit's entity names and a restore's snapshot names inside the RPC's transaction;
+	// nil rejects such requests with domain.ErrFailedPrecondition.
+	Resolver EntityResolver
+	// Config resolves the entity match threshold (with the request overrides) before the transaction.
+	Config port.ConfigResolver
 	// Archived reads an archived unit's snapshot entity names before a restore, so the rederive re-creates
 	// entities graph maintenance pruned meanwhile; nil = rely on the entities Restore reattaches.
 	Archived UnitGetter

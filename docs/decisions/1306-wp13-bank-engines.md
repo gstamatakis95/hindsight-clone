@@ -27,13 +27,34 @@ BankAdmin, StatsReader, PromptPreviewer and BankDeleter. The spec leaves several
   InTx, at most MaxBatches per run, then `done=false` and the handler re-enqueues with DedupePending. A
   batch error that means "nothing to do" (bank gone = `ErrNotFound`, bank not tombstoned =
   `ErrFailedPrecondition` from a fresh bank) ends the run as done without touching blobs.
-- **Fencing window.** After the last batch: `JobFence.Alive(job)` (port.Claimer), then a fresh
-  `Banks().Get` confirming the bank still exists and is still tombstoned, then `Blob.DeletePrefix`, then
-  `Banks().Delete`. The remaining window is between that check and `DeletePrefix`: a duplicate run would
-  have to finish `Banks().Delete` and a client write would have to recreate the bank and store a blob in
-  it inside that gap. Accepted as the narrow window the orchestrator asked for. `Alive` does not check the
-  worker id, so a re-claimed duplicate still passes it; the tombstone re-check is what protects a fresh
-  bank. `NewBankDeleter` grew a `JobFence` and a `port.Clock` (deleting_at) parameter.
+- **Fencing (review round 1).** After the last batch the job runs these steps:
+  1. **Fence:** `JobFence.Alive(job)` (port.Claimer), then a fresh `Banks().Get` confirming the bank still
+     exists and is still tombstoned. A gone or no-longer-tombstoned bank ends the run as done, deleting no
+     blobs.
+  2. **Wait for other jobs:** while any operation of the bank other than delete_bank is still PROCESSING
+     (a handler winding down to its next checkpoint after the tombstone), it deletes nothing. It enqueues
+     its own continuation (delete_bank, serial `bank`, DedupePending, `run_at = now + DeleteBlockedDelay`
+     = 5 s) and reports done=false; the handler's DedupePending re-enqueue joins that delayed row. Without
+     this, a job still running when the bank row went could write into the fresh bank a later write
+     creates (its Seq would succeed there).
+  3. **Blobs:** with `DeleterConfig.Blobs` (a `BlobLister`, the `Blob.List` proposed in CCR WP-13-2) the
+     blobs are deleted page by page (`BlobPageSize`, default 1000) with step 1's fence re-checked between
+     pages. Without a lister (until the CCR lands), one `Blob.DeletePrefix`.
+  4. **Bank row:** `Banks().Delete`, in a transaction that repeats step 2's check first.
+
+  The remaining window is one page (or, without a lister, the whole `DeletePrefix`) between a fence check
+  and the deletes: a duplicate run would have to finish `Banks().Delete` and a client write would have to
+  recreate the bank and store a blob in it inside that gap. `Alive` does not check the worker id, so a
+  re-claimed duplicate still passes it; the tombstone re-check is what protects a fresh bank.
+  `NewBankDeleter` grew a `JobFence` and a `port.Clock` (deleting_at, continuation run_at) parameter.
+- **Recovery.** A delete_bank that fails for good leaves a tombstoned, half-deleted bank (writes refused,
+  reads NOT_FOUND). Re-issuing DeleteBank resumes it: `Enqueue` with DedupePendingOrRunning does not join
+  a FAILED or CANCELLED row, so Tombstone returns a new pending delete_bank, which continues from whatever
+  rows are left (test `TestRedeleteResumesHalfDeletedBank`). **Note for WP-14:** delete_bank should retry
+  without an attempt cap, like consolidate, so a transient failure never strands a tombstoned bank.
+- **Completion signal.** The DeleteBank operation can reach COMPLETED while a continuation (budget or
+  blocked) still runs, and the operation rows vanish with the bank row at the end. Clients must treat
+  GetBank returning NOT_FOUND as the signal that the delete finished, not the operation status.
 - **Tombstone** takes no change seq (`Tx.Seq` refuses a tombstoned bank, and nothing written is memory
   content). `MarkDeleting` runs first, so the bank row is locked before `CancelBank` and `Enqueue` take
   their share locks. A second tombstone joins the queued or running delete_bank (DedupePendingOrRunning).

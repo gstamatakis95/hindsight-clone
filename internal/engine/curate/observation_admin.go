@@ -165,6 +165,9 @@ func (a *observationAdmin) ClearObservations(
 		if err := a.d.Clearer.ClearScopes(ctx, tx, b, keys); err != nil {
 			return fmt.Errorf("clear scopes: %w", err)
 		}
+		if err := enqueueGraph(ctx, tx, b); err != nil {
+			return err
+		}
 		return reconsolidateInto(ctx, tx, j, reconsolidate, &res)
 	})
 	if err != nil {
@@ -197,7 +200,8 @@ func (a *observationAdmin) ClearMemoryObservations(
 	var res ClearResult
 	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
 		res = ClearResult{}
-		if _, err := tx.Seq(ctx, b); err != nil {
+		seq, err := tx.Seq(ctx, b)
+		if err != nil {
 			return err
 		}
 		us, err := tx.GetUnits(ctx, b, []port.UnitID{id})
@@ -212,10 +216,29 @@ func (a *observationAdmin) ClearMemoryObservations(
 			return err
 		}
 		res.Deleted = int64(len(deleted))
+		if err := resetOwnConsolidation(ctx, tx, us[0], seq); err != nil {
+			return err
+		}
+		if err := enqueueGraph(ctx, tx, b); err != nil {
+			return err
+		}
 		return reconsolidateInto(ctx, tx, j, reconsolidate, &res)
 	})
 	if err != nil {
 		return ClearResult{}, fmt.Errorf("clear observations of memory %s: %w", id, err)
 	}
 	return res, nil
+}
+
+// resetOwnConsolidation makes a cleared fact consolidate again: UnitRepo.Update rewrites it unchanged
+// (embedding kept, seq = the tx's) and clears consolidated_at and consolidation_failed_at. Observations
+// have no consolidation stamps and are left alone. A fact without an embedding is waiting for its rederive,
+// which clears the stamps when it writes the embedding, so it is left alone too: resetting it now would let
+// consolidation decide on a NULL embedding (decision 1305).
+func resetOwnConsolidation(ctx context.Context, tx port.Tx, u domain.Unit, seq int64) error {
+	if u.Type == domain.FactTypeObservation || u.Embedding == nil {
+		return nil
+	}
+	u.Seq = seq
+	return tx.Units().Update(ctx, u)
 }

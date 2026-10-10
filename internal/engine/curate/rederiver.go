@@ -7,27 +7,25 @@ import (
 	"memd/internal/port"
 )
 
-// Rederiver is the rederive_memory job: re-embed, re-resolve, re-link, enqueue consolidation.
+// Rederiver is the rederive_memory job: re-embed, re-link, enqueue consolidation.
 type Rederiver interface {
-	// Rederive re-embeds the job's unit, re-resolves its entities (or takes names literally), rebuilds
-	// its temporal and semantic links and enqueues consolidation. A unit that is gone (archived or
-	// replaced) or whose text changed after the embedding was computed is left alone: the job succeeds
-	// and a later rederive (serialized behind it) does the work. Running it twice is harmless.
+	// Rederive re-embeds the job's unit, rebuilds its temporal and semantic links and enqueues
+	// consolidation. Entity changes are not its job: the Curator resolves an edit's names and a restore's
+	// snapshot names in the RPC's own transaction, so a rederive keeps the unit's current attachments and an
+	// older rederive retried after a newer edit can never re-apply stale names (decision 1305). A unit that
+	// is gone (archived or replaced) or whose text changed after the embedding was computed is left alone:
+	// the job succeeds and the newer edit's rederive does the work. Running it twice is harmless.
 	Rederive(ctx context.Context, j port.Job) error
 }
 
 // RederivePayload is the rederive_memory job payload (decision 1301).
 type RederivePayload struct {
-	// UnitID is the edited or restored unit.
+	// UnitID is the edited or restored unit. The payload carries no entity names: the RPC committed them.
 	UnitID port.UnitID `json:"unit_id"`
-	// Entities replaces the unit's entity names; nil (null) = re-resolve the unit's current names, non-nil
-	// empty ([]) = clear them. No omitempty: it would turn a clear into "keep".
-	Entities []string `json:"entities"`
-	// ResolveEntities false takes Entities literally; nil (absent) = true.
-	ResolveEntities *bool `json:"resolve_entities,omitempty"`
 }
 
-// EntityResolver is the part of retain.EntityResolver the rederiver consumes; retain.EntityResolver
+// EntityResolver is the part of retain.EntityResolver the curator consumes (no model call, so it runs
+// inside the RPC's transaction); retain.EntityResolver
 // satisfies it.
 type EntityResolver interface {
 	// Resolve maps the mentions of one fact to existing or new entities inside tx.
@@ -46,10 +44,6 @@ type RederiverDeps struct {
 	Store port.Store
 	// Embedder re-embeds the unit text, outside any transaction.
 	Embedder port.Embedder
-	// Resolver re-resolves the unit's entity names.
-	Resolver EntityResolver
 	// Linker rebuilds the unit's temporal and semantic links.
 	Linker Linker
-	// Config resolves the effective config (entity match threshold) with the job's overrides.
-	Config port.ConfigResolver
 }

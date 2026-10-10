@@ -204,6 +204,9 @@ func (f fixture) assertRetagged(t *testing.T) {
 	if len(cons) != 1 || cons[0].SerialKey != "consolidate" {
 		t.Fatalf("consolidate jobs = %+v, want one (deduplicated)", cons)
 	}
+	if graph := f.jobs(t, domain.OperationKindGraphMaintenance); len(graph) != 1 || graph[0].SerialKey != "graph" {
+		t.Fatalf("graph_maintenance jobs = %+v, want one (the deleted observation removed a unit)", graph)
+	}
 }
 
 func TestRetagJobReadsCurrentTags(t *testing.T) {
@@ -245,6 +248,10 @@ func TestRetagUnknownDocument(t *testing.T) {
 	if err := r.Apply(ctx, port.Job{Bank: testBank, Payload: []byte(`{"document_id":"nope"}`)}); err != nil {
 		t.Fatalf("Apply on a gone document: %v, want a no-op", err)
 	}
+	gone := port.Job{Bank: other, Payload: []byte(`{"document_id":"d1"}`)}
+	if err := r.Apply(ctx, gone); !errors.Is(err, domain.ErrNotFound) || !errors.Is(err, domain.ErrCancelled) {
+		t.Fatalf("Apply on a gone bank: %v, want ErrCancelled wrapping ErrNotFound (not a silent no-op)", err)
+	}
 	if err := r.Apply(ctx, port.Job{Bank: testBank, Payload: []byte(`{}`)}); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("Apply without document_id: %v, want ErrInvalidArgument", err)
 	}
@@ -259,5 +266,47 @@ func TestRetagUnknownDocument(t *testing.T) {
 	err := r.Apply(ctx, port.Job{Bank: testBank, Payload: []byte(`{"document_id":"d1"}`)})
 	if !errors.Is(err, domain.ErrBankDeleting) {
 		t.Fatalf("Apply on a deleting bank: %v, want ErrBankDeleting", err)
+	}
+}
+
+// TestRetagSetEqualAfterFailedRetagReenqueues: the tags were committed on the document but the retag job
+// failed, so the units still carry the old tags; repeating the same tags must re-enqueue the job.
+func TestRetagSetEqualAfterFailedRetagReenqueues(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	r := docs.NewRetagger(f.store)
+
+	first, err := r.Retag(ctx, testBank, "d1", []string{"c"})
+	if err != nil || first == "" {
+		t.Fatalf("Retag = %q, %v", first, err)
+	}
+	job := f.claimRetag(t)
+	if err := f.store.Fail(ctx, job.ID, errors.New("boom"), nil); err != nil {
+		t.Fatalf("Fail: %v", err)
+	}
+	again, err := r.Retag(ctx, testBank, "d1", []string{"C"})
+	if err != nil {
+		t.Fatalf("Retag after failure: %v", err)
+	}
+	if again == "" || again == first {
+		t.Fatalf("same-tags retag after a failed one = %q, want a new operation (first %s)", again, first)
+	}
+	if err := r.Apply(ctx, f.claimRetag(t)); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if us := f.units(t, "f1"); !slices.Equal(us["f1"].Tags, []string{"c"}) {
+		t.Fatalf("unit tags = %v, want [c]", us["f1"].Tags)
+	}
+	// Now the newest retag completed (well, ran): mark it done, after which the same tags are a no-op.
+	jobs := f.jobs(t, domain.OperationKindRetagDocument)
+	for _, op := range jobs {
+		if op.ID == again && op.Status == domain.OperationStatusProcessing {
+			if err := f.store.Complete(ctx, again, nil, nil); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+		}
+	}
+	if id, err := r.Retag(ctx, testBank, "d1", []string{"c"}); err != nil || id != "" {
+		t.Fatalf("same tags after a completed retag = %q, %v; want a no-op", id, err)
 	}
 }

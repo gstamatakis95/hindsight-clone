@@ -512,6 +512,90 @@ func (mock *JobFence) AliveCalls() []struct {
 	return calls
 }
 
+// Ensure that BlobLister does implement bank.BlobLister.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.BlobLister = &BlobLister{}
+
+// BlobLister is a mock implementation of bank.BlobLister.
+//
+//	func TestSomethingThatUsesBlobLister(t *testing.T) {
+//
+//		// make and configure a mocked bank.BlobLister
+//		mockedBlobLister := &BlobLister{
+//			ListFunc: func(ctx context.Context, prefix string, after string, limit int) ([]string, error) {
+//				panic("mock out the List method")
+//			},
+//		}
+//
+//		// use mockedBlobLister in code that requires bank.BlobLister
+//		// and then make assertions.
+//
+//	}
+type BlobLister struct {
+	// ListFunc mocks the List method.
+	ListFunc func(ctx context.Context, prefix string, after string, limit int) ([]string, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// List holds details about calls to the List method.
+		List []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Prefix is the prefix argument value.
+			Prefix string
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
+	}
+	lockList sync.RWMutex
+}
+
+// List calls ListFunc.
+func (mock *BlobLister) List(ctx context.Context, prefix string, after string, limit int) ([]string, error) {
+	if mock.ListFunc == nil {
+		panic("BlobLister.ListFunc: method is nil but BlobLister.List was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Prefix string
+		After  string
+		Limit  int
+	}{
+		Ctx:    ctx,
+		Prefix: prefix,
+		After:  after,
+		Limit:  limit,
+	}
+	mock.lockList.Lock()
+	mock.calls.List = append(mock.calls.List, callInfo)
+	mock.lockList.Unlock()
+	return mock.ListFunc(ctx, prefix, after, limit)
+}
+
+// ListCalls gets all the calls that were made to List.
+// Check the length with:
+//
+//	len(mockedBlobLister.ListCalls())
+func (mock *BlobLister) ListCalls() []struct {
+	Ctx    context.Context
+	Prefix string
+	After  string
+	Limit  int
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Prefix string
+		After  string
+		Limit  int
+	}
+	mock.lockList.RLock()
+	calls = mock.calls.List
+	mock.lockList.RUnlock()
+	return calls
+}
+
 // Ensure that DirectiveSelector does implement bank.DirectiveSelector.
 // If this is not the case, regenerate this file with mockery.
 var _ bank.DirectiveSelector = &DirectiveSelector{}

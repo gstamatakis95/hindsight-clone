@@ -141,6 +141,11 @@ func TestObservationAdminClears(t *testing.T) {
 	if err != nil || all.Deleted != 9 || all.Operation != nil {
 		t.Errorf("clear all = %+v, %v", all, err)
 	}
+	// The caller owns the consolidate enqueue (Invalidator.ClearScopes enqueues none): exactly one, from the
+	// reconsolidate=true clear, and none from the reconsolidate=false one.
+	if ops := e.ops(domain.OperationKindConsolidate); len(ops) != 1 || ops[0].ID != res.Operation.ID {
+		t.Errorf("consolidate ops = %+v, want only %s", ops, res.Operation.ID)
+	}
 }
 
 func TestObservationAdminClearMemory(t *testing.T) {

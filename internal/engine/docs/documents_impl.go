@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"memd/internal/domain"
@@ -91,6 +92,9 @@ func (a *documentAdmin) GetDocument(
 		return view, nil
 	}
 	text, err := readBlob(ctx, a.d.Blob, d.BlobKey)
+	if errors.Is(err, domain.ErrNotFound) {
+		return view, nil // the blob is gone (or not written yet): the document stays readable without text
+	}
 	if err != nil {
 		return DocumentView{}, err
 	}

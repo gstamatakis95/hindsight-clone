@@ -19,8 +19,8 @@ func (s archivedStub) GetUnit(_ context.Context, _ port.BankRef, id port.UnitID)
 }
 
 // TestRestoreAfterEntityPruneKeepsEntities runs graph maintenance's entity prune while f1 is archived (its
-// only entity, Alice, becomes an orphan and is deleted), then restores f1: the rederive re-creates Alice
-// from the archive snapshot's names.
+// only entity, Alice, becomes an orphan and is deleted), then restores f1: the restore's transaction
+// re-creates Alice from the archive snapshot's names.
 func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 	e := newEnv(t)
 	e.invalidate(e.curator())
@@ -36,7 +36,8 @@ func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 		return err
 	})
 	c := NewCurator(CuratorDeps{
-		Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{},
+		Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{}, Resolver: resolverStub{},
+		Config: configStub{},
 		Archived: archivedStub{u: domain.Unit{
 			ID: "f1", Bank: testBank, State: domain.MemoryStateInvalidated, Entities: []string{"Alice"},
 		}},
@@ -45,8 +46,5 @@ func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 	if _, _, err := c.Update(e.ctx, req); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := e.unit("f1"); len(got.Entities) != 0 {
-		t.Fatalf("restored entities before rederive = %v, want none (Alice was pruned)", got.Entities)
-	}
-	e.rederiveEdited([]string{"Alice"})
+	e.rederiveEdited([]string{"Alice"}) // re-created in the restore's own transaction
 }

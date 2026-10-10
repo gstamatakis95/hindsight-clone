@@ -20,7 +20,13 @@ no live unit references, in committed batches, resuming where it stopped. Hindsi
   (its own row is PROCESSING, so this inserts the successor, which the serial key holds back until this
   run completes).
 - **Termination.** `done=true` only when a batch finds both queues empty; that batch is the final
-  re-check. Queue emptiness is decided by the queues themselves, never by a count of work done.
+  re-check and always runs after the last batch that did work, so anything queued while a working batch ran
+  (even inside its own transaction) is drained before the run ends (`TestGraphMaintenanceRechecksAfterFinalBatch`).
+  Queue emptiness is decided by the queues themselves, never by a count of work done.
+- **Triggers.** Every path that removes units or detaches entities enqueues graph_maintenance
+  (`DedupePendingOrRunning`); in the docs package that is the retag job when it deletes observations
+  (review round 1, item 4).
+- **Cancellation.** A batch error after ctx ended is reported as `domain.ErrCancelled`.
 - **No change seq.** Links, entities and co-occurrences are not memory content: no `tx.Seq`, so a
   maintenance run never makes mental models stale.
 - **Deleting banks.** Each batch first reads the bank row; a tombstoned or gone bank stops the run with
@@ -28,7 +34,8 @@ no live unit references, in committed batches, resuming where it stopped. Hindsi
   never calls `Banks().Ensure`.
 
 ## Known gap (accepted)
-A removal that commits after the final empty check but before the handler's `Complete` enqueues
+The only remaining window is between the final empty check and the handler's `Complete`: a removal that
+commits there enqueues
 graph_maintenance with `DedupePendingOrRunning`, joins this still-PROCESSING row and is dropped. Its
 `graph_dirty` / `entity_maintenance` rows are not lost: the next removal (or any later trigger) drains
 them. Hindsight has the same window (it re-checks after the run, gated on progress). Closing it fully

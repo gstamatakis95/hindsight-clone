@@ -33,6 +33,14 @@ func (c *curator) Update(ctx context.Context, req UpdateMemoryRequest) (domain.U
 	if err != nil {
 		return domain.Unit{}, "", err
 	}
+	change, err := c.planEntities(ctx, req, names)
+	if err != nil {
+		return domain.Unit{}, "", err
+	}
+	models, err := c.citingModels(ctx, req)
+	if err != nil {
+		return domain.Unit{}, "", err
+	}
 	var (
 		out domain.Unit
 		op  port.OperationID
@@ -41,10 +49,10 @@ func (c *curator) Update(ctx context.Context, req UpdateMemoryRequest) (domain.U
 		out, op = domain.Unit{}, ""
 		var err error
 		if req.State == domain.MemoryStateInvalidated {
-			out, err = c.invalidate(ctx, tx, req)
+			out, err = c.invalidate(ctx, tx, req, models)
 			return err
 		}
-		out, op, err = c.restoreOrEdit(ctx, tx, req, names)
+		out, op, err = c.restoreOrEdit(ctx, tx, req, change)
 		return err
 	})
 	if err != nil {
@@ -108,9 +116,11 @@ func liveFact(ctx context.Context, tx port.Tx, b port.BankRef, id port.UnitID) (
 
 // invalidate archives a fact and does every in-tx effect of the Curation table: citing observations
 // deleted (before the archive, which drops the evidence rows) and their co-sources reset, audit row,
-// event, consolidate, graph_maintenance and refreshes of the models citing the unit or a deleted
-// observation.
-func (c *curator) invalidate(ctx context.Context, tx port.Tx, req UpdateMemoryRequest) (domain.Unit, error) {
+// event, consolidate, graph_maintenance and refreshes of models, the models citing the unit or an
+// observation citing it (read before the transaction).
+func (c *curator) invalidate(
+	ctx context.Context, tx port.Tx, req UpdateMemoryRequest, models []port.MentalModelID,
+) (domain.Unit, error) {
 	seq, err := tx.Seq(ctx, req.Bank)
 	if err != nil {
 		return domain.Unit{}, err
@@ -119,8 +129,7 @@ func (c *curator) invalidate(ctx context.Context, tx port.Tx, req UpdateMemoryRe
 	if err != nil {
 		return domain.Unit{}, err
 	}
-	deleted, _, err := tx.Evidence().DeleteCiting(ctx, req.Bank, []port.UnitID{u.ID})
-	if err != nil {
+	if _, _, err := tx.Evidence().DeleteCiting(ctx, req.Bank, []port.UnitID{u.ID}); err != nil {
 		return domain.Unit{}, err
 	}
 	if err := tx.Units().Archive(ctx, req.Bank, u.ID, req.Reason); err != nil {
@@ -135,7 +144,7 @@ func (c *curator) invalidate(ctx context.Context, tx port.Tx, req UpdateMemoryRe
 	if err := enqueueGraph(ctx, tx, req.Bank); err != nil {
 		return domain.Unit{}, err
 	}
-	if err := c.refreshCiting(ctx, tx, req.Bank, append([]port.UnitID{u.ID}, deleted...)); err != nil {
+	if err := c.queueRefreshes(ctx, tx, req.Bank, models); err != nil {
 		return domain.Unit{}, err
 	}
 	if err := c.event(ctx, tx, req.Bank, seq, u.ID, ""); err != nil {
@@ -145,15 +154,21 @@ func (c *curator) invalidate(ctx context.Context, tx port.Tx, req UpdateMemoryRe
 	return u, nil
 }
 
-// refreshCiting queues a refresh of every model whose source_ids include any of ids.
-func (c *curator) refreshCiting(ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID) error {
-	if c.d.Citing == nil || c.d.Refresh == nil {
-		return nil
+// citingModels reads, before the invalidate's transaction (so no pool read runs while the transaction holds
+// a connection), the models citing the unit or an observation citing it. Other requests read nothing.
+func (c *curator) citingModels(ctx context.Context, req UpdateMemoryRequest) ([]port.MentalModelID, error) {
+	if req.State != domain.MemoryStateInvalidated || c.d.Citing == nil || c.d.Refresh == nil {
+		return nil, nil
 	}
-	models, err := c.d.Citing.ModelsCiting(ctx, b, ids)
+	models, err := c.d.Citing.ModelsCiting(ctx, req.Bank, []port.UnitID{req.ID})
 	if err != nil {
-		return fmt.Errorf("find models citing %v: %w", ids, err)
+		return nil, fmt.Errorf("find models citing %s: %w", req.ID, err)
 	}
+	return models, nil
+}
+
+// queueRefreshes queues one refresh per distinct model in tx.
+func (c *curator) queueRefreshes(ctx context.Context, tx port.Tx, b port.BankRef, models []port.MentalModelID) error {
 	seen := map[port.MentalModelID]bool{}
 	for _, m := range models {
 		if seen[m] {
@@ -167,11 +182,11 @@ func (c *curator) refreshCiting(ctx context.Context, tx port.Tx, b port.BankRef,
 	return nil
 }
 
-// restoreOrEdit restores an archived unit when asked (State valid), applies any edits and enqueues the
-// rederive. State valid on a live unit is no state change; with no edits either, nothing is written. names
-// are the archived unit's snapshot entity names; a restore without new entities re-resolves them.
+// restoreOrEdit restores an archived unit when asked (State valid), applies any edits, commits entity
+// changes (an edit's names, or a restore's snapshot names) and enqueues the rederive, which only re-embeds
+// and relinks. State valid on a live unit is no state change; with no edits either, nothing is written.
 func (c *curator) restoreOrEdit(
-	ctx context.Context, tx port.Tx, req UpdateMemoryRequest, names []string,
+	ctx context.Context, tx port.Tx, req UpdateMemoryRequest, change *entityChange,
 ) (domain.Unit, port.OperationID, error) {
 	seq, err := tx.Seq(ctx, req.Bank)
 	if err != nil {
@@ -179,7 +194,7 @@ func (c *curator) restoreOrEdit(
 	}
 	restored := false
 	if req.State == domain.MemoryStateValid {
-		if restored, err = restoreIfArchived(ctx, tx, req.Bank, req.ID); err != nil {
+		if restored, err = c.restoreIfArchived(ctx, tx, req.Bank, req.ID); err != nil {
 			return domain.Unit{}, "", err
 		}
 	}
@@ -196,11 +211,10 @@ func (c *curator) restoreOrEdit(
 			return domain.Unit{}, "", err
 		}
 	}
-	entities := req.Entities
-	if entities == nil && restored {
-		entities = names
+	if u, err = c.commitEntities(ctx, tx, u, req, restored, change); err != nil {
+		return domain.Unit{}, "", err
 	}
-	op, err := enqueueRederive(ctx, tx, u, req, entities)
+	op, err := enqueueRederive(ctx, tx, u, req)
 	if err != nil {
 		return domain.Unit{}, "", err
 	}
@@ -215,8 +229,8 @@ func (c *curator) restoreOrEdit(
 
 // snapshotNames reads the entity names of the archived unit a restore brings back, before the restore. Graph
 // maintenance may have pruned those entities while the unit was archived (Restore then skips them), so the
-// rederive re-resolves the names and re-creates them. It returns nil when no restore is asked for, new
-// entities are given, no reader is wired or the unit is not archived.
+// restore's own transaction re-resolves the names and re-creates them. It returns nil when no restore is
+// asked for, new entities are given, no reader is wired or the unit is not archived.
 func (c *curator) snapshotNames(ctx context.Context, req UpdateMemoryRequest) ([]string, error) {
 	if req.State != domain.MemoryStateValid || req.Entities != nil || c.d.Archived == nil {
 		return nil, nil
@@ -235,12 +249,13 @@ func (c *curator) snapshotNames(ctx context.Context, req UpdateMemoryRequest) ([
 }
 
 // restoreIfArchived moves an archived unit back; a unit that is not archived reports false (the caller
-// then finds it live or not at all).
-func restoreIfArchived(ctx context.Context, tx port.Tx, b port.BankRef, id port.UnitID) (bool, error) {
+// then finds it live or not at all). The restored unit is stamped consolidated so consolidation never
+// decides on it while its embedding is empty; the rederive's write clears the stamp (decision 1305).
+func (c *curator) restoreIfArchived(ctx context.Context, tx port.Tx, b port.BankRef, id port.UnitID) (bool, error) {
 	err := tx.Units().Restore(ctx, b, id)
 	switch {
 	case err == nil:
-		return true, nil
+		return true, tx.Units().MarkConsolidated(ctx, []port.UnitID{id}, c.d.Clock.Now())
 	case errors.Is(err, domain.ErrNotFound):
 		return false, nil
 	default:
@@ -248,8 +263,9 @@ func restoreIfArchived(ctx context.Context, tx port.Tx, b port.BankRef, id port.
 	}
 }
 
-// applyEdit writes the new curated values (embedding cleared until rederive) and deletes the observations
-// citing the unit, resetting their co-sources.
+// applyEdit writes the new curated values (embedding cleared until rederive), keeps the unit stamped
+// consolidated until the rederive writes its new embedding (decision 1305), deletes the observations citing
+// the unit, resetting their co-sources, and queues graph maintenance for the removed observations.
 func (c *curator) applyEdit(
 	ctx context.Context, tx port.Tx, u domain.Unit, req UpdateMemoryRequest, seq int64,
 ) (domain.Unit, error) {
@@ -263,10 +279,10 @@ func (c *curator) applyEdit(
 		u.OccurredStart, u.OccurredEnd = nil, nil
 	}
 	if req.OccurredStart != nil {
-		u.OccurredStart = req.OccurredStart
+		u.OccurredStart, u.Timeless = req.OccurredStart, false
 	}
 	if req.OccurredEnd != nil {
-		u.OccurredEnd = req.OccurredEnd
+		u.OccurredEnd, u.Timeless = req.OccurredEnd, false
 	}
 	if req.FactType != domain.FactTypeUnspecified {
 		u.Type = req.FactType
@@ -276,13 +292,19 @@ func (c *curator) applyEdit(
 	if err := tx.Units().Update(ctx, u); err != nil {
 		return domain.Unit{}, err
 	}
+	if err := tx.Units().MarkConsolidated(ctx, []port.UnitID{u.ID}, now); err != nil {
+		return domain.Unit{}, err
+	}
 	if _, _, err := tx.Evidence().DeleteCiting(ctx, u.Bank, []port.UnitID{u.ID}); err != nil {
+		return domain.Unit{}, err
+	}
+	if err := enqueueGraph(ctx, tx, u.Bank); err != nil {
 		return domain.Unit{}, err
 	}
 	if req.Entities != nil {
 		u.Entities = slices.Clone(req.Entities)
 	}
-	u.ConsolidatedAt, u.ConsolidationFailedAt = nil, nil
+	u.ConsolidatedAt, u.ConsolidationFailedAt = &now, nil
 	return u, nil
 }
 

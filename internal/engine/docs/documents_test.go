@@ -139,3 +139,15 @@ func TestDocumentAdminGetAndReprocess(t *testing.T) {
 		t.Fatalf("tombstoned bank: %v, want ErrNotFound", err)
 	}
 }
+
+// TestGetDocumentMissingBlobIsEmptyText: a document whose original text is missing from the blob store
+// still reads, with empty text, instead of NOT_FOUND.
+func TestGetDocumentMissingBlobIsEmptyText(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	a := docs.NewDocumentAdmin(docs.DocumentAdminDeps{Store: f.store, Blob: fake.NewBlob()})
+	v, err := a.GetDocument(ctx, testBank, "d1", true)
+	if err != nil || v.Document.ID != "d1" || v.OriginalText != "" {
+		t.Fatalf("GetDocument with a missing blob = %+v, %v; want the document with empty text", v, err)
+	}
+}

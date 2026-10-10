@@ -42,7 +42,8 @@ type ScopeSource interface {
 // consolidate.Invalidator satisfies it.
 type ObservationClearer interface {
 	// ClearScopes deletes every observation in scopes (all scopes when empty) and resets their sources,
-	// in the caller's transaction.
+	// in the caller's transaction. It enqueues nothing: ObservationAdmin owns the consolidate enqueue
+	// (exactly one, only when reconsolidate is set).
 	ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) error
 }
 

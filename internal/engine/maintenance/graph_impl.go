@@ -33,7 +33,9 @@ func NewGraphMaintainer(s port.Store, linker Linker, clock port.Clock) GraphMain
 }
 
 // Run commits one batch per transaction (up to DirtyBatch link top-ups plus up to EntityBatch entity
-// prunes) until a batch finds both queues empty (done=true) or the budget has run out (done=false). The
+// prunes) until a batch finds both queues empty (done=true) or the budget has run out (done=false). done is
+// only ever reported by a batch that found both queues empty after the last batch that did work, so work
+// queued while a batch ran (even inside it) is drained before the run ends. The
 // budget is checked between batches only, so a batch is never cut in half. Neither step takes the bank's
 // change seq: links and entity rows are not memory content, so models must not go stale over them.
 func (g *graphMaintainer) Run(ctx context.Context, b port.BankRef, budget time.Duration) (bool, error) {
@@ -56,6 +58,9 @@ func (g *graphMaintainer) Run(ctx context.Context, b port.BankRef, budget time.D
 			return err
 		})
 		if err != nil {
+			if ctx.Err() != nil {
+				return false, fmt.Errorf("%w: graph maintenance of %s/%s: %w", domain.ErrCancelled, b.Tenant, b.Bank, err)
+			}
 			return false, err
 		}
 		if linked == 0 && pruned == 0 {

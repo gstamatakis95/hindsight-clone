@@ -189,17 +189,20 @@ func TestRestoreRoundTrip(t *testing.T) {
 	}
 }
 
-// rederiveEdited claims the one rederive job, checks its payload carries names and runs it, checking the
-// unit is embedded and attached to names afterwards.
+// rederiveEdited checks the RPC already attached names, claims the one rederive job (its payload carries
+// only the unit id) and runs it, checking the unit is embedded and still attached to names afterwards.
 func (e *env) rederiveEdited(names []string) {
 	e.t.Helper()
 	t := e.t
+	if got, _ := e.unit("f1"); !slices.Equal(got.Entities, names) {
+		t.Fatalf("entities committed by the RPC = %v, want %v", got.Entities, names)
+	}
 	jobs := e.claim(domain.OperationKindRederiveMemory)
 	if len(jobs) != 1 {
 		t.Fatalf("rederive jobs = %d", len(jobs))
 	}
 	var p RederivePayload
-	if err := json.Unmarshal(jobs[0].Payload, &p); err != nil || !slices.Equal(p.Entities, names) {
+	if err := json.Unmarshal(jobs[0].Payload, &p); err != nil || p.UnitID != "f1" {
 		t.Fatalf("payload = %s (%v)", jobs[0].Payload, err)
 	}
 	if err := e.rederiver(nil).Rederive(e.ctx, jobs[0]); err != nil {

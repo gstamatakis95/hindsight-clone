@@ -174,8 +174,13 @@ func TestBankDeleteLifecycle(t *testing.T) {
 	if done, err := d.Run(e.ctx, j); err != nil || done {
 		t.Fatalf("first run with a 2-batch budget: done=%v err=%v, want done=false", done, err)
 	}
-	if runs := runUntilDone(t, e, d, j); runs < 2 {
-		t.Errorf("finished in %d more runs; the batch budget should force several", runs)
+	assertBlockedByProcessing(t, e, d, j, claimed)
+	// The retain handler reaches its checkpoint and stops; only then can the bank go.
+	if err := e.store.Fail(e.ctx, claimed, errors.New("stopped at checkpoint"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if runs := runUntilDone(t, e, d, j); runs < 1 {
+		t.Errorf("finished in %d more runs", runs)
 	}
 
 	if keys := blobKeys(e, domain.BankBlobPrefix(b)); len(keys) != 0 {
@@ -185,6 +190,62 @@ func TestBankDeleteLifecycle(t *testing.T) {
 		t.Errorf("other bank's blobs touched: %v", keys)
 	}
 	assertFreshBank(t, e, b, pending, claimed)
+	// The old retain job ended before the bank went, so it can't settle (or write) into the fresh bank.
+	if err := e.store.Complete(e.ctx, claimed, nil, nil); err == nil {
+		t.Error("old retain job completed against the fresh bank")
+	}
+}
+
+// assertBlockedByProcessing runs the delete while the claimed job of the bank is still processing: every
+// run reports done=false, the bank stays tombstoned with its blobs, the job's writes are refused and a
+// delayed delete_bank continuation is queued.
+func assertBlockedByProcessing(t *testing.T, e env, d BankDeleter, j port.Job, claimed port.OperationID) {
+	t.Helper()
+	var cont *domain.Operation
+	for runs := 0; runs < 50 && cont == nil; runs++ {
+		done, err := d.Run(e.ctx, j)
+		if err != nil || done {
+			t.Fatalf("run while a job is processing: done=%v err=%v, want done=false", done, err)
+		}
+		cont = delayedContinuation(t, e, j)
+	}
+	if cont == nil {
+		t.Fatal("no delayed delete_bank continuation while a job is processing")
+	}
+	if want := e.clock.Now().Add(DeleteBlockedDelay); cont.NextRunAt == nil || cont.NextRunAt.Before(want) {
+		t.Errorf("continuation run_at = %v, want >= %v", cont.NextRunAt, want)
+	}
+	if done, err := d.Run(e.ctx, j); err != nil || done {
+		t.Errorf("run still blocked: done=%v err=%v", done, err)
+	}
+	var bank domain.Bank
+	e.tx(t, func(tx port.Tx) error { var err error; bank, err = tx.Banks().Get(e.ctx, j.Bank); return err })
+	if !bank.Deleting() || len(blobKeys(e, domain.BankBlobPrefix(j.Bank))) == 0 {
+		t.Errorf("blocked delete went ahead: bank %+v, blobs %v", bank, blobKeys(e, domain.BankBlobPrefix(j.Bank)))
+	}
+	err := e.store.InTx(e.ctx, func(tx port.Tx) error { _, err := tx.Seq(e.ctx, j.Bank); return err })
+	if !errors.Is(err, domain.ErrBankDeleting) {
+		t.Errorf("claimed job %s write while blocked: %v, want ErrBankDeleting", claimed, err)
+	}
+}
+
+// delayedContinuation returns the pending delete_bank operation other than j, if any.
+func delayedContinuation(t *testing.T, e env, j port.Job) *domain.Operation {
+	t.Helper()
+	var out *domain.Operation
+	e.tx(t, func(tx port.Tx) error {
+		out = nil
+		ops, _, err := tx.Queue().List(e.ctx, j.Bank, port.OperationFilter{
+			Status: domain.OperationStatusPending, Kind: domain.OperationKindDeleteBank, PageSize: 100,
+		})
+		for i := range ops {
+			if ops[i].ID != j.ID {
+				out = &ops[i]
+			}
+		}
+		return err
+	})
+	return out
 }
 
 // assertFreshBank checks bank b is gone with its jobs, and a write afterwards creates a clean bank.

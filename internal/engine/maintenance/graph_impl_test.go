@@ -229,3 +229,58 @@ func TestGraphMaintenanceStopsOnTombstone(t *testing.T) {
 		t.Fatalf("Run on an unknown bank: %v, want ErrCancelled", err)
 	}
 }
+
+// archivingLinker archives unit victim inside the maintainer's own transaction on its first call, which
+// queues victim's live neighbours in graph_dirty after this batch already read the queue.
+type archivingLinker struct {
+	stubLinker
+	victim port.UnitID
+}
+
+func (l *archivingLinker) Link(
+	ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID,
+) error {
+	if len(l.calls) == 0 {
+		if err := tx.Units().Archive(ctx, b, l.victim, "test"); err != nil {
+			return err
+		}
+	}
+	return l.stubLinker.Link(ctx, tx, b, units, causes)
+}
+
+// TestGraphMaintenanceRechecksAfterFinalBatch: work queued during the last working batch (here inside it)
+// is drained before Run reports done.
+func TestGraphMaintenanceRechecksAfterFinalBatch(t *testing.T) {
+	ctx := context.Background()
+	clock := fake.NewClock(time.Time{})
+	store := fake.NewStore(clock)
+	seedHub(t, store, 2)
+	err := store.InTx(ctx, func(tx port.Tx) error {
+		units := []domain.Unit{
+			{ID: "z", Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld},
+			{ID: "w", Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld},
+		}
+		if err := tx.Units().Insert(ctx, units); err != nil {
+			return err
+		}
+		return tx.Links().Insert(ctx, []domain.Link{
+			{Bank: testBank, From: "z", To: "w", Kind: domain.LinkTemporal, Weight: 1},
+		})
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	l := &archivingLinker{stubLinker: stubLinker{clock: clock}, victim: "w"}
+	g := maintenance.NewGraphMaintainer(store, l, clock)
+
+	done, err := g.Run(ctx, testBank, maintenance.DefaultGraphBudget)
+	if err != nil || !done {
+		t.Fatalf("Run = %v, %v; want done", done, err)
+	}
+	if !slices.Contains(l.linked(), "z") {
+		t.Fatalf("linker saw %v; want z, queued during the first batch, topped up too", l.linked())
+	}
+	if d, p := queues(t, store); len(d) != 0 || len(p) != 0 {
+		t.Fatalf("queues after run: %v dirty, %v entities; want both empty", d, p)
+	}
+}
