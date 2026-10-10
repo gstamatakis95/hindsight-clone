@@ -2,165 +2,273 @@ package recall
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/domain"
+	"memd/internal/engine/timex"
 	"memd/internal/port"
-	"time"
-)
+	"strings"
 
-// Arm names, as returned by Retriever.Name and used as keys of Fuser lists, Candidate.Arms,
-// RecallConfig.StrategyBoosts and RecallConfig.EnabledStrategies.
-const (
-	// ArmSemantic is the HNSW cosine arm.
-	ArmSemantic = "semantic"
-	// ArmKeyword is the BM25 arm.
-	ArmKeyword = "keyword"
-	// ArmGraph is the link-expansion arm.
-	ArmGraph = "graph"
-	// ArmTemporal is the occurrence-overlap arm.
-	ArmTemporal = "temporal"
+	"golang.org/x/sync/errgroup"
 )
 
 // Recaller answers one recall request.
 type Recaller interface {
-	// Recall parses, retrieves over all enabled arms, fuses, scores, gates, packs and enriches.
+	// Recall resolves the effective config (unknown bank = domain.ErrNotFound), parses, retrieves over the
+	// enabled arms concurrently, fuses, scores, gates, packs and enriches. It is read-only and opens a short
+	// read transaction only to resolve config, so callers must not call it inside Store.InTx. A failing arm,
+	// embedder or reranker fails the call; a recall that finds nothing is not a failure.
 	Recall(ctx context.Context, req RecallRequest) (RecallResult, error)
 }
 
-// Retriever is one recall arm.
-type Retriever interface {
-	// Name is the arm name: semantic | keyword | graph | temporal.
-	Name() string
-	// Retrieve returns the arm's candidates for q, best first, at most q.Limit.
-	Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, error)
+// RecallerDeps are the Recaller's dependencies.
+type RecallerDeps struct {
+	// Reader serves the four arms, hydration and source facts.
+	Reader port.Reader
+	// Lookups serves fuzzy tags, chunks and entity state (CCR WP-09-1); nil = those features are off.
+	Lookups Lookups
+	// Config merges server < tenant < bank < request.
+	Config port.ConfigResolver
+	// Embedder embeds the query.
+	Embedder port.Embedder
+	// Reranker is the cross-encoder; nil = recall.rerank off.
+	Reranker port.Reranker
+	// Router resolves the RERANK binding.
+	Router port.ModelRouter
+	// Times derives a query's time window (TIME_PARSE only for a cue its rules can't resolve); nil = no
+	// derived windows (explicit windows still work).
+	Times timex.TimeNormalizer
+	// Clock is the reference for "now" and durations.
+	Clock port.Clock
+	// Count counts tokens for packing, include budgets and the query limit.
+	Count TokenCounter
+	// Retrievers replaces the four standard arms over Reader; nil = NewSemantic, NewKeyword, NewGraph and
+	// NewTemporal.
+	Retrievers []Retriever
 }
 
-// Candidate is one unit moving through the recall pipeline with every score it has collected.
-type Candidate struct {
-	// ID is the unit.
-	ID port.UnitID
-	// Unit is the hydrated unit; nil until hydrated (port.Reader.GetUnits).
-	Unit *domain.Unit
-	// Arms holds the candidate's rank and raw score per arm name; an absent arm did not return it.
-	Arms map[string]ArmScore
-	// RRF is the reciprocal-rank-fusion score.
-	RRF float64
-	// Reranker is the cross-encoder score in [0,1]; nil = not reranked.
-	Reranker *float64
-	// Boosts are the recency, temporal and proof boosts the Scorer applied.
-	Boosts Boosts
-	// Final is the final score after reranking and boosts.
-	Final float64
-	// Tokens is the unit text's token count, set when packing.
-	Tokens int
+// recaller is the Recaller.
+type recaller struct {
+	d        RecallerDeps
+	arms     []Retriever
+	tags     TagFilterCompiler
+	fuser    Fuser
+	scorer   Scorer
+	gate     ScoreGate
+	packer   Packer
+	prefer   ObservationPreference
+	includer Includer
 }
 
-// ArmScore is a candidate's position and raw score in one arm's list.
-type ArmScore struct {
-	// Rank is the 1-based rank in the arm's list.
-	Rank int
-	// Score is the arm's raw score (cosine similarity, BM25, proximity or path weight).
-	Score float64
+var _ Recaller = (*recaller)(nil)
+
+// NewRecaller returns the Recaller over d.
+func NewRecaller(d RecallerDeps) Recaller {
+	arms := d.Retrievers
+	if arms == nil {
+		arms = []Retriever{NewSemantic(d.Reader), NewKeyword(d.Reader), NewGraph(d.Reader), NewTemporal(d.Reader)}
+	}
+	var vocab TagVocabulary
+	if d.Lookups != nil {
+		vocab = d.Lookups
+	}
+	return &recaller{
+		d: d, arms: arms, tags: NewTagFilterCompiler(vocab), fuser: NewRRF(),
+		scorer: NewScorer(d.Reranker, d.Router, d.Clock), gate: NewScoreGate(), packer: NewPacker(d.Count),
+		prefer: NewObservationPreference(), includer: NewIncluder(d.Reader, d.Lookups, d.Count),
+	}
 }
 
-// RecallRequest mirrors memory.v1.RecallRequest with domain types.
-type RecallRequest struct { //nolint:revive // stutter: name fixed by the spec and the proto message it mirrors
-	// Bank is the bank searched.
-	Bank port.BankRef
-	// Query is the query text (max 500 tokens).
-	Query string
-	// Types limits fact types; empty = all.
-	Types []domain.FactType
-	// Tags is the tag filter: flat tags with a match mode, or tag groups.
-	Tags domain.TagFilter
-	// Budget is the effort level; unspecified = the RPC default.
-	Budget domain.Budget
-	// MaxTokens caps the packed results.
-	MaxTokens int
-	// QueryTime is the reference time for relative dates and recency; nil = now (port.Clock).
-	QueryTime *time.Time
-	// Window is an explicit time window (time_window_start / end); nil = derived from the query by timex.
-	Window *domain.TimeWindow
-	// PreferObservations drops raw facts covered by a returned observation and backfills.
-	PreferObservations bool
-	// MinScores are the arm and result floors.
-	MinScores domain.MinScores
-	// Include asks for chunks, source facts and entity state.
-	Include domain.RecallInclude
-	// Trace fills RecallResult.Trace.
-	Trace bool
-	// Overrides are request-level config overrides; nil = none.
-	Overrides *domain.BankConfig
-	// Seq bounds the units' seq; zero = unbounded. Internal callers only (mental-model refreshes read a
-	// stable snapshot); not on the wire.
-	Seq port.SeqRange
+// Recall implements Recaller.
+func (r *recaller) Recall(ctx context.Context, req RecallRequest) (RecallResult, error) {
+	start := r.d.Clock.Now()
+	if strings.TrimSpace(req.Query) == "" {
+		return RecallResult{}, fmt.Errorf("%w: recall: query is empty", domain.ErrInvalidArgument)
+	}
+	var overrides []domain.BankConfig
+	if req.Overrides != nil {
+		overrides = append(overrides, *req.Overrides)
+	}
+	cfg, err := r.d.Config.Effective(ctx, req.Bank, overrides...)
+	if err != nil {
+		return RecallResult{}, fmt.Errorf("recall: config: %w", err)
+	}
+	q, err := parse(ctx, req, cfg, parseDeps{
+		embedder: r.d.Embedder, times: r.d.Times, tags: r.tags, clock: r.d.Clock, count: r.d.Count,
+	})
+	if err != nil {
+		return RecallResult{}, err
+	}
+	set := settingsOf(cfg)
+	lists, arms, err := r.retrieve(ctx, q, set)
+	if err != nil {
+		return RecallResult{}, err
+	}
+	fused := r.fuser.Fuse(lists, set.rrfK)
+	ranked, reranked, err := r.rank(ctx, q, fused, set)
+	if err != nil {
+		return RecallResult{}, err
+	}
+	maxTokens := req.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = DefaultMaxTokens
+	}
+	var packed []Candidate
+	if req.PreferObservations {
+		packed = r.prefer.Apply(ranked, 2*q.Limit, maxTokens, r.d.Count)
+	} else {
+		packed = r.packer.Pack(ranked, maxTokens)
+	}
+	enr, err := r.includer.Enrich(ctx, req.Bank, req.Seq, packed, req.Include)
+	if err != nil {
+		return RecallResult{}, fmt.Errorf("recall: include: %w", err)
+	}
+	out := result(packed, enr)
+	if req.Trace {
+		out.Trace = &RecallTrace{
+			Arms: arms, Fused: len(fused), Reranked: reranked, Packed: len(packed),
+			TokenBudget: maxTokens, TokensUsed: tokensOf(packed), Window: q.Window,
+			DurationMS: r.d.Clock.Now().Sub(start).Milliseconds(),
+		}
+	}
+	return out, nil
 }
 
-// RecallResult mirrors memory.v1.RecallResponse with domain types.
-type RecallResult struct { //nolint:revive // stutter: name fixed by the spec and the proto message it mirrors
-	// Results are the packed memories, best first.
-	Results []Memory
-	// SourceFacts are the facts behind returned observations, by id (include.source_facts).
-	SourceFacts map[port.UnitID]domain.Unit
-	// SourceFactsTruncated reports that the source-fact budget cut some off.
-	SourceFactsTruncated bool
-	// Chunks are the source chunks of returned memories, by id (include.chunks).
-	Chunks map[port.ChunkID]Chunk
-	// Entities is the entity state of returned memories, by id (include.entities).
-	Entities map[port.EntityID]domain.EntityState
-	// Trace explains the run; nil unless requested.
-	Trace *RecallTrace
+// retrieve runs the enabled arms concurrently. The temporal arm runs only when the query has a window. It
+// returns each arm's list by name and one trace entry per arm that ran, in arm order.
+func (r *recaller) retrieve(ctx context.Context, q *ParsedQuery, set settings) (
+	map[string][]Candidate, []ArmTrace, error,
+) {
+	var run []Retriever
+	for _, a := range r.arms {
+		if set.enabled[a.Name()] && (a.Name() != ArmTemporal || q.Window != nil) {
+			run = append(run, a)
+		}
+	}
+	results := make([][]Candidate, len(run))
+	traces := make([]ArmTrace, len(run))
+	g, gctx := errgroup.WithContext(ctx)
+	for i, a := range run {
+		g.Go(func() error {
+			t0 := r.d.Clock.Now()
+			cs, err := a.Retrieve(gctx, q)
+			if err != nil {
+				return fmt.Errorf("recall: %s arm: %w", a.Name(), err)
+			}
+			results[i] = cs
+			traces[i] = ArmTrace{
+				Arm: a.Name(), Candidates: len(cs), DurationMS: r.d.Clock.Now().Sub(t0).Milliseconds(),
+				TopIDs: topIDs(cs),
+			}
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, nil, fmt.Errorf("recall: retrieve: %w", err)
+	}
+	lists := make(map[string][]Candidate, len(run))
+	for i, a := range run {
+		lists[a.Name()] = results[i]
+	}
+	return lists, traces, nil
 }
 
-// Memory is one returned unit with its scores.
-type Memory struct {
-	// Unit is the memory unit.
-	Unit domain.Unit
-	// Scores are the unit's scores.
-	Scores Scores
-	// Stale marks an observation whose scope still has unconsolidated facts.
-	Stale bool
+// rank keeps the top reranker_max_candidates of fused (strategy boosts decide that cut), hydrates them
+// (units archived since retrieval are dropped), scores them and applies the result floors. It also returns
+// how many the cross-encoder scored.
+func (r *recaller) rank(ctx context.Context, q *ParsedQuery, fused []Candidate, set settings) (
+	[]Candidate, int, error,
+) {
+	top := trimBoosted(fused, set.rerankMax, set.rrfK, set.boosts)
+	hydrated, err := r.hydrate(ctx, q.Bank, q.Seq, top)
+	if err != nil {
+		return nil, 0, err
+	}
+	scored, err := r.scorer.Score(ctx, q, hydrated)
+	if err != nil {
+		return nil, 0, fmt.Errorf("recall: score: %w", err)
+	}
+	kept, reranked := scored[:0:0], 0
+	for _, c := range scored {
+		if c.Reranker != nil {
+			reranked++
+		}
+		if r.gate.Keep(c, q.MinScores) {
+			kept = append(kept, c)
+		}
+	}
+	return kept, reranked, nil
 }
 
-// Scores mirrors memory.v1.Scores.
-type Scores struct {
-	// Final is the final score.
-	Final float64
-	// Reranker is the cross-encoder score; nil = not reranked.
-	Reranker *float64
-	// Semantic is the cosine similarity; nil = not returned by the semantic arm.
-	Semantic *float64
-	// Keyword is the BM25 score; nil = not returned by the keyword arm.
-	Keyword *float64
+// hydrate attaches each candidate's unit, keeping fused order and dropping ids that no longer resolve or
+// whose unit was rewritten outside seq since the arm saw it (a refresh's snapshot stays at or below S).
+func (r *recaller) hydrate(ctx context.Context, b port.BankRef, seq port.SeqRange, cs []Candidate) (
+	[]Candidate, error,
+) {
+	if len(cs) == 0 {
+		return nil, nil
+	}
+	ids := make([]port.UnitID, len(cs))
+	for i, c := range cs {
+		ids[i] = c.ID
+	}
+	units, err := r.d.Reader.GetUnits(ctx, b, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[port.UnitID]*domain.Unit, len(units))
+	for i := range units {
+		if seq.Contains(units[i].Seq) {
+			byID[units[i].ID] = &units[i]
+		}
+	}
+	out := make([]Candidate, 0, len(cs))
+	for _, c := range cs {
+		if u, ok := byID[c.ID]; ok {
+			c.Unit = u
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
-// RecallTrace mirrors memory.v1.RecallTrace.
-type RecallTrace struct { //nolint:revive // stutter: name fixed by the spec and the proto message it mirrors
-	// Arms has one entry per arm that ran: semantic, keyword, graph, temporal.
-	Arms []ArmTrace
-	// Fused is the number of candidates after fusion.
-	Fused int
-	// Reranked is the number of candidates sent to the cross-encoder.
-	Reranked int
-	// Packed is the number of results returned.
-	Packed int
-	// TokenBudget is the max_tokens budget packing used.
-	TokenBudget int
-	// TokensUsed is the token count of the packed results.
-	TokensUsed int
-	// Window is the time window the temporal arm used (explicit or resolved by TIME_PARSE); nil = none.
-	Window *domain.TimeWindow
-	// DurationMS is the recall duration.
-	DurationMS int64
+// result builds the RecallResult from the packed candidates and the enrichment.
+func result(packed []Candidate, e Enrichment) RecallResult {
+	out := RecallResult{
+		Results: make([]Memory, 0, len(packed)), SourceFacts: e.SourceFacts,
+		SourceFactsTruncated: e.SourceFactsTruncated, Chunks: e.Chunks, Entities: e.Entities,
+	}
+	for _, c := range packed {
+		out.Results = append(out.Results, Memory{Unit: *c.Unit, Scores: scoresOf(c)})
+	}
+	return out
 }
 
-// ArmTrace mirrors memory.v1.ArmTrace: one arm's contribution.
-type ArmTrace struct {
-	// Arm is the arm name.
-	Arm string
-	// Candidates is the number of candidates the arm returned.
-	Candidates int
-	// DurationMS is the arm's duration.
-	DurationMS int64
-	// TopIDs are the arm's best few unit ids.
-	TopIDs []port.UnitID
+// scoresOf returns a candidate's wire scores.
+func scoresOf(c Candidate) Scores {
+	s := Scores{Final: c.Final, Reranker: c.Reranker}
+	if a, ok := c.Arms[ArmSemantic]; ok {
+		s.Semantic = &a.Score
+	}
+	if a, ok := c.Arms[ArmKeyword]; ok {
+		s.Keyword = &a.Score
+	}
+	return s
+}
+
+// tokensOf sums the packed candidates' token counts.
+func tokensOf(cs []Candidate) int {
+	n := 0
+	for _, c := range cs {
+		n += c.Tokens
+	}
+	return n
+}
+
+// topIDs returns the first traceTopIDs ids of an arm's list.
+func topIDs(cs []Candidate) []port.UnitID {
+	out := make([]port.UnitID, 0, min(len(cs), traceTopIDs))
+	for _, c := range cs[:min(len(cs), traceTopIDs)] {
+		out = append(out, c.ID)
+	}
+	return out
 }
