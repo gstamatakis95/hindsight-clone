@@ -12,6 +12,312 @@ import (
 	"sync"
 )
 
+// Ensure that TenantAdmin does implement bank.TenantAdmin.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.TenantAdmin = &TenantAdmin{}
+
+// TenantAdmin is a mock implementation of bank.TenantAdmin.
+//
+//	func TestSomethingThatUsesTenantAdmin(t *testing.T) {
+//
+//		// make and configure a mocked bank.TenantAdmin
+//		mockedTenantAdmin := &TenantAdmin{
+//			TenantConfigFunc: func(ctx context.Context, tenant string) (domain.BankConfig, error) {
+//				panic("mock out the TenantConfig method")
+//			},
+//			UpdateTenantConfigFunc: func(ctx context.Context, tenant string, patch bank.ConfigPatch) (domain.BankConfig, error) {
+//				panic("mock out the UpdateTenantConfig method")
+//			},
+//		}
+//
+//		// use mockedTenantAdmin in code that requires bank.TenantAdmin
+//		// and then make assertions.
+//
+//	}
+type TenantAdmin struct {
+	// TenantConfigFunc mocks the TenantConfig method.
+	TenantConfigFunc func(ctx context.Context, tenant string) (domain.BankConfig, error)
+
+	// UpdateTenantConfigFunc mocks the UpdateTenantConfig method.
+	UpdateTenantConfigFunc func(ctx context.Context, tenant string, patch bank.ConfigPatch) (domain.BankConfig, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// TenantConfig holds details about calls to the TenantConfig method.
+		TenantConfig []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tenant is the tenant argument value.
+			Tenant string
+		}
+		// UpdateTenantConfig holds details about calls to the UpdateTenantConfig method.
+		UpdateTenantConfig []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tenant is the tenant argument value.
+			Tenant string
+			// Patch is the patch argument value.
+			Patch bank.ConfigPatch
+		}
+	}
+	lockTenantConfig       sync.RWMutex
+	lockUpdateTenantConfig sync.RWMutex
+}
+
+// TenantConfig calls TenantConfigFunc.
+func (mock *TenantAdmin) TenantConfig(ctx context.Context, tenant string) (domain.BankConfig, error) {
+	if mock.TenantConfigFunc == nil {
+		panic("TenantAdmin.TenantConfigFunc: method is nil but TenantAdmin.TenantConfig was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Tenant string
+	}{
+		Ctx:    ctx,
+		Tenant: tenant,
+	}
+	mock.lockTenantConfig.Lock()
+	mock.calls.TenantConfig = append(mock.calls.TenantConfig, callInfo)
+	mock.lockTenantConfig.Unlock()
+	return mock.TenantConfigFunc(ctx, tenant)
+}
+
+// TenantConfigCalls gets all the calls that were made to TenantConfig.
+// Check the length with:
+//
+//	len(mockedTenantAdmin.TenantConfigCalls())
+func (mock *TenantAdmin) TenantConfigCalls() []struct {
+	Ctx    context.Context
+	Tenant string
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Tenant string
+	}
+	mock.lockTenantConfig.RLock()
+	calls = mock.calls.TenantConfig
+	mock.lockTenantConfig.RUnlock()
+	return calls
+}
+
+// UpdateTenantConfig calls UpdateTenantConfigFunc.
+func (mock *TenantAdmin) UpdateTenantConfig(ctx context.Context, tenant string, patch bank.ConfigPatch) (domain.BankConfig, error) {
+	if mock.UpdateTenantConfigFunc == nil {
+		panic("TenantAdmin.UpdateTenantConfigFunc: method is nil but TenantAdmin.UpdateTenantConfig was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Tenant string
+		Patch  bank.ConfigPatch
+	}{
+		Ctx:    ctx,
+		Tenant: tenant,
+		Patch:  patch,
+	}
+	mock.lockUpdateTenantConfig.Lock()
+	mock.calls.UpdateTenantConfig = append(mock.calls.UpdateTenantConfig, callInfo)
+	mock.lockUpdateTenantConfig.Unlock()
+	return mock.UpdateTenantConfigFunc(ctx, tenant, patch)
+}
+
+// UpdateTenantConfigCalls gets all the calls that were made to UpdateTenantConfig.
+// Check the length with:
+//
+//	len(mockedTenantAdmin.UpdateTenantConfigCalls())
+func (mock *TenantAdmin) UpdateTenantConfigCalls() []struct {
+	Ctx    context.Context
+	Tenant string
+	Patch  bank.ConfigPatch
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Tenant string
+		Patch  bank.ConfigPatch
+	}
+	mock.lockUpdateTenantConfig.RLock()
+	calls = mock.calls.UpdateTenantConfig
+	mock.lockUpdateTenantConfig.RUnlock()
+	return calls
+}
+
+// Ensure that BankAdmin does implement bank.BankAdmin.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.BankAdmin = &BankAdmin{}
+
+// BankAdmin is a mock implementation of bank.BankAdmin.
+//
+//	func TestSomethingThatUsesBankAdmin(t *testing.T) {
+//
+//		// make and configure a mocked bank.BankAdmin
+//		mockedBankAdmin := &BankAdmin{
+//			CreateBankFunc: func(ctx context.Context, bank1 domain.Bank) (domain.Bank, error) {
+//				panic("mock out the CreateBank method")
+//			},
+//			GetBankFunc: func(ctx context.Context, b port.BankRef) (domain.Bank, error) {
+//				panic("mock out the GetBank method")
+//			},
+//			UpdateBankConfigFunc: func(ctx context.Context, b port.BankRef, patch bank.ConfigPatch) (domain.Bank, error) {
+//				panic("mock out the UpdateBankConfig method")
+//			},
+//		}
+//
+//		// use mockedBankAdmin in code that requires bank.BankAdmin
+//		// and then make assertions.
+//
+//	}
+type BankAdmin struct {
+	// CreateBankFunc mocks the CreateBank method.
+	CreateBankFunc func(ctx context.Context, bank1 domain.Bank) (domain.Bank, error)
+
+	// GetBankFunc mocks the GetBank method.
+	GetBankFunc func(ctx context.Context, b port.BankRef) (domain.Bank, error)
+
+	// UpdateBankConfigFunc mocks the UpdateBankConfig method.
+	UpdateBankConfigFunc func(ctx context.Context, b port.BankRef, patch bank.ConfigPatch) (domain.Bank, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// CreateBank holds details about calls to the CreateBank method.
+		CreateBank []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Bank1 is the bank1 argument value.
+			Bank1 domain.Bank
+		}
+		// GetBank holds details about calls to the GetBank method.
+		GetBank []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+		// UpdateBankConfig holds details about calls to the UpdateBankConfig method.
+		UpdateBankConfig []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Patch is the patch argument value.
+			Patch bank.ConfigPatch
+		}
+	}
+	lockCreateBank       sync.RWMutex
+	lockGetBank          sync.RWMutex
+	lockUpdateBankConfig sync.RWMutex
+}
+
+// CreateBank calls CreateBankFunc.
+func (mock *BankAdmin) CreateBank(ctx context.Context, bank1 domain.Bank) (domain.Bank, error) {
+	if mock.CreateBankFunc == nil {
+		panic("BankAdmin.CreateBankFunc: method is nil but BankAdmin.CreateBank was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		Bank1 domain.Bank
+	}{
+		Ctx:   ctx,
+		Bank1: bank1,
+	}
+	mock.lockCreateBank.Lock()
+	mock.calls.CreateBank = append(mock.calls.CreateBank, callInfo)
+	mock.lockCreateBank.Unlock()
+	return mock.CreateBankFunc(ctx, bank1)
+}
+
+// CreateBankCalls gets all the calls that were made to CreateBank.
+// Check the length with:
+//
+//	len(mockedBankAdmin.CreateBankCalls())
+func (mock *BankAdmin) CreateBankCalls() []struct {
+	Ctx   context.Context
+	Bank1 domain.Bank
+} {
+	var calls []struct {
+		Ctx   context.Context
+		Bank1 domain.Bank
+	}
+	mock.lockCreateBank.RLock()
+	calls = mock.calls.CreateBank
+	mock.lockCreateBank.RUnlock()
+	return calls
+}
+
+// GetBank calls GetBankFunc.
+func (mock *BankAdmin) GetBank(ctx context.Context, b port.BankRef) (domain.Bank, error) {
+	if mock.GetBankFunc == nil {
+		panic("BankAdmin.GetBankFunc: method is nil but BankAdmin.GetBank was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockGetBank.Lock()
+	mock.calls.GetBank = append(mock.calls.GetBank, callInfo)
+	mock.lockGetBank.Unlock()
+	return mock.GetBankFunc(ctx, b)
+}
+
+// GetBankCalls gets all the calls that were made to GetBank.
+// Check the length with:
+//
+//	len(mockedBankAdmin.GetBankCalls())
+func (mock *BankAdmin) GetBankCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockGetBank.RLock()
+	calls = mock.calls.GetBank
+	mock.lockGetBank.RUnlock()
+	return calls
+}
+
+// UpdateBankConfig calls UpdateBankConfigFunc.
+func (mock *BankAdmin) UpdateBankConfig(ctx context.Context, b port.BankRef, patch bank.ConfigPatch) (domain.Bank, error) {
+	if mock.UpdateBankConfigFunc == nil {
+		panic("BankAdmin.UpdateBankConfigFunc: method is nil but BankAdmin.UpdateBankConfig was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Patch bank.ConfigPatch
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Patch: patch,
+	}
+	mock.lockUpdateBankConfig.Lock()
+	mock.calls.UpdateBankConfig = append(mock.calls.UpdateBankConfig, callInfo)
+	mock.lockUpdateBankConfig.Unlock()
+	return mock.UpdateBankConfigFunc(ctx, b, patch)
+}
+
+// UpdateBankConfigCalls gets all the calls that were made to UpdateBankConfig.
+// Check the length with:
+//
+//	len(mockedBankAdmin.UpdateBankConfigCalls())
+func (mock *BankAdmin) UpdateBankConfigCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Patch bank.ConfigPatch
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Patch bank.ConfigPatch
+	}
+	mock.lockUpdateBankConfig.RLock()
+	calls = mock.calls.UpdateBankConfig
+	mock.lockUpdateBankConfig.RUnlock()
+	return calls
+}
+
 // Ensure that BankDeleter does implement bank.BankDeleter.
 // If this is not the case, regenerate this file with mockery.
 var _ bank.BankDeleter = &BankDeleter{}
@@ -134,6 +440,78 @@ func (mock *BankDeleter) TombstoneCalls() []struct {
 	return calls
 }
 
+// Ensure that JobFence does implement bank.JobFence.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.JobFence = &JobFence{}
+
+// JobFence is a mock implementation of bank.JobFence.
+//
+//	func TestSomethingThatUsesJobFence(t *testing.T) {
+//
+//		// make and configure a mocked bank.JobFence
+//		mockedJobFence := &JobFence{
+//			AliveFunc: func(ctx context.Context, id port.OperationID) (bool, error) {
+//				panic("mock out the Alive method")
+//			},
+//		}
+//
+//		// use mockedJobFence in code that requires bank.JobFence
+//		// and then make assertions.
+//
+//	}
+type JobFence struct {
+	// AliveFunc mocks the Alive method.
+	AliveFunc func(ctx context.Context, id port.OperationID) (bool, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Alive holds details about calls to the Alive method.
+		Alive []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// ID is the id argument value.
+			ID port.OperationID
+		}
+	}
+	lockAlive sync.RWMutex
+}
+
+// Alive calls AliveFunc.
+func (mock *JobFence) Alive(ctx context.Context, id port.OperationID) (bool, error) {
+	if mock.AliveFunc == nil {
+		panic("JobFence.AliveFunc: method is nil but JobFence.Alive was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		ID  port.OperationID
+	}{
+		Ctx: ctx,
+		ID:  id,
+	}
+	mock.lockAlive.Lock()
+	mock.calls.Alive = append(mock.calls.Alive, callInfo)
+	mock.lockAlive.Unlock()
+	return mock.AliveFunc(ctx, id)
+}
+
+// AliveCalls gets all the calls that were made to Alive.
+// Check the length with:
+//
+//	len(mockedJobFence.AliveCalls())
+func (mock *JobFence) AliveCalls() []struct {
+	Ctx context.Context
+	ID  port.OperationID
+} {
+	var calls []struct {
+		Ctx context.Context
+		ID  port.OperationID
+	}
+	mock.lockAlive.RLock()
+	calls = mock.calls.Alive
+	mock.lockAlive.RUnlock()
+	return calls
+}
+
 // Ensure that DirectiveSelector does implement bank.DirectiveSelector.
 // If this is not the case, regenerate this file with mockery.
 var _ bank.DirectiveSelector = &DirectiveSelector{}
@@ -215,6 +593,196 @@ func (mock *DirectiveSelector) SelectCalls() []struct {
 	mock.lockSelect.RLock()
 	calls = mock.calls.Select
 	mock.lockSelect.RUnlock()
+	return calls
+}
+
+// Ensure that DirectiveAdmin does implement bank.DirectiveAdmin.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.DirectiveAdmin = &DirectiveAdmin{}
+
+// DirectiveAdmin is a mock implementation of bank.DirectiveAdmin.
+//
+//	func TestSomethingThatUsesDirectiveAdmin(t *testing.T) {
+//
+//		// make and configure a mocked bank.DirectiveAdmin
+//		mockedDirectiveAdmin := &DirectiveAdmin{
+//			DeleteDirectiveFunc: func(ctx context.Context, b port.BankRef, id port.DirectiveID) error {
+//				panic("mock out the DeleteDirective method")
+//			},
+//			ListDirectivesFunc: func(ctx context.Context, b port.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error) {
+//				panic("mock out the ListDirectives method")
+//			},
+//			UpsertDirectiveFunc: func(ctx context.Context, d domain.Directive) (domain.Directive, error) {
+//				panic("mock out the UpsertDirective method")
+//			},
+//		}
+//
+//		// use mockedDirectiveAdmin in code that requires bank.DirectiveAdmin
+//		// and then make assertions.
+//
+//	}
+type DirectiveAdmin struct {
+	// DeleteDirectiveFunc mocks the DeleteDirective method.
+	DeleteDirectiveFunc func(ctx context.Context, b port.BankRef, id port.DirectiveID) error
+
+	// ListDirectivesFunc mocks the ListDirectives method.
+	ListDirectivesFunc func(ctx context.Context, b port.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error)
+
+	// UpsertDirectiveFunc mocks the UpsertDirective method.
+	UpsertDirectiveFunc func(ctx context.Context, d domain.Directive) (domain.Directive, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// DeleteDirective holds details about calls to the DeleteDirective method.
+		DeleteDirective []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.DirectiveID
+		}
+		// ListDirectives holds details about calls to the ListDirectives method.
+		ListDirectives []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Tags is the tags argument value.
+			Tags []string
+			// ActiveOnly is the activeOnly argument value.
+			ActiveOnly bool
+		}
+		// UpsertDirective holds details about calls to the UpsertDirective method.
+		UpsertDirective []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// D is the d argument value.
+			D domain.Directive
+		}
+	}
+	lockDeleteDirective sync.RWMutex
+	lockListDirectives  sync.RWMutex
+	lockUpsertDirective sync.RWMutex
+}
+
+// DeleteDirective calls DeleteDirectiveFunc.
+func (mock *DirectiveAdmin) DeleteDirective(ctx context.Context, b port.BankRef, id port.DirectiveID) error {
+	if mock.DeleteDirectiveFunc == nil {
+		panic("DirectiveAdmin.DeleteDirectiveFunc: method is nil but DirectiveAdmin.DeleteDirective was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.DirectiveID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockDeleteDirective.Lock()
+	mock.calls.DeleteDirective = append(mock.calls.DeleteDirective, callInfo)
+	mock.lockDeleteDirective.Unlock()
+	return mock.DeleteDirectiveFunc(ctx, b, id)
+}
+
+// DeleteDirectiveCalls gets all the calls that were made to DeleteDirective.
+// Check the length with:
+//
+//	len(mockedDirectiveAdmin.DeleteDirectiveCalls())
+func (mock *DirectiveAdmin) DeleteDirectiveCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.DirectiveID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.DirectiveID
+	}
+	mock.lockDeleteDirective.RLock()
+	calls = mock.calls.DeleteDirective
+	mock.lockDeleteDirective.RUnlock()
+	return calls
+}
+
+// ListDirectives calls ListDirectivesFunc.
+func (mock *DirectiveAdmin) ListDirectives(ctx context.Context, b port.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error) {
+	if mock.ListDirectivesFunc == nil {
+		panic("DirectiveAdmin.ListDirectivesFunc: method is nil but DirectiveAdmin.ListDirectives was just called")
+	}
+	callInfo := struct {
+		Ctx        context.Context
+		B          port.BankRef
+		Tags       []string
+		ActiveOnly bool
+	}{
+		Ctx:        ctx,
+		B:          b,
+		Tags:       tags,
+		ActiveOnly: activeOnly,
+	}
+	mock.lockListDirectives.Lock()
+	mock.calls.ListDirectives = append(mock.calls.ListDirectives, callInfo)
+	mock.lockListDirectives.Unlock()
+	return mock.ListDirectivesFunc(ctx, b, tags, activeOnly)
+}
+
+// ListDirectivesCalls gets all the calls that were made to ListDirectives.
+// Check the length with:
+//
+//	len(mockedDirectiveAdmin.ListDirectivesCalls())
+func (mock *DirectiveAdmin) ListDirectivesCalls() []struct {
+	Ctx        context.Context
+	B          port.BankRef
+	Tags       []string
+	ActiveOnly bool
+} {
+	var calls []struct {
+		Ctx        context.Context
+		B          port.BankRef
+		Tags       []string
+		ActiveOnly bool
+	}
+	mock.lockListDirectives.RLock()
+	calls = mock.calls.ListDirectives
+	mock.lockListDirectives.RUnlock()
+	return calls
+}
+
+// UpsertDirective calls UpsertDirectiveFunc.
+func (mock *DirectiveAdmin) UpsertDirective(ctx context.Context, d domain.Directive) (domain.Directive, error) {
+	if mock.UpsertDirectiveFunc == nil {
+		panic("DirectiveAdmin.UpsertDirectiveFunc: method is nil but DirectiveAdmin.UpsertDirective was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		D   domain.Directive
+	}{
+		Ctx: ctx,
+		D:   d,
+	}
+	mock.lockUpsertDirective.Lock()
+	mock.calls.UpsertDirective = append(mock.calls.UpsertDirective, callInfo)
+	mock.lockUpsertDirective.Unlock()
+	return mock.UpsertDirectiveFunc(ctx, d)
+}
+
+// UpsertDirectiveCalls gets all the calls that were made to UpsertDirective.
+// Check the length with:
+//
+//	len(mockedDirectiveAdmin.UpsertDirectiveCalls())
+func (mock *DirectiveAdmin) UpsertDirectiveCalls() []struct {
+	Ctx context.Context
+	D   domain.Directive
+} {
+	var calls []struct {
+		Ctx context.Context
+		D   domain.Directive
+	}
+	mock.lockUpsertDirective.RLock()
+	calls = mock.calls.UpsertDirective
+	mock.lockUpsertDirective.RUnlock()
 	return calls
 }
 
@@ -424,6 +992,152 @@ func (mock *StatsReader) TagsCalls() []struct {
 	return calls
 }
 
+// Ensure that StatsSource does implement bank.StatsSource.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.StatsSource = &StatsSource{}
+
+// StatsSource is a mock implementation of bank.StatsSource.
+//
+//	func TestSomethingThatUsesStatsSource(t *testing.T) {
+//
+//		// make and configure a mocked bank.StatsSource
+//		mockedStatsSource := &StatsSource{
+//			BankStatsFunc: func(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+//				panic("mock out the BankStats method")
+//			},
+//			TagCountsFunc: func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+//				panic("mock out the TagCounts method")
+//			},
+//		}
+//
+//		// use mockedStatsSource in code that requires bank.StatsSource
+//		// and then make assertions.
+//
+//	}
+type StatsSource struct {
+	// BankStatsFunc mocks the BankStats method.
+	BankStatsFunc func(ctx context.Context, b port.BankRef) (domain.BankStats, error)
+
+	// TagCountsFunc mocks the TagCounts method.
+	TagCountsFunc func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// BankStats holds details about calls to the BankStats method.
+		BankStats []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+		// TagCounts holds details about calls to the TagCounts method.
+		TagCounts []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Source is the source argument value.
+			Source domain.TagSource
+			// Prefix is the prefix argument value.
+			Prefix string
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
+	}
+	lockBankStats sync.RWMutex
+	lockTagCounts sync.RWMutex
+}
+
+// BankStats calls BankStatsFunc.
+func (mock *StatsSource) BankStats(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+	if mock.BankStatsFunc == nil {
+		panic("StatsSource.BankStatsFunc: method is nil but StatsSource.BankStats was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockBankStats.Lock()
+	mock.calls.BankStats = append(mock.calls.BankStats, callInfo)
+	mock.lockBankStats.Unlock()
+	return mock.BankStatsFunc(ctx, b)
+}
+
+// BankStatsCalls gets all the calls that were made to BankStats.
+// Check the length with:
+//
+//	len(mockedStatsSource.BankStatsCalls())
+func (mock *StatsSource) BankStatsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockBankStats.RLock()
+	calls = mock.calls.BankStats
+	mock.lockBankStats.RUnlock()
+	return calls
+}
+
+// TagCounts calls TagCountsFunc.
+func (mock *StatsSource) TagCounts(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+	if mock.TagCountsFunc == nil {
+		panic("StatsSource.TagCountsFunc: method is nil but StatsSource.TagCounts was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}{
+		Ctx:    ctx,
+		B:      b,
+		Source: source,
+		Prefix: prefix,
+		After:  after,
+		Limit:  limit,
+	}
+	mock.lockTagCounts.Lock()
+	mock.calls.TagCounts = append(mock.calls.TagCounts, callInfo)
+	mock.lockTagCounts.Unlock()
+	return mock.TagCountsFunc(ctx, b, source, prefix, after, limit)
+}
+
+// TagCountsCalls gets all the calls that were made to TagCounts.
+// Check the length with:
+//
+//	len(mockedStatsSource.TagCountsCalls())
+func (mock *StatsSource) TagCountsCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Source domain.TagSource
+	Prefix string
+	After  string
+	Limit  int
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}
+	mock.lockTagCounts.RLock()
+	calls = mock.calls.TagCounts
+	mock.lockTagCounts.RUnlock()
+	return calls
+}
+
 // Ensure that TemplateCodec does implement bank.TemplateCodec.
 // If this is not the case, regenerate this file with mockery.
 var _ bank.TemplateCodec = &TemplateCodec{}
@@ -437,6 +1151,9 @@ var _ bank.TemplateCodec = &TemplateCodec{}
 //			CreateFunc: func(ctx context.Context, b port.BankRef, t domain.BankTemplate) (domain.Bank, error) {
 //				panic("mock out the Create method")
 //			},
+//			CreateNamedFunc: func(ctx context.Context, b port.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error) {
+//				panic("mock out the CreateNamed method")
+//			},
 //			ExportFunc: func(ctx context.Context, b port.BankRef) (domain.BankTemplate, error) {
 //				panic("mock out the Export method")
 //			},
@@ -449,6 +1166,9 @@ var _ bank.TemplateCodec = &TemplateCodec{}
 type TemplateCodec struct {
 	// CreateFunc mocks the Create method.
 	CreateFunc func(ctx context.Context, b port.BankRef, t domain.BankTemplate) (domain.Bank, error)
+
+	// CreateNamedFunc mocks the CreateNamed method.
+	CreateNamedFunc func(ctx context.Context, b port.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error)
 
 	// ExportFunc mocks the Export method.
 	ExportFunc func(ctx context.Context, b port.BankRef) (domain.BankTemplate, error)
@@ -464,6 +1184,17 @@ type TemplateCodec struct {
 			// T is the t argument value.
 			T domain.BankTemplate
 		}
+		// CreateNamed holds details about calls to the CreateNamed method.
+		CreateNamed []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Name is the name argument value.
+			Name string
+			// T is the t argument value.
+			T domain.BankTemplate
+		}
 		// Export holds details about calls to the Export method.
 		Export []struct {
 			// Ctx is the ctx argument value.
@@ -472,8 +1203,9 @@ type TemplateCodec struct {
 			B port.BankRef
 		}
 	}
-	lockCreate sync.RWMutex
-	lockExport sync.RWMutex
+	lockCreate      sync.RWMutex
+	lockCreateNamed sync.RWMutex
+	lockExport      sync.RWMutex
 }
 
 // Create calls CreateFunc.
@@ -516,6 +1248,50 @@ func (mock *TemplateCodec) CreateCalls() []struct {
 	return calls
 }
 
+// CreateNamed calls CreateNamedFunc.
+func (mock *TemplateCodec) CreateNamed(ctx context.Context, b port.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error) {
+	if mock.CreateNamedFunc == nil {
+		panic("TemplateCodec.CreateNamedFunc: method is nil but TemplateCodec.CreateNamed was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Name string
+		T    domain.BankTemplate
+	}{
+		Ctx:  ctx,
+		B:    b,
+		Name: name,
+		T:    t,
+	}
+	mock.lockCreateNamed.Lock()
+	mock.calls.CreateNamed = append(mock.calls.CreateNamed, callInfo)
+	mock.lockCreateNamed.Unlock()
+	return mock.CreateNamedFunc(ctx, b, name, t)
+}
+
+// CreateNamedCalls gets all the calls that were made to CreateNamed.
+// Check the length with:
+//
+//	len(mockedTemplateCodec.CreateNamedCalls())
+func (mock *TemplateCodec) CreateNamedCalls() []struct {
+	Ctx  context.Context
+	B    port.BankRef
+	Name string
+	T    domain.BankTemplate
+} {
+	var calls []struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Name string
+		T    domain.BankTemplate
+	}
+	mock.lockCreateNamed.RLock()
+	calls = mock.calls.CreateNamed
+	mock.lockCreateNamed.RUnlock()
+	return calls
+}
+
 // Export calls ExportFunc.
 func (mock *TemplateCodec) Export(ctx context.Context, b port.BankRef) (domain.BankTemplate, error) {
 	if mock.ExportFunc == nil {
@@ -549,5 +1325,161 @@ func (mock *TemplateCodec) ExportCalls() []struct {
 	mock.lockExport.RLock()
 	calls = mock.calls.Export
 	mock.lockExport.RUnlock()
+	return calls
+}
+
+// Ensure that ModelSpecReader does implement bank.ModelSpecReader.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.ModelSpecReader = &ModelSpecReader{}
+
+// ModelSpecReader is a mock implementation of bank.ModelSpecReader.
+//
+//	func TestSomethingThatUsesModelSpecReader(t *testing.T) {
+//
+//		// make and configure a mocked bank.ModelSpecReader
+//		mockedModelSpecReader := &ModelSpecReader{
+//			MentalModelSpecsFunc: func(ctx context.Context, b port.BankRef) ([]domain.MentalModelSpec, error) {
+//				panic("mock out the MentalModelSpecs method")
+//			},
+//		}
+//
+//		// use mockedModelSpecReader in code that requires bank.ModelSpecReader
+//		// and then make assertions.
+//
+//	}
+type ModelSpecReader struct {
+	// MentalModelSpecsFunc mocks the MentalModelSpecs method.
+	MentalModelSpecsFunc func(ctx context.Context, b port.BankRef) ([]domain.MentalModelSpec, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// MentalModelSpecs holds details about calls to the MentalModelSpecs method.
+		MentalModelSpecs []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+	}
+	lockMentalModelSpecs sync.RWMutex
+}
+
+// MentalModelSpecs calls MentalModelSpecsFunc.
+func (mock *ModelSpecReader) MentalModelSpecs(ctx context.Context, b port.BankRef) ([]domain.MentalModelSpec, error) {
+	if mock.MentalModelSpecsFunc == nil {
+		panic("ModelSpecReader.MentalModelSpecsFunc: method is nil but ModelSpecReader.MentalModelSpecs was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockMentalModelSpecs.Lock()
+	mock.calls.MentalModelSpecs = append(mock.calls.MentalModelSpecs, callInfo)
+	mock.lockMentalModelSpecs.Unlock()
+	return mock.MentalModelSpecsFunc(ctx, b)
+}
+
+// MentalModelSpecsCalls gets all the calls that were made to MentalModelSpecs.
+// Check the length with:
+//
+//	len(mockedModelSpecReader.MentalModelSpecsCalls())
+func (mock *ModelSpecReader) MentalModelSpecsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockMentalModelSpecs.RLock()
+	calls = mock.calls.MentalModelSpecs
+	mock.lockMentalModelSpecs.RUnlock()
+	return calls
+}
+
+// Ensure that RefreshQueuer does implement bank.RefreshQueuer.
+// If this is not the case, regenerate this file with mockery.
+var _ bank.RefreshQueuer = &RefreshQueuer{}
+
+// RefreshQueuer is a mock implementation of bank.RefreshQueuer.
+//
+//	func TestSomethingThatUsesRefreshQueuer(t *testing.T) {
+//
+//		// make and configure a mocked bank.RefreshQueuer
+//		mockedRefreshQueuer := &RefreshQueuer{
+//			QueueRefreshFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error) {
+//				panic("mock out the QueueRefresh method")
+//			},
+//		}
+//
+//		// use mockedRefreshQueuer in code that requires bank.RefreshQueuer
+//		// and then make assertions.
+//
+//	}
+type RefreshQueuer struct {
+	// QueueRefreshFunc mocks the QueueRefresh method.
+	QueueRefreshFunc func(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// QueueRefresh holds details about calls to the QueueRefresh method.
+		QueueRefresh []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.MentalModelID
+		}
+	}
+	lockQueueRefresh sync.RWMutex
+}
+
+// QueueRefresh calls QueueRefreshFunc.
+func (mock *RefreshQueuer) QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error) {
+	if mock.QueueRefreshFunc == nil {
+		panic("RefreshQueuer.QueueRefreshFunc: method is nil but RefreshQueuer.QueueRefresh was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		ID  port.MentalModelID
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockQueueRefresh.Lock()
+	mock.calls.QueueRefresh = append(mock.calls.QueueRefresh, callInfo)
+	mock.lockQueueRefresh.Unlock()
+	return mock.QueueRefreshFunc(ctx, tx, b, id)
+}
+
+// QueueRefreshCalls gets all the calls that were made to QueueRefresh.
+// Check the length with:
+//
+//	len(mockedRefreshQueuer.QueueRefreshCalls())
+func (mock *RefreshQueuer) QueueRefreshCalls() []struct {
+	Ctx context.Context
+	Tx  port.Tx
+	B   port.BankRef
+	ID  port.MentalModelID
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		ID  port.MentalModelID
+	}
+	mock.lockQueueRefresh.RLock()
+	calls = mock.calls.QueueRefresh
+	mock.lockQueueRefresh.RUnlock()
 	return calls
 }

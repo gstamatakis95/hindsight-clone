@@ -6,10 +6,363 @@ package mockdocs
 
 import (
 	"context"
+	"memd/internal/domain"
 	"memd/internal/engine/docs"
 	"memd/internal/port"
 	"sync"
 )
+
+// Ensure that DocumentAdmin does implement docs.DocumentAdmin.
+// If this is not the case, regenerate this file with mockery.
+var _ docs.DocumentAdmin = &DocumentAdmin{}
+
+// DocumentAdmin is a mock implementation of docs.DocumentAdmin.
+//
+//	func TestSomethingThatUsesDocumentAdmin(t *testing.T) {
+//
+//		// make and configure a mocked docs.DocumentAdmin
+//		mockedDocumentAdmin := &DocumentAdmin{
+//			GetDocumentFunc: func(ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool) (docs.DocumentView, error) {
+//				panic("mock out the GetDocument method")
+//			},
+//			ListDocumentsFunc: func(ctx context.Context, req docs.ListDocumentsRequest) (docs.DocumentPage, error) {
+//				panic("mock out the ListDocuments method")
+//			},
+//			ReprocessDocumentFunc: func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (domain.Operation, error) {
+//				panic("mock out the ReprocessDocument method")
+//			},
+//		}
+//
+//		// use mockedDocumentAdmin in code that requires docs.DocumentAdmin
+//		// and then make assertions.
+//
+//	}
+type DocumentAdmin struct {
+	// GetDocumentFunc mocks the GetDocument method.
+	GetDocumentFunc func(ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool) (docs.DocumentView, error)
+
+	// ListDocumentsFunc mocks the ListDocuments method.
+	ListDocumentsFunc func(ctx context.Context, req docs.ListDocumentsRequest) (docs.DocumentPage, error)
+
+	// ReprocessDocumentFunc mocks the ReprocessDocument method.
+	ReprocessDocumentFunc func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (domain.Operation, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// GetDocument holds details about calls to the GetDocument method.
+		GetDocument []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.DocumentID
+			// IncludeText is the includeText argument value.
+			IncludeText bool
+		}
+		// ListDocuments holds details about calls to the ListDocuments method.
+		ListDocuments []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Req is the req argument value.
+			Req docs.ListDocumentsRequest
+		}
+		// ReprocessDocument holds details about calls to the ReprocessDocument method.
+		ReprocessDocument []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.DocumentID
+			// Overrides is the overrides argument value.
+			Overrides *domain.BankConfig
+		}
+	}
+	lockGetDocument       sync.RWMutex
+	lockListDocuments     sync.RWMutex
+	lockReprocessDocument sync.RWMutex
+}
+
+// GetDocument calls GetDocumentFunc.
+func (mock *DocumentAdmin) GetDocument(ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool) (docs.DocumentView, error) {
+	if mock.GetDocumentFunc == nil {
+		panic("DocumentAdmin.GetDocumentFunc: method is nil but DocumentAdmin.GetDocument was just called")
+	}
+	callInfo := struct {
+		Ctx         context.Context
+		B           port.BankRef
+		ID          port.DocumentID
+		IncludeText bool
+	}{
+		Ctx:         ctx,
+		B:           b,
+		ID:          id,
+		IncludeText: includeText,
+	}
+	mock.lockGetDocument.Lock()
+	mock.calls.GetDocument = append(mock.calls.GetDocument, callInfo)
+	mock.lockGetDocument.Unlock()
+	return mock.GetDocumentFunc(ctx, b, id, includeText)
+}
+
+// GetDocumentCalls gets all the calls that were made to GetDocument.
+// Check the length with:
+//
+//	len(mockedDocumentAdmin.GetDocumentCalls())
+func (mock *DocumentAdmin) GetDocumentCalls() []struct {
+	Ctx         context.Context
+	B           port.BankRef
+	ID          port.DocumentID
+	IncludeText bool
+} {
+	var calls []struct {
+		Ctx         context.Context
+		B           port.BankRef
+		ID          port.DocumentID
+		IncludeText bool
+	}
+	mock.lockGetDocument.RLock()
+	calls = mock.calls.GetDocument
+	mock.lockGetDocument.RUnlock()
+	return calls
+}
+
+// ListDocuments calls ListDocumentsFunc.
+func (mock *DocumentAdmin) ListDocuments(ctx context.Context, req docs.ListDocumentsRequest) (docs.DocumentPage, error) {
+	if mock.ListDocumentsFunc == nil {
+		panic("DocumentAdmin.ListDocumentsFunc: method is nil but DocumentAdmin.ListDocuments was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Req docs.ListDocumentsRequest
+	}{
+		Ctx: ctx,
+		Req: req,
+	}
+	mock.lockListDocuments.Lock()
+	mock.calls.ListDocuments = append(mock.calls.ListDocuments, callInfo)
+	mock.lockListDocuments.Unlock()
+	return mock.ListDocumentsFunc(ctx, req)
+}
+
+// ListDocumentsCalls gets all the calls that were made to ListDocuments.
+// Check the length with:
+//
+//	len(mockedDocumentAdmin.ListDocumentsCalls())
+func (mock *DocumentAdmin) ListDocumentsCalls() []struct {
+	Ctx context.Context
+	Req docs.ListDocumentsRequest
+} {
+	var calls []struct {
+		Ctx context.Context
+		Req docs.ListDocumentsRequest
+	}
+	mock.lockListDocuments.RLock()
+	calls = mock.calls.ListDocuments
+	mock.lockListDocuments.RUnlock()
+	return calls
+}
+
+// ReprocessDocument calls ReprocessDocumentFunc.
+func (mock *DocumentAdmin) ReprocessDocument(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (domain.Operation, error) {
+	if mock.ReprocessDocumentFunc == nil {
+		panic("DocumentAdmin.ReprocessDocumentFunc: method is nil but DocumentAdmin.ReprocessDocument was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		B         port.BankRef
+		ID        port.DocumentID
+		Overrides *domain.BankConfig
+	}{
+		Ctx:       ctx,
+		B:         b,
+		ID:        id,
+		Overrides: overrides,
+	}
+	mock.lockReprocessDocument.Lock()
+	mock.calls.ReprocessDocument = append(mock.calls.ReprocessDocument, callInfo)
+	mock.lockReprocessDocument.Unlock()
+	return mock.ReprocessDocumentFunc(ctx, b, id, overrides)
+}
+
+// ReprocessDocumentCalls gets all the calls that were made to ReprocessDocument.
+// Check the length with:
+//
+//	len(mockedDocumentAdmin.ReprocessDocumentCalls())
+func (mock *DocumentAdmin) ReprocessDocumentCalls() []struct {
+	Ctx       context.Context
+	B         port.BankRef
+	ID        port.DocumentID
+	Overrides *domain.BankConfig
+} {
+	var calls []struct {
+		Ctx       context.Context
+		B         port.BankRef
+		ID        port.DocumentID
+		Overrides *domain.BankConfig
+	}
+	mock.lockReprocessDocument.RLock()
+	calls = mock.calls.ReprocessDocument
+	mock.lockReprocessDocument.RUnlock()
+	return calls
+}
+
+// Ensure that DocumentSource does implement docs.DocumentSource.
+// If this is not the case, regenerate this file with mockery.
+var _ docs.DocumentSource = &DocumentSource{}
+
+// DocumentSource is a mock implementation of docs.DocumentSource.
+//
+//	func TestSomethingThatUsesDocumentSource(t *testing.T) {
+//
+//		// make and configure a mocked docs.DocumentSource
+//		mockedDocumentSource := &DocumentSource{
+//			ListDocumentsFunc: func(ctx context.Context, q docs.DocumentQuery) ([]domain.Document, error) {
+//				panic("mock out the ListDocuments method")
+//			},
+//		}
+//
+//		// use mockedDocumentSource in code that requires docs.DocumentSource
+//		// and then make assertions.
+//
+//	}
+type DocumentSource struct {
+	// ListDocumentsFunc mocks the ListDocuments method.
+	ListDocumentsFunc func(ctx context.Context, q docs.DocumentQuery) ([]domain.Document, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// ListDocuments holds details about calls to the ListDocuments method.
+		ListDocuments []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q docs.DocumentQuery
+		}
+	}
+	lockListDocuments sync.RWMutex
+}
+
+// ListDocuments calls ListDocumentsFunc.
+func (mock *DocumentSource) ListDocuments(ctx context.Context, q docs.DocumentQuery) ([]domain.Document, error) {
+	if mock.ListDocumentsFunc == nil {
+		panic("DocumentSource.ListDocumentsFunc: method is nil but DocumentSource.ListDocuments was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   docs.DocumentQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListDocuments.Lock()
+	mock.calls.ListDocuments = append(mock.calls.ListDocuments, callInfo)
+	mock.lockListDocuments.Unlock()
+	return mock.ListDocumentsFunc(ctx, q)
+}
+
+// ListDocumentsCalls gets all the calls that were made to ListDocuments.
+// Check the length with:
+//
+//	len(mockedDocumentSource.ListDocumentsCalls())
+func (mock *DocumentSource) ListDocumentsCalls() []struct {
+	Ctx context.Context
+	Q   docs.DocumentQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   docs.DocumentQuery
+	}
+	mock.lockListDocuments.RLock()
+	calls = mock.calls.ListDocuments
+	mock.lockListDocuments.RUnlock()
+	return calls
+}
+
+// Ensure that Reprocessor does implement docs.Reprocessor.
+// If this is not the case, regenerate this file with mockery.
+var _ docs.Reprocessor = &Reprocessor{}
+
+// Reprocessor is a mock implementation of docs.Reprocessor.
+//
+//	func TestSomethingThatUsesReprocessor(t *testing.T) {
+//
+//		// make and configure a mocked docs.Reprocessor
+//		mockedReprocessor := &Reprocessor{
+//			ReprocessFunc: func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (port.OperationID, error) {
+//				panic("mock out the Reprocess method")
+//			},
+//		}
+//
+//		// use mockedReprocessor in code that requires docs.Reprocessor
+//		// and then make assertions.
+//
+//	}
+type Reprocessor struct {
+	// ReprocessFunc mocks the Reprocess method.
+	ReprocessFunc func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (port.OperationID, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Reprocess holds details about calls to the Reprocess method.
+		Reprocess []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.DocumentID
+			// Overrides is the overrides argument value.
+			Overrides *domain.BankConfig
+		}
+	}
+	lockReprocess sync.RWMutex
+}
+
+// Reprocess calls ReprocessFunc.
+func (mock *Reprocessor) Reprocess(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (port.OperationID, error) {
+	if mock.ReprocessFunc == nil {
+		panic("Reprocessor.ReprocessFunc: method is nil but Reprocessor.Reprocess was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		B         port.BankRef
+		ID        port.DocumentID
+		Overrides *domain.BankConfig
+	}{
+		Ctx:       ctx,
+		B:         b,
+		ID:        id,
+		Overrides: overrides,
+	}
+	mock.lockReprocess.Lock()
+	mock.calls.Reprocess = append(mock.calls.Reprocess, callInfo)
+	mock.lockReprocess.Unlock()
+	return mock.ReprocessFunc(ctx, b, id, overrides)
+}
+
+// ReprocessCalls gets all the calls that were made to Reprocess.
+// Check the length with:
+//
+//	len(mockedReprocessor.ReprocessCalls())
+func (mock *Reprocessor) ReprocessCalls() []struct {
+	Ctx       context.Context
+	B         port.BankRef
+	ID        port.DocumentID
+	Overrides *domain.BankConfig
+} {
+	var calls []struct {
+		Ctx       context.Context
+		B         port.BankRef
+		ID        port.DocumentID
+		Overrides *domain.BankConfig
+	}
+	mock.lockReprocess.RLock()
+	calls = mock.calls.Reprocess
+	mock.lockReprocess.RUnlock()
+	return calls
+}
 
 // Ensure that Retagger does implement docs.Retagger.
 // If this is not the case, regenerate this file with mockery.
@@ -21,6 +374,9 @@ var _ docs.Retagger = &Retagger{}
 //
 //		// make and configure a mocked docs.Retagger
 //		mockedRetagger := &Retagger{
+//			ApplyFunc: func(ctx context.Context, j port.Job) error {
+//				panic("mock out the Apply method")
+//			},
 //			RetagFunc: func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string) (port.OperationID, error) {
 //				panic("mock out the Retag method")
 //			},
@@ -31,11 +387,21 @@ var _ docs.Retagger = &Retagger{}
 //
 //	}
 type Retagger struct {
+	// ApplyFunc mocks the Apply method.
+	ApplyFunc func(ctx context.Context, j port.Job) error
+
 	// RetagFunc mocks the Retag method.
 	RetagFunc func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string) (port.OperationID, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// Apply holds details about calls to the Apply method.
+		Apply []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// J is the j argument value.
+			J port.Job
+		}
 		// Retag holds details about calls to the Retag method.
 		Retag []struct {
 			// Ctx is the ctx argument value.
@@ -48,7 +414,44 @@ type Retagger struct {
 			Tags []string
 		}
 	}
+	lockApply sync.RWMutex
 	lockRetag sync.RWMutex
+}
+
+// Apply calls ApplyFunc.
+func (mock *Retagger) Apply(ctx context.Context, j port.Job) error {
+	if mock.ApplyFunc == nil {
+		panic("Retagger.ApplyFunc: method is nil but Retagger.Apply was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		J   port.Job
+	}{
+		Ctx: ctx,
+		J:   j,
+	}
+	mock.lockApply.Lock()
+	mock.calls.Apply = append(mock.calls.Apply, callInfo)
+	mock.lockApply.Unlock()
+	return mock.ApplyFunc(ctx, j)
+}
+
+// ApplyCalls gets all the calls that were made to Apply.
+// Check the length with:
+//
+//	len(mockedRetagger.ApplyCalls())
+func (mock *Retagger) ApplyCalls() []struct {
+	Ctx context.Context
+	J   port.Job
+} {
+	var calls []struct {
+		Ctx context.Context
+		J   port.Job
+	}
+	mock.lockApply.RLock()
+	calls = mock.calls.Apply
+	mock.lockApply.RUnlock()
+	return calls
 }
 
 // Retag calls RetagFunc.
@@ -92,89 +495,5 @@ func (mock *Retagger) RetagCalls() []struct {
 	mock.lockRetag.RLock()
 	calls = mock.calls.Retag
 	mock.lockRetag.RUnlock()
-	return calls
-}
-
-// Ensure that Invalidator does implement docs.Invalidator.
-// If this is not the case, regenerate this file with mockery.
-var _ docs.Invalidator = &Invalidator{}
-
-// Invalidator is a mock implementation of docs.Invalidator.
-//
-//	func TestSomethingThatUsesInvalidator(t *testing.T) {
-//
-//		// make and configure a mocked docs.Invalidator
-//		mockedInvalidator := &Invalidator{
-//			ClearDocumentUnitsFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.ScopeKey, error) {
-//				panic("mock out the ClearDocumentUnits method")
-//			},
-//		}
-//
-//		// use mockedInvalidator in code that requires docs.Invalidator
-//		// and then make assertions.
-//
-//	}
-type Invalidator struct {
-	// ClearDocumentUnitsFunc mocks the ClearDocumentUnits method.
-	ClearDocumentUnitsFunc func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.ScopeKey, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// ClearDocumentUnits holds details about calls to the ClearDocumentUnits method.
-		ClearDocumentUnits []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Tx is the tx argument value.
-			Tx port.Tx
-			// B is the b argument value.
-			B port.BankRef
-			// Doc is the doc argument value.
-			Doc port.DocumentID
-		}
-	}
-	lockClearDocumentUnits sync.RWMutex
-}
-
-// ClearDocumentUnits calls ClearDocumentUnitsFunc.
-func (mock *Invalidator) ClearDocumentUnits(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.ScopeKey, error) {
-	if mock.ClearDocumentUnitsFunc == nil {
-		panic("Invalidator.ClearDocumentUnitsFunc: method is nil but Invalidator.ClearDocumentUnits was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		Tx  port.Tx
-		B   port.BankRef
-		Doc port.DocumentID
-	}{
-		Ctx: ctx,
-		Tx:  tx,
-		B:   b,
-		Doc: doc,
-	}
-	mock.lockClearDocumentUnits.Lock()
-	mock.calls.ClearDocumentUnits = append(mock.calls.ClearDocumentUnits, callInfo)
-	mock.lockClearDocumentUnits.Unlock()
-	return mock.ClearDocumentUnitsFunc(ctx, tx, b, doc)
-}
-
-// ClearDocumentUnitsCalls gets all the calls that were made to ClearDocumentUnits.
-// Check the length with:
-//
-//	len(mockedInvalidator.ClearDocumentUnitsCalls())
-func (mock *Invalidator) ClearDocumentUnitsCalls() []struct {
-	Ctx context.Context
-	Tx  port.Tx
-	B   port.BankRef
-	Doc port.DocumentID
-} {
-	var calls []struct {
-		Ctx context.Context
-		Tx  port.Tx
-		B   port.BankRef
-		Doc port.DocumentID
-	}
-	mock.lockClearDocumentUnits.RLock()
-	calls = mock.calls.ClearDocumentUnits
-	mock.lockClearDocumentUnits.RUnlock()
 	return calls
 }
