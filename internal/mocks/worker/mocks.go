@@ -10,6 +10,7 @@ import (
 	"memd/internal/port"
 	"memd/internal/worker"
 	"sync"
+	"time"
 )
 
 // Ensure that Checkpoint does implement worker.Checkpoint.
@@ -215,5 +216,403 @@ func (mock *OperationControl) RetryCalls() []struct {
 	mock.lockRetry.RLock()
 	calls = mock.calls.Retry
 	mock.lockRetry.RUnlock()
+	return calls
+}
+
+// Ensure that ConsolidationCandidates does implement worker.ConsolidationCandidates.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.ConsolidationCandidates = &ConsolidationCandidates{}
+
+// ConsolidationCandidates is a mock implementation of worker.ConsolidationCandidates.
+//
+//	func TestSomethingThatUsesConsolidationCandidates(t *testing.T) {
+//
+//		// make and configure a mocked worker.ConsolidationCandidates
+//		mockedConsolidationCandidates := &ConsolidationCandidates{
+//			BanksToConsolidateFunc: func(ctx context.Context) ([]port.BankRef, error) {
+//				panic("mock out the BanksToConsolidate method")
+//			},
+//		}
+//
+//		// use mockedConsolidationCandidates in code that requires worker.ConsolidationCandidates
+//		// and then make assertions.
+//
+//	}
+type ConsolidationCandidates struct {
+	// BanksToConsolidateFunc mocks the BanksToConsolidate method.
+	BanksToConsolidateFunc func(ctx context.Context) ([]port.BankRef, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// BanksToConsolidate holds details about calls to the BanksToConsolidate method.
+		BanksToConsolidate []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockBanksToConsolidate sync.RWMutex
+}
+
+// BanksToConsolidate calls BanksToConsolidateFunc.
+func (mock *ConsolidationCandidates) BanksToConsolidate(ctx context.Context) ([]port.BankRef, error) {
+	if mock.BanksToConsolidateFunc == nil {
+		panic("ConsolidationCandidates.BanksToConsolidateFunc: method is nil but ConsolidationCandidates.BanksToConsolidate was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockBanksToConsolidate.Lock()
+	mock.calls.BanksToConsolidate = append(mock.calls.BanksToConsolidate, callInfo)
+	mock.lockBanksToConsolidate.Unlock()
+	return mock.BanksToConsolidateFunc(ctx)
+}
+
+// BanksToConsolidateCalls gets all the calls that were made to BanksToConsolidate.
+// Check the length with:
+//
+//	len(mockedConsolidationCandidates.BanksToConsolidateCalls())
+func (mock *ConsolidationCandidates) BanksToConsolidateCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockBanksToConsolidate.RLock()
+	calls = mock.calls.BanksToConsolidate
+	mock.lockBanksToConsolidate.RUnlock()
+	return calls
+}
+
+// Ensure that CronRefresher does implement worker.CronRefresher.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.CronRefresher = &CronRefresher{}
+
+// CronRefresher is a mock implementation of worker.CronRefresher.
+//
+//	func TestSomethingThatUsesCronRefresher(t *testing.T) {
+//
+//		// make and configure a mocked worker.CronRefresher
+//		mockedCronRefresher := &CronRefresher{
+//			EnqueueDueCronRefreshesFunc: func(ctx context.Context, now time.Time) (int, error) {
+//				panic("mock out the EnqueueDueCronRefreshes method")
+//			},
+//		}
+//
+//		// use mockedCronRefresher in code that requires worker.CronRefresher
+//		// and then make assertions.
+//
+//	}
+type CronRefresher struct {
+	// EnqueueDueCronRefreshesFunc mocks the EnqueueDueCronRefreshes method.
+	EnqueueDueCronRefreshesFunc func(ctx context.Context, now time.Time) (int, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// EnqueueDueCronRefreshes holds details about calls to the EnqueueDueCronRefreshes method.
+		EnqueueDueCronRefreshes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Now is the now argument value.
+			Now time.Time
+		}
+	}
+	lockEnqueueDueCronRefreshes sync.RWMutex
+}
+
+// EnqueueDueCronRefreshes calls EnqueueDueCronRefreshesFunc.
+func (mock *CronRefresher) EnqueueDueCronRefreshes(ctx context.Context, now time.Time) (int, error) {
+	if mock.EnqueueDueCronRefreshesFunc == nil {
+		panic("CronRefresher.EnqueueDueCronRefreshesFunc: method is nil but CronRefresher.EnqueueDueCronRefreshes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Now time.Time
+	}{
+		Ctx: ctx,
+		Now: now,
+	}
+	mock.lockEnqueueDueCronRefreshes.Lock()
+	mock.calls.EnqueueDueCronRefreshes = append(mock.calls.EnqueueDueCronRefreshes, callInfo)
+	mock.lockEnqueueDueCronRefreshes.Unlock()
+	return mock.EnqueueDueCronRefreshesFunc(ctx, now)
+}
+
+// EnqueueDueCronRefreshesCalls gets all the calls that were made to EnqueueDueCronRefreshes.
+// Check the length with:
+//
+//	len(mockedCronRefresher.EnqueueDueCronRefreshesCalls())
+func (mock *CronRefresher) EnqueueDueCronRefreshesCalls() []struct {
+	Ctx context.Context
+	Now time.Time
+} {
+	var calls []struct {
+		Ctx context.Context
+		Now time.Time
+	}
+	mock.lockEnqueueDueCronRefreshes.RLock()
+	calls = mock.calls.EnqueueDueCronRefreshes
+	mock.lockEnqueueDueCronRefreshes.RUnlock()
+	return calls
+}
+
+// Ensure that RefreshFailureReconciler does implement worker.RefreshFailureReconciler.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.RefreshFailureReconciler = &RefreshFailureReconciler{}
+
+// RefreshFailureReconciler is a mock implementation of worker.RefreshFailureReconciler.
+//
+//	func TestSomethingThatUsesRefreshFailureReconciler(t *testing.T) {
+//
+//		// make and configure a mocked worker.RefreshFailureReconciler
+//		mockedRefreshFailureReconciler := &RefreshFailureReconciler{
+//			ReconcileFailedRefreshesFunc: func(ctx context.Context) (int, error) {
+//				panic("mock out the ReconcileFailedRefreshes method")
+//			},
+//		}
+//
+//		// use mockedRefreshFailureReconciler in code that requires worker.RefreshFailureReconciler
+//		// and then make assertions.
+//
+//	}
+type RefreshFailureReconciler struct {
+	// ReconcileFailedRefreshesFunc mocks the ReconcileFailedRefreshes method.
+	ReconcileFailedRefreshesFunc func(ctx context.Context) (int, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// ReconcileFailedRefreshes holds details about calls to the ReconcileFailedRefreshes method.
+		ReconcileFailedRefreshes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockReconcileFailedRefreshes sync.RWMutex
+}
+
+// ReconcileFailedRefreshes calls ReconcileFailedRefreshesFunc.
+func (mock *RefreshFailureReconciler) ReconcileFailedRefreshes(ctx context.Context) (int, error) {
+	if mock.ReconcileFailedRefreshesFunc == nil {
+		panic("RefreshFailureReconciler.ReconcileFailedRefreshesFunc: method is nil but RefreshFailureReconciler.ReconcileFailedRefreshes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockReconcileFailedRefreshes.Lock()
+	mock.calls.ReconcileFailedRefreshes = append(mock.calls.ReconcileFailedRefreshes, callInfo)
+	mock.lockReconcileFailedRefreshes.Unlock()
+	return mock.ReconcileFailedRefreshesFunc(ctx)
+}
+
+// ReconcileFailedRefreshesCalls gets all the calls that were made to ReconcileFailedRefreshes.
+// Check the length with:
+//
+//	len(mockedRefreshFailureReconciler.ReconcileFailedRefreshesCalls())
+func (mock *RefreshFailureReconciler) ReconcileFailedRefreshesCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockReconcileFailedRefreshes.RLock()
+	calls = mock.calls.ReconcileFailedRefreshes
+	mock.lockReconcileFailedRefreshes.RUnlock()
+	return calls
+}
+
+// Ensure that PendingChecker does implement worker.PendingChecker.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.PendingChecker = &PendingChecker{}
+
+// PendingChecker is a mock implementation of worker.PendingChecker.
+//
+//	func TestSomethingThatUsesPendingChecker(t *testing.T) {
+//
+//		// make and configure a mocked worker.PendingChecker
+//		mockedPendingChecker := &PendingChecker{
+//			HasPendingFunc: func(ctx context.Context, b port.BankRef, kind port.JobKind) (bool, error) {
+//				panic("mock out the HasPending method")
+//			},
+//		}
+//
+//		// use mockedPendingChecker in code that requires worker.PendingChecker
+//		// and then make assertions.
+//
+//	}
+type PendingChecker struct {
+	// HasPendingFunc mocks the HasPending method.
+	HasPendingFunc func(ctx context.Context, b port.BankRef, kind port.JobKind) (bool, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// HasPending holds details about calls to the HasPending method.
+		HasPending []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Kind is the kind argument value.
+			Kind port.JobKind
+		}
+	}
+	lockHasPending sync.RWMutex
+}
+
+// HasPending calls HasPendingFunc.
+func (mock *PendingChecker) HasPending(ctx context.Context, b port.BankRef, kind port.JobKind) (bool, error) {
+	if mock.HasPendingFunc == nil {
+		panic("PendingChecker.HasPendingFunc: method is nil but PendingChecker.HasPending was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Kind port.JobKind
+	}{
+		Ctx:  ctx,
+		B:    b,
+		Kind: kind,
+	}
+	mock.lockHasPending.Lock()
+	mock.calls.HasPending = append(mock.calls.HasPending, callInfo)
+	mock.lockHasPending.Unlock()
+	return mock.HasPendingFunc(ctx, b, kind)
+}
+
+// HasPendingCalls gets all the calls that were made to HasPending.
+// Check the length with:
+//
+//	len(mockedPendingChecker.HasPendingCalls())
+func (mock *PendingChecker) HasPendingCalls() []struct {
+	Ctx  context.Context
+	B    port.BankRef
+	Kind port.JobKind
+} {
+	var calls []struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Kind port.JobKind
+	}
+	mock.lockHasPending.RLock()
+	calls = mock.calls.HasPending
+	mock.lockHasPending.RUnlock()
+	return calls
+}
+
+// Ensure that JobRunner does implement worker.JobRunner.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.JobRunner = &JobRunner{}
+
+// JobRunner is a mock implementation of worker.JobRunner.
+//
+//	func TestSomethingThatUsesJobRunner(t *testing.T) {
+//
+//		// make and configure a mocked worker.JobRunner
+//		mockedJobRunner := &JobRunner{
+//			HandleFunc: func(kind port.JobKind, h worker.Handler)  {
+//				panic("mock out the Handle method")
+//			},
+//			RunFunc: func(ctx context.Context) error {
+//				panic("mock out the Run method")
+//			},
+//		}
+//
+//		// use mockedJobRunner in code that requires worker.JobRunner
+//		// and then make assertions.
+//
+//	}
+type JobRunner struct {
+	// HandleFunc mocks the Handle method.
+	HandleFunc func(kind port.JobKind, h worker.Handler)
+
+	// RunFunc mocks the Run method.
+	RunFunc func(ctx context.Context) error
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Handle holds details about calls to the Handle method.
+		Handle []struct {
+			// Kind is the kind argument value.
+			Kind port.JobKind
+			// H is the h argument value.
+			H worker.Handler
+		}
+		// Run holds details about calls to the Run method.
+		Run []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockHandle sync.RWMutex
+	lockRun    sync.RWMutex
+}
+
+// Handle calls HandleFunc.
+func (mock *JobRunner) Handle(kind port.JobKind, h worker.Handler) {
+	if mock.HandleFunc == nil {
+		panic("JobRunner.HandleFunc: method is nil but JobRunner.Handle was just called")
+	}
+	callInfo := struct {
+		Kind port.JobKind
+		H    worker.Handler
+	}{
+		Kind: kind,
+		H:    h,
+	}
+	mock.lockHandle.Lock()
+	mock.calls.Handle = append(mock.calls.Handle, callInfo)
+	mock.lockHandle.Unlock()
+	mock.HandleFunc(kind, h)
+}
+
+// HandleCalls gets all the calls that were made to Handle.
+// Check the length with:
+//
+//	len(mockedJobRunner.HandleCalls())
+func (mock *JobRunner) HandleCalls() []struct {
+	Kind port.JobKind
+	H    worker.Handler
+} {
+	var calls []struct {
+		Kind port.JobKind
+		H    worker.Handler
+	}
+	mock.lockHandle.RLock()
+	calls = mock.calls.Handle
+	mock.lockHandle.RUnlock()
+	return calls
+}
+
+// Run calls RunFunc.
+func (mock *JobRunner) Run(ctx context.Context) error {
+	if mock.RunFunc == nil {
+		panic("JobRunner.RunFunc: method is nil but JobRunner.Run was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockRun.Lock()
+	mock.calls.Run = append(mock.calls.Run, callInfo)
+	mock.lockRun.Unlock()
+	return mock.RunFunc(ctx)
+}
+
+// RunCalls gets all the calls that were made to Run.
+// Check the length with:
+//
+//	len(mockedJobRunner.RunCalls())
+func (mock *JobRunner) RunCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockRun.RLock()
+	calls = mock.calls.Run
+	mock.lockRun.RUnlock()
 	return calls
 }
