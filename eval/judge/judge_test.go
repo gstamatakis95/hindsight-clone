@@ -44,7 +44,15 @@ func TestLLMJudgeVerdicts(t *testing.T) {
 	tests := []struct {
 		reply string
 		want  bool
-	}{{"Yes", true}, {"yes.", true}, {"No", false}, {"no", false}}
+	}{
+		{"Yes", true},
+		{"yes.", true},
+		{"**Yes**", true},
+		{"No", false},
+		{"no", false},
+		{"No, the answer is not yes.", false},
+		{"", false},
+	}
 	for _, tt := range tests {
 		srv, _ := gateway(t, http.StatusOK, tt.reply)
 		j := judge.NewLLM(srv.URL+"/v1/", "judge-model", "k", nil)
@@ -81,7 +89,7 @@ func TestLLMJudgePromptPerKind(t *testing.T) {
 		{harness.KindUpdate, false, "updated answer"},
 		{harness.KindPreference, false, "Rubric: gold"},
 		{harness.KindAbstention, false, "unanswerable"},
-		{harness.KindAbstention, true, "Retrieved Memories:\nresp {{x}}"},
+		{harness.KindTemporal, true, "Retrieved Memories:\nresp {{x}}"},
 	}
 	for _, tt := range tests {
 		srv, prompt := gateway(t, http.StatusOK, "yes")
@@ -96,6 +104,17 @@ func TestLLMJudgePromptPerKind(t *testing.T) {
 	}
 	if _, err := judge.Prompt(harness.Question{Kind: "nope"}, "", false); err == nil {
 		t.Error("unknown kind: want error")
+	}
+}
+
+func TestLLMJudgeRecallNotApplicable(t *testing.T) {
+	// No gateway: a not-applicable question must not call the model.
+	j := judge.NewLLM("http://127.0.0.1:1/v1", "judge-model", "k", nil)
+	for _, kind := range []string{harness.KindAbstention, harness.KindPreference} {
+		v, err := j.Grade(context.Background(), harness.Question{Kind: kind}, "memories", true)
+		if err != nil || !v.NotApplicable || v.Correct {
+			t.Errorf("kind %q in recall mode: verdict %+v, err %v; want not applicable", kind, v, err)
+		}
 	}
 }
 

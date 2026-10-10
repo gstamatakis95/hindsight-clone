@@ -38,6 +38,8 @@ type Config struct {
 	QuietPolls int
 	// SettleTimeout bounds the barrier per conversation; default 15 min.
 	SettleTimeout time.Duration
+	// CallTimeout bounds every single target and judge call; 0 = no per-call bound (only ctx).
+	CallTimeout time.Duration
 }
 
 // Runner drives conversations against one target and grades the answers.
@@ -70,10 +72,14 @@ func NewRunner(target Target, judge Judge, clock Clock, cfg Config) *Runner {
 
 // Run retains every conversation into its own bank, waits for the barrier, asks every question and
 // returns the target's report. A conversation that fails to retain or settle marks its questions as
-// errors and the run continues; Run itself fails only on an unknown mode or a cancelled context.
+// errors and the run continues; Run itself fails only on an unknown mode, two conversations whose bank
+// ids collide, or a cancelled context.
 func (r *Runner) Run(ctx context.Context, convs []Conversation) (TargetReport, error) {
 	if r.cfg.Mode != ModeReflect && r.cfg.Mode != ModeRecall {
 		return TargetReport{}, fmt.Errorf("harness: unknown mode %q", r.cfg.Mode)
+	}
+	if err := checkBankIDs(r.cfg.BankPrefix, convs); err != nil {
+		return TargetReport{}, err
 	}
 	rec := newRecorder(len(convs))
 	sem := make(chan struct{}, r.cfg.Parallel)
@@ -94,23 +100,30 @@ func (r *Runner) Run(ctx context.Context, convs []Conversation) (TargetReport, e
 	return rep, nil
 }
 
-// runConversation runs one conversation end to end, recording into slot i of rec.
+// runConversation runs one conversation end to end, recording into slot i of rec. Background usage and
+// failed operations are collected whenever the bank exists (at least one Retain succeeded), even when a
+// later retain or the barrier failed.
 func (r *Runner) runConversation(ctx context.Context, i int, c Conversation, rec *recorder) {
 	bank := BankID(r.cfg.BankPrefix, c.ID)
-	if err := r.retainAll(ctx, bank, c.Sessions, rec); err != nil {
+	retained, err := r.retainAll(ctx, bank, c.Sessions, rec)
+	if err == nil {
+		err = r.waitIdle(ctx, bank, rec)
+	}
+	if err != nil {
 		rec.failConversation(i, c, err)
+	} else {
+		results := make([]QuestionResult, 0, len(c.Questions))
+		for _, q := range c.Questions {
+			results = append(results, r.ask(ctx, bank, c.ID, q, rec))
+		}
+		rec.setResults(i, results)
+	}
+	if retained == 0 {
 		return
 	}
-	if err := r.waitIdle(ctx, bank, rec); err != nil {
-		rec.failConversation(i, c, err)
-		return
-	}
-	results := make([]QuestionResult, 0, len(c.Questions))
-	for _, q := range c.Questions {
-		results = append(results, r.ask(ctx, bank, c.ID, q, rec))
-	}
-	rec.setResults(i, results)
-	bg, err := r.target.Background(ctx, bank)
+	cctx, cancel := r.call(ctx)
+	defer cancel()
+	bg, err := r.target.Background(cctx, bank)
 	if err != nil {
 		rec.addError(fmt.Sprintf("%s: background usage: %v", c.ID, err))
 		return
@@ -118,18 +131,28 @@ func (r *Runner) runConversation(ctx context.Context, i int, c Conversation, rec
 	rec.addBackground(bg)
 }
 
-// retainAll retains the sessions in order, one synchronous Retain each.
-func (r *Runner) retainAll(ctx context.Context, bank string, sessions []Session, rec *recorder) error {
-	for _, s := range sessions {
+// call bounds one target or judge call by CallTimeout.
+func (r *Runner) call(ctx context.Context) (context.Context, context.CancelFunc) {
+	if r.cfg.CallTimeout > 0 {
+		return context.WithTimeout(ctx, r.cfg.CallTimeout)
+	}
+	return context.WithCancel(ctx)
+}
+
+// retainAll retains the sessions in order, one synchronous Retain each, and returns how many succeeded.
+func (r *Runner) retainAll(ctx context.Context, bank string, sessions []Session, rec *recorder) (int, error) {
+	for n, s := range sessions {
 		start := r.clock.Now()
-		usage, err := r.target.Retain(ctx, bank, s)
+		cctx, cancel := r.call(ctx)
+		usage, err := r.target.Retain(cctx, bank, s)
+		cancel()
 		rec.observe(opRetain, r.clock.Now().Sub(start))
 		if err != nil {
-			return fmt.Errorf("retain session %s: %w", s.ID, err)
+			return n, fmt.Errorf("retain session %s: %w", s.ID, err)
 		}
 		rec.addUsage(usage)
 	}
-	return nil
+	return len(sessions), nil
 }
 
 // waitIdle is the eval barrier: it polls the bank's pending operations until QuietPolls consecutive
@@ -140,7 +163,9 @@ func (r *Runner) waitIdle(ctx context.Context, bank string, rec *recorder) error
 	quiet := 0
 	var last map[string]int64
 	for {
-		pending, err := r.target.PendingOperations(ctx, bank)
+		cctx, cancel := r.call(ctx)
+		pending, err := r.target.PendingOperations(cctx, bank)
+		cancel()
 		if err != nil {
 			return fmt.Errorf("barrier: %w", err)
 		}
@@ -168,31 +193,48 @@ func (r *Runner) ask(ctx context.Context, bank, conv string, q Question, rec *re
 		Conversation: conv, ID: q.ID, Category: q.Category, Query: q.Query, Gold: q.Answer,
 	}
 	start := r.clock.Now()
+	cctx, cancel := r.call(ctx)
 	var err error
 	if r.cfg.Mode == ModeRecall {
 		var texts []string
-		texts, err = r.target.Recall(ctx, bank, q.Query, q.QueryTime)
+		texts, err = r.target.Recall(cctx, bank, q.Query, q.QueryTime)
 		res.Response = strings.Join(texts, "\n")
 	} else {
 		var usage []Usage
-		res.Response, usage, err = r.target.Reflect(ctx, bank, q.Query, q.QueryTime)
+		res.Response, usage, err = r.target.Reflect(cctx, bank, q.Query, q.QueryTime)
 		rec.addUsage(usage)
 	}
+	cancel()
 	rec.observe(r.cfg.Mode, r.clock.Now().Sub(start))
 	if err != nil {
 		res.Error = fmt.Sprintf("%s: %v", r.cfg.Mode, err)
 		return res
 	}
 	start = r.clock.Now()
-	v, err := r.judge.Grade(ctx, q, res.Response, r.cfg.Mode == ModeRecall)
+	cctx, cancel = r.call(ctx)
+	v, err := r.judge.Grade(cctx, q, res.Response, r.cfg.Mode == ModeRecall)
+	cancel()
 	rec.observe(opJudge, r.clock.Now().Sub(start))
 	if err != nil {
 		res.Error = fmt.Sprintf("judge: %v", err)
 		return res
 	}
 	rec.addUsage(v.Usage)
-	res.Correct, res.Reason = v.Correct, v.Reason
+	res.Correct, res.NotApplicable, res.Reason = v.Correct && !v.NotApplicable, v.NotApplicable, v.Reason
 	return res
+}
+
+// checkBankIDs fails when two conversations sanitise to the same bank id, which would mix their memories.
+func checkBankIDs(prefix string, convs []Conversation) error {
+	seen := make(map[string]string, len(convs))
+	for _, c := range convs {
+		id := BankID(prefix, c.ID)
+		if prev, dup := seen[id]; dup {
+			return fmt.Errorf("harness: conversations %q and %q share bank id %q", prev, c.ID, id)
+		}
+		seen[id] = c.ID
+	}
+	return nil
 }
 
 // BankID derives a bank id from a prefix and a conversation id, keeping only characters that are safe

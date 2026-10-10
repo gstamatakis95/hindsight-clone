@@ -13,6 +13,12 @@ meaningful enough for an LLM judge.
 - Golden runs default to `-mode recall -judge contains`: a check passes when any recalled memory contains one of
   its `accept` substrings (case-insensitive). No model is called, so the run is deterministic; the CLI exits
   non-zero when any check fails, so CI can gate on it.
+- **Golden checks only prove retain → recall presence:** a retained fact can be found again. They don't test
+  temporal reasoning or knowledge updates; that is the benchmarks' job. Their categories say so: `presence`,
+  `presence-dated` (the facts carry dates) and `presence-updated` (the bank also holds an older, superseded
+  fact). A `presence-updated` check passes even if the old fact is also recalled.
+- Within a fixture, session ids (which are document ids) and check ids must be unique. A repeated session id
+  would silently upsert over the earlier session.
 
 ## Alternatives
 - Add `gopkg.in/yaml.v3` through a CCR for block-style YAML. Deferred: block style is nicer to read but not

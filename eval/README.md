@@ -55,7 +55,9 @@ Useful flags:
 - `-limit N`: run at most N conversations.
 - `-questions N`: ask at most N questions per conversation.
 - `-skip-memd`: run against Hindsight only.
-- `-poll`, `-quiet-polls`, `-settle-timeout`: tune the barrier.
+- `-poll`, `-quiet-polls`, `-settle-timeout`: tune the barrier. Defaults are 1 s, 2 and 15 min; for golden
+  runs, 200 ms, 2 and 90 s.
+- `-call-timeout`: bounds each single target or judge call (default 5 min; 0 = no bound).
 - `-bank-prefix`: the bank id prefix. The default includes the start time, so each run gets fresh banks.
 - `-out-json`, `-out-md`: report paths (defaults `eval-report.json` and `eval-report.md`). The Markdown report
   is also printed to stdout.
@@ -68,13 +70,16 @@ itself.
 ## Reading the report
 - **Accuracy by category:** `correct/total` per category, plus an overall row. Each target gets its own column.
   Errors (failed retain, barrier timeout, RPC failure) count as wrong and are listed with their count.
+  In recall mode, LongMemEval abstention and preference questions can't be graded (there is no fact to find),
+  so they are shown as `n/a` and left out of the total (decision 701).
 - **Token usage per slot:** input and output tokens per memd model slot:
+  - `EXTRACT`, `TIME_PARSE`, `EMBED` from sync Retain responses.
   - `REFLECT` from Reflect responses.
-  - `CONSOLIDATE`, `EXTRACT` and the other slots from the bank's background operations.
+  - `CONSOLIDATE` and the other slots from the bank's background operations, read even when a conversation
+    failed partway.
   - `JUDGE` for the judge's own tokens.
 
-  Hindsight reports totals only, so its tokens show under `RETAIN` and `REFLECT`. Sync `Retain` returns no
-  usage, so memd's extraction tokens show only when the server records them on an operation. See decision 702.
+  Hindsight reports totals only, so its tokens show under `RETAIN` and `REFLECT`. See decision 702.
 - **Latency:** nearest-rank p50 and p95 in milliseconds, with sample counts, for each operation: `retain`
   (per session), `barrier` (per bank), `recall` or `reflect` (per question) and `judge`.
 - **Problems:** the number of failed background operations and the conversation-level errors.
@@ -89,11 +94,13 @@ and judge reason.
 {
   "name": "personal-facts",
   "sessions": [{"id": "pf-1", "time": "2024-03-04T09:15:00Z", "context": "...", "content": "user: ..."}],
-  "checks": [{"id": "city", "category": "single-hop", "query": "Which city?", "accept": ["Lisbon"]}]
+  "checks": [{"id": "city", "category": "presence", "query": "Which city?", "accept": ["Lisbon"]}]
 }
 ```
 
-A check passes when any recalled memory contains one of its `accept` strings (case-insensitive).
+A check passes when any recalled memory contains one of its `accept` strings (case-insensitive). The golden
+checks only prove that a retained fact can be recalled (presence); the categories `presence-dated` and
+`presence-updated` don't test temporal reasoning or knowledge updates. The benchmarks do that.
 `go test ./eval/golden/` runs every fixture against the in-process stub and fails if the run takes 2 minutes
 or longer.
 

@@ -47,12 +47,15 @@ type TargetReport struct {
 type CategoryStats struct {
 	// Category is the bucket name; "overall" for the total.
 	Category string `json:"category"`
-	// Total is the number of questions asked.
+	// Total is the number of questions graded (not-applicable ones excluded).
 	Total int `json:"total"`
 	// Correct is the number graded correct.
 	Correct int `json:"correct"`
 	// Errors is the number that failed before grading (they count as incorrect).
 	Errors int `json:"errors"`
+	// NotApplicable is the number of questions the judge could not grade in this mode; they are not in
+	// Total.
+	NotApplicable int `json:"not_applicable,omitempty"`
 	// Accuracy is Correct / Total, 0 when Total is 0.
 	Accuracy float64 `json:"accuracy"`
 }
@@ -85,6 +88,8 @@ type QuestionResult struct {
 	Response string `json:"response"`
 	// Correct is the judge's verdict.
 	Correct bool `json:"correct"`
+	// NotApplicable is set when the question can't be graded in this mode; it is left out of accuracy.
+	NotApplicable bool `json:"not_applicable,omitempty"`
 	// Reason is the judge's explanation.
 	Reason string `json:"reason,omitempty"`
 	// Error is set when the question failed before grading.
@@ -204,6 +209,10 @@ func categoryStats(results []QuestionResult) (CategoryStats, []CategoryStats) {
 			byCat[q.Category] = c
 		}
 		for _, s := range []*CategoryStats{&overall, c} {
+			if q.NotApplicable {
+				s.NotApplicable++
+				continue
+			}
 			s.Total++
 			if q.Correct {
 				s.Correct++

@@ -43,8 +43,8 @@ func NewMemd(conn grpc.ClientConnInterface, tenant string) *Memd {
 // Name returns "memd".
 func (m *Memd) Name() string { return "memd" }
 
-// Retain stores s as one document (document id = session id) with a synchronous Retain. memd's sync
-// Retain reports no usage, so the returned usage is nil.
+// Retain stores s as one document (document id = session id) with a synchronous Retain and returns the
+// per-slot usage the response reports (extraction, time parsing, embedding).
 func (m *Memd) Retain(ctx context.Context, bank string, s harness.Session) ([]harness.Usage, error) {
 	req := &memoryv1.RetainRequest{BankId: bank, Items: []*memoryv1.RetainItem{{
 		Content:    s.Content,
@@ -52,10 +52,13 @@ func (m *Memd) Retain(ctx context.Context, bank string, s harness.Session) ([]ha
 		DocumentId: s.ID,
 		Timestamp:  timestamp(s.Time),
 	}}}
-	if _, err := m.memory.Retain(m.out(ctx), req); err != nil {
+	resp, err := m.memory.Retain(m.out(ctx), req)
+	if err != nil {
 		return nil, fmt.Errorf("memd: retain %s/%s: %w", bank, s.ID, err)
 	}
-	return nil, nil
+	var acc usageSum
+	acc.add(resp.GetUsage())
+	return acc.usage, nil
 }
 
 // PendingOperations returns BankStats.pending_operations_by_kind without zero counts.

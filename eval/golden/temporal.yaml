@@ -15,8 +15,8 @@
     }
   ],
   "checks": [
-    {"id": "group", "category": "temporal", "query": "When did Caroline go to the support group?", "accept": ["support group"]},
-    {"id": "race", "category": "temporal", "query": "What race did Melanie run?", "accept": ["5K"]},
-    {"id": "cert", "category": "temporal", "query": "When does Caroline start the counseling certification?", "accept": ["certification"]}
+    {"id": "group", "category": "presence-dated", "query": "When did Caroline go to the support group?", "accept": ["support group"]},
+    {"id": "race", "category": "presence-dated", "query": "What race did Melanie run?", "accept": ["5K"]},
+    {"id": "cert", "category": "presence-dated", "query": "When does Caroline start the counseling certification?", "accept": ["certification"]}
   ]
 }

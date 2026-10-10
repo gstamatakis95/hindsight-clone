@@ -33,7 +33,7 @@ type options struct {
 	bankPrefix, outJSON, outMD, categories string
 	parallel, quietPolls                   int
 	maxConvs, maxQuestions                 int
-	poll, settle                           time.Duration
+	poll, settle, callTimeout              time.Duration
 }
 
 func main() {
@@ -67,9 +67,10 @@ func parseFlags(args []string) (options, error) {
 	fs.IntVar(&o.maxConvs, "limit", 0, "max conversations (0 = all)")
 	fs.IntVar(&o.maxQuestions, "questions", 0, "max questions per conversation (0 = all)")
 	fs.IntVar(&o.parallel, "parallel", 4, "conversations run concurrently")
-	fs.DurationVar(&o.poll, "poll", time.Second, "barrier poll interval")
+	fs.DurationVar(&o.poll, "poll", time.Second, "barrier poll interval (golden default: 200ms)")
 	fs.IntVar(&o.quietPolls, "quiet-polls", 2, "consecutive idle polls that end the barrier")
-	fs.DurationVar(&o.settle, "settle-timeout", 15*time.Minute, "barrier timeout per conversation")
+	fs.DurationVar(&o.settle, "settle-timeout", 15*time.Minute, "barrier timeout per conversation (golden default: 90s)")
+	fs.DurationVar(&o.callTimeout, "call-timeout", 5*time.Minute, "timeout of each target or judge call (0 = none)")
 	fs.StringVar(&o.outJSON, "out-json", "eval-report.json", "JSON report path (empty = none)")
 	fs.StringVar(&o.outMD, "out-md", "eval-report.md", "Markdown report path (empty = none)")
 	if err := fs.Parse(args); err != nil {
@@ -78,21 +79,33 @@ func parseFlags(args []string) (options, error) {
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
 	if o.dataset == "golden" {
-		if !set["mode"] {
-			o.mode = harness.ModeRecall
-		}
-		if !set["judge"] {
-			o.judgeKind = "contains"
-		}
-		if o.data == "" {
-			o.data = filepath.Join("eval", "golden")
-		}
+		o.goldenDefaults(set)
 	}
 	o.judgeKey = os.Getenv("MEMD_EVAL_JUDGE_API_KEY")
 	if o.bankPrefix == "" {
 		o.bankPrefix = fmt.Sprintf("eval-%d-", time.Now().Unix())
 	}
 	return o, nil
+}
+
+// goldenDefaults applies the golden run's defaults to the flags the caller did not set: recall mode,
+// substring judge, the fixture directory, and a short barrier (CI against `memd all` should fail fast).
+func (o *options) goldenDefaults(set map[string]bool) {
+	if !set["mode"] {
+		o.mode = harness.ModeRecall
+	}
+	if !set["judge"] {
+		o.judgeKind = "contains"
+	}
+	if !set["settle-timeout"] {
+		o.settle = 90 * time.Second
+	}
+	if !set["poll"] {
+		o.poll = 200 * time.Millisecond
+	}
+	if o.data == "" {
+		o.data = filepath.Join("eval", "golden")
+	}
 }
 
 // run executes one eval and writes the reports.
@@ -120,7 +133,7 @@ func run(ctx context.Context, args []string, stdout io.Writer) error {
 	rep := harness.Report{Dataset: o.dataset, Mode: o.mode}
 	cfg := harness.Config{
 		Mode: o.mode, BankPrefix: o.bankPrefix, Parallel: o.parallel,
-		PollInterval: o.poll, QuietPolls: o.quietPolls, SettleTimeout: o.settle,
+		PollInterval: o.poll, QuietPolls: o.quietPolls, SettleTimeout: o.settle, CallTimeout: o.callTimeout,
 	}
 	for _, t := range targets {
 		tr, err := harness.NewRunner(t, j, harness.SystemClock{}, cfg).Run(ctx, convs)

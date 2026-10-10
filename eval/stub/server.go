@@ -124,7 +124,8 @@ func (s *Server) Retains() int {
 }
 
 // Retain upserts each item as a document (by document_id), creating the bank when it is unknown. It arms
-// the bank's pending polls and records one completed consolidate operation per call.
+// the bank's pending polls, records one completed consolidate operation per call and, like a sync retain,
+// reports EXTRACT usage (20 in, 4 out per item).
 func (s *Server) Retain(ctx context.Context, req *memoryv1.RetainRequest) (*memoryv1.RetainResponse, error) {
 	tenant, err := tenantOf(ctx)
 	if err != nil {
@@ -146,6 +147,9 @@ func (s *Server) Retain(ctx context.Context, req *memoryv1.RetainRequest) (*memo
 		b.upsert(&document{id: id, content: it.GetContent(), time: it.GetTimestamp()})
 		s.retains++
 		resp.Documents = append(resp.Documents, &memoryv1.RetainedDocument{DocumentId: id, UnitsCreated: 1})
+		resp.Usage = append(resp.Usage, &memoryv1.SlotUsage{
+			Slot: memoryv1.ModelSlot_MODEL_SLOT_EXTRACT, Model: stubModel, InputTokens: 20, OutputTokens: 4,
+		})
 	}
 	b.pending = s.opts.PendingPolls
 	b.ops = append(b.ops, s.newOp(memoryv1.OperationStatus_OPERATION_STATUS_COMPLETED, []*memoryv1.SlotUsage{{

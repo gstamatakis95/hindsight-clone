@@ -92,3 +92,20 @@ Gates run in the worktree:
   WP-07.
 - **No run against real datasets or a real gateway was done.** Only the stub and `httptest` fakes were
   exercised.
+
+## Follow-up after review (same branch, rebased on main after f5da652)
+- `target.Memd.Retain` returns `RetainResponse.usage` (CCR WP-07-1 approved), so memd's extraction tokens are
+  now reported. Decision 702 and the README are updated.
+- When a conversation fails during retain or at the barrier, its background usage and failed-operation count
+  are still collected, as long as the bank exists.
+- `-call-timeout` (default 5m) bounds every target and judge call. Golden runs default to `-settle-timeout 90s`
+  and `-poll 200ms`.
+- In recall mode, the LLM judge marks LongMemEval abstention and preference questions N/A. They are shown as
+  `n/a` and left out of accuracy (decision 701).
+- Golden categories were renamed to `presence`, `presence-dated` and `presence-updated` (decision 700).
+- The judge verdict is now taken from the reply's first word. Bank-id collisions after sanitising fail the run
+  up front.
+- New tests: `TestBackgroundCollectedAfterBarrierFailure`, `TestRunRejectsBankIDCollision`,
+  `TestNotApplicableLeftOutOfAccuracy`, `TestCallTimeoutBoundsEachCall`, `TestLLMJudgeRecallNotApplicable`.
+  First-word cases were added to `TestLLMJudgeVerdicts`. `TestMemdRetainRecallReflect` and
+  `TestRunEndToEndAgainstStub` now assert EXTRACT usage from Retain.

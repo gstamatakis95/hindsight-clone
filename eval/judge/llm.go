@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"text/template"
+	"unicode"
 )
 
 // SlotJudge is the usage slot the judge's own tokens are reported under.
@@ -27,8 +28,7 @@ var templateFS embed.FS
 var prompts = template.Must(template.ParseFS(templateFS, "templates/*.tmpl"))
 
 // LLM grades answers with a chat model behind an OpenAI-compatible gateway (POST {base}/chat/completions).
-// It asks for a yes/no verdict at temperature 0 and, like LongMemEval's official scorer, counts a reply
-// containing "yes" as correct.
+// It asks for a yes/no verdict at temperature 0 and counts a reply whose first word is "yes" as correct.
 type LLM struct {
 	baseURL string
 	model   string
@@ -48,8 +48,13 @@ func NewLLM(baseURL, model, apiKey string, client *http.Client) *LLM {
 }
 
 // Grade renders the prompt for q's kind (the recall prompt when recall is set), asks the model and
-// parses its yes/no verdict.
+// parses its yes/no verdict. In recall mode, abstention and preference questions are not applicable: an
+// unanswerable question has no answer to find in memories, and a rubric is not a fact, so they are left
+// out of accuracy without a model call.
 func (l *LLM) Grade(ctx context.Context, q harness.Question, response string, recall bool) (harness.Verdict, error) {
+	if recall && (q.Kind == harness.KindAbstention || q.Kind == harness.KindPreference) {
+		return harness.Verdict{NotApplicable: true, Reason: "not gradable in recall mode: " + q.Kind}, nil
+	}
 	prompt, err := Prompt(q, response, recall)
 	if err != nil {
 		return harness.Verdict{}, err
@@ -59,10 +64,19 @@ func (l *LLM) Grade(ctx context.Context, q harness.Question, response string, re
 		return harness.Verdict{}, err
 	}
 	return harness.Verdict{
-		Correct: strings.Contains(strings.ToLower(reply), "yes"),
+		Correct: firstWord(reply) == "yes",
 		Reason:  strings.TrimSpace(reply),
 		Usage:   []harness.Usage{usage},
 	}, nil
+}
+
+// firstWord returns the reply's first word, lower-cased and stripped of punctuation and markup.
+func firstWord(reply string) string {
+	fields := strings.Fields(strings.ToLower(reply))
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.TrimFunc(fields[0], func(r rune) bool { return !unicode.IsLetter(r) })
 }
 
 // Prompt renders the judge prompt for q and response.

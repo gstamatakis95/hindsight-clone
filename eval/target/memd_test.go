@@ -47,8 +47,8 @@ func TestMemdRetainRecallReflect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Retain: %v", err)
 	}
-	if usage != nil {
-		t.Fatalf("Retain usage = %v, want nil", usage)
+	if len(usage) != 1 || usage[0] != (harness.Usage{Slot: "EXTRACT", InputTokens: 20, OutputTokens: 4}) {
+		t.Fatalf("Retain usage = %v, want the response's EXTRACT usage", usage)
 	}
 
 	for i, want := range []int{1, 1, 0} {
