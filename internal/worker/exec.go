@@ -10,11 +10,17 @@ import (
 	"time"
 )
 
+// Settle retry backoff: 50 ms doubling to 2 s, within settleTimeout.
+const (
+	settleRetryBase = 50 * time.Millisecond
+	settleRetryMax  = 2 * time.Second
+)
+
 // execute runs one job and settles its row. The deferred release runs on every exit, after the terminal
-// Complete or Fail, so the job is heartbeated until its handler has returned and been settled.
-func (r *Runner) execute(hctx, base context.Context, j port.Job) {
+// Complete or Fail, so the run is heartbeated until its handler has returned and been settled.
+func (r *Runner) execute(hctx, base context.Context, j port.Job, a *active) {
 	defer r.wg.Done()
-	defer r.release(j.ID)
+	defer r.release(j.ID, a)
 	hctx, rec := withRecorder(hctx)
 	err := r.invoke(hctx, j)
 	r.settle(base, j, err, context.Cause(hctx), rec)
@@ -37,23 +43,24 @@ func (r *Runner) invoke(ctx context.Context, j port.Job) (err error) {
 }
 
 // settle writes the job's terminal call. cause is why the runner cancelled the handler, if it did:
+//   - lost run (checked first, whatever the handler returned): see settleLost;
 //   - success: Complete with the reported result and usage (on a cancel-requested row it ends CANCELLED);
-//   - lost job: see settleLost;
-//   - shutdown (unless the handler failed permanently): Fail with retry at now, outside the attempt cap,
-//     whatever error the interrupted handler returned (an interrupted run is not a failure);
+//   - shutdown (unless the handler failed permanently): Fail with retry at now, whatever error the
+//     interrupted handler returned. Fail with a retry time always charges an attempt, so the release is
+//     not outside the attempt cap; the shutdown grace keeps such releases rare;
 //   - otherwise: Fail with the retry policy's time, or nil once the policy gives up.
 func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec *recorder) {
 	ctx, cancel := context.WithTimeout(base, settleTimeout)
 	defer cancel()
 	switch {
-	case err == nil:
-		result, usage := rec.get()
-		r.report(j, "complete", r.c.Complete(ctx, j.ID, result, usage))
 	case errors.Is(cause, errLost):
-		r.settleLost(ctx, j, err)
+		r.settleLost(ctx, j, err, rec)
+	case err == nil:
+		r.complete(ctx, j, rec)
 	case errors.Is(cause, errShutdown) && !errors.Is(err, ErrPermanent):
 		now := r.cfg.Clock.Now()
-		r.report(j, "release (shutdown)", r.c.Fail(ctx, j.ID, fmt.Errorf("%w: %w", errShutdown, err), &now))
+		cause := fmt.Errorf("%w: %w", errShutdown, err)
+		r.persist(ctx, j, "release (shutdown)", func(c context.Context) error { return r.c.Fail(c, j.ID, cause, &now) })
 	default:
 		at := r.retryAt(ctx, j, err)
 		if at == nil {
@@ -62,25 +69,40 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 			r.log.Info("job failed, retrying", "op", j.ID, "kind", j.Kind, "attempt", j.Attempt, "at", *at,
 				"err", err)
 		}
-		r.report(j, "fail", r.c.Fail(ctx, j.ID, err, at))
+		r.persist(ctx, j, "fail", func(c context.Context) error { return r.c.Fail(c, j.ID, err, at) })
 	}
 }
 
-// settleLost settles a job Heartbeat reported lost. Alive is true only when the row is PROCESSING under
-// another worker (re-claimed after a reclaim): that run is not ours, so nothing is written. Otherwise
-// (cancel requested, reclaimed and still pending, finished, bank gone) it calls Fail with no retry, which
-// ends a cancel-requested row CANCELLED and is fenced off the rest. A lost run is never requeued, so a
-// job can't get a second concurrent run.
-func (r *Runner) settleLost(ctx context.Context, j port.Job, err error) {
-	if alive, aerr := r.c.Alive(ctx, j.ID); aerr == nil && alive {
-		r.log.Warn("job re-claimed by another worker; leaving its row alone", "op", j.ID, "kind", j.Kind)
-		return
+// complete writes Complete with the run's reported result and usage.
+func (r *Runner) complete(ctx context.Context, j port.Job, rec *recorder) {
+	result, usage := rec.get()
+	r.persist(ctx, j, "complete", func(c context.Context) error { return r.c.Complete(c, j.ID, result, usage) })
+}
+
+// settleLost settles a run the runner stopped as lost (Heartbeat named it, it went too long without a
+// heartbeat, or this runner re-claimed the id). Alive is true only when the row is PROCESSING under another
+// run (another worker, or a newer run here): that run is not this one's, so nothing is written. If Alive
+// fails, nothing is written either; ReclaimStale covers the row. Otherwise (cancel requested, reclaimed
+// and pending, finished, bank gone) a successful run is completed and a failed one failed with no retry:
+// a cancel-requested row ends CANCELLED and the rest are fenced. A lost run is never requeued, so a job
+// can't get a second concurrent run.
+func (r *Runner) settleLost(ctx context.Context, j port.Job, err error, rec *recorder) {
+	alive, aerr := r.c.Alive(ctx, j.ID)
+	switch {
+	case aerr != nil:
+		r.log.Warn("lost job: Alive failed; leaving the row to reclaim", "op", j.ID, "err", aerr)
+	case alive:
+		r.log.Warn("lost job is running elsewhere; leaving its row alone", "op", j.ID, "kind", j.Kind)
+	case err == nil:
+		r.complete(ctx, j, rec)
+	default:
+		cause := fmt.Errorf("%w: %w", errLost, err)
+		r.persist(ctx, j, "fail (lost)", func(c context.Context) error { return r.c.Fail(c, j.ID, cause, nil) })
 	}
-	r.report(j, "fail (lost)", r.c.Fail(ctx, j.ID, fmt.Errorf("%w: %w", errLost, err), nil))
 }
 
 // retryAt applies the retry policy; nil = fail for good. A consolidate that would retry fails instead
-// when another consolidate is already pending for its bank (that one picks up the same units).
+// when another automatic consolidate is already due for its bank (that one picks up the same units).
 func (r *Runner) retryAt(ctx context.Context, j port.Job, err error) *time.Time {
 	at, ok := nextRun(j, err, r.cfg.Clock.Now())
 	if !ok {
@@ -92,11 +114,40 @@ func (r *Runner) retryAt(ctx context.Context, j port.Job, err error) *time.Time 
 		case perr != nil:
 			r.log.Warn("pending consolidate lookup failed; retrying anyway", "op", j.ID, "err", perr)
 		case pending:
-			r.log.Info("another consolidate is pending; skipping the retry", "op", j.ID, "bank", j.Bank)
+			r.log.Info("another consolidate is due; skipping the retry", "op", j.ID, "bank", j.Bank)
 			return nil
 		}
 	}
 	return &at
+}
+
+// persist runs a terminal Complete or Fail, retrying transient errors with backoff until ctx (the settle
+// timeout) runs out. Fencing outcomes end it at once (see report).
+func (r *Runner) persist(ctx context.Context, j port.Job, what string, call func(context.Context) error) {
+	wait := settleRetryBase
+	for {
+		err := call(ctx)
+		if err == nil || fenced(err) {
+			r.report(j, what, err)
+			return
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			r.report(j, what, err)
+			return
+		case <-t.C:
+		}
+		r.log.Debug("retrying terminal call", "op", j.ID, "call", what, "err", err)
+		wait = min(2*wait, settleRetryMax)
+	}
+}
+
+// fenced reports whether a Complete/Fail error is a final fencing outcome rather than a transient failure.
+func fenced(err error) bool {
+	return errors.Is(err, domain.ErrCancelled) || errors.Is(err, domain.ErrNotFound) ||
+		errors.Is(err, domain.ErrFailedPrecondition)
 }
 
 // report logs the outcome of a terminal Complete or Fail. Fencing outcomes are expected: ErrCancelled (the
@@ -133,7 +184,9 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 	}
 }
 
-// heartbeat refreshes every running job and cancels the handlers of the jobs the Claimer reports lost.
+// heartbeat refreshes every running job (one call, bounded by HeartbeatInterval). It stops the handlers of
+// the jobs the Claimer reports lost, and of every run whose last successful heartbeat is older than 3/4 of
+// StaleAfter: by then another worker may reclaim it, so the runner fences itself first.
 func (r *Runner) heartbeat(ctx context.Context) {
 	r.mu.Lock()
 	ids := make([]port.OperationID, 0, len(r.running))
@@ -144,17 +197,33 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	if len(ids) == 0 {
 		return
 	}
-	err := r.c.Heartbeat(ctx, r.cfg.WorkerID, ids)
+	hctx, cancel := context.WithTimeout(ctx, r.cfg.HeartbeatInterval)
+	err := r.c.Heartbeat(hctx, r.cfg.WorkerID, ids)
+	cancel()
 	lost := port.LostJobs(err)
-	if err != nil && lost == nil {
+	ok := err == nil || lost != nil
+	if !ok {
 		r.log.Warn("heartbeat failed", "jobs", len(ids), "err", err)
-		return
 	}
+	now := r.cfg.Clock.Now()
+	fenceAfter := r.cfg.StaleAfter * 3 / 4
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, id := range lost {
 		if a := r.running[id]; a != nil {
 			r.log.Info("job lost; stopping its handler", "op", id)
+			a.cancel(errLost)
+		}
+	}
+	for _, id := range ids {
+		a := r.running[id]
+		if a == nil {
+			continue
+		}
+		if ok {
+			a.lastBeat = now
+		} else if now.Sub(a.lastBeat) > fenceAfter {
+			r.log.Warn("no heartbeat for too long; stopping the handler before it is reclaimed", "op", id)
 			a.cancel(errLost)
 		}
 	}

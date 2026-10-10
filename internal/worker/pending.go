@@ -2,42 +2,70 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 )
 
-// PendingChecker tells the runner whether a bank already has a pending job of a kind, so a failed
-// consolidate skips its retry when another consolidation is queued for the bank.
+// PendingChecker tells the runner whether a bank already has a due automatic consolidate, so a failed
+// consolidate skips its retry when another consolidation will pick up the same units.
 type PendingChecker interface {
-	// HasPending reports whether b has at least one PENDING operation of kind (due or parked).
+	// HasPending reports whether b has a PENDING, joinable (automatic: no overrides, no scopes) operation
+	// of kind that is due now. Only consolidate is supported; other kinds are domain.ErrInvalidArgument.
 	HasPending(ctx context.Context, b port.BankRef, kind port.JobKind) (bool, error)
 }
 
-// pendingChecker implements PendingChecker over Queue.List in a short read transaction.
+// pendingChecker implements PendingChecker with a probe transaction that is always rolled back.
 type pendingChecker struct {
 	s port.Store
+	c port.Clock
 }
 
 var _ PendingChecker = (*pendingChecker)(nil)
 
-// NewPendingChecker returns a PendingChecker reading the operations table through s.
-func NewPendingChecker(s port.Store) PendingChecker {
-	return &pendingChecker{s: s}
+// errProbeRollback rolls the probe transaction back.
+var errProbeRollback = errors.New("pending probe: roll back")
+
+// NewPendingChecker returns a PendingChecker reading the operations table through s, judging due-ness
+// with c.
+func NewPendingChecker(s port.Store, c port.Clock) PendingChecker {
+	return &pendingChecker{s: s, c: c}
 }
 
-// HasPending lists at most one pending operation of kind in b.
+// HasPending probes with a DedupePending Enqueue of an automatic consolidate (payload {}, no overrides,
+// serial key "consolidate"): it joins exactly the joinable pending rows, which domain.Operation can't tell
+// apart (it carries neither joinability nor scopes). A joined row counts when it is due (Queue.Get's
+// NextRunAt not after now). The transaction is always rolled back, so a probe that inserted leaves nothing
+// behind. A tombstoned bank has nothing pending.
 func (p *pendingChecker) HasPending(ctx context.Context, b port.BankRef, kind port.JobKind) (bool, error) {
-	var found bool
-	err := p.s.InTx(ctx, func(tx port.Tx) error {
-		ops, _, err := tx.Queue().List(ctx, b, port.OperationFilter{
-			Status: domain.OperationStatusPending, Kind: kind, PageSize: 1,
-		})
-		found = len(ops) > 0
-		return err
-	})
-	if err != nil {
-		return false, fmt.Errorf("pending %s lookup: %w", kind, err)
+	if kind != domain.OperationKindConsolidate {
+		return false, fmt.Errorf("%w: pending probe supports consolidate only, not %s", domain.ErrInvalidArgument, kind)
 	}
-	return found, nil
+	var due bool
+	var probeErr error
+	err := p.s.InTx(ctx, func(tx port.Tx) error {
+		id, joined, err := tx.Queue().Enqueue(ctx, port.Job{
+			Bank: b, Kind: kind, SerialKey: consolidateSerialKey, Payload: json.RawMessage(`{}`),
+			Dedupe: port.DedupePending,
+		})
+		if err != nil || !joined {
+			probeErr = err
+			return errProbeRollback
+		}
+		op, err := tx.Queue().Get(ctx, b, id)
+		probeErr = err
+		due = err == nil && (op.NextRunAt == nil || !op.NextRunAt.After(p.c.Now()))
+		return errProbeRollback
+	})
+	switch {
+	case errors.Is(probeErr, domain.ErrBankDeleting):
+		return false, nil
+	case probeErr != nil:
+		return false, fmt.Errorf("pending %s probe: %w", kind, probeErr)
+	case err != nil && !errors.Is(err, errProbeRollback):
+		return false, fmt.Errorf("pending %s probe: %w", kind, err)
+	}
+	return due, nil
 }

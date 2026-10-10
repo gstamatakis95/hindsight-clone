@@ -1,6 +1,6 @@
 # WP-05 · Worker runtime
 
-Branch `wp/WP-05-worker-runtime`, based on `contracts-v1`. Touches only `internal/worker/**`, its
+Branch `wp/WP-05-worker-runtime`, rebased on main. Touches only `internal/worker/**`, its
 regenerated mocks (`internal/mocks/worker/mocks.go`), `docs/wp/WP-05*.md` and `docs/decisions/50x-*.md`.
 No frozen path changed and no CCR.
 
@@ -11,17 +11,25 @@ No frozen path changed and no CCR.
     consolidate is claimed first and may use any slot;
   - dispatches by kind and claims only registered kinds;
   - heartbeats every 15 s until every handler has returned and been settled;
-  - stops a handler on `*LostJobsError`. It then writes nothing if `Alive` shows the row was re-claimed
-    by another worker, and otherwise calls `Fail(nil)`, which ends a cancel-requested row CANCELLED;
-  - on shutdown, releases interrupted jobs at once, deciding on the cancel cause, not on the error shape;
+  - tracks runs, not ids: if it re-claims an id it is still running, it stops the older run, and a release
+    removes only its own run;
+  - each heartbeat call is bounded by `HeartbeatInterval`. A run with no successful heartbeat for ¾ of
+    `StaleAfter` is stopped as lost, so the runner fences itself before another worker can reclaim the job;
+  - stops a handler on `*LostJobsError`. A lost run is checked before success. It then writes nothing if
+    `Alive` errors or shows the row running elsewhere; otherwise it completes or fails it with no retry,
+    which ends a cancel-requested row CANCELLED;
+  - on shutdown, stops claiming and gives handlers `ShutdownGrace` (30 s) to finish. It then cancels the
+    rest and releases them at once, deciding on the cancel cause, not on the error shape;
+  - retries a transient Complete/Fail error with backoff within the 30 s settle timeout;
   - recovers panics;
   - defers Complete or Fail on every exit, including during shutdown.
   - `*Runner` implements `JobRunner`.
 - [x] **Retry policy** (`retry.go`, `errors.go`):
   - 60 s × (attempt+1), with the runner owning the cap: `Fail(nil)` at attempt+1 >= `MaxAttempts()`;
   - consolidate backs off 60 s × 2^attempt, capped at 30 min, with no attempt limit;
-  - consolidate skips its retry (ends FAILED) when another consolidate is pending for the bank
-    (`PendingChecker` over `Queue.List`);
+  - consolidate skips its retry (ends FAILED) when another consolidate for the bank is automatic
+    (joinable) and due. `PendingChecker` finds it with a rolled-back `DedupePending` Enqueue probe plus
+    `Queue.Get`;
   - `ErrPermanent`, `ErrRetryAt` / `RetryAt()`.
 - [x] **Checkpoint** (`NewCheckpoint`): Progress, then Alive. It returns `domain.ErrCancelled` when the ctx
   is done, Progress is fenced or the row is gone, or Alive is false.
@@ -56,7 +64,11 @@ All run against a test-local fake Claimer/Queue/Store and a manual Clock (`inter
 Supporting tests:
 - `TestRunnerPanicRetries`
 - `TestRunnerShutdownReleasesJobs`
-- `TestRunnerLostToAnotherWorkerLeavesRowAlone`
+- `TestRunnerLostToAnotherWorkerLeavesRowAlone` (H2: also when the lost handler returns nil)
+- `TestRunnerSelfReclaimStopsOlderRun` (H1)
+- `TestRunnerShutdownGraceLetsJobsFinish` (H3)
+- `TestRunnerFencesItselfWithoutHeartbeats` (M1, L1)
+- `TestRunnerRetriesTerminalCall` (M3)
 - `TestRunnerReportsResult`
 - `TestRegisterStubs`
 - `TestMaintenanceStepOrderAndIsolation`
@@ -69,15 +81,18 @@ Supporting tests:
 Gates:
 - `make gen` leaves no diff;
 - `make lint` and `make test` pass;
-- `go test -race -count=3 ./internal/worker/` passes, with 93% statement coverage.
+- `go test -race -count=5 ./internal/worker/...` passes.
 
 ## Decisions and CCRs
 - `docs/decisions/500-worker-retry-policy.md`: attempt numbering, the consolidate backoff cap, which
   errors are permanent, `ErrRetryAt` still counting toward the cap, and the skipped consolidate retry
   ending FAILED.
-- `docs/decisions/501-runner-lifecycle.md`: slot accounting, lost jobs failed without requeue (so no
-  double run), shutdown releasing jobs with `retryAt = now` outside the cap, `ReportResult`, and the
-  `JobRunner` interface.
+- `docs/decisions/501-runner-lifecycle.md`:
+  - slot accounting, and per-run tokens;
+  - lost runs: when the runner stops them, the `Alive` gate, and never requeuing them (so no double run);
+  - shutdown: the grace period, then a release with `retryAt = now`, which still charges an attempt;
+  - settle retries;
+  - `ReportResult` and the `JobRunner` interface.
 - `docs/decisions/502-maintenance-consumer-interfaces.md`: the consumer interfaces, the step order, the
   consolidate job shape (payload `{}`, serial key `consolidate`, `DedupePendingOrRunning`) and the retention
   defaults (7 d operations, 30 d events).
@@ -98,7 +113,13 @@ Gates:
   re-claimed elsewhere can land on the other worker's row, because Complete and Fail carry no worker
   token. The runner narrows this to the race between `Alive` and `Fail`: lost jobs are never requeued,
   and a row `Alive` shows as re-claimed is left alone.
-- **Shutdown counts as an attempt.** A job released on shutdown still gets attempt+1 (`Fail` with retryAt
-  always increments). Only the cap check is skipped for that call.
+- **A shutdown release uses up an attempt** (orchestrator ruling H3: documented, no CCR). The frozen
+  `Fail(retryAt)` always increments the attempt, so a job cut off by a shutdown is charged an attempt.
+  Repeated deploys during a long job can exhaust its 3 attempts, and a later failure or reclaim then fails
+  it for good. The runner never fails a job for good on the release itself. The 30 s shutdown grace makes
+  such releases rare.
+- **Skip-retry for consolidate is still possible on retain-driven rows.** Retains enqueue consolidate with
+  `DedupePending`, so a retain that commits during a failing consolidate makes that run skip its retry and
+  end FAILED. That is the spec's rule, and no work is lost.
 - **Lint toolchain.** `golangci-lint` on the default PATH here resolves to a v1 binary in `~/go/bin`. The
   gates were run with the v2 binary first on PATH: `PATH="/opt/homebrew/bin:$PATH" make lint`.

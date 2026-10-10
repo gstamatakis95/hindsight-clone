@@ -312,8 +312,18 @@ func (f *fakeOps) Enqueue(_ context.Context, j port.Job) (port.OperationID, bool
 func (f *fakeOps) op(r *fakeRow) domain.Operation {
 	return domain.Operation{
 		ID: r.job.ID, Bank: r.job.Bank, Kind: r.job.Kind, Status: r.status, SerialKey: r.job.SerialKey,
-		Error: r.errMsg, Attempts: r.job.Attempt, WorkerID: r.worker,
+		Error: r.errMsg, Attempts: r.job.Attempt, WorkerID: r.worker, NextRunAt: &r.job.RunAt,
 	}
+}
+
+func (f *fakeOps) Get(_ context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.rows[id]
+	if r == nil || r.job.Bank != b {
+		return domain.Operation{}, domain.ErrNotFound
+	}
+	return f.op(r), nil
 }
 
 func (f *fakeOps) Cancel(_ context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
@@ -399,7 +409,20 @@ func (s *fakeStore) InTx(_ context.Context, fn func(port.Tx) error) error {
 	if s.txErr != nil {
 		return s.txErr
 	}
-	return fn(&fakeTx{s: s})
+	s.ops.mu.Lock()
+	before := s.ops.next
+	s.ops.mu.Unlock()
+	err := fn(&fakeTx{s: s})
+	if err != nil { // roll back the rows this tx inserted (tests don't run rolling-back txs concurrently)
+		s.ops.mu.Lock()
+		for id, r := range s.ops.rows {
+			if r.created > before {
+				delete(s.ops.rows, id)
+			}
+		}
+		s.ops.mu.Unlock()
+	}
+	return err
 }
 
 func (s *fakeStore) Read() port.Reader { return nil }
@@ -490,6 +513,9 @@ func testRunner(c port.Claimer, clock port.Clock, cfg RunnerConfig) *Runner {
 	}
 	if cfg.HeartbeatInterval == 0 {
 		cfg.HeartbeatInterval = time.Hour
+	}
+	if cfg.ShutdownGrace == 0 {
+		cfg.ShutdownGrace = -1 // cancel at once, so test cleanup doesn't wait
 	}
 	return NewRunner(c, cfg)
 }

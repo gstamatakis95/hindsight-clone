@@ -31,7 +31,10 @@ Mental-model payloads and cron semantics belong to WP-12.
     trap: with `DedupePending`, a tick during a slow, failing run would queue a fresh job, so the
     failing run would skip its retry (decision 500) and end FAILED. Backoff would reset on every
     failure and each failure would emit an event. Jobs enqueued by retain, rederive and similar paths
-    keep the spec's `DedupePending`.
+    keep the spec's `DedupePending`. So the trap still exists for those: a retain that commits during
+    a failing consolidate queues a due automatic consolidate, and the failing run then ends FAILED
+    instead of retrying. That is the spec's own rule ("skipping the retry if another consolidation is
+    already pending"). No work is lost, because the queued job picks up the same units.
 
   Concurrent ticks therefore insert at most one job per bank, and that is what the acceptance test
   checks. `ErrBankDeleting` and `ErrNotFound` skip the bank. Any other error is collected without

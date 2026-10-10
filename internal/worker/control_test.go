@@ -6,6 +6,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/port"
 	"testing"
+	"time"
 )
 
 func TestCheckpointReport(t *testing.T) {
@@ -82,17 +83,46 @@ func TestOperationControl(t *testing.T) {
 
 func TestPendingChecker(t *testing.T) {
 	bg := context.Background()
-	ops := newOps(newClock())
-	pc := NewPendingChecker(&fakeStore{ops: ops})
+	clock := newClock()
+	ops := newOps(clock)
+	pc := NewPendingChecker(&fakeStore{ops: ops}, clock)
+	parked := consolidateJob(bankB)
+	parked.RunAt = clock.Now().Add(time.Hour)
 	ops.add(consolidateJob(bankA))
-	if ok, err := pc.HasPending(bg, bankA, domain.OperationKindConsolidate); err != nil || !ok {
-		t.Errorf("bank A = %v, %v; want pending", ok, err)
+	ops.add(parked)
+	ops.add(port.Job{
+		Bank: bankC, Kind: domain.OperationKindConsolidate, SerialKey: consolidateSerialKey,
+		Overrides: &domain.BankConfig{},
+	}) // manual, with overrides: not joinable
+	ops.deleting[port.BankRef{Tenant: "t9", Bank: "gone"}] = true
+	rows := ops.count(func(*fakeRow) bool { return true })
+	tests := []struct {
+		bank port.BankRef
+		want bool
+	}{
+		{bankA, true},  // due automatic consolidate
+		{bankB, false}, // parked
+		{bankC, false}, // not joinable
+		{port.BankRef{Tenant: "t9", Bank: "x"}, false},
+		{port.BankRef{Tenant: "t9", Bank: "gone"}, false}, // tombstoned
 	}
-	if ok, err := pc.HasPending(bg, bankB, domain.OperationKindConsolidate); err != nil || ok {
-		t.Errorf("bank B = %v, %v; want none", ok, err)
+	for _, tt := range tests {
+		if ok, err := pc.HasPending(bg, tt.bank, domain.OperationKindConsolidate); err != nil || ok != tt.want {
+			t.Errorf("bank %v = %v, %v; want %v", tt.bank, ok, err, tt.want)
+		}
 	}
-	broken := NewPendingChecker(&fakeStore{ops: ops, txErr: domain.ErrUnavailable})
+	if n := ops.count(func(*fakeRow) bool { return true }); n != rows {
+		t.Errorf("probe left %d rows, want %d (always rolled back)", n, rows)
+	}
+	clock.Advance(2 * time.Hour)
+	if ok, _ := pc.HasPending(bg, bankB, domain.OperationKindConsolidate); !ok {
+		t.Error("a parked consolidate that became due must count")
+	}
+	broken := NewPendingChecker(&fakeStore{ops: ops, txErr: domain.ErrUnavailable}, clock)
 	if _, err := broken.HasPending(bg, bankA, domain.OperationKindConsolidate); !errors.Is(err, domain.ErrUnavailable) {
 		t.Errorf("broken store = %v, want ErrUnavailable", err)
+	}
+	if _, err := pc.HasPending(bg, bankA, domain.OperationKindRetainDocument); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("other kind = %v, want ErrInvalidArgument", err)
 	}
 }

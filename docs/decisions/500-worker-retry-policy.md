@@ -27,11 +27,22 @@ Decision 012 R10' says the runner owns the attempt cap: at attempt+1 >= MaxAttem
     to CANCELLED.
 - **A panicking handler** is recovered and treated as a transient failure, so it gets a retry within the
   cap.
-- **Skipping the consolidate retry.** If a failed consolidate would retry, the runner first checks for a
-  PENDING consolidate in the bank (`PendingChecker`, which uses `Queue.List`). If one exists, it calls
-  `Fail(cause, nil)`, so the row ends FAILED with its error and one OPERATION_FAILED event. The pending
-  job covers the same units, because they are still unstamped. If the lookup fails, the retry goes
-  ahead.
+- **Skipping the consolidate retry** (amended in review round 1, M2). If a failed consolidate would
+  retry, the runner first checks for another consolidate in the bank that is:
+  - PENDING and joinable, meaning automatic: no overrides and no scopes;
+  - due now.
+
+  Parked rows and manual or scoped consolidates don't count, because they may not cover the same units
+  soon.
+
+  `PendingChecker` finds such a row with a probe transaction that is always rolled back:
+  - a `DedupePending` Enqueue of an automatic consolidate joins exactly the joinable pending rows
+    (`domain.Operation` exposes neither joinability nor scopes);
+  - `Queue.Get(id).NextRunAt` then decides whether the joined row is due.
+
+  If one exists, the runner calls `Fail(cause, nil)`, so the row ends FAILED with its error and one
+  OPERATION_FAILED event. The pending job covers the same units, because they are still unstamped. If
+  the probe fails, the retry goes ahead.
 
 ## Alternatives
 - End a skipped consolidate as COMPLETED or CANCELLED. Rejected: it did fail, and recording it any other
