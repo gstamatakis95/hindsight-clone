@@ -22,10 +22,10 @@ var _ timex.TimeNormalizer = &TimeNormalizer{}
 //
 //		// make and configure a mocked timex.TimeNormalizer
 //		mockedTimeNormalizer := &TimeNormalizer{
-//			NormalizeFunc: func(ctx context.Context, f *domain.ExtractedFact, ref time.Time) error {
+//			NormalizeFunc: func(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact, ref time.Time) error {
 //				panic("mock out the Normalize method")
 //			},
-//			QueryWindowFunc: func(ctx context.Context, query string, ref time.Time) (*domain.TimeWindow, error) {
+//			QueryWindowFunc: func(ctx context.Context, cfg domain.BankConfig, query string, ref time.Time) (*domain.TimeWindow, error) {
 //				panic("mock out the QueryWindow method")
 //			},
 //		}
@@ -36,10 +36,10 @@ var _ timex.TimeNormalizer = &TimeNormalizer{}
 //	}
 type TimeNormalizer struct {
 	// NormalizeFunc mocks the Normalize method.
-	NormalizeFunc func(ctx context.Context, f *domain.ExtractedFact, ref time.Time) error
+	NormalizeFunc func(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact, ref time.Time) error
 
 	// QueryWindowFunc mocks the QueryWindow method.
-	QueryWindowFunc func(ctx context.Context, query string, ref time.Time) (*domain.TimeWindow, error)
+	QueryWindowFunc func(ctx context.Context, cfg domain.BankConfig, query string, ref time.Time) (*domain.TimeWindow, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -47,6 +47,8 @@ type TimeNormalizer struct {
 		Normalize []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
+			// Cfg is the cfg argument value.
+			Cfg domain.BankConfig
 			// F is the f argument value.
 			F *domain.ExtractedFact
 			// Ref is the ref argument value.
@@ -56,6 +58,8 @@ type TimeNormalizer struct {
 		QueryWindow []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
+			// Cfg is the cfg argument value.
+			Cfg domain.BankConfig
 			// Query is the query argument value.
 			Query string
 			// Ref is the ref argument value.
@@ -67,23 +71,25 @@ type TimeNormalizer struct {
 }
 
 // Normalize calls NormalizeFunc.
-func (mock *TimeNormalizer) Normalize(ctx context.Context, f *domain.ExtractedFact, ref time.Time) error {
+func (mock *TimeNormalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact, ref time.Time) error {
 	if mock.NormalizeFunc == nil {
 		panic("TimeNormalizer.NormalizeFunc: method is nil but TimeNormalizer.Normalize was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
+		Cfg domain.BankConfig
 		F   *domain.ExtractedFact
 		Ref time.Time
 	}{
 		Ctx: ctx,
+		Cfg: cfg,
 		F:   f,
 		Ref: ref,
 	}
 	mock.lockNormalize.Lock()
 	mock.calls.Normalize = append(mock.calls.Normalize, callInfo)
 	mock.lockNormalize.Unlock()
-	return mock.NormalizeFunc(ctx, f, ref)
+	return mock.NormalizeFunc(ctx, cfg, f, ref)
 }
 
 // NormalizeCalls gets all the calls that were made to Normalize.
@@ -92,11 +98,13 @@ func (mock *TimeNormalizer) Normalize(ctx context.Context, f *domain.ExtractedFa
 //	len(mockedTimeNormalizer.NormalizeCalls())
 func (mock *TimeNormalizer) NormalizeCalls() []struct {
 	Ctx context.Context
+	Cfg domain.BankConfig
 	F   *domain.ExtractedFact
 	Ref time.Time
 } {
 	var calls []struct {
 		Ctx context.Context
+		Cfg domain.BankConfig
 		F   *domain.ExtractedFact
 		Ref time.Time
 	}
@@ -107,23 +115,25 @@ func (mock *TimeNormalizer) NormalizeCalls() []struct {
 }
 
 // QueryWindow calls QueryWindowFunc.
-func (mock *TimeNormalizer) QueryWindow(ctx context.Context, query string, ref time.Time) (*domain.TimeWindow, error) {
+func (mock *TimeNormalizer) QueryWindow(ctx context.Context, cfg domain.BankConfig, query string, ref time.Time) (*domain.TimeWindow, error) {
 	if mock.QueryWindowFunc == nil {
 		panic("TimeNormalizer.QueryWindowFunc: method is nil but TimeNormalizer.QueryWindow was just called")
 	}
 	callInfo := struct {
 		Ctx   context.Context
+		Cfg   domain.BankConfig
 		Query string
 		Ref   time.Time
 	}{
 		Ctx:   ctx,
+		Cfg:   cfg,
 		Query: query,
 		Ref:   ref,
 	}
 	mock.lockQueryWindow.Lock()
 	mock.calls.QueryWindow = append(mock.calls.QueryWindow, callInfo)
 	mock.lockQueryWindow.Unlock()
-	return mock.QueryWindowFunc(ctx, query, ref)
+	return mock.QueryWindowFunc(ctx, cfg, query, ref)
 }
 
 // QueryWindowCalls gets all the calls that were made to QueryWindow.
@@ -132,11 +142,13 @@ func (mock *TimeNormalizer) QueryWindow(ctx context.Context, query string, ref t
 //	len(mockedTimeNormalizer.QueryWindowCalls())
 func (mock *TimeNormalizer) QueryWindowCalls() []struct {
 	Ctx   context.Context
+	Cfg   domain.BankConfig
 	Query string
 	Ref   time.Time
 } {
 	var calls []struct {
 		Ctx   context.Context
+		Cfg   domain.BankConfig
 		Query string
 		Ref   time.Time
 	}
