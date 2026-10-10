@@ -27,7 +27,7 @@ because v0.24.0 raises the `go` line to 1.26.
 ## Acceptance tests (all pass, `go test -race`)
 | Card item | Test |
 |---|---|
-| Schema retry | `TestStructuredRetriesWithValidationError`, `TestStructuredGivesUpAfterMaxRetries`, `TestStructuredRequestBody` |
+| Schema retry | `TestStructuredRetriesWithValidationError`, `TestStructuredGivesUpAfterMaxRetries`, `TestStructuredRequestBody`, `TestStructuredFailedDecodeLeavesNoPartialFields` |
 | Tool calls | `TestChatToolCalls`, `TestChatMalformedToolArgumentsRoundTrip` |
 | Timeouts | `TestTimeoutHonoursBindingTimeoutMS` (per-attempt timeout retried; caller deadline not retried) |
 | Transient vs permanent errors | `TestTransientErrorsRetry`, `TestClientErrorNotRetried` |
@@ -75,7 +75,6 @@ terminate it.
   port.Embedder/Reranker return no usage.
 - **JSON Schema keywords.** Keywords outside the subset in decision 303 are ignored, notably `pattern`,
   `format` and tuple `items`.
-- **Local lint toolchain.** `~/go/bin/golangci-lint` is v1 built with go1.25, which comes before the v2.14
-  binary in `/opt/homebrew/bin` on PATH, so a plain `make lint` fails to load the config. The lint gates
-  were run with the v2 binary directly: golangci-lint, ifacedoc, buf lint, buf breaking against
-  contracts-v1, and ruff.
+- **Local lint toolchain (environment, not code).** `~/go/bin/golangci-lint` is v1 built with go1.25, and it
+  comes before the v2.14 binary in `/opt/homebrew/bin` on PATH, so a plain `make lint` fails to load the
+  config. With `/opt/homebrew/bin` first on PATH, `make lint BREAKING_AGAINST=contracts-v1` passes.

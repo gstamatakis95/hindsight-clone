@@ -7,6 +7,7 @@ import (
 	"maps"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"reflect"
 	"regexp"
 )
 
@@ -214,6 +215,12 @@ func decodeValid(sch *schema, content string, out any) error {
 	}
 	if out == nil {
 		return nil
+	}
+	// Decode into a scratch value first, so a failed attempt never leaves partial fields in out.
+	if t := reflect.TypeOf(out); t.Kind() == reflect.Pointer && t.Elem().Kind() != reflect.Interface {
+		if err := json.Unmarshal([]byte(content), reflect.New(t.Elem()).Interface()); err != nil {
+			return fmt.Errorf("response does not decode into the expected type: %w", err)
+		}
 	}
 	if err := json.Unmarshal([]byte(content), out); err != nil {
 		return fmt.Errorf("response does not decode into the expected type: %w", err)

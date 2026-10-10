@@ -310,3 +310,31 @@ func TestStructuredRejectsMissingSchema(t *testing.T) {
 		t.Errorf("got %d requests, want none", n)
 	}
 }
+
+func TestStructuredFailedDecodeLeavesNoPartialFields(t *testing.T) {
+	g := newFakeGateway(t)
+	g.chat = func(n int, _ map[string]any) (int, any) {
+		if n == 0 { // valid per schema, but 1.5 does not decode into an int
+			return http.StatusOK, chatReply(`{"answer":"stale","n":1.5}`, 1, 1)
+		}
+		return http.StatusOK, chatReply(`{"answer":"ok"}`, 1, 1)
+	}
+	b := binding("m")
+	b.MaxRetries = ptr(1)
+	req := structuredReq(b)
+	req.Schema = json.RawMessage(`{"type":"object","required":["answer"],` +
+		`"properties":{"answer":{"type":"string"},"n":{"type":"number"}}}`)
+	var out struct {
+		Answer string `json:"answer"`
+		N      int    `json:"n"`
+	}
+	if _, err := g.client(gateway.Config{}).Structured(t.Context(), req, &out); err != nil {
+		t.Fatalf("Structured: %v", err)
+	}
+	if out.Answer != "ok" || out.N != 0 {
+		t.Errorf("out = %+v, want only the accepted answer's fields", out)
+	}
+	if n := len(g.bodies("chat")); n != 2 {
+		t.Errorf("got %d requests, want 2", n)
+	}
+}
