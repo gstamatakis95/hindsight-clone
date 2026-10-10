@@ -184,3 +184,6 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   800-1399). CCR process for this phase: engines declare consumer interfaces and file CCRs for missing port
   methods; the orchestrator batches approvals; a follow-up package (WP-15) implements them in the fake,
   Postgres and porttest before WP-14 wires everything.
+- 2026-10-10 WP-09 handed in (c4f22a2); reviewer spawned. CCR WP-09-1 (Reader: BankTags, GetChunks,
+  EntityStates, StaleScopes) PENDING, held for the Phase 2 CCR batch. WP-14: wire a tokenizer for the recall
+  TokenCounter; Recall must not be called inside Store.InTx.
