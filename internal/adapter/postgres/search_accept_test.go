@@ -116,8 +116,10 @@ func explainVector(ctx context.Context, t *testing.T, pool *pgxpool.Pool, q []fl
 		if err != nil {
 			return fmt.Errorf("explain query: %w", err)
 		}
-		plan, err = pgx.CollectRows(rows, pgx.RowTo[string])
-		return fmt.Errorf("explain query: %w", err)
+		if plan, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+			return fmt.Errorf("explain rows: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("explain: %v", err)
