@@ -39,6 +39,7 @@ func TestServerDefaults(t *testing.T) {
 		"temporal link cap 20":  *cfg.Retain.TemporalLinkCap == 20,
 		"budget mid 300":        *cfg.Recall.BudgetMid == 300,
 		"rrf 60":                *cfg.Recall.RRFK == 60,
+		"rerank on when bound":  *cfg.Recall.Rerank,
 		"budget clamp 20..2000": *cfg.Recall.BudgetMin == 20 && *cfg.Recall.BudgetMax == 2000,
 		"max iterations 10":     *cfg.Reflect.MaxIterations == 10,
 		"answer 4096":           *cfg.Reflect.MaxAnswerTokens == 4096,
@@ -64,5 +65,8 @@ func TestServerDefaultsNoModels(t *testing.T) {
 	}
 	if _, ok := cfg.Binding(domain.ModelSlotRerank); ok {
 		t.Fatal("rerank bound without MEMD_MODEL_RERANK")
+	}
+	if cfg.Recall.Rerank == nil || *cfg.Recall.Rerank {
+		t.Fatal("recall.rerank must default to false when RERANK is unbound")
 	}
 }

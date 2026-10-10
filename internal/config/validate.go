@@ -91,7 +91,8 @@ var strategySlots = []domain.ModelSlot{domain.ModelSlotConsolidate, domain.Model
 // ValidateOverrides rejects, with domain.ErrInvalidArgument, any field the RPC can't use (for example
 // retain_mission on Recall), so an override is never silently ignored. Everywhere it also rejects a model
 // binding for EMBED (server-wide), an unspecified or unknown slot, a slot bound twice in one level, a binding
-// with no model name, and a consolidation strategy binding a slot other than CONSOLIDATE / DEDUP_CHECK.
+// with no model name, a consolidation strategy binding a slot other than CONSOLIDATE / DEDUP_CHECK, and a
+// disposition trait outside 0..5.
 // An unknown rpc is domain.ErrInvalidArgument too.
 func ValidateOverrides(rpc string, o domain.BankConfig) error {
 	al, ok := allowlists[rpc]
@@ -106,6 +107,9 @@ func ValidateOverrides(rpc string, o domain.BankConfig) error {
 			return fmt.Errorf("%w: %s overrides: consolidation_strategies[%d].models: %w",
 				domain.ErrInvalidArgument, rpc, i, err)
 		}
+	}
+	if err := checkDisposition(o.Disposition); err != nil {
+		return fmt.Errorf("%w: %s overrides: %w", domain.ErrInvalidArgument, rpc, err)
 	}
 	if al.all {
 		return nil
@@ -154,6 +158,19 @@ func (a allowlist) allowsSlot(s domain.ModelSlot) bool {
 		}
 	}
 	return false
+}
+
+// checkDisposition requires each trait in 0..5 (0 = unset, inherit; 1-5 per the spec).
+func checkDisposition(d *domain.Disposition) error {
+	if d == nil {
+		return nil
+	}
+	for name, v := range map[string]int{"skepticism": d.Skepticism, "literalism": d.Literalism, "empathy": d.Empathy} {
+		if v < 0 || v > 5 {
+			return fmt.Errorf("disposition.%s = %d, want 1-5 (0 = unset)", name, v)
+		}
+	}
+	return nil
 }
 
 // checkSlots validates one level's slot bindings against a.

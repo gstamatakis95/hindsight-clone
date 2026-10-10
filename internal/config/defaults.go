@@ -29,7 +29,8 @@ var (
 // ServerDefaults is the server level of the config hierarchy: every default the spec states, plus the
 // model bindings from the environment (EnvModel for every LLM slot, EnvModelPrefix+SLOT per slot).
 // Knobs whose default the spec leaves open stay unset; the engine that reads them owns that default.
-// A slot with no model in the environment stays unbound, and port.ModelRouter rejects calls on it.
+// A slot with no model in the environment stays unbound, and port.ModelRouter rejects calls on it;
+// without a RERANK binding, recall.rerank defaults to false.
 func ServerDefaults(env func(string) string) (domain.BankConfig, error) {
 	cfg := specDefaults()
 	def := strings.TrimSpace(env(EnvModel))
@@ -41,6 +42,11 @@ func ServerDefaults(env func(string) string) (domain.BankConfig, error) {
 		if model != "" {
 			cfg.Models = append(cfg.Models, domain.SlotBinding{Slot: s, Binding: domain.ModelBinding{Model: model}})
 		}
+	}
+	if _, ok := cfg.Binding(domain.ModelSlotRerank); !ok {
+		// No reranker in this deployment: recall skips the cross-encoder instead of failing on an unbound
+		// slot. A level that binds RERANK must also set recall.rerank = true.
+		cfg.Recall.Rerank = ptr(false)
 	}
 	if err := ValidateOverrides(RPCBankConfig, cfg); err != nil {
 		return domain.BankConfig{}, fmt.Errorf("config: server defaults: %w", err)

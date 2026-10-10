@@ -225,6 +225,19 @@ func TestValidateOverridesExamples(t *testing.T) {
 	}
 }
 
+func TestValidateOverridesDisposition(t *testing.T) {
+	for _, d := range []domain.Disposition{{Skepticism: 6}, {Literalism: -1}, {Empathy: 9}} {
+		err := ValidateOverrides(RPCReflect, domain.BankConfig{Disposition: &d})
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("%+v accepted", d)
+		}
+	}
+	ok := domain.Disposition{Skepticism: 1, Literalism: 5}
+	if err := ValidateOverrides(RPCBankConfig, domain.BankConfig{Disposition: &ok}); err != nil {
+		t.Fatalf("valid disposition rejected: %v", err)
+	}
+}
+
 func TestPreviewRPC(t *testing.T) {
 	cases := map[domain.PromptOperation]string{
 		domain.PromptOperationRetain:           RPCRetain,

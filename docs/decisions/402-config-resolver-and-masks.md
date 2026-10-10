@@ -34,6 +34,10 @@ through `Tx.Banks()`. The spec also leaves open several things this package need
     of the inherited list (decision 010).
   - An empty mask merges patch's set fields over base (the usual proto convention).
   - Nested messages left with no set field are pruned to nil.
+  - `models` is a repeated field, so it follows the standard FieldMask rule for repeated fields: a
+    `models` mask replaces the level's whole binding list with patch's (an empty patch removes every
+    binding at that level). It does not merge per slot. To change one slot, send the full list you want
+    at that level. Per-slot merging happens only across levels, in `Merge`.
   - Unknown paths are INVALID_ARGUMENT.
 - **Reset, `config.ResetPaths(cfg, paths)`:** removes the overrides at those paths, so they inherit again.
   No paths resets everything (ResetBankConfig).
@@ -46,6 +50,7 @@ through `Tx.Banks()`. The spec also leaves open several things this package need
   - mental models: debounce 30, no interval floor, history 50, agentic, full;
   - observation scopes: combined, 15 combinations;
   - extraction mode concise; auto consolidation, observations and free-form entities on.
+  - `ValidateOverrides` also rejects disposition traits outside 0..5 (0 = unset).
 
   Knobs whose default the spec leaves open stay unset; the engine that reads a knob owns its default.
 
@@ -54,6 +59,8 @@ through `Tx.Banks()`. The spec also leaves open several things this package need
   - `MEMD_MODEL_<SLOT>` (for example `MEMD_MODEL_REFLECT` or `MEMD_MODEL_RERANK`) binds one slot.
   - RERANK is bound only by `MEMD_MODEL_RERANK`.
   - An unbound slot fails at `ModelRouter.Resolve` with INVALID_ARGUMENT.
+  - When RERANK is unbound, `recall.rerank` defaults to false, so recall skips the cross-encoder instead
+    of failing. A tenant or bank that binds RERANK must also set `recall.rerank = true`.
 
   The binary's own env/flag config (WP-06/WP-14) decides whether a missing model fails at startup.
 
