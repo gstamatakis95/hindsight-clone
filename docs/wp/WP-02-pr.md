@@ -43,6 +43,9 @@ Carried-forward items:
 - Tenant isolation on every write port: `TestTenantIsolationWritePorts`, `TestTenantIsolationBankWrites`,
   and the contract TenantIsolation cases.
 - Refresh with DedupeNone is treated as Pending: the contract RefreshDedupeNone case.
+- Enqueue/Upgrade race (a claim never lands between a join and its Upgrade): `TestEnqueueUpgradeRace`.
+- A Tx used after its InTx returned panics instead of writing into committed state:
+  `TestTxUnusableAfterCommit`.
 
 Gates: `make gen` (no diff), `make lint BREAKING_AGAINST=contracts-v1` (0 issues), and `make test`
 (`go test -race ./...`) all pass. `go test -race -count=3 ./internal/fake/` is stable.
@@ -66,5 +69,8 @@ Gates: `make gen` (no diff), `make lint BREAKING_AGAINST=contracts-v1` (0 issues
   InTx deadlocks until its ctx ends (documented).
 - Search scores approximate pg_search, pgvector and pg_trgm. Order and set semantics match the contract
   suites, but absolute keyword and temporal scores differ from Postgres.
+- When WP-01 adds new `Run*` entry points to internal/porttest, wire them into
+  `internal/fake/store_test.go` too. Today the fakes run all four: Store, Seq, Queue and Blob.
+- The fake does not check that ids are UUIDs. Postgres's uuid columns would reject an id like "u1".
 - Archive and observation-version and audit rows have no read port, so they are stored but not
   inspectable beyond DeleteBatch.

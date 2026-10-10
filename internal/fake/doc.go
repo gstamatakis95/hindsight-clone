@@ -22,7 +22,10 @@
 // Read() and Claimer.Alive read the latest committed snapshot without the lock and never block. Every
 // other Claimer method is its own short transaction. Consequently an InTx callback must not open another
 // InTx or call Claim, Heartbeat, Progress, Complete, Fail or ReclaimStale: it would wait for its own lock
-// until ctx ends. (Engines must not do that anyway: no transaction spans another call.)
+// until ctx ends. (Engines must not do that anyway: no transaction spans another call.) A Tx (or a repo
+// taken from it) used after its InTx returned panics, like a closed Postgres transaction errors.
+//
+// Ids are not checked to be UUIDs (Postgres's uuid columns would reject "u1"); tests may use readable ids.
 //
 // All times the store writes or compares (created_at, run_at, heartbeats, finished_at, event times,
 // document extracted_at) come from the Clock passed to NewStore, read once per transaction like

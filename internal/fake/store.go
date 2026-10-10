@@ -75,6 +75,8 @@ func (s *Store) write(ctx context.Context, fn func(*tx) error) error {
 	}
 	defer func() { <-s.lock }()
 	t := &tx{st: s.cur.Load().clone(), now: s.clock.Now(), seqs: map[port.BankRef]int64{}}
+	// A Tx used after its callback returned would write into the published snapshot; make it panic instead.
+	defer func() { t.st = nil }()
 	if err := fn(t); err != nil {
 		return err
 	}
