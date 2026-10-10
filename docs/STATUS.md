@@ -11,7 +11,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-01 | Postgres adapter | in progress | wp/WP-01-postgres | — | — | — | — |
 | WP-02 | Fakes | merged | wp/WP-02-fakes | 0d2775e | — | — | 2 cosmetic LOW |
 | WP-03 | Gateway and S3 adapters | merged (8dd2090 + follow-up) | wp/WP-03-gateway-s3 | 20fab3d | — | — | 5 LOW accepted (see log) |
-| WP-04 | Config, routing, time, prompts | merged (756d945); follow-up in progress | wp/WP-04-config-prompts | bd81d61 | — | WP-04-1 approved + applied | follow-up: Normalize never fails retain; non-nullable default schema |
+| WP-04 | Config, routing, time, prompts | merged (756d945 + follow-up) | wp/WP-04-config-prompts | fb9fa38 | — | WP-04-1 approved + applied | — |
 | WP-05 | Worker runtime | merged (08d057d) | wp/WP-05-worker-runtime | 7afa08e | — | — | H3 attempt-charge gap; LOWs in log |
 | WP-06 | Server shell | merged | wp/WP-06-server-shell | 0f2815d | — | — | jsonToStruct non-object (LOW) |
 | WP-07 | Eval harness | merged (f5da652 + follow-up) | wp/WP-07-eval | 7865932 | — | WP-07-1 approved + applied | 1 LOW accepted (see log) |
@@ -163,3 +163,5 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   WP-04) are now met. Follow-up sent to the WP-04 worker: Normalize must never fail a retain on a TIME_PARSE
   error; the default extraction schema is non-nullable.
 - 2026-10-10 user checkpoint: Phase 2 (WP-08..13) awaits the user's go-ahead.
+- 2026-10-10 WP-04 follow-up fb9fa38 checked by the orchestrator and merged; gates pass. WP-04 done. Note for WP-08:
+  get the extraction schema from prompts.ExtractSchema(name, data.OptionalDimensions), not Schema.
