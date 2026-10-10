@@ -14,7 +14,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
 | WP-05 | Worker runtime | in progress | wp/WP-05-worker-runtime | — | — | — | — |
 | WP-06 | Server shell | in progress | wp/WP-06-server-shell | — | — | — | — |
-| WP-07 | Eval harness | merged (f5da652) | wp/WP-07-eval | 2b33aa0 | — | WP-07-1 approved + applied | follow-up: usage, timeouts, recall-mode N/A, fixture naming |
+| WP-07 | Eval harness | merged (f5da652 + follow-up) | wp/WP-07-eval | 7865932 | — | WP-07-1 approved + applied | 1 LOW accepted (see log) |
 | WP-08 | Retain engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-09 | Recall engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-10 | Consolidation engine | waiting | — | — | WP-02, WP-04 | — | — |
@@ -97,3 +97,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-03 follow-up 20fab3d (usage sum on no-choices, positive defaults, single Extra copy) checked by
   the orchestrator and merged; lint and gateway tests pass. WP-03 done.
 - 2026-10-10 WP-02 handed in (8bf5ef7, rebased on main); reviewer spawned. Fakes pass all 4 porttest suites.
+- 2026-10-10 WP-07 follow-up 7865932 merged (eval-only scope checked); lint, eval tests and golden-stub run pass. WP-07 done.
+- 2026-10-10 PAUSED on the user's usage limit. In flight at pause: WP-01, WP-04, WP-06 workers; WP-02 and WP-05
+  reviewers. Their worktrees under .claude/worktrees/ keep committed work. Next: collect the reviews, merge,
+  then ask the user before Phase 2.
