@@ -55,7 +55,8 @@ Branch `wp/WP-09-recall`, rebased on main (99fbdd1). `make gen` leaves no diff. 
 | Golden: the budget clamp | `TestBudgetLimit` |
 | Golden: the packing edge case | `TestPackSkipsOversized`, `TestPackFloorWhenNothingFits`, `TestTruncateTokens` |
 | Golden: include budgets reported as truncated | `TestIncludeChunksTruncated`, `TestIncludeSourceFactsTruncated`, `TestRecallIncludes` |
-| No-cue queries make no TIME_PARSE call | `TestRecallNoCueNoTimeParse` (real timex, unscripted fake LLM, 0 calls); `TestRecallExplicitWindowNoTimeParse` |
+| No-cue queries make no TIME_PARSE call | `TestRecallNoCueNoTimeParse` (real timex, unscripted fake LLM, 0 calls); `TestRecallExplicitWindowNoTimeParse`; positive control `TestRecallCueFallbackCallsTimeParse` (an unresolvable cue makes exactly 1 call and degrades to no window) |
+| Seq snapshot also bounds hydration (mental-model refreshes) | `TestRecallSeqSnapshot` |
 | Rerank top N; rerank off | `TestRecallRerankTopN`, `TestRecallRerankDisabledUsesRRF` |
 | Arms, graph hop, temporal only with a window, enabled_strategies, trace | `TestRecallArmsAndTrace` |
 | Unknown bank = NOT_FOUND (before any embed call); blank query = INVALID_ARGUMENT | `TestRecallUnknownBank` |

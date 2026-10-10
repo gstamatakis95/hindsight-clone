@@ -177,7 +177,7 @@ func (r *recaller) rank(ctx context.Context, q *ParsedQuery, fused []Candidate, 
 	if set.rerankMax > 0 && len(top) > set.rerankMax {
 		top = top[:set.rerankMax]
 	}
-	hydrated, err := r.hydrate(ctx, q.Bank, top)
+	hydrated, err := r.hydrate(ctx, q.Bank, q.Seq, top)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -197,8 +197,11 @@ func (r *recaller) rank(ctx context.Context, q *ParsedQuery, fused []Candidate, 
 	return kept, reranked, nil
 }
 
-// hydrate attaches each candidate's unit, keeping fused order and dropping ids that no longer resolve.
-func (r *recaller) hydrate(ctx context.Context, b port.BankRef, cs []Candidate) ([]Candidate, error) {
+// hydrate attaches each candidate's unit, keeping fused order and dropping ids that no longer resolve or
+// whose unit was rewritten outside seq since the arm saw it (a refresh's snapshot stays at or below S).
+func (r *recaller) hydrate(ctx context.Context, b port.BankRef, seq port.SeqRange, cs []Candidate) (
+	[]Candidate, error,
+) {
 	if len(cs) == 0 {
 		return nil, nil
 	}
@@ -212,7 +215,9 @@ func (r *recaller) hydrate(ctx context.Context, b port.BankRef, cs []Candidate) 
 	}
 	byID := make(map[port.UnitID]*domain.Unit, len(units))
 	for i := range units {
-		byID[units[i].ID] = &units[i]
+		if seq.Contains(units[i].Seq) {
+			byID[units[i].ID] = &units[i]
+		}
 	}
 	out := make([]Candidate, 0, len(cs))
 	for _, c := range cs {

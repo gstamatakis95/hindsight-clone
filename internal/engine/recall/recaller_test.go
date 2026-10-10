@@ -361,3 +361,35 @@ func TestRecallFusionOrderGolden(t *testing.T) {
 		t.Fatalf("scores of b = %+v", s)
 	}
 }
+
+func TestRecallCueFallbackCallsTimeParse(t *testing.T) {
+	// Positive control for the no-cue test: a cue the rules can't resolve reaches TIME_PARSE once; the
+	// unscripted call fails and recall degrades to no window instead of failing.
+	e := newEnv(t, envOpts{})
+	e.add(t, fact("u1", "holiday dinner with family"))
+	res := e.recall(t, RecallRequest{Query: "what did we do around the holidays?", Trace: true})
+	if n := len(e.llm.CallsFor(domain.ModelSlotTimeParse, "time_parse_system")); n != 1 {
+		t.Fatalf("TIME_PARSE calls = %d, want 1 (all calls: %d)", n, len(e.llm.Calls()))
+	}
+	if res.Trace.Window != nil || !slices.Contains(ids(res), "u1") {
+		t.Fatalf("window = %v results = %v", res.Trace.Window, ids(res))
+	}
+}
+
+func TestRecallSeqSnapshot(t *testing.T) {
+	sem := arm(ArmSemantic, "old", "late")
+	e := newEnv(t, envOpts{arms: []Retriever{sem}})
+	e.add(t, fact("old", "early fact"))
+	snapshot, err := e.store.Read().BankSeq(context.Background(), testBank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.add(t, fact("late", "late fact")) // written after the snapshot; the stub arm still returns it
+	res := e.recall(t, RecallRequest{Query: "fact", Seq: port.SeqUpTo(0, snapshot)})
+	if got := ids(res); !slices.Equal(got, []string{"old"}) {
+		t.Fatalf("snapshot results = %v, want [old]", got)
+	}
+	if got := sortedIDs(e.recall(t, RecallRequest{Query: "fact"})); !slices.Equal(got, []string{"late", "old"}) {
+		t.Fatalf("unbounded results = %v", got)
+	}
+}
