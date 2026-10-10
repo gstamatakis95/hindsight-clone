@@ -20,8 +20,9 @@ type Rederiver interface {
 type RederivePayload struct {
 	// UnitID is the edited or restored unit.
 	UnitID port.UnitID `json:"unit_id"`
-	// Entities replaces the unit's entity names; nil (absent) = re-resolve the unit's current names.
-	Entities []string `json:"entities,omitempty"`
+	// Entities replaces the unit's entity names; nil (null) = re-resolve the unit's current names, non-nil
+	// empty ([]) = clear them. No omitempty: it would turn a clear into "keep".
+	Entities []string `json:"entities"`
 	// ResolveEntities false takes Entities literally; nil (absent) = true.
 	ResolveEntities *bool `json:"resolve_entities,omitempty"`
 }

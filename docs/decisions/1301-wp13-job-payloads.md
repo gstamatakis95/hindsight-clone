@@ -9,7 +9,7 @@ and runs rederive_memory, retag_document, graph_maintenance and delete_bank.
 ## Decision
 | Kind | Payload | Serial key | Dedupe | Overrides |
 |---|---|---|---|---|
-| rederive_memory | `{"unit_id": "...", "entities": [...]?, "resolve_entities": bool?}` (`curate.RederivePayload`; `entities` absent = re-resolve the unit's current names, `resolve_entities` absent = true) | `doc:{unit's document}` | None | the UpdateMemory request overrides |
+| rederive_memory | `{"unit_id": "...", "entities": [...] | null, "resolve_entities": bool?}` (`curate.RederivePayload`; `entities` null = re-resolve the unit's current names, `[]` = clear them; `resolve_entities` absent = true) | `doc:{unit's document}` | None | the UpdateMemory request overrides |
 | retag_document | `{"document_id": "..."}` (`docs.RetagPayload`). The tags are **not** in the payload: the API commits them on the document row and the job re-reads them, so a later retag that joins a pending one is never lost. | `doc:{document_id}` | Pending | none |
 | graph_maintenance | `{}` | `graph` | PendingOrRunning when a removal triggers it; Pending for the job's own continuation | none |
 | delete_bank | `{}` | `bank` | PendingOrRunning | none |

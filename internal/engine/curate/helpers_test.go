@@ -1,0 +1,322 @@
+package curate
+
+import (
+	"context"
+	"encoding/json"
+	"memd/internal/domain"
+	"memd/internal/engine/retain"
+	"memd/internal/fake"
+	"memd/internal/port"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+)
+
+// testBank is the bank every curate test works in.
+var testBank = port.BankRef{Tenant: "acme", Bank: "notes"}
+
+// env is a fake store with a seeded bank: document d1 with facts f1 (Alice, tagged team, causal link to
+// f2) and f2, and observation o1 citing both.
+type env struct {
+	t      *testing.T
+	ctx    context.Context
+	clock  *fake.Clock
+	fake   *fake.Store
+	store  *auditStore
+	emb    *fake.Embedder
+	citing *citingStub
+	linker *linkerStub
+}
+
+// newEnv seeds the store and returns the environment.
+func newEnv(t *testing.T) *env {
+	t.Helper()
+	clock := fake.NewClock(time.Time{})
+	fs := fake.NewStore(clock)
+	e := &env{
+		t: t, ctx: context.Background(), clock: clock, fake: fs, store: &auditStore{Store: fs},
+		emb: fake.NewEmbedder(fake.EmbedSimilar), citing: &citingStub{}, linker: &linkerStub{},
+	}
+	e.seed()
+	return e
+}
+
+// seed writes the bank, document, facts, observation, entity and links.
+func (e *env) seed() {
+	consolidated := e.clock.Now()
+	e.inTx(func(tx port.Tx) error {
+		if _, err := tx.Banks().Ensure(e.ctx, testBank); err != nil {
+			return err
+		}
+		seq, err := tx.Seq(e.ctx, testBank)
+		if err != nil {
+			return err
+		}
+		if err := tx.Documents().Upsert(e.ctx, domain.Document{ID: "d1", Bank: testBank}); err != nil {
+			return err
+		}
+		f1 := e.fact("f1", "Alice likes green tea", []string{"team"}, seq)
+		f2 := e.fact("f2", "Bob drinks coffee daily", []string{"team"}, seq)
+		f2.ConsolidatedAt = &consolidated
+		o1 := domain.Unit{
+			ID: "o1", Bank: testBank, Type: domain.FactTypeObservation, Text: "Alice and Bob enjoy hot drinks",
+			Tags: []string{"team"}, Embedding: e.emb.Vector("Alice and Bob enjoy hot drinks"), Seq: seq,
+		}
+		if err := tx.Units().Insert(e.ctx, []domain.Unit{f1, f2, o1}); err != nil {
+			return err
+		}
+		if err := tx.Evidence().Add(e.ctx, "o1", []domain.Evidence{{Unit: "f1"}, {Unit: "f2"}}); err != nil {
+			return err
+		}
+		ent, err := tx.Entities().Upsert(e.ctx, domain.Entity{Bank: testBank, CanonicalName: "Alice"})
+		if err != nil {
+			return err
+		}
+		if err := tx.Entities().Attach(e.ctx, "f1", []port.EntityID{ent}); err != nil {
+			return err
+		}
+		return tx.Links().Insert(e.ctx, []domain.Link{
+			{Bank: testBank, From: "f1", To: "f2", Kind: domain.LinkCausal, Weight: 1},
+			{Bank: testBank, From: "f1", To: "f2", Kind: domain.LinkTemporal, Weight: 0.5},
+		})
+	})
+}
+
+// fact builds a seeded fact of document d1.
+func (e *env) fact(id port.UnitID, text string, tags []string, seq int64) domain.Unit {
+	at := e.clock.Now()
+	return domain.Unit{
+		ID: id, Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: text, Tags: tags,
+		Embedding: e.emb.Vector(text), MentionedAt: &at, Seq: seq,
+	}
+}
+
+// inTx runs fn in a transaction and fails the test on error.
+func (e *env) inTx(fn func(tx port.Tx) error) {
+	e.t.Helper()
+	if err := e.fake.InTx(e.ctx, fn); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// curator returns a Curator over the env with the refresh stub.
+func (e *env) curator() Curator {
+	return NewCurator(CuratorDeps{Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{}})
+}
+
+// rederiver returns a Rederiver over the env.
+func (e *env) rederiver(emb port.Embedder) Rederiver {
+	if emb == nil {
+		emb = e.emb
+	}
+	return NewRederiver(RederiverDeps{
+		Store: e.store, Embedder: emb, Resolver: resolverStub{}, Linker: e.linker, Config: configStub{},
+	})
+}
+
+// unit reads a live unit; ok=false when it is not live.
+func (e *env) unit(id port.UnitID) (domain.Unit, bool) {
+	e.t.Helper()
+	us, err := e.fake.Read().GetUnits(e.ctx, testBank, []port.UnitID{id})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if len(us) == 0 {
+		return domain.Unit{}, false
+	}
+	return us[0], true
+}
+
+// ops lists the bank's operations of kind (any status).
+func (e *env) ops(kind domain.OperationKind) []domain.Operation {
+	e.t.Helper()
+	var out []domain.Operation
+	e.inTx(func(tx port.Tx) error {
+		out = nil
+		ops, _, err := tx.Queue().List(e.ctx, testBank, port.OperationFilter{Kind: kind, PageSize: 1000})
+		out = ops
+		return err
+	})
+	return out
+}
+
+// claim claims every due job of kind.
+func (e *env) claim(kind domain.OperationKind) []port.Job {
+	e.t.Helper()
+	jobs, err := e.fake.Claim(e.ctx, "w1", []port.JobKind{kind}, 100)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return jobs
+}
+
+// drain claims and completes every due job of kind.
+func (e *env) drain(kind domain.OperationKind) {
+	e.t.Helper()
+	for _, j := range e.claim(kind) {
+		if err := e.fake.Complete(e.ctx, j.ID, nil, nil); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+}
+
+// events lists the bank's lifecycle events.
+func (e *env) events() []domain.LifecycleEvent {
+	e.t.Helper()
+	var out []domain.LifecycleEvent
+	e.inTx(func(tx port.Tx) error {
+		var err error
+		out, _, err = tx.Events().List(e.ctx, testBank, 0, 0, nil)
+		return err
+	})
+	return out
+}
+
+// hitIDs returns the unit ids of hits.
+func hitIDs(hs []port.Hit) []port.UnitID {
+	ids := make([]port.UnitID, len(hs))
+	for i, h := range hs {
+		ids[i] = h.ID
+	}
+	return ids
+}
+
+// auditStore wraps a Store to record the audit rows its transactions append (the ports have no audit read).
+type auditStore struct {
+	port.Store
+	mu     sync.Mutex
+	audits []domain.AuditEntry
+}
+
+// InTx wraps the transaction so Units().AppendAudit is recorded.
+func (s *auditStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
+	return s.Store.InTx(ctx, func(tx port.Tx) error { return fn(auditTx{Tx: tx, s: s}) })
+}
+
+// recorded returns the audit rows recorded so far.
+func (s *auditStore) recorded() []domain.AuditEntry {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.audits)
+}
+
+// auditTx is a Tx whose unit repo records audits.
+type auditTx struct {
+	port.Tx
+	s *auditStore
+}
+
+// Units returns the recording unit repo.
+func (t auditTx) Units() port.UnitRepo { return auditUnits{UnitRepo: t.Tx.Units(), s: t.s} }
+
+// auditUnits records AppendAudit calls.
+type auditUnits struct {
+	port.UnitRepo
+	s *auditStore
+}
+
+// AppendAudit records a and forwards it.
+func (u auditUnits) AppendAudit(ctx context.Context, a domain.AuditEntry) error {
+	u.s.mu.Lock()
+	u.s.audits = append(u.s.audits, a)
+	u.s.mu.Unlock()
+	return u.UnitRepo.AppendAudit(ctx, a)
+}
+
+// citingStub maps cited unit ids to the models citing them.
+type citingStub struct {
+	by map[port.UnitID][]port.MentalModelID
+}
+
+// ModelsCiting returns the models citing any of ids.
+func (c *citingStub) ModelsCiting(_ context.Context, _ port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error) {
+	var out []port.MentalModelID
+	for _, id := range ids {
+		out = append(out, c.by[id]...)
+	}
+	return out, nil
+}
+
+// refreshStub enqueues a refresh_mental_model job in the caller's tx, as WP-12's queuer would.
+type refreshStub struct{}
+
+// QueueRefresh enqueues {"model_id": id} under serial key mm:{id}.
+func (refreshStub) QueueRefresh(
+	ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID,
+) (port.OperationID, error) {
+	raw, _ := json.Marshal(map[string]string{"model_id": string(id)})
+	op, _, err := tx.Queue().Enqueue(ctx, port.Job{
+		Bank: b, Kind: domain.OperationKindRefreshMentalModel, SerialKey: "mm:" + string(id), Payload: raw,
+		Dedupe: port.DedupePending,
+	})
+	return op, err
+}
+
+// resolverStub resolves each mention to the entity with exactly that name, creating it when missing.
+type resolverStub struct{}
+
+// Resolve upserts one entity per mention.
+func (resolverStub) Resolve(
+	ctx context.Context, tx port.Tx, b port.BankRef, in retain.ResolveInput,
+) ([]port.EntityID, error) {
+	var ids []port.EntityID
+	for _, m := range in.Mentions {
+		cands, err := tx.Entities().Candidates(ctx, b, m.Name, 5)
+		if err != nil {
+			return nil, err
+		}
+		id := port.EntityID("")
+		for _, c := range cands {
+			if c.Entity.CanonicalName == m.Name {
+				id = c.Entity.ID
+			}
+		}
+		if id == "" {
+			if id, err = tx.Entities().Upsert(ctx, domain.Entity{Bank: b, CanonicalName: m.Name}); err != nil {
+				return nil, err
+			}
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+// linkerStub records the units it links and adds a temporal link from each to f2 when both are live.
+type linkerStub struct {
+	mu    sync.Mutex
+	calls [][]port.UnitID
+}
+
+// Link records the call and inserts a temporal edge to f2.
+func (l *linkerStub) Link(
+	ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, _ retain.CauseMap,
+) error {
+	ids := make([]port.UnitID, len(units))
+	for i, u := range units {
+		ids[i] = u.ID
+	}
+	l.mu.Lock()
+	l.calls = append(l.calls, ids)
+	l.mu.Unlock()
+	var ls []domain.Link
+	for _, u := range units {
+		if u.ID != "f2" {
+			ls = append(ls, domain.Link{Bank: b, From: u.ID, To: "f2", Kind: domain.LinkTemporal, Weight: 0.9})
+		}
+	}
+	return tx.Links().Insert(ctx, ls)
+}
+
+// configStub is a ConfigResolver returning the empty config.
+type configStub struct{}
+
+// Effective returns the zero config.
+func (configStub) Effective(context.Context, port.BankRef, ...domain.BankConfig) (domain.BankConfig, error) {
+	return domain.BankConfig{}, nil
+}
+
+// ForScope returns the zero config.
+func (configStub) ForScope(context.Context, port.ScopeKey, *domain.BankConfig) (domain.BankConfig, error) {
+	return domain.BankConfig{}, nil
+}
