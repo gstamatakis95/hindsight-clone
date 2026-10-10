@@ -127,3 +127,8 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   self-links). Both make the fakes looser than production. Ruling: move the gateway JSON-schema validator to a
   shared internal/jsonschema package (WP-02 may touch internal/adapter/gateway for that move only) so the fake
   validates outputs the same way. Fixes and MEDIUMs sent back to the worker.
+- 2026-10-10 WP-05 review round 2 on 1ee03bb: MERGE. H1, H2 and M1-M3 verified; the M2 probe-tx design was
+  judged safe against Postgres. One new MEDIUM (a retried Fail(retryAt=now) after a lost ack can reset another
+  worker's claim) sent back as a one-line fix before merge.
+- Carried forward to WP-14: set RunnerConfig.StaleAfter and MaintenanceDeps.StaleAfter from one value.
+- Carried forward to WP-02: InTx must roll back on error (the WP-05 pending probe relies on it).
