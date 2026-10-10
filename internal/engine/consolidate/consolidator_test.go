@@ -31,6 +31,7 @@ func (k *killAt) Report(context.Context, domain.Progress) error {
 func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}})
 	e.fact("f1", "Alice moved to Paris in May", "a", "b", "c")
+	e.script(e.createEach("f1"))
 	kill := &killAt{n: 3}
 	e.deps.Checkpoint = func(port.Job) Checkpointer { return kill }
 
@@ -41,21 +42,16 @@ func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 	if got := len(e.observations()); got != 2 {
 		t.Fatalf("after the kill: %d observations, want 2 (scopes a and b)", got)
 	}
-	if u := e.unit("f1"); u.ConsolidatedAt != nil {
-		t.Fatalf("unit stamped before its last scope was decided")
-	}
-	if res.Processed != 0 {
-		t.Fatalf("killed run processed %d, want 0", res.Processed)
+	if u := e.unit("f1"); u.ConsolidatedAt != nil || res.Processed != 0 {
+		t.Fatalf("unit stamped (%v) or processed (%d) before its last scope was decided", u.ConsolidatedAt,
+			res.Processed)
 	}
 
 	e.deps.Checkpoint = nil
 	e.clock.Advance(time.Minute)
 	replayAt := e.clock.Now()
-	res, err = e.consolidator().Run(t.Context(), autoJob())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls := len(e.llm.callsFor(domain.ModelSlotConsolidate)); calls != 3 {
+	res = e.run(autoJob())
+	if calls := len(e.batches()); calls != 3 {
 		t.Fatalf("CONSOLIDATE calls = %d, want 3 (2 before the kill, only scope c on replay)", calls)
 	}
 	want := map[string]int{scopeOf("a").String(): 1, scopeOf("b").String(): 1, scopeOf("c").String(): 1}
@@ -84,29 +80,26 @@ func perScope(t *testing.T, obs []domain.Unit, source port.UnitID) map[string]in
 	return out
 }
 
-// TestRunHalvesDownToPoisonUnit: a failing batch is halved until the poison unit fails alone and is
-// parked; every other unit is stamped.
+// wantBatches checks the fact ids of every CONSOLIDATE call so far.
+func (e *env) wantBatches(want ...[]string) {
+	e.t.Helper()
+	if got := e.batches(); !slices.EqualFunc(got, want, slices.Equal) {
+		e.t.Fatalf("batches = %v, want %v", got, want)
+	}
+}
+
+// TestRunHalvesDownToPoisonUnit: a failing batch is halved until the poison unit fails alone; the next
+// successful call parks it, and every other unit is stamped.
 func TestRunHalvesDownToPoisonUnit(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(4)})
 	e.fact("f1", "Alpha ships on Monday", "x")
 	e.fact("f2", "Beta ships on Tuesday", "x")
 	e.fact("f3", "Poison fact", "x")
 	e.fact("f4", "Gamma ships on Friday", "x")
-	var sizes []int
-	e.llm.consolidate = func(req port.StructuredRequest, ids []string) (string, error) {
-		sizes = append(sizes, len(ids))
-		if hasFact(ids, "f3") {
-			return "", errPoison
-		}
-		return e.createEach(req, ids)
-	}
-	res, err := e.consolidator().Run(t.Context(), autoJob())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []int{4, 2, 2, 1, 1}; !slices.Equal(sizes, want) {
-		t.Fatalf("batch sizes = %v, want %v", sizes, want)
-	}
+	e.script(fail(), e.createEach("f1", "f2"), fail(), fail(), e.createEach("f4"))
+	res := e.run(autoJob())
+	e.wantBatches([]string{"f1", "f2", "f3", "f4"}, []string{"f1", "f2"}, []string{"f3", "f4"}, []string{"f3"},
+		[]string{"f4"})
 	if u := e.unit("f3"); u.ConsolidationFailedAt == nil || u.ConsolidatedAt != nil {
 		t.Fatalf("poison unit: failed_at %v consolidated_at %v, want parked only", u.ConsolidationFailedAt,
 			u.ConsolidatedAt)
@@ -124,15 +117,38 @@ func TestRunHalvesDownToPoisonUnit(t *testing.T) {
 	}
 }
 
-// TestRunOutageDoesNotPark: when no call of the run succeeds, nothing is parked; the run fails with
-// UNAVAILABLE so the job retries.
+// TestRunPoisonLastLeafParkedOnRetry: a poison unit that fails alone as the last call of its batch is not
+// parked (nothing succeeded after it, so it may be an outage): the run fails after committing the rest,
+// and the retry, where it leads a batch, parks it.
+func TestRunPoisonLastLeafParkedOnRetry(t *testing.T) {
+	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(2)})
+	e.fact("f1", "Alpha ships", "x")
+	e.fact("f2", "Poison fact", "x")
+	e.script(fail(), e.createEach("f1"), fail())
+	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	if e.unit("f1").ConsolidatedAt == nil || e.unit("f2").ConsolidationFailedAt != nil {
+		t.Fatal("want f1 stamped and f2 neither stamped nor parked")
+	}
+	e.fact("f3", "Gamma ships", "x")
+	e.llm.Reset()
+	e.script(fail(), fail(), e.createEach("f3"))
+	res := e.run(autoJob())
+	e.wantBatches([]string{"f2", "f3"}, []string{"f2"}, []string{"f3"})
+	if e.unit("f2").ConsolidationFailedAt == nil || e.unit("f3").ConsolidatedAt == nil || res.Processed != 2 {
+		t.Fatalf("retry = %+v; want f2 parked and f3 stamped", res)
+	}
+}
+
+// TestRunOutageDoesNotPark: when the gateway fails from the first call, nothing is parked; the run fails
+// with UNAVAILABLE so the job retries.
 func TestRunOutageDoesNotPark(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(2)})
 	e.fact("f1", "One", "x")
 	e.fact("f2", "Two", "x")
-	e.llm.consolidate = func(port.StructuredRequest, []string) (string, error) { return "", errors.New("gateway down") }
-	_, err := e.consolidator().Run(t.Context(), autoJob())
-	if !errors.Is(err, domain.ErrUnavailable) {
+	e.script(fail())
+	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 	for _, id := range []string{"f1", "f2"} {
@@ -140,8 +156,27 @@ func TestRunOutageDoesNotPark(t *testing.T) {
 			t.Errorf("%s was stamped or parked during an outage", id)
 		}
 	}
-	if calls := len(e.llm.callsFor(domain.ModelSlotConsolidate)); calls != 3 {
-		t.Fatalf("calls = %d, want 3 (the batch, then each half)", calls)
+	e.wantBatches([]string{"f1", "f2"}, []string{"f1"}, []string{"f2"})
+}
+
+// TestRunOutageMidRunDoesNotPark: an outage that starts after earlier calls succeeded still parks
+// nothing; the earlier scope's writes stay committed.
+func TestRunOutageMidRunDoesNotPark(t *testing.T) {
+	e := newEnv(t, domain.BankConfig{})
+	e.fact("f1", "Kim sails", "a")
+	e.fact("f2", "Lee rows", "b")
+	e.fact("f3", "Max surfs", "b")
+	e.script(e.createEach("f1"), fail())
+	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+	if e.unit("f1").ConsolidatedAt == nil || len(e.observations()) != 1 {
+		t.Fatal("scope a's writes were not kept")
+	}
+	for _, id := range []string{"f2", "f3"} {
+		if u := e.unit(id); u.ConsolidationFailedAt != nil || u.ConsolidatedAt != nil {
+			t.Errorf("%s was stamped or parked during an outage", id)
+		}
 	}
 }
 
@@ -149,11 +184,10 @@ func TestRunOutageDoesNotPark(t *testing.T) {
 // (deduplicated) and reports More; the continuation finishes the rest.
 func TestRunContinuationAtCap(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{ConsolidationMaxUnitsPerRun: ptr(2)})
-	e.fact("f1", "One fact", "x")
-	e.fact("f2", "Two fact", "x")
-	e.fact("f3", "Three fact", "x")
-	e.fact("f4", "Four fact", "x")
-	e.fact("f5", "Five fact", "x")
+	for i, text := range []string{"One fact", "Two fact", "Three fact", "Four fact", "Five fact"} {
+		e.fact("f"+string(rune('1'+i)), text, "x")
+	}
+	e.script(e.createEach("f1", "f2"), e.createEach("f3", "f4"), e.createEach("f5"))
 	if res := e.run(autoJob()); res.Processed != 2 || !res.More {
 		t.Fatalf("first run = %+v, want Processed 2, More true", res)
 	}
@@ -189,19 +223,16 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 			Name:                "team",
 			Scopes:              []domain.ScopePattern{{Tags: []string{"team"}}},
 			ObservationsMission: "STRATEGY-MISSION",
-			Models: []domain.SlotBinding{{
-				Slot: domain.ModelSlotConsolidate, Binding: domain.ModelBinding{Model: "strategy-model"},
-			}},
+			Models:              consolidateModel("strategy-model"),
 		}},
 	}
 	e := newEnv(t, cfg)
 	e.fact("f1", "The team meets on Monday", "team")
 	e.fact("f2", "The other group meets on Friday", "other")
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); err != nil {
-		t.Fatal(err)
-	}
+	e.script(ok(reply(nil, nil)))
+	e.run(autoJob())
 	got := map[string]string{}
-	for _, c := range e.llm.callsFor(domain.ModelSlotConsolidate) {
+	for _, c := range e.calls(domain.ModelSlotConsolidate) {
 		got[schemaFactIDs(c.Schema)[0]] = c.Binding.Model + "|" + missionOf(c.User)
 	}
 	if got["f1"] != "strategy-model|STRATEGY-MISSION" || got["f2"] != "bank-model|BANK-MISSION" {
@@ -214,10 +245,8 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 		Models:              consolidateModel("request-model"),
 	})
 	j.ID = "op-manual"
-	if _, err := e.consolidator().Run(t.Context(), j); err != nil {
-		t.Fatal(err)
-	}
-	calls := e.llm.callsFor(domain.ModelSlotConsolidate)
+	e.run(j)
+	calls := e.calls(domain.ModelSlotConsolidate)
 	last := calls[len(calls)-1]
 	if last.Binding.Model != "request-model" || missionOf(last.User) != "REQUEST-MISSION" {
 		t.Fatalf("manual run in the team scope: model %q mission %q; want the request's", last.Binding.Model,
@@ -243,16 +272,9 @@ func TestRunDedupMerge(t *testing.T) {
 	e.fact("f0", "Alice lives in Paris", "x")
 	e.observation("obs-twin", "Alice lives in Paris", []string{"x"}, "f0")
 	e.fact("f1", "Alice lives in Paris France", "x")
-	e.llm.consolidate = func(port.StructuredRequest, []string) (string, error) {
-		return reply([]create{{Text: "Alice lives in Paris France", SourceFactIDs: []string{"f1"}}}, nil), nil
-	}
-	e.llm.dedup = func(port.StructuredRequest) (string, error) {
-		return `{"action":"merge","text":"Alice lives in Paris, France","reason":"same fact"}`, nil
-	}
-	res, err := e.consolidator().Run(t.Context(), autoJob())
-	if err != nil {
-		t.Fatal(err)
-	}
+	e.script(ok(reply([]create{{Text: "Alice lives in Paris France", SourceFactIDs: []string{"f1"}}}, nil)))
+	e.dedupReply(`{"action":"merge","text":"Alice lives in Paris, France","reason":"same fact"}`)
+	res := e.run(autoJob())
 	obs := e.observations()
 	if len(obs) != 1 {
 		t.Fatalf("%d observations, want only the twin", len(obs))
@@ -263,7 +285,7 @@ func TestRunDedupMerge(t *testing.T) {
 		t.Fatalf("twin = %s %q v%d sources %v proof %d; want merged text, v2, [f0 f1], 2",
 			twin.ID, twin.Text, twin.Version, twin.SourceIDs, twin.ProofCount)
 	}
-	if len(e.llm.callsFor(domain.ModelSlotDedupCheck)) != 1 {
+	if len(e.calls(domain.ModelSlotDedupCheck)) != 1 {
 		t.Fatal("want exactly one DEDUP_CHECK call")
 	}
 	if e.unit("f1").ConsolidatedAt == nil || len(res.Changed) != 1 {
@@ -280,15 +302,9 @@ func TestRunDedupKeep(t *testing.T) {
 	e.fact("f0", "Alice owns 3 cats", "x")
 	e.observation("obs-twin", "Alice owns 3 cats", []string{"x"}, "f0")
 	e.fact("f1", "Alice owns 4 cats", "x")
-	e.llm.consolidate = func(port.StructuredRequest, []string) (string, error) {
-		return reply([]create{{Text: "Alice owns 4 cats", SourceFactIDs: []string{"f1"}}}, nil), nil
-	}
-	e.llm.dedup = func(port.StructuredRequest) (string, error) {
-		return `{"action":"keep","text":"","reason":"different numbers"}`, nil
-	}
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); err != nil {
-		t.Fatal(err)
-	}
+	e.script(ok(reply([]create{{Text: "Alice owns 4 cats", SourceFactIDs: []string{"f1"}}}, nil)))
+	e.dedupReply(`{"action":"keep","text":"","reason":"different numbers"}`)
+	e.run(autoJob())
 	obs := e.observations()
 	if len(obs) != 2 {
 		t.Fatalf("%d observations, want the twin and the new one", len(obs))
@@ -305,7 +321,7 @@ func TestRunDedupKeep(t *testing.T) {
 			}
 		}
 	}
-	if len(e.llm.callsFor(domain.ModelSlotDedupCheck)) != 1 {
+	if len(e.calls(domain.ModelSlotDedupCheck)) != 1 {
 		t.Fatal("want exactly one DEDUP_CHECK call")
 	}
 }
@@ -316,10 +332,9 @@ func TestRunDedupBelowThresholdSkipsCheck(t *testing.T) {
 	e.fact("f0", "Alice owns cats", "x")
 	e.observation("obs-1", "Alice owns cats", []string{"x"}, "f0")
 	e.fact("f1", "Bob drives trucks", "x")
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); err != nil {
-		t.Fatal(err)
-	}
-	if n := len(e.llm.callsFor(domain.ModelSlotDedupCheck)); n != 0 {
+	e.script(e.createEach("f1"))
+	e.run(autoJob())
+	if n := len(e.calls(domain.ModelSlotDedupCheck)); n != 0 {
 		t.Fatalf("DEDUP_CHECK calls = %d, want 0", n)
 	}
 	if len(e.observations()) != 2 {

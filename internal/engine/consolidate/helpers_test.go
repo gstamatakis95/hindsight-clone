@@ -9,9 +9,8 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/routing"
 	"memd/internal/fake"
-	"memd/internal/jsonschema"
 	"memd/internal/port"
-	"sync"
+	"memd/internal/prompts"
 	"testing"
 	"time"
 )
@@ -19,91 +18,8 @@ import (
 // bank is the test bank.
 var bank = port.BankRef{Tenant: "t1", Bank: "b1"}
 
-// errPoison is what the test LLM returns for a batch holding a poison unit.
+// errPoison is what a scripted CONSOLIDATE call fails with for a batch holding a poison unit.
 var errPoison = errors.New("poison input")
-
-// funcLLM is a port.LLM whose Structured replies are computed per call, then validated against the
-// request's schema exactly like the gateway and the fake (internal/jsonschema), so a reply citing a fact
-// outside the batch or exceeding maxItems fails the call.
-type funcLLM struct {
-	mu          sync.Mutex
-	consolidate func(req port.StructuredRequest, ids []string) (string, error)
-	dedup       func(req port.StructuredRequest) (string, error)
-	calls       []port.StructuredRequest
-}
-
-var _ port.LLM = (*funcLLM)(nil)
-
-// Structured serves one call from the slot's handler.
-func (l *funcLLM) Structured(ctx context.Context, req port.StructuredRequest, out any) (port.Usage, error) {
-	sch, err := jsonschema.Compile(req.Schema)
-	if err != nil {
-		return port.Usage{}, fmt.Errorf("test llm: %w", err)
-	}
-	l.mu.Lock()
-	l.calls = append(l.calls, req)
-	consolidate, dedup := l.consolidate, l.dedup
-	l.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return port.Usage{}, fmt.Errorf("test llm: %w", err)
-	}
-	var body string
-	switch {
-	case req.Slot == domain.ModelSlotConsolidate && consolidate != nil:
-		body, err = consolidate(req, schemaFactIDs(req.Schema))
-	case req.Slot == domain.ModelSlotDedupCheck && dedup != nil:
-		body, err = dedup(req)
-	default:
-		err = fmt.Errorf("no handler for slot %s", req.Slot)
-	}
-	if err != nil {
-		return port.Usage{}, fmt.Errorf("%w: test llm: %w", domain.ErrUnavailable, err)
-	}
-	if err := sch.Validate([]byte(body)); err != nil {
-		return port.Usage{}, fmt.Errorf("%w: test llm: invalid output: %w", domain.ErrUnavailable, err)
-	}
-	if err := json.Unmarshal([]byte(body), out); err != nil {
-		return port.Usage{}, fmt.Errorf("%w: test llm: %w", domain.ErrUnavailable, err)
-	}
-	return port.Usage{Slot: req.Slot, Model: req.Binding.Model, InputTokens: 10, OutputTokens: 2}, nil
-}
-
-// Chat is unused by consolidation.
-func (l *funcLLM) Chat(context.Context, port.ChatRequest) (port.ChatResponse, error) {
-	return port.ChatResponse{}, errors.New("test llm: no chat")
-}
-
-// callsFor returns the recorded requests of slot.
-func (l *funcLLM) callsFor(slot port.ModelSlot) []port.StructuredRequest {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	var out []port.StructuredRequest
-	for _, c := range l.calls {
-		if c.Slot == slot {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
-// schemaFactIDs reads the per-call source_fact_ids enum (the batch's fact ids) from a CONSOLIDATE schema.
-func schemaFactIDs(raw json.RawMessage) []string {
-	var root map[string]any
-	if json.Unmarshal(raw, &root) != nil {
-		return nil
-	}
-	items, ok := dig(root, "properties", "creates", "items", "properties", "source_fact_ids", "items")
-	if !ok {
-		return nil
-	}
-	enum, _ := items["enum"].([]any)
-	out := make([]string, 0, len(enum))
-	for _, v := range enum {
-		s, _ := v.(string)
-		out = append(out, s)
-	}
-	return out
-}
 
 // create is one create of a scripted CONSOLIDATE reply.
 type create struct {
@@ -132,28 +48,27 @@ func reply(creates []create, updates []update) string {
 	return string(b)
 }
 
-// env is a consolidation test environment over the fakes.
+// env is a consolidation test environment over the fakes (Store, LLM, Embedder, Clock) with the real
+// config resolver, router and StrategyMatcher.
 type env struct {
 	t      *testing.T
 	clock  *fake.Clock
 	store  *fake.Store
-	llm    *funcLLM
+	llm    *fake.LLM
 	emb    *fake.Embedder
 	deps   ConsolidatorDeps
 	texts  map[port.UnitID]string
 	nextID int
 }
 
-// newEnv creates the bank with cfg as its own config and wires a Consolidator with the real config
-// resolver and StrategyMatcher. The default CONSOLIDATE handler creates one observation per fact.
+// newEnv creates the bank with cfg as its own config.
 func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 	t.Helper()
 	clock := fake.NewClock(time.Time{})
 	e := &env{
-		t: t, clock: clock, store: fake.NewStore(clock), llm: &funcLLM{},
+		t: t, clock: clock, store: fake.NewStore(clock), llm: fake.NewLLM(),
 		emb: fake.NewEmbedder(fake.EmbedSimilar), texts: map[port.UnitID]string{},
 	}
-	e.llm.consolidate = e.createEach
 	server, err := config.ServerDefaults(func(k string) string {
 		if k == config.EnvModel {
 			return "base-model"
@@ -210,13 +125,70 @@ func (e *env) scopesTx(fn func(tx port.Tx) ([]port.ScopeKey, error)) []port.Scop
 	return out
 }
 
-// createEach answers CONSOLIDATE with one create per fact of the batch.
-func (e *env) createEach(_ port.StructuredRequest, ids []string) (string, error) {
+// script queues CONSOLIDATE replies, one per call in order (the last one repeats).
+func (e *env) script(replies ...fake.Reply) {
+	e.llm.Script(domain.ModelSlotConsolidate, prompts.ConsolidateSystem, replies...)
+}
+
+// ok is a CONSOLIDATE reply with body (10 input and 2 output tokens).
+func ok(body string) fake.Reply {
+	return fake.Reply{JSON: body, Usage: port.Usage{InputTokens: 10, OutputTokens: 2}}
+}
+
+// fail is a failing CONSOLIDATE reply.
+func fail() fake.Reply { return fake.Reply{Err: errPoison} }
+
+// createEach is a CONSOLIDATE reply creating one observation per fact.
+func (e *env) createEach(ids ...string) fake.Reply {
 	var cs []create
 	for _, id := range ids {
 		cs = append(cs, create{Text: "Observed: " + e.texts[port.UnitID(id)], SourceFactIDs: []string{id}})
 	}
-	return reply(cs, nil), nil
+	return ok(reply(cs, nil))
+}
+
+// dedupReply queues a DEDUP_CHECK reply.
+func (e *env) dedupReply(body string) {
+	e.llm.RespondJSON(domain.ModelSlotDedupCheck, prompts.DedupSystem, body)
+}
+
+// calls returns the recorded requests of slot.
+func (e *env) calls(slot port.ModelSlot) []port.StructuredRequest {
+	var out []port.StructuredRequest
+	for _, c := range e.llm.Calls() {
+		if c.Slot == slot && c.Structured != nil {
+			out = append(out, *c.Structured)
+		}
+	}
+	return out
+}
+
+// batches returns the fact ids of every CONSOLIDATE call, in call order.
+func (e *env) batches() [][]string {
+	var out [][]string
+	for _, c := range e.calls(domain.ModelSlotConsolidate) {
+		out = append(out, schemaFactIDs(c.Schema))
+	}
+	return out
+}
+
+// schemaFactIDs reads the per-call source_fact_ids enum (the batch's fact ids) from a CONSOLIDATE schema.
+func schemaFactIDs(raw json.RawMessage) []string {
+	var root map[string]any
+	if json.Unmarshal(raw, &root) != nil {
+		return nil
+	}
+	items, ok := dig(root, "properties", "creates", "items", "properties", "source_fact_ids", "items")
+	if !ok {
+		return nil
+	}
+	enum, _ := items["enum"].([]any)
+	out := make([]string, 0, len(enum))
+	for _, v := range enum {
+		s, _ := v.(string)
+		out = append(out, s)
+	}
+	return out
 }
 
 // fact inserts a world fact with tags (normalized) and an embedding of its text.
@@ -275,33 +247,23 @@ func (e *env) unit(id string) domain.Unit {
 	return us[0]
 }
 
-// observations returns every live observation of the bank, by id.
+// observations returns every live observation of the bank.
 func (e *env) observations() []domain.Unit {
 	e.t.Helper()
-	return listObservations(e.t.Context(), e.t, e.store.Read(), nil)
-}
-
-// listObservations lists the bank's observations (only those of scope s when s is non-nil) with a
-// zero-vector semantic search, which the fake answers with every unit that has an embedding.
-func listObservations(ctx context.Context, t *testing.T, r port.Reader, s *port.ScopeKey) []domain.Unit {
-	q := port.VectorQuery{
+	hits, err := e.store.Read().SearchVector(e.t.Context(), port.VectorQuery{
 		Bank: bank, Embedding: make([]float32, domain.EmbeddingDim),
 		Types: []domain.FactType{domain.FactTypeObservation},
-	}
-	if s != nil {
-		q.Tags = scopePredicate(*s)
-	}
-	hits, err := r.SearchVector(ctx, q)
+	})
 	if err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
 	ids := make([]port.UnitID, 0, len(hits))
 	for _, h := range hits {
 		ids = append(ids, h.ID)
 	}
-	us, err := r.GetUnits(ctx, bank, ids)
+	us, err := e.store.Read().GetUnits(e.t.Context(), bank, ids)
 	if err != nil {
-		t.Fatal(err)
+		e.t.Fatal(err)
 	}
 	return us
 }
@@ -338,7 +300,8 @@ func (e *env) run(j port.Job) ConsolidationResult {
 	return res
 }
 
-// storeCounter is the test ObservationCounter: it counts a scope's observations through the fake's search.
+// storeCounter is the test ObservationCounter: it counts a scope's observations through the fake's search
+// (a zero-vector query with no floor returns every observation that has an embedding).
 type storeCounter struct{ s port.Store }
 
 // CountObservations counts the observations of scope s.
@@ -363,16 +326,6 @@ func scopeOf(tags ...string) port.ScopeKey { return domain.NewScopeKey(bank, tag
 
 // ptr returns a pointer to v.
 func ptr[T any](v T) *T { return &v }
-
-// hasFact reports whether ids contain id.
-func hasFact(ids []string, id string) bool {
-	for _, x := range ids {
-		if x == id {
-			return true
-		}
-	}
-	return false
-}
 
 // consolidateModel binds the CONSOLIDATE slot to model.
 func consolidateModel(model string) []domain.SlotBinding {

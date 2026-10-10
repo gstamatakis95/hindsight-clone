@@ -24,8 +24,7 @@ type run struct {
 	done   []port.UnitID       // planned units with no pending scope: stamped in finish
 
 	parked    map[port.UnitID]bool
-	deferred  []port.UnitID // failed alone before any call of the run succeeded
-	succeeded bool          // a CONSOLIDATE call of this run succeeded
+	deferred  []port.UnitID // failed alone; parked by the next successful call
 	lastErr   error         // the latest batch failure
 	processed int
 	changed   map[string]port.ScopeKey
@@ -169,11 +168,12 @@ func (r *run) scope(ctx context.Context, i int) error {
 		if err := r.batch(ctx, i, cfg, ids); err != nil {
 			return err
 		}
-		if len(r.deferred) > 0 && !r.succeeded {
-			// Every call of the run failed, down to single units: most likely the gateway, not the
-			// input. Fail the job (it retries with backoff) instead of parking units (decision 1002).
-			return fmt.Errorf("%w: consolidate: no CONSOLIDATE call of the run succeeded: %w",
-				domain.ErrUnavailable, r.lastErr)
+		if len(r.deferred) > 0 {
+			// A unit failed alone and no call succeeded after it: the gateway may be down, so fail the
+			// job (it retries with backoff) instead of parking (decision 1002). Committed work stays; on
+			// the retry a poison unit is the oldest, leads a batch and is parked when a sibling succeeds.
+			return fmt.Errorf("%w: consolidate: no CONSOLIDATE call succeeded after %v failed alone: %w",
+				domain.ErrUnavailable, r.deferred, r.lastErr)
 		}
 	}
 	return nil
@@ -217,6 +217,9 @@ func (r *run) result() ConsolidationResult {
 // addUsage folds usage into the run's per-(slot, model) totals.
 func (r *run) addUsage(us ...port.Usage) {
 	for _, u := range us {
+		if u == (port.Usage{}) {
+			continue
+		}
 		i := slices.IndexFunc(r.usage, func(x port.Usage) bool { return x.Slot == u.Slot && x.Model == u.Model })
 		if i < 0 {
 			r.usage = append(r.usage, u)

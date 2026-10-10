@@ -20,7 +20,7 @@ func (e *batchError) Unwrap() error { return e.err }
 
 // batch decides ids in scope i outside any transaction, then applies the decision and stamps the units
 // whose last scope this is in one short transaction. A failed call halves the batch; a unit failing alone
-// is parked (or deferred until a call of the run succeeds).
+// is deferred and parked by the next successful call.
 func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []port.UnitID) error {
 	if len(ids) == 0 {
 		return nil
@@ -39,7 +39,11 @@ func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []por
 		}
 		r.lastErr = be.err
 		if len(ids) == 1 {
-			return r.failAlone(ctx, ids[0])
+			// Failed alone: the next call that succeeds parks it (the gateway works, so the failure is
+			// the unit's). If none does before its top-level batch ends, the run fails instead and
+			// nothing is parked (decision 1002).
+			r.deferred = append(r.deferred, ids[0])
+			return nil
 		}
 		mid := len(ids) / 2
 		if err := r.batch(ctx, i, cfg, ids[:mid]); err != nil {
@@ -57,7 +61,6 @@ func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []por
 	if err != nil {
 		return err
 	}
-	r.succeeded = true
 	r.processed += len(stamp)
 	if wrote {
 		r.changed[w.key.String()] = w.key
@@ -67,16 +70,6 @@ func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []por
 		r.deferred = nil
 		return r.park(ctx, deferred)
 	}
-	return nil
-}
-
-// failAlone parks a unit whose call failed even alone, once a call of this run has succeeded (so the
-// gateway works and the failure is the unit's); before that it is deferred.
-func (r *run) failAlone(ctx context.Context, id port.UnitID) error {
-	if r.succeeded {
-		return r.park(ctx, []port.UnitID{id})
-	}
-	r.deferred = append(r.deferred, id)
 	return nil
 }
 

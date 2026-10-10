@@ -26,16 +26,15 @@ func TestRunCreateAndUpdateWriteVersionsAndEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.llm.consolidate = func(req port.StructuredRequest, _ []string) (string, error) {
-		if !strings.Contains(req.User, "obs-chess") || !strings.Contains(req.User, "Bob plays chess") {
-			t.Errorf("the related observation is not shown: %s", req.User)
-		}
-		return reply(
-			[]create{{Text: "Carol bakes bread", SourceFactIDs: []string{"f2", "f2"}}},
-			[]update{{ObservationID: "obs-chess", Text: "Bob plays chess every Sunday", SourceFactIDs: []string{"f1"}}},
-		), nil
-	}
+	e.script(ok(reply(
+		[]create{{Text: "Carol bakes bread", SourceFactIDs: []string{"f2", "f2"}}},
+		[]update{{ObservationID: "obs-chess", Text: "Bob plays chess every Sunday", SourceFactIDs: []string{"f1"}}},
+	)))
 	res := e.run(autoJob())
+	if user := e.calls(domain.ModelSlotConsolidate)[0].User; !strings.Contains(user, `"id":"obs-chess"`) ||
+		!strings.Contains(user, `"source_memories":[{"text":"Bob plays chess"}]`) {
+		t.Errorf("the related observation and its source are not shown: %s", user)
+	}
 	got := map[port.UnitID]string{}
 	for _, o := range e.observations() {
 		got[o.ID] = fmt.Sprintf("%s|v%d|proof %d|%v|%v|new seq %t",
@@ -110,24 +109,22 @@ func TestRunObservationCap(t *testing.T) {
 	e.fact("f0", "Dana runs", "x")
 	e.observation("obs-run", "Dana runs", []string{"x"}, "f0")
 	e.fact("f1", "Dana swims", "x")
-	e.llm.consolidate = func(req port.StructuredRequest, ids []string) (string, error) {
-		if !strings.Contains(req.User, "OBSERVATION LIMIT REACHED (1/1)") {
-			t.Errorf("no capacity note: %s", req.User)
-		}
-		return reply(nil, []update{{ObservationID: "obs-run", Text: "Dana runs and swims", SourceFactIDs: ids}}), nil
-	}
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); err != nil {
-		t.Fatal(err)
+	e.script(ok(reply(nil, []update{{
+		ObservationID: "obs-run", Text: "Dana runs and swims", SourceFactIDs: []string{"f1"},
+	}})))
+	e.run(autoJob())
+	call := e.calls(domain.ModelSlotConsolidate)[0]
+	if !strings.Contains(call.User, "OBSERVATION LIMIT REACHED (1/1)") ||
+		!strings.Contains(string(call.Schema), `"maxItems":0`) {
+		t.Errorf("no capacity note or maxItems 0: %s %s", call.User, call.Schema)
 	}
 	if obs := e.observations(); len(obs) != 1 || obs[0].Text != "Dana runs and swims" {
 		t.Fatalf("observations = %+v", obs)
 	}
-	// A create past the cap fails the schema; the batch is retried alone and the unit parked only after
-	// a success, so a model that keeps ignoring the cap fails the run instead (nothing parked).
+	// A create past the cap fails the schema (maxItems 0); the unit fails alone and nothing succeeds after
+	// it, so the run fails and nothing is parked.
 	e.fact("f2", "Dana cycles", "x")
-	e.llm.consolidate = func(_ port.StructuredRequest, ids []string) (string, error) {
-		return reply([]create{{Text: "Dana cycles", SourceFactIDs: ids}}, nil), nil
-	}
+	e.script(ok(reply([]create{{Text: "Dana cycles", SourceFactIDs: []string{"f2"}}}, nil)))
 	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("over-cap create: err = %v", err)
 	}
@@ -143,15 +140,11 @@ func TestRunObservationCap(t *testing.T) {
 func TestRunDropsInvalidActions(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	e.fact("f1", "Eve paints", "x")
-	e.llm.consolidate = func(_ port.StructuredRequest, ids []string) (string, error) {
-		return reply(
-			[]create{{Text: "   ", SourceFactIDs: ids}},
-			[]update{{ObservationID: "obs-unknown", Text: "Eve paints", SourceFactIDs: ids}},
-		), nil
-	}
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); err != nil {
-		t.Fatal(err)
-	}
+	e.script(ok(reply(
+		[]create{{Text: "   ", SourceFactIDs: []string{"f1"}}},
+		[]update{{ObservationID: "obs-unknown", Text: "Eve paints", SourceFactIDs: []string{"f1"}}},
+	)))
+	e.run(autoJob())
 	if len(e.observations()) != 0 || e.unit("f1").ConsolidatedAt == nil {
 		t.Fatal("want no observation and f1 stamped")
 	}
@@ -165,9 +158,10 @@ func TestRunEmptyPayloadDisabledAndBadPayload(t *testing.T) {
 	j := autoJob()
 	j.Payload = nil
 	res, err := e.consolidator().Run(t.Context(), j)
-	if err != nil || res.Processed != 0 || len(e.llm.callsFor(domain.ModelSlotConsolidate)) != 0 {
+	if err != nil || res.Processed != 0 || len(e.calls(domain.ModelSlotConsolidate)) != 0 {
 		t.Fatalf("disabled: %+v, %v", res, err)
 	}
+	e.script(e.createEach("f1"))
 	j.Overrides = &domain.BankConfig{EnableObservations: ptr(true)}
 	if res, err = e.consolidator().Run(t.Context(), j); err != nil || res.Processed != 1 {
 		t.Fatalf("enabled by the request: %+v, %v", res, err)
@@ -188,10 +182,8 @@ func TestRunManualScopes(t *testing.T) {
 	if j.Dedupe != port.DedupeNone || string(j.Payload) != `{"scopes":[{"tags":["A"]}]}` {
 		t.Fatalf("manual job = %+v", j)
 	}
-	res, err := e.consolidator().Run(t.Context(), j)
-	if err != nil {
-		t.Fatal(err)
-	}
+	e.script(e.createEach("f1"))
+	res := e.run(j)
 	if res.Processed != 1 || e.unit("f2").ConsolidatedAt != nil || e.unit("f1").ConsolidatedAt == nil {
 		t.Fatalf("result %+v; want only f1", res)
 	}
@@ -224,9 +216,8 @@ func TestRunDocumentScopeMode(t *testing.T) {
 			Tags: []string{"a", "b"}, Embedding: e.emb.Vector("Ivy hikes"), Seq: seq,
 		}})
 	})
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); err != nil {
-		t.Fatal(err)
-	}
+	e.script(e.createEach("f1"))
+	e.run(autoJob())
 	obs := e.observations()
 	if len(obs) != 1 || len(obs[0].Tags) != 0 {
 		t.Fatalf("observations = %+v, want one in the shared scope", obs)
@@ -268,9 +259,8 @@ func TestRunTriggersRefreshes(t *testing.T) {
 		paused,
 	}
 	e.fact("f1", "Jack climbs", "x")
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); err != nil {
-		t.Fatal(err)
-	}
+	e.script(e.createEach("f1"))
+	e.run(autoJob())
 	got := map[string]time.Time{}
 	e.clock.Advance(time.Hour)
 	jobs, err := e.store.Claim(t.Context(), "w", []port.JobKind{domain.OperationKindRefreshMentalModel}, 100)
