@@ -499,9 +499,11 @@ func TestRunnerSelfReclaimStopsOlderRun(t *testing.T) {
 // flakyClaimer injects Claimer failures.
 type flakyClaimer struct {
 	port.Claimer
-	hbErr         error        // every Heartbeat fails with it
-	aliveErr      error        // every Alive fails with it
-	completeFails atomic.Int32 // the next n Completes fail with domain.ErrUnavailable
+	hbErr         error                     // every Heartbeat fails with it
+	aliveErr      error                     // every Alive fails with it
+	completeFails atomic.Int32              // the next n Completes fail with domain.ErrUnavailable
+	failAckLost   atomic.Int32              // the next n Fails commit, then report domain.ErrUnavailable
+	afterFail     func(id port.OperationID) // runs after a Fail committed, before its ack
 }
 
 func (f *flakyClaimer) Heartbeat(ctx context.Context, w string, ids []port.OperationID) error {
@@ -516,6 +518,17 @@ func (f *flakyClaimer) Alive(ctx context.Context, id port.OperationID) (bool, er
 		return false, f.aliveErr
 	}
 	return f.Claimer.Alive(ctx, id)
+}
+
+func (f *flakyClaimer) Fail(ctx context.Context, id port.OperationID, cause error, at *time.Time) error {
+	err := f.Claimer.Fail(ctx, id, cause, at)
+	if f.afterFail != nil {
+		f.afterFail(id)
+	}
+	if f.failAckLost.Add(-1) >= 0 {
+		return domain.ErrUnavailable
+	}
+	return err
 }
 
 func (f *flakyClaimer) Complete(ctx context.Context, id port.OperationID, res json.RawMessage, u []port.Usage) error {
@@ -582,6 +595,52 @@ func TestRunnerRetriesTerminalCall(t *testing.T) {
 	startRunner(t, r)
 	eventually(t, "completed after two failed Completes", func() bool {
 		return ops.row(id).status == domain.OperationStatusCompleted
+	})
+}
+
+// A Fail whose commit landed but whose ack was lost is retried only when its retry time lies beyond the
+// settle timeout. A release due now is tried once, so it can't reset a row another worker has already
+// claimed back to PENDING (which would let a third worker run it concurrently).
+func TestRunnerFailAckLost(t *testing.T) {
+	t.Run("shutdown release due now: one try", func(t *testing.T) {
+		clock := newClock()
+		ops := newOps(clock)
+		fc := &flakyClaimer{Claimer: ops, afterFail: func(port.OperationID) {
+			// Another worker claims the released row before our ack arrives.
+			_, _ = ops.Claim(context.Background(), "w2", []port.JobKind{domain.OperationKindRetainDocument}, 1)
+		}}
+		fc.failAckLost.Store(1)
+		started := make(chan struct{})
+		r := testRunner(fc, clock, RunnerConfig{WorkerID: "w1"})
+		r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ port.Job) error {
+			close(started)
+			<-ctx.Done()
+			return fmt.Errorf("stopped: %w", ctx.Err())
+		})
+		id := ops.add(retainJob("1"))
+		stop := startRunner(t, r)
+		<-started
+		stop()
+		if n := len(ops.failCalls()); n != 1 {
+			t.Errorf("Fail calls = %d, want 1 (no retry of a release due now)", n)
+		}
+		if row := ops.row(id); row.status != domain.OperationStatusProcessing || row.worker != "w2" {
+			t.Errorf("row: status %s worker %s, want processing under w2", row.status, row.worker)
+		}
+	})
+	t.Run("backoff beyond the settle timeout: retried", func(t *testing.T) {
+		clock := newClock()
+		ops := newOps(clock)
+		fc := &flakyClaimer{Claimer: ops}
+		fc.failAckLost.Store(1)
+		r := testRunner(fc, clock, RunnerConfig{})
+		r.Handle(domain.OperationKindRetainDocument, func(context.Context, port.Job) error { return errors.New("boom") })
+		id := ops.add(retainJob("1"))
+		startRunner(t, r)
+		eventually(t, "Fail retried", func() bool { return len(ops.failCalls()) == 2 })
+		if row := ops.row(id); row.status != domain.OperationStatusPending || row.job.Attempt != 1 {
+			t.Errorf("row: status %s attempt %d, want pending attempt 1 (the repeat is fenced)", row.status, row.job.Attempt)
+		}
 	})
 }
 

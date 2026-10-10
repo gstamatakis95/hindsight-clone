@@ -38,9 +38,12 @@ returns, and defer Complete or Fail on every exit. The spec leaves open:
   a re-claimed row) narrows to the race between `Alive` and the write.
 - **Shutdown** (amended in review round 1, H3). When `Run`'s context ends, the runner:
   1. stops claiming;
-  2. gives the running handlers `ShutdownGrace` (default 30 s) to finish on their own, so they complete
+  2. gives the running handlers `ShutdownGrace` (default 20 s) to finish on their own, so they complete
      normally;
   3. cancels the rest with a shutdown cause, waits for them, and heartbeats until the last one returns.
+
+  A shutdown can take up to grace + settle timeout (50 s by default). The k8s worker Deployment's
+  `terminationGracePeriodSeconds` must be at least that; 60 s is recommended.
 
   A handler cut off by the shutdown is released with `Fail(cause, retryAt = now)` and re-runs at once on
   another worker. The release is decided on the cancel cause alone, whatever error the handler returned
@@ -57,6 +60,16 @@ returns, and defer Complete or Fail on every exit. The spec leaves open:
 
   If the timeout runs out, the row stays PROCESSING without heartbeats, and ReclaimStale re-queues it.
   Handlers are idempotent, so nothing is lost.
+
+  One exception (review round 2): a `Fail` whose retry time falls within the settle timeout, such as a
+  shutdown release (`retryAt = now`) or a short `ErrRetryAt`, is tried only once. If its commit landed
+  but the ack was lost, the row may already be due and claimed by another worker. A repeated `Fail` would
+  reset that worker's PROCESSING row to PENDING, and a third worker would then run it concurrently. If the
+  single try fails, the row is left to ReclaimStale. A repeat of any other terminal call can only hit a
+  fenced row, so those are retried:
+  - Complete;
+  - Fail(nil);
+  - Fail with a later retry time.
 - **Claims** run under the runner's long-lived context with a 10 s timeout, after a check that the run
   context is still live. A claim that commits as shutdown begins therefore still starts its jobs.
 - **Results.** `ReportResult(ctx, result, usage...)` records a handler's result summary and per-slot usage

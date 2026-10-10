@@ -60,7 +60,7 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 	case errors.Is(cause, errShutdown) && !errors.Is(err, ErrPermanent):
 		now := r.cfg.Clock.Now()
 		cause := fmt.Errorf("%w: %w", errShutdown, err)
-		r.persist(ctx, j, "release (shutdown)", func(c context.Context) error { return r.c.Fail(c, j.ID, cause, &now) })
+		r.fail(ctx, j, "release (shutdown)", cause, &now)
 	default:
 		at := r.retryAt(ctx, j, err)
 		if at == nil {
@@ -69,8 +69,22 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 			r.log.Info("job failed, retrying", "op", j.ID, "kind", j.Kind, "attempt", j.Attempt, "at", *at,
 				"err", err)
 		}
-		r.persist(ctx, j, "fail", func(c context.Context) error { return r.c.Fail(c, j.ID, err, at) })
+		r.fail(ctx, j, "fail", err, at)
 	}
+}
+
+// fail writes Fail(cause, at). A Fail whose retry time falls within the settle timeout is tried once: if
+// it committed but its ack was lost, the row may already be due and re-claimed by another worker, and a
+// repeated Fail would reset that worker's PROCESSING row to PENDING (a double run). Left unwritten, the row
+// stays PROCESSING without heartbeats and ReclaimStale re-queues it. Later retry times (and terminal
+// fails, which a repeat can only hit fenced) are retried through persist.
+func (r *Runner) fail(ctx context.Context, j port.Job, what string, cause error, at *time.Time) {
+	call := func(c context.Context) error { return r.c.Fail(c, j.ID, cause, at) }
+	if at != nil && !at.After(r.cfg.Clock.Now().Add(settleTimeout)) {
+		r.report(j, what, call(ctx))
+		return
+	}
+	r.persist(ctx, j, what, call)
 }
 
 // complete writes Complete with the run's reported result and usage.
@@ -97,7 +111,7 @@ func (r *Runner) settleLost(ctx context.Context, j port.Job, err error, rec *rec
 		r.complete(ctx, j, rec)
 	default:
 		cause := fmt.Errorf("%w: %w", errLost, err)
-		r.persist(ctx, j, "fail (lost)", func(c context.Context) error { return r.c.Fail(c, j.ID, cause, nil) })
+		r.fail(ctx, j, "fail (lost)", cause, nil)
 	}
 }
 

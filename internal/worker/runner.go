@@ -24,7 +24,9 @@ const (
 	// DefaultHeartbeatInterval is how often the runner heartbeats its running jobs.
 	DefaultHeartbeatInterval = 15 * time.Second
 	// DefaultShutdownGrace is how long running handlers may finish on their own after Run's context ends.
-	DefaultShutdownGrace = 30 * time.Second
+	// A shutdown can then take up to grace + settleTimeout (50 s by default), so the k8s pod's
+	// terminationGracePeriodSeconds must be at least that (60 s recommended).
+	DefaultShutdownGrace = 20 * time.Second
 	// settleTimeout bounds the terminal Complete or Fail of a job (with its retries), which runs even
 	// during shutdown.
 	settleTimeout = 30 * time.Second

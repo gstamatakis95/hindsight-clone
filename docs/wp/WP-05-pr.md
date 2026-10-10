@@ -18,9 +18,11 @@ No frozen path changed and no CCR.
   - stops a handler on `*LostJobsError`. A lost run is checked before success. It then writes nothing if
     `Alive` errors or shows the row running elsewhere; otherwise it completes or fails it with no retry,
     which ends a cancel-requested row CANCELLED;
-  - on shutdown, stops claiming and gives handlers `ShutdownGrace` (30 s) to finish. It then cancels the
+  - on shutdown, stops claiming and gives handlers `ShutdownGrace` (20 s) to finish. It then cancels the
     rest and releases them at once, deciding on the cancel cause, not on the error shape;
-  - retries a transient Complete/Fail error with backoff within the 30 s settle timeout;
+  - retries a transient Complete/Fail error with backoff within the 30 s settle timeout. The exception is a
+    Fail whose retry time falls within that timeout: it is tried once, so a lost ack can't reset a row
+    another worker has already re-claimed;
   - recovers panics;
   - defers Complete or Fail on every exit, including during shutdown.
   - `*Runner` implements `JobRunner`.
@@ -69,6 +71,7 @@ Supporting tests:
 - `TestRunnerShutdownGraceLetsJobsFinish` (H3)
 - `TestRunnerFencesItselfWithoutHeartbeats` (M1, L1)
 - `TestRunnerRetriesTerminalCall` (M3)
+- `TestRunnerFailAckLost` (round 2: a Fail due within the settle timeout is tried once)
 - `TestRunnerReportsResult`
 - `TestRegisterStubs`
 - `TestMaintenanceStepOrderAndIsolation`
@@ -116,10 +119,16 @@ Gates:
 - **A shutdown release uses up an attempt** (orchestrator ruling H3: documented, no CCR). The frozen
   `Fail(retryAt)` always increments the attempt, so a job cut off by a shutdown is charged an attempt.
   Repeated deploys during a long job can exhaust its 3 attempts, and a later failure or reclaim then fails
-  it for good. The runner never fails a job for good on the release itself. The 30 s shutdown grace makes
+  it for good. The runner never fails a job for good on the release itself. The 20 s shutdown grace makes
   such releases rare.
 - **Skip-retry for consolidate is still possible on retain-driven rows.** Retains enqueue consolidate with
   `DedupePending`, so a retain that commits during a failing consolidate makes that run skip its retry and
   end FAILED. That is the spec's rule, and no work is lost.
+- **WP-14 wiring: one StaleAfter.** WP-14 must set `RunnerConfig.StaleAfter` and
+  `MaintenanceDeps.StaleAfter` from a single config value. The runner fences itself at ¾ of its own value,
+  which only protects against the reclaim if both match.
+- **k8s shutdown budget.** A worker shutdown can take up to `ShutdownGrace` + settle timeout (20 s + 30 s
+  by default). The worker Deployment's `terminationGracePeriodSeconds` must be at least that; 60 s is
+  recommended.
 - **Lint toolchain.** `golangci-lint` on the default PATH here resolves to a v1 binary in `~/go/bin`. The
   gates were run with the v2 binary first on PATH: `PATH="/opt/homebrew/bin:$PATH" make lint`.
