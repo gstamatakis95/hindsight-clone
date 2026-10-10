@@ -10,7 +10,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-00 | Contracts and scaffold | merged (0374c87, tag contracts-v1) | wp/WP-00-contracts | f5ab75f | — | WP-00-1 approved + applied | see carried-forward |
 | WP-01 | Postgres adapter | in progress | wp/WP-01-postgres | — | — | — | — |
 | WP-02 | Fakes | in progress | wp/WP-02-fakes | — | — | — | — |
-| WP-03 | Gateway and S3 adapters | in progress | wp/WP-03-gateway-s3 | — | — | — | — |
+| WP-03 | Gateway and S3 adapters | merged (8dd2090) | wp/WP-03-gateway-s3 | e304714 | — | — | chat.go usage-sum fix + config defaults (follow-up); 6 LOW in review |
 | WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
 | WP-05 | Worker runtime | in progress | wp/WP-05-worker-runtime | — | — | — | — |
 | WP-06 | Server shell | in progress | wp/WP-06-server-shell | — | — | — | — |
@@ -86,3 +86,8 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 env: a stale golangci-lint v1 in ~/go/bin shadows Homebrew's v2.14; run make with
   PATH="/opt/homebrew/bin:$PATH". Running workers told.
 - 2026-10-10 WP-05 handed in (9a9d8fe, rebased on f7f0488); reviewer spawned.
+- 2026-10-10 WP-03 review: MERGE (0 CRITICAL/HIGH, 1 MEDIUM, 8 LOW). Merged into main as 8dd2090; gates
+  (gen no diff, lint incl. buf breaking vs contracts-v1, test) pass on main. The MEDIUM (usage not summed on a
+  no-choices response) and two cheap LOWs (negative config defaults, double Extra copy) went back to the worker
+  as a follow-up. Remaining LOWs accepted: decode-retry on caller bug, duplicate rerank indices, seekable size
+  check, MinIO suite skips without Docker, validator text sent to model.
