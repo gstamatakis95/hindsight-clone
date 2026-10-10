@@ -1,6 +1,6 @@
 # WP-04 · Config, routing, time, prompts
 
-Branch `wp/WP-04-config-prompts`, rebased on main (4812411). `make gen` leaves no diff. `make lint`
+Branch `wp/WP-04-config-prompts`, rebased on main (e3dae3b). `make gen` leaves no diff. `make lint`
 (BREAKING_AGAINST=contracts-v1) and `make test` (`go test -race ./...`) pass.
 
 ## Built
