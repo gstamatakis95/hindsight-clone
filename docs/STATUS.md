@@ -195,3 +195,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   BanksToConsolidate; domain.Unit.Stale) PENDING for the batch. WP-14 wiring notes are in docs/wp/WP-13-pr.md
   and decision 1302 (alias the server admin types). WP-10's consolidate handler must accept
   curate.ConsolidatePayload {"scopes":[{"tags":[...]}]}. ServerDefaults should set retain.entity_match_threshold.
+- 2026-10-10 PAUSED on the user's usage limit. In flight: WP-08, WP-10, WP-12 workers; WP-09, WP-11, WP-13
+  reviewers. Pending CCRs for the batch: WP-09-1, WP-11-1, WP-11-2, WP-13-1. Next: collect the reviews,
+  fix/merge, rule on the CCR batch, assign WP-15 (implement the approved port methods in fake + Postgres +
+  porttest), then WP-14.
