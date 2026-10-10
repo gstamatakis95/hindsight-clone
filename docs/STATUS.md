@@ -153,3 +153,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   (a hard-coded tenant passed every test). Tenant isolation, id checks and error mapping were verified correct.
   Fixes, the override-validation MEDIUM and cheap LOWs sent back to the worker.
 - For the Phase 2 CCR batch: Memory.stale outside Recall needs a stale field from the curate lister.
+- 2026-10-10 WP-06 round-1 fixes in at 0f2815d (leaf-path implied masks; per-RPC forwarding test for all 48 RPCs); narrow round-2 review spawned.
