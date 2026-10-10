@@ -32,3 +32,17 @@ func TestQueueContract(t *testing.T) {
 		return s, s
 	})
 }
+
+// TestStoreGapsContract runs the store gap cases added in WP-01 (tenant isolation of the round-1/2 write ports).
+func TestStoreGapsContract(t *testing.T) {
+	porttest.RunStoreGapsSuite(t, newWallStore)
+}
+
+// TestQueueGapsContract runs the queue gap cases added in WP-01 (cancel-requested Fail, tombstoned banks,
+// join-and-upgrade versus a concurrent claim).
+func TestQueueGapsContract(t *testing.T) {
+	porttest.RunQueueGapsSuite(t, func(*testing.T) (port.Store, port.Claimer) {
+		s := fake.NewStore(wallClock{})
+		return s, s
+	})
+}

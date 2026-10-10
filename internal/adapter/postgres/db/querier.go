@@ -75,6 +75,9 @@ type Querier interface {
 	ClaimCancelStale(ctx context.Context, arg ClaimCancelStaleParams) (int64, error)
 	// ClaimComplete finishes a processing job: COMPLETED, or CANCELLED when its cancel was requested.
 	ClaimComplete(ctx context.Context, arg ClaimCompleteParams) (string, error)
+	// ClaimFailUndecodable ends a selected pending row whose stored overrides can't be decoded FAILED at once, so it
+	// can't block its serial key or be claimed again.
+	ClaimFailUndecodable(ctx context.Context, arg ClaimFailUndecodableParams) error
 	// ClaimFinishFailed ends a processing job FAILED, or CANCELLED when its cancel was requested. With
 	// stale_secs set it only matches a job whose heartbeat is older than that and that has the given attempts.
 	ClaimFinishFailed(ctx context.Context, arg ClaimFinishFailedParams) (string, error)
@@ -253,12 +256,14 @@ type Querier interface {
 	UnitRecordObservationVersion(ctx context.Context, arg UnitRecordObservationVersionParams) error
 	// UnitRestore inserts an archived unit back as a live, unconsolidated unit without embedding; a chunk that no longer exists is dropped.
 	UnitRestore(ctx context.Context, arg UnitRestoreParams) error
-	// UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank and counts their mentions back.
+	// UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank (locked in id order, so concurrent writers can't deadlock on them) and counts their mentions back.
 	UnitRestoreEntities(ctx context.Context, arg UnitRestoreEntitiesParams) error
 	// UnitRestoreLinks reattaches the snapshot's causal links whose partner is live in the bank.
 	UnitRestoreLinks(ctx context.Context, arg UnitRestoreLinksParams) error
 	// UnitScopeUpsert records an observation scope of a bank; an existing scope only gets a new updated_at.
 	UnitScopeUpsert(ctx context.Context, arg UnitScopeUpsertParams) error
+	// UnitSetArchivedDocumentTags rewrites the tags of a document's archived units.
+	UnitSetArchivedDocumentTags(ctx context.Context, arg UnitSetArchivedDocumentTagsParams) error
 	// UnitSetDocumentTags rewrites the tags and seq of a document's live units, clears their consolidation stamps and returns their ids.
 	UnitSetDocumentTags(ctx context.Context, arg UnitSetDocumentTagsParams) ([]uuid.UUID, error)
 	// UnitTakeArchived deletes a bank's archived unit and returns its row.

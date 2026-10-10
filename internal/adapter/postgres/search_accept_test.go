@@ -188,6 +188,10 @@ func TestAcceptSmallBankVector(t *testing.T) {
 	// of them in the small bank.
 	n := countWithoutIterativeScan(t, forced, q)
 	t.Logf("forced HNSW plan without iterative scan: %d hits", n)
+	if n >= 10 {
+		t.Errorf("control: the HNSW plan without iterative scan found %d hits; want < 10, else this test does not "+
+			"show that iterative scan is what finds the small bank's units", n)
+	}
 }
 
 // countWithoutIterativeScan runs the semantic query shape on pool with hnsw.iterative_scan off and returns

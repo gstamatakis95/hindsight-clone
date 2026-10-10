@@ -85,6 +85,12 @@ SET status = 'pending', run_at = now(), attempts = 0, error = NULL, finished_at 
 WHERE tenant_id = $1 AND bank_id = $2 AND id = $3 AND status IN ('failed', 'cancelled')
 RETURNING *;
 
+-- ClaimFailUndecodable ends a selected pending row whose stored overrides can't be decoded FAILED at once, so it
+-- can't block its serial key or be claimed again.
+-- name: ClaimFailUndecodable :exec
+UPDATE operations SET status = 'failed', error = @error, finished_at = now(), joinable = false, updated_at = now()
+WHERE id = @id AND status = 'pending';
+
 -- QueuePrune deletes terminal operations finished before the cutoff.
 -- name: QueuePrune :execrows
 DELETE FROM operations

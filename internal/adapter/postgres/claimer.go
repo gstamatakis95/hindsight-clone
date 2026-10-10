@@ -74,13 +74,23 @@ func (s *Store) claimOnce(ctx context.Context, worker string, kinds []string, li
 		if len(rows) == 0 {
 			return nil
 		}
-		ids := make([]uuid.UUID, len(rows))
-		jobs = make([]port.Job, len(rows))
-		for i, row := range rows {
-			ids[i] = row.ID
-			if jobs[i], err = jobOf(row); err != nil {
-				return err
+		ids := make([]uuid.UUID, 0, len(rows))
+		jobs = make([]port.Job, 0, len(rows))
+		for _, row := range rows {
+			j, err := jobOf(row)
+			if err != nil {
+				// A row that can't be decoded would be claimed (and fail) forever: fail it for good instead.
+				// No OPERATION_FAILED event: that needs the bank row lock, which must not follow op row locks.
+				msg := fmt.Sprintf("undecodable operation row: %v", err)
+				if err := t.q.ClaimFailUndecodable(ctx, db.ClaimFailUndecodableParams{Error: &msg, ID: row.ID}); err != nil {
+					return mapErr("claim: fail undecodable row", err)
+				}
+				continue
 			}
+			ids, jobs = append(ids, row.ID), append(jobs, j)
+		}
+		if len(ids) == 0 {
+			return nil
 		}
 		if err := t.q.ClaimMark(ctx, db.ClaimMarkParams{WorkerID: &worker, Ids: ids}); err != nil {
 			return mapErr("claim: mark processing", err)

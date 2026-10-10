@@ -13,8 +13,9 @@ PendingOrRunning, re-cancelling a cancel-requested row, and whether a retried ro
 
 - **Several keys in one transaction.** Each `Enqueue` takes its own advisory lock, so the adapter can't sort
   the keys of one caller's transaction. Two transactions that take the same two keys in opposite order can
-  deadlock. Postgres aborts one of them with 40P01, which `mapErr` turns into `domain.ErrConflict`. The caller
-  retries the whole transaction (the port doc allows "keys in sorted order ... or retry on 40P01"). A caller
+  deadlock. Postgres aborts one of them with 40P01; `Store.InTx` rolls it back and runs it again, up to 3
+  attempts (decision 100; the port doc allows "keys in sorted order ... or retry on 40P01"). Only after the
+  last attempt does the caller see `domain.ErrConflict`. A caller
   that enqueues several dedupe jobs in one transaction should enqueue them in sorted key order to avoid this.
 - **Effective policy**, in order:
   1. A job without a serial key never dedupes. Its row is inserted with `joinable = false`. A NULL key would

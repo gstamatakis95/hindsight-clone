@@ -96,6 +96,23 @@ func (q *Queries) ClaimComplete(ctx context.Context, arg ClaimCompleteParams) (s
 	return status, err
 }
 
+const claimFailUndecodable = `-- name: ClaimFailUndecodable :exec
+UPDATE operations SET status = 'failed', error = $1, finished_at = now(), joinable = false, updated_at = now()
+WHERE id = $2 AND status = 'pending'
+`
+
+type ClaimFailUndecodableParams struct {
+	Error *string
+	ID    uuid.UUID
+}
+
+// ClaimFailUndecodable ends a selected pending row whose stored overrides can't be decoded FAILED at once, so it
+// can't block its serial key or be claimed again.
+func (q *Queries) ClaimFailUndecodable(ctx context.Context, arg ClaimFailUndecodableParams) error {
+	_, err := q.db.Exec(ctx, claimFailUndecodable, arg.Error, arg.ID)
+	return err
+}
+
 const claimFinishFailed = `-- name: ClaimFinishFailed :one
 UPDATE operations
 SET status = CASE WHEN cancel_requested_at IS NULL THEN 'failed' ELSE 'cancelled' END,

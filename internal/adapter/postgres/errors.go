@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -16,10 +17,12 @@ const (
 	codeForeignKeyViolation  = "23503"
 	codeCheckViolation       = "23514"
 	codeNotNullViolation     = "23502"
-	codeInvalidText          = "22P02"
 	codeSerializationFailure = "40001"
 	codeDeadlockDetected     = "40P01"
 	codeLockNotAvailable     = "55P03"
+	codeProgramLimitExceeded = "54000"
+	// classDataException is the SQLSTATE class of data exceptions (22xxx).
+	classDataException = "22"
 )
 
 // mapErr translates a driver error into a domain error class, wrapping the original with %w so both
@@ -50,13 +53,17 @@ func pgClass(code string) error {
 		return domain.ErrAlreadyExists
 	case codeForeignKeyViolation:
 		return domain.ErrNotFound
-	case codeCheckViolation, codeNotNullViolation, codeInvalidText:
+	case codeCheckViolation, codeNotNullViolation, codeProgramLimitExceeded:
 		return domain.ErrInvalidArgument
 	case codeSerializationFailure, codeDeadlockDetected, codeLockNotAvailable:
 		return domain.ErrConflict
-	default:
-		return domain.ErrUnavailable
 	}
+	if strings.HasPrefix(code, classDataException) {
+		// Bad input (NUL bytes, invalid encodings, out-of-range values; 22P02 included): deterministic, so
+		// the job fails at once instead of retrying (SPEC "Jobs").
+		return domain.ErrInvalidArgument
+	}
+	return domain.ErrUnavailable
 }
 
 // isDomainErr reports whether err already carries a domain error class.

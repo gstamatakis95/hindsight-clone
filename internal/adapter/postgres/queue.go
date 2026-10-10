@@ -303,6 +303,9 @@ func (r *queue) Retry(ctx context.Context, b port.BankRef, id port.OperationID) 
 	if err != nil {
 		return domain.Operation{}, err
 	}
+	if err := r.lockForRetry(ctx, b, uid); err != nil {
+		return domain.Operation{}, err
+	}
 	row, err := r.q.QueueRetry(ctx, db.QueueRetryParams{TenantID: b.Tenant, BankID: b.Bank, ID: uid})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Operation{}, r.wrongStatus(ctx, b, uid, "retry")
@@ -311,6 +314,30 @@ func (r *queue) Retry(ctx context.Context, b port.BankRef, id port.OperationID) 
 		return domain.Operation{}, mapErr(fmt.Sprintf("retry %s", id), err)
 	}
 	return operationOf(row)
+}
+
+// lockForRetry takes the locks Enqueue takes before a row becomes PENDING (and possibly joinable) again:
+// FOR KEY SHARE on the bank row, refusing a tombstoned bank (domain.ErrBankDeleting) except for its
+// delete_bank job, then the row's dedupe advisory lock, so a concurrent Enqueue can't insert a duplicate.
+func (r *queue) lockForRetry(ctx context.Context, b port.BankRef, id uuid.UUID) error {
+	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, BankID: b.Bank, ID: id})
+	if err != nil {
+		return mapErr(fmt.Sprintf("retry %s", id), err)
+	}
+	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, ID: b.Bank})
+	if err != nil {
+		return mapErr(fmt.Sprintf("retry: bank %s/%s", b.Tenant, b.Bank), err)
+	}
+	if deletingAt != nil && row.Kind != string(domain.OperationKindDeleteBank) {
+		return fmt.Errorf("%w: retry %s on %s/%s", domain.ErrBankDeleting, id, b.Tenant, b.Bank)
+	}
+	if row.SerialKey == nil {
+		return nil
+	}
+	err = r.q.QueueDedupeLock(ctx, db.QueueDedupeLockParams{
+		TenantID: b.Tenant, BankID: b.Bank, Kind: row.Kind, SerialKey: *row.SerialKey,
+	})
+	return mapErr("retry: dedupe lock", err)
 }
 
 // wrongStatus explains why a bank-scoped status update matched nothing: domain.ErrNotFound when b has no

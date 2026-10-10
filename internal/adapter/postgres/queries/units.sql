@@ -55,6 +55,11 @@ UPDATE memory_units SET
 WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND document_id = @document_id::text
 RETURNING id;
 
+-- UnitSetArchivedDocumentTags rewrites the tags of a document's archived units.
+-- name: UnitSetArchivedDocumentTags :exec
+UPDATE memory_units_archive SET tags = @tags
+WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND document_id = @document_id;
+
 -- UnitAppendAudit writes one memory_audit row; a NULL at takes now().
 -- name: UnitAppendAudit :exec
 INSERT INTO memory_audit (tenant_id, bank_id, unit_id, action, reason, before, after, operation_id, at)
@@ -171,13 +176,17 @@ INSERT INTO memory_units (
     @scope_key, @seq, @edited_at, @created_at
 );
 
--- UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank and counts their mentions back.
+-- UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank (locked in id order, so concurrent writers can't deadlock on them) and counts their mentions back.
 -- name: UnitRestoreEntities :exec
-WITH ins AS (
-    INSERT INTO unit_entities (tenant_id, bank_id, unit_id, entity_id)
-    SELECT e.tenant_id, e.bank_id, @unit_id::uuid, e.id FROM entities e
+WITH locked AS (
+    SELECT e.tenant_id, e.bank_id, e.id FROM entities e
     WHERE e.tenant_id = @tenant_id AND e.bank_id = @bank_id
       AND e.id IN (SELECT (x.v->>'id')::uuid FROM jsonb_array_elements(@snapshot::jsonb) AS x(v))
+    ORDER BY e.id
+    FOR UPDATE
+), ins AS (
+    INSERT INTO unit_entities (tenant_id, bank_id, unit_id, entity_id)
+    SELECT l.tenant_id, l.bank_id, @unit_id::uuid, l.id FROM locked l
     ON CONFLICT DO NOTHING
     RETURNING entity_id
 )
