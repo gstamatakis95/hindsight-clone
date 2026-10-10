@@ -38,6 +38,8 @@ func TestToStatus(t *testing.T) {
 			"deadline wins over unavailable", fmt.Errorf("%w: %w", domain.ErrUnavailable, context.DeadlineExceeded),
 			codes.DeadlineExceeded,
 		},
+		{"cancel wins over a domain error", fmt.Errorf("%w: %w", domain.ErrNotFound, context.Canceled), codes.Canceled},
+		{"wrapped status passes through", wrap(status.Error(codes.PermissionDenied, "no")), codes.PermissionDenied},
 		{"unclassified", errors.New("boom"), codes.Internal},
 		{"status passes through", status.Error(codes.PermissionDenied, "no"), codes.PermissionDenied},
 	}

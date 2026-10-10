@@ -34,6 +34,11 @@ func TestTenantInterceptor(t *testing.T) {
 			"control char", "/memory.v1.MemoryService/Recall",
 			metadata.Pairs(TenantHeader, "a\nb"), codes.InvalidArgument, "",
 		},
+		{"DEL", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, "a\x7fb"), codes.InvalidArgument, ""},
+		{
+			"exactly 256 bytes", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, strings.Repeat("x", 256)), codes.OK, strings.Repeat("x", 256),
+		},
 		{
 			"too long", "/memory.v1.MemoryService/Recall",
 			metadata.Pairs(TenantHeader, strings.Repeat("x", 257)), codes.InvalidArgument, "",
@@ -95,7 +100,7 @@ func TestBankRef(t *testing.T) {
 	if b, err := bankRef(ctx, "main"); err != nil || b.Tenant != "acme" || b.Bank != "main" {
 		t.Fatalf("bankRef = %v, %v", b, err)
 	}
-	for _, id := range []string{"", "a/b", "a\x00"} {
+	for _, id := range []string{"", "a/b", "a\x00", "a\x7f", strings.Repeat("b", 257)} {
 		if _, err := bankRef(ctx, id); status.Code(toStatus(err)) != codes.InvalidArgument {
 			t.Fatalf("bank %q: err = %v, want INVALID_ARGUMENT", id, err)
 		}

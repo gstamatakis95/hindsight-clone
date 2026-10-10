@@ -30,8 +30,8 @@ Branch `wp/WP-06-server-shell`. All code is in `internal/server/**`. Two changes
 ## Acceptance tests (all pass, `go test -race ./internal/server/`)
 | Card item | Tests |
 |---|---|
-| Round-trip conversion for every message, fuzzed | `TestRoundTripEveryMessage`: every memory.v1 message has a round trip (96, 200 random samples each) or an exemption with a reason, or the test fails. Also `FuzzRoundTrip`, `TestEnumMapping` (every enum value pinned), `TestUnknownEnumRejected`, `TestGoldenRetainRequest`, `TestGoldenRecallRequest`, `TestGoldenReflectRequest`, `TestUpdateMemoryEntitiesPresence`, `TestStrategyMatchBadScope`, `TestMentalModelDetail`, `TestFieldMaskConfigPatch`, `TestFieldMaskInvalid`, `TestFieldMaskReset`, `TestFieldMaskSpecPatch`, `TestFieldMaskPathsResolve` |
-| Every RPC registered and reachable over bufconn with mocks | `TestEveryRPCReachable` enumerates the 48 methods from the service descriptors, calls each one with mockery mocks and checks for OK and a mock hit. Also `TestServiceInfo`, `TestHealthWithoutTenant`, `TestTenantReachesEngine`, `TestUnwiredDependency` |
+| Round-trip conversion for every message, fuzzed | `TestRoundTripEveryMessage`: every memory.v1 message has a round trip (96, 200 random samples each) or an exemption with a reason, or the test fails. Also `FuzzRoundTrip`, `TestEnumMapping` (every enum value pinned), `TestUnknownEnumRejected`, `TestGoldenRetainRequest`, `TestGoldenRecallRequest`, `TestGoldenReflectRequest`, `TestUpdateMemoryEntitiesPresence`, `TestStrategyMatchBadScope`, `TestMentalModelDetail`, `TestFieldMaskConfigPatch`, `TestFieldMaskInvalid`, `TestFieldMaskReset`, `TestFieldMaskSpecPatch`, `TestFieldMaskImpliedLeaves`, `TestFieldMaskPathsResolve` |
+| Every RPC registered and reachable over bufconn with mocks | `TestEveryRPCForwards` covers all 48 RPCs. For each, it checks that the expected engine or admin method was called with BankRef {acme, x}, or the tenant for tenant-scoped RPCs, plus one representative field. Also `TestEveryRPCReachable` enumerates the 48 methods from the service descriptors, calls each one with mockery mocks and checks for OK and a mock hit. Also `TestServiceInfo`, `TestHealthWithoutTenant`, `TestTenantReachesEngine`, `TestUnwiredDependency`, `TestUpdateDocumentTags`, `TestSpecOverridesValidated`, `TestRequestEdgeCases` |
 | Error mapping table | `TestToStatus` |
 | Interceptors | `TestTenantInterceptor`, `TestDeadlineInterceptor`, `TestBankRef` |
 
@@ -60,6 +60,9 @@ No CCRs filed.
   `config.ValidateOverrides`.
   - The rpc names passed are the method names (Retain, Recall, Reflect, UpdateMemory, Consolidate,
     ReprocessDocument, PreviewPrompt, CreateMentalModel, RefreshMentalModel).
-  - UpdateMentalModel does not validate `spec.overrides`.
+  - UpdateMentalModel (inside the patch) and CreateBankFromTemplate (for each template spec) validate
+    spec overrides as "CreateMentalModel".
+- **`Memory.stale` outside Recall.** `domain.Unit` has no stale field, so ListMemories, GetMemory and
+  based_on never set it. A lister field is needed (Phase 2 CCR batch).
 - **Explicit clears in jsonb.** BankConfig's JSON `omitempty` drops a persisted explicit clear (a non-nil
   empty list) on reload. That's a domain or adapter concern, recorded in decision 604.

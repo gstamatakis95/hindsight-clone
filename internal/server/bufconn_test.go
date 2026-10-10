@@ -36,12 +36,30 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// counter records how often each mocked method ran.
+// counter records how often each mocked method ran and the arguments of its last call.
 type counter struct {
-	// mu guards n.
+	// mu guards n and last.
 	mu sync.Mutex
 	// n counts calls per "Mock.Method".
 	n map[string]int
+	// last holds the arguments (after ctx) of the latest call per "Mock.Method".
+	last map[string][]any
+}
+
+// reset forgets every recorded call.
+func (c *counter) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n = map[string]int{}
+	c.last = map[string][]any{}
+}
+
+// args returns the arguments of the latest call of key and whether it was called.
+func (c *counter) args(key string) ([]any, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	a, ok := c.last[key]
+	return a, ok
 }
 
 // total returns the number of calls so far.
@@ -67,9 +85,14 @@ func (c *counter) stub(m any) {
 		}
 		key := v.Type().Name() + "." + strings.TrimSuffix(name, "Func")
 		ft := f.Type()
-		f.Set(reflect.MakeFunc(ft, func([]reflect.Value) []reflect.Value {
+		f.Set(reflect.MakeFunc(ft, func(in []reflect.Value) []reflect.Value {
+			args := make([]any, 0, len(in))
+			for _, a := range in[1:] {
+				args = append(args, a.Interface())
+			}
 			c.mu.Lock()
 			c.n[key]++
+			c.last[key] = args
 			c.mu.Unlock()
 			out := make([]reflect.Value, ft.NumOut())
 			for j := range out {
@@ -95,9 +118,9 @@ type harness struct {
 }
 
 // newHarness starts the server with zero-value mocks for every dependency.
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, opts ...func(*server.Deps)) *harness {
 	t.Helper()
-	h := &harness{calls: &counter{n: map[string]int{}}}
+	h := &harness{calls: &counter{n: map[string]int{}, last: map[string][]any{}}}
 	h.recaller = &mockrecall.Recaller{}
 	h.probe = &mockserver.ReadinessProbe{}
 	d := server.Deps{
@@ -118,6 +141,9 @@ func newHarness(t *testing.T) *harness {
 		d.Documents, d.Observations, d.MentalModels, d.Operations, h.probe,
 	} {
 		h.calls.stub(m)
+	}
+	for _, o := range opts {
+		o(&d)
 	}
 	h.srv = server.New(d)
 	lis := bufconn.Listen(1 << 20)

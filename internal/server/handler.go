@@ -34,4 +34,3 @@ func (d Deps) validatedSpec(patch SpecPatch) SpecPatch {
 		return out, nil
 	}
 }
-

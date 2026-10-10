@@ -8,8 +8,8 @@ import (
 )
 
 // New returns a gRPC server with all eight memory.v1 services and grpc.health.v1 registered over d. The
-// tenant, default-deadline and paging (negative page_size / limit) interceptors run first, in that order; opts are appended (more interceptors
-// chain after them).
+// tenant, default-deadline and paging (negative page_size / limit) interceptors run first, in that order;
+// opts are appended (more interceptors chain after them).
 func New(d Deps, opts ...grpc.ServerOption) *grpc.Server {
 	base := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
