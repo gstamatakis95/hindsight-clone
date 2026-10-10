@@ -3,6 +3,7 @@ package reflect
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
@@ -222,7 +223,8 @@ func (r *run) toolMessage(id string, out json.RawMessage) {
 }
 
 // finish asks for the answer as a done call when the conversation ends on tool results; otherwise, or if
-// the model doesn't comply, it synthesises the answer in a tool-less call.
+// the model doesn't comply or the call fails, it synthesises the answer in a tool-less call. The closing done
+// skips the evidence guard, as Hindsight's last iteration does.
 func (r *run) finish(ctx context.Context, stop StopReason) (answer, error) {
 	if n := len(r.messages); n == 0 || r.messages[n-1].Role != port.ChatRoleTool {
 		return r.synthesize(ctx, stop)
@@ -233,11 +235,16 @@ func (r *run) finish(ctx context.Context, stop StopReason) (answer, error) {
 	}
 	r.messages = append(r.messages, port.ChatMessage{Role: port.ChatRoleUser, Content: prompt})
 	resp, err := r.chat(ctx, prompts.ReflectDoneRequest, r.specs, ToolDone)
-	if err != nil {
-		if isContextOverflow(err) {
-			return r.synthesize(ctx, StopContextFull)
-		}
+	switch {
+	case err == nil:
+	case ctx.Err() != nil, errors.Is(err, domain.ErrResourceExhausted):
 		return answer{}, err
+	case isContextOverflow(err):
+		return r.synthesize(ctx, StopContextFull)
+	default:
+		// The closing turn is optional and retrieves nothing (Hindsight falls back the same way); some
+		// OpenAI-compatible backends also reject a named tool_choice.
+		return r.synthesize(ctx, stop)
 	}
 	for _, c := range resp.Message.ToolCalls {
 		if normalizeName(c.Name) != ToolDone {

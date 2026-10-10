@@ -103,14 +103,13 @@ func decodeArgs(name string, raw json.RawMessage, v any) (ToolResult, bool) {
 	return ToolResult{}, true
 }
 
-// retrievalError classifies a dependency error: a caller's ctx error passes through, an invalid model-made
-// argument goes back to the model (ok=false with a tool result), anything else fails reflect as UNAVAILABLE.
+// retrievalError classifies a dependency error: a caller's ctx error passes through, anything else fails
+// reflect as UNAVAILABLE (strict: it never answers from evidence it could not gather). The one argument error
+// the model controls, an over-long query, is caught before the call (checkQuery).
 func retrievalError(ctx context.Context, name string, err error) (ToolResult, error) {
 	switch {
 	case ctx.Err() != nil:
 		return ToolResult{}, fmt.Errorf("reflect: %s: %w", name, err)
-	case errors.Is(err, domain.ErrInvalidArgument):
-		return malformed("%s: %v", name, err), nil
 	case errors.Is(err, domain.ErrUnavailable):
 		return ToolResult{}, fmt.Errorf("reflect: %s: %w", name, err)
 	default:
@@ -124,6 +123,21 @@ func tokenArg(v *float64, def int) int {
 		return def
 	}
 	return min(max(int(*v), minToolTokens), maxToolTokens)
+}
+
+// maxQueryTokens is recall's query limit (RecallRequest.Query: max 500 tokens).
+const maxQueryTokens = 500
+
+// checkQuery returns the malformed-call result for a missing or over-long query; ok when the query is usable.
+func checkQuery(tool, query string) (ToolResult, bool) {
+	switch {
+	case strings.TrimSpace(query) == "":
+		return malformed("%s requires a query parameter", tool), false
+	case estimateTokens(query) > maxQueryTokens:
+		return malformed("%s: the query is too long (max %d tokens); search with a shorter query", tool,
+			maxQueryTokens), false
+	}
+	return ToolResult{}, true
 }
 
 // estimateTokens approximates a text's token count as one token per four bytes (decision 1104).
@@ -202,8 +216,8 @@ func (t *recallTool) Call(ctx context.Context, st *AgentState, args json.RawMess
 	if res, ok := decodeArgs(ToolRecall, args, &a); !ok {
 		return res, nil
 	}
-	if a.Query == "" {
-		return malformed("recall requires a query parameter"), nil
+	if res, ok := checkQuery(ToolRecall, a.Query); !ok {
+		return res, nil
 	}
 	def := defaultRecallMaxTokens
 	if st.Config.Reflect != nil && st.Config.Reflect.RecallMaxTokens != nil {
@@ -262,8 +276,8 @@ func (t *observationsTool) Call(ctx context.Context, st *AgentState, args json.R
 	if res, ok := decodeArgs(ToolSearchObservations, args, &a); !ok {
 		return res, nil
 	}
-	if a.Query == "" {
-		return malformed("search_observations requires a query parameter"), nil
+	if res, ok := checkQuery(ToolSearchObservations, a.Query); !ok {
+		return res, nil
 	}
 	def, entities := defaultObservationsMaxTokens, true
 	if rc := st.Config.Reflect; rc != nil {

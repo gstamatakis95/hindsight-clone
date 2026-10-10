@@ -167,7 +167,7 @@ func (r *reflector) newRun(
 		queryTime = *req.QueryTime
 	}
 	tools := r.offered(cfg, req.ExcludeMentalModels)
-	data := promptData(cfg, directives, toolNames(tools), r.d.Clock.Now())
+	data := promptData(cfg, directives, toolNames(tools), queryTime)
 	data.BankName, data.Context, data.Query = bankName, req.Context, req.Query
 	data.Budget, data.AnswerAsDocument = string(effectiveBudget(req.Budget)), req.AsDocument
 	data.MaxTokens = answerTokens(cfg, req.MaxTokens)

@@ -9,6 +9,8 @@ tags (apply_all, extra_directives)"; a request can never remove the bank's store
   costing an iteration) until a retrieval tool has run successfully. A retrieval that found nothing counts:
   Hindsight requires a retrieved id, but on an empty bank that burns every iteration, and SPEC says "a
   retrieval that returns nothing is not a failure". `expand` does not count (it reads ids found earlier).
+  The closing `done` turn after max_iterations is not guarded (as Hindsight's last iteration): it can only
+  run after at least one tool turn, and its answer cites only what was retrieved.
 - **What is retrievable.** recall and search_observations register the units they return; search_mental_models
   (snippet hits included, as in Hindsight) and read_mental_models register the pages they return. `expand`
   registers nothing, so its source facts can't be cited unless a search returned them (Hindsight).

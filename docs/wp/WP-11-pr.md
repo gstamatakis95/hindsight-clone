@@ -11,8 +11,8 @@ Plan: `docs/wp/WP-11.md`.
 - [x] The loop: `max_iterations` scaled by budget (LOW halves, HIGH doubles, unspecified = LOW, never below 1),
   then a closing `done` turn, then a tool-less synthesis; must retrieve before done (`require_evidence`,
   default on); citations it never retrieved are dropped.
-- [x] A malformed tool call (unknown tool, bad JSON, missing query/ids, malformed done, recall rejecting the
-  model's arguments) goes back to the model as `{"error": ...}`.
+- [x] A malformed tool call (unknown tool, bad JSON, missing query/ids, an over-long query, malformed done)
+  goes back to the model as `{"error": ...}`.
 - [x] Strict failure: UNAVAILABLE on retrieval errors (database, embedder, reranker, pages), on an empty
   answer and on a model that never calls a tool; a context-window overflow synthesises from what was gathered
   (stop reason `context_full`, older outputs dropped if the synthesis overflows too).
@@ -36,7 +36,7 @@ Plan: `docs/wp/WP-11.md`.
 | Empty retrieval is not a failure | `TestReflectEmptyRetrievalIsNotFailure` |
 | Empty final answer fails (done and synthesis) | `TestReflectEmptyAnswerFails` |
 | Model that can't drive tools fails | `TestReflectModelWithoutToolCallsFails` |
-| Context overflow synthesises from what it has | `TestReflectContextOverflowSynthesizes` |
+| Context overflow synthesises from what it has | `TestReflectContextOverflowSynthesizes`, `TestReflectSynthesisFallbacks` |
 | max_total_tokens → RESOURCE_EXHAUSTED (bank and request level) | `TestReflectMaxTotalTokensExhausted` |
 | Malformed tool call goes back to the model | `TestReflectMalformedToolCallReturnsToModel` |
 | Must retrieve before done | `TestReflectDoneBeforeRetrievalRejected` |

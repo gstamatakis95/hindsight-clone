@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReflectRetrievalErrorIsUnavailable(t *testing.T) {
@@ -21,6 +22,7 @@ func TestReflectRetrievalErrorIsUnavailable(t *testing.T) {
 		"reranker":      fmt.Errorf("%w: rerank: 503", domain.ErrUnavailable),
 		"embedder":      fmt.Errorf("%w: embed: timeout", domain.ErrUnavailable),
 		"bank vanished": fmt.Errorf("%w: bank", domain.ErrNotFound),
+		"unbound slot":  fmt.Errorf("%w: no model bound to slot \"rerank\"", domain.ErrInvalidArgument),
 	}
 	for name, cause := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -96,11 +98,13 @@ func TestReflectModelWithoutToolCallsFails(t *testing.T) {
 	}
 }
 
+// errOverflow is a gateway error for a prompt over the context window.
+var errOverflow = fmt.Errorf("%w: gateway: status 400: This model's maximum context length is 8192 tokens",
+	domain.ErrUnavailable)
+
 func TestReflectContextOverflowSynthesizes(t *testing.T) {
-	overflow := fmt.Errorf("%w: gateway: status 400: This model's maximum context length is 8192 tokens",
-		domain.ErrUnavailable)
 	h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes green tea"))
-	h.turns(recallCall(), fake.Reply{Err: overflow})
+	h.turns(recallCall(), fake.Reply{Err: errOverflow})
 	h.llm.Script(domain.ModelSlotReflect, prompts.ReflectFinal, text("Alice likes green tea."))
 	res, err := h.reflect(nil)
 	if err != nil {
@@ -119,11 +123,13 @@ func TestReflectContextOverflowSynthesizes(t *testing.T) {
 	if len(res.BasedOn.Memories) != 1 || res.BasedOn.Memories[0].ID != "u1" {
 		t.Errorf("based_on = %+v, want everything retrieved", res.BasedOn.Memories)
 	}
+}
 
+func TestReflectSynthesisFallbacks(t *testing.T) {
 	t.Run("synthesis overflow drops older results", func(t *testing.T) {
 		h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes green tea"))
-		h.turns(recallCall(), recallCall(), fake.Reply{Err: overflow})
-		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectFinal, fake.Reply{Err: overflow}, text("Tea."))
+		h.turns(recallCall(), recallCall(), fake.Reply{Err: errOverflow})
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectFinal, fake.Reply{Err: errOverflow}, text("Tea."))
 		res, err := h.reflect(nil)
 		if err != nil || res.Text != "Tea." {
 			t.Fatalf("res %q err %v", res.Text, err)
@@ -131,6 +137,18 @@ func TestReflectContextOverflowSynthesizes(t *testing.T) {
 		final := h.llm.CallsFor(domain.ModelSlotReflect, prompts.ReflectFinal)
 		if len(final) != 2 || !strings.Contains(final[1].Chat.Messages[1].Content, "omitted") {
 			t.Errorf("want a second, trimmed synthesis; got %d calls", len(final))
+		}
+	})
+	t.Run("closing turn failure falls back to synthesis", func(t *testing.T) {
+		h := newHarness(t, domain.BankConfig{Reflect: &domain.ReflectConfig{MaxIterations: ptr(2)}},
+			unit("u1", "Alice likes tea"))
+		h.turns(recallCall())
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectDoneRequest,
+			fake.Reply{Err: fmt.Errorf("%w: gateway: status 400: tool_choice not supported", domain.ErrUnavailable)})
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectFinal, text("Tea."))
+		res, err := h.reflect(nil)
+		if err != nil || res.Text != "Tea." || res.Trace.StopReason != rf.StopMaxIterations {
+			t.Fatalf("res %q stop %q err %v", res.Text, res.Trace.StopReason, err)
 		}
 	})
 	t.Run("other chat errors fail", func(t *testing.T) {
@@ -196,6 +214,18 @@ func TestReflectMalformedToolCallReturnsToModel(t *testing.T) {
 	if errs != 3 || res.Text != "Alice likes tea." {
 		t.Errorf("trace errors = %d, text %q", errs, res.Text)
 	}
+
+	t.Run("over-long query", func(t *testing.T) {
+		h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
+		long := strings.Repeat("alice ", 400)
+		h.turns(calls(rf.ToolRecall, `{"query":"`+long+`"}`), recallCall(), doneCall("tea", "u1"))
+		if _, err := h.reflect(nil); err != nil {
+			t.Fatal(err)
+		}
+		if msgs := toolMessages(h.loopCalls()[1]); len(msgs) != 1 || !strings.Contains(msgs[0], "too long") {
+			t.Errorf("tool messages = %v", msgs)
+		}
+	})
 }
 
 func TestReflectDoneBeforeRetrievalRejected(t *testing.T) {
@@ -416,12 +446,13 @@ func TestPromptBuilderUsesEffectiveConfig(t *testing.T) {
 		r.Overrides = &domain.BankConfig{
 			ReflectMission: "Request mission.", Disposition: &domain.Disposition{Skepticism: 5, Literalism: 3, Empathy: 3},
 		}
+		r.QueryTime = ptr(time.Date(2020, 5, 1, 12, 30, 0, 0, time.UTC))
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sys := systemPrompt(h.loopCalls()[0])
-	if !containsAll(sys, "Request mission.", "highly skeptical", "Memory Bank: Bank One") ||
+	if !containsAll(sys, "Request mission.", "highly skeptical", "Memory Bank: Bank One", "2020-05-01 12:30 UTC") ||
 		strings.Contains(sys, "Bank mission.") {
 		t.Errorf("system prompt does not reflect the effective config:\n%s", sys)
 	}
