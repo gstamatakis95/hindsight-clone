@@ -38,9 +38,9 @@ func (r *Runner) invoke(ctx context.Context, j port.Job) (err error) {
 
 // settle writes the job's terminal call. cause is why the runner cancelled the handler, if it did:
 //   - success: Complete with the reported result and usage (on a cancel-requested row it ends CANCELLED);
-//   - lost job: Fail with no retry, which ends a cancel-requested row CANCELLED and is fenced off a
-//     reclaimed one; never requeued, so a job re-claimed elsewhere can't get a second concurrent run;
-//   - shutdown: Fail with retry at now, outside the attempt cap (an interrupted run is not a failure);
+//   - lost job: see settleLost;
+//   - shutdown (unless the handler failed permanently): Fail with retry at now, outside the attempt cap,
+//     whatever error the interrupted handler returned (an interrupted run is not a failure);
 //   - otherwise: Fail with the retry policy's time, or nil once the policy gives up.
 func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec *recorder) {
 	ctx, cancel := context.WithTimeout(base, settleTimeout)
@@ -50,8 +50,8 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 		result, usage := rec.get()
 		r.report(j, "complete", r.c.Complete(ctx, j.ID, result, usage))
 	case errors.Is(cause, errLost):
-		r.report(j, "fail (lost)", r.c.Fail(ctx, j.ID, fmt.Errorf("%w: %w", errLost, err), nil))
-	case errors.Is(cause, errShutdown) && errors.Is(err, context.Canceled):
+		r.settleLost(ctx, j, err)
+	case errors.Is(cause, errShutdown) && !errors.Is(err, ErrPermanent):
 		now := r.cfg.Clock.Now()
 		r.report(j, "release (shutdown)", r.c.Fail(ctx, j.ID, fmt.Errorf("%w: %w", errShutdown, err), &now))
 	default:
@@ -64,6 +64,19 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 		}
 		r.report(j, "fail", r.c.Fail(ctx, j.ID, err, at))
 	}
+}
+
+// settleLost settles a job Heartbeat reported lost. Alive is true only when the row is PROCESSING under
+// another worker (re-claimed after a reclaim): that run is not ours, so nothing is written. Otherwise
+// (cancel requested, reclaimed and still pending, finished, bank gone) it calls Fail with no retry, which
+// ends a cancel-requested row CANCELLED and is fenced off the rest. A lost run is never requeued, so a
+// job can't get a second concurrent run.
+func (r *Runner) settleLost(ctx context.Context, j port.Job, err error) {
+	if alive, aerr := r.c.Alive(ctx, j.ID); aerr == nil && alive {
+		r.log.Warn("job re-claimed by another worker; leaving its row alone", "op", j.ID, "kind", j.Kind)
+		return
+	}
+	r.report(j, "fail (lost)", r.c.Fail(ctx, j.ID, fmt.Errorf("%w: %w", errLost, err), nil))
 }
 
 // retryAt applies the retry policy; nil = fail for good. A consolidate that would retry fails instead

@@ -16,16 +16,20 @@ returns, and defer Complete or Fail on every exit. The spec leaves open:
   at once.
 - **Lost jobs.** A `*LostJobsError` from Heartbeat means the cancel was requested, or the job was
   reclaimed or re-claimed elsewhere. The runner cancels that handler's context. When the handler
-  returns, the runner calls `Fail(cause, nil)`:
-  - on a cancel-requested row this ends CANCELLED;
-  - on a reclaimed row it is fenced and changes nothing.
+  returns, the runner calls `Alive` first.
+  - If `Alive` is true, the row is PROCESSING under another worker, so the runner writes nothing.
+  - Otherwise it calls `Fail(cause, nil)`. On a cancel-requested row this ends CANCELLED; on a reclaimed
+    or finished row it is fenced and changes nothing.
 
   The job is never requeued from a lost run, so a job already re-claimed by another worker can't get a
-  second concurrent run. (A Complete or Fail landing on a re-claimed row stays the R7 known limit.)
+  second concurrent run. The R7 window (a write landing on a re-claimed row) narrows to the race between
+  `Alive` and `Fail`.
 - **Shutdown.** When `Run`'s context ends, the runner stops claiming and cancels every handler with a
   shutdown cause. It waits for all of them and heartbeats until the last one returns. A handler that
-  stopped because of the shutdown is released with `Fail(cause, retryAt = now)`, outside the attempt cap:
-  an interrupted run is not a failure, and it re-runs at once on another worker.
+  cancelled by the shutdown is released with `Fail(cause, retryAt = now)`, outside the attempt cap: an
+  interrupted run is not a failure, and it re-runs at once on another worker. The release is decided on
+  the cancel cause alone, whatever error the handler returned (engines often drop `context.Canceled`),
+  unless that error is `ErrPermanent`. A handler that returns nil during shutdown is completed.
 - **Settling.** Complete and Fail run under `context.WithoutCancel` with a 30 s timeout, so they also run
   during shutdown. Fencing outcomes are logged, not treated as errors:
   - `ErrCancelled`;

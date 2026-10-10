@@ -26,7 +26,12 @@ Mental-model payloads and cron semantics belong to WP-12.
 - **The consolidation enqueue stays in the worker.** It runs one short transaction per bank with:
   - kind `consolidate`, serial key `consolidate`;
   - payload `{}`, no overrides, no scopes;
-  - `DedupePending`.
+  - `DedupePendingOrRunning`. It joins the bank's queued *or running* automatic consolidate, because a
+    running consolidate re-enqueues itself while units remain. Joining a running one also avoids a
+    trap: with `DedupePending`, a tick during a slow, failing run would queue a fresh job, so the
+    failing run would skip its retry (decision 500) and end FAILED. Backoff would reset on every
+    failure and each failure would emit an event. Jobs enqueued by retain, rederive and similar paths
+    keep the spec's `DedupePending`.
 
   Concurrent ticks therefore insert at most one job per bank, and that is what the acceptance test
   checks. `ErrBankDeleting` and `ErrNotFound` skip the bank. Any other error is collected without
@@ -48,8 +53,8 @@ Mental-model payloads and cron semantics belong to WP-12.
 ## Alternatives
 - Have the worker enqueue cron refreshes from a "due models" read. Rejected: it would fix WP-12's payload
   and due-ness rules here.
-- Use `DedupePendingOrRunning` for the reconcile. Rejected: the spec marks consolidate as dedupe
-  Pending, and a running consolidate already re-enqueues itself while units remain.
+- Use `DedupePending` for the reconcile, as the spec's table does for consolidate. Rejected for this one
+  safety-net enqueue: it interacts badly with the skip-retry rule, as described above.
 
 ## Spec lines involved
 SPEC "Jobs" (Maintenance tick, table row for consolidate), "Function signatures" (worker), decision 012

@@ -384,6 +384,35 @@ func TestKilledWorkerJobReclaimed(t *testing.T) {
 	})
 }
 
+// A job lost to another worker (reclaimed and re-claimed) is stopped here and its row is left alone.
+func TestRunnerLostToAnotherWorkerLeavesRowAlone(t *testing.T) {
+	clock := newClock()
+	ops := newOps(clock)
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+	r := testRunner(ops, clock, RunnerConfig{WorkerID: "w1", HeartbeatInterval: 2 * time.Millisecond})
+	r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ port.Job) error {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return fmt.Errorf("stopped: %w", ctx.Err())
+	})
+	id := ops.add(retainJob("1"))
+	startRunner(t, r)
+	<-started
+	ops.mu.Lock()
+	ops.rows[id].worker = "w2" // reclaimed and re-claimed elsewhere
+	ops.mu.Unlock()
+	<-stopped
+	time.Sleep(20 * time.Millisecond)
+	if fails := ops.failCalls(); len(fails) != 0 {
+		t.Errorf("fail calls = %+v, want none", fails)
+	}
+	if row := ops.row(id); row.status != domain.OperationStatusProcessing || row.worker != "w2" {
+		t.Errorf("row: status %s worker %s, want processing under w2", row.status, row.worker)
+	}
+}
+
 // A panicking handler is retried like a transient failure, and its slot is freed.
 func TestRunnerPanicRetries(t *testing.T) {
 	clock := newClock()
@@ -410,22 +439,37 @@ func TestRunnerPanicRetries(t *testing.T) {
 
 // On shutdown the runner cancels running handlers and releases their jobs for an immediate re-run.
 func TestRunnerShutdownReleasesJobs(t *testing.T) {
-	clock := newClock()
-	ops := newOps(clock)
-	started := make(chan struct{})
-	r := testRunner(ops, clock, RunnerConfig{})
-	r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, j port.Job) error {
-		close(started)
-		<-ctx.Done()
-		return NewCheckpoint(ops, j.ID).Report(ctx, domain.Progress{})
-	})
-	id := ops.add(port.Job{Bank: bankA, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:1", Attempt: 2})
-	stop := startRunner(t, r)
-	<-started
-	stop()
-	row := ops.row(id)
-	if row.status != domain.OperationStatusPending || !row.job.RunAt.Equal(clock.Now()) {
-		t.Fatalf("after shutdown: status %s run_at %v, want pending now", row.status, row.job.RunAt)
+	tests := []struct {
+		name   string
+		stopIn func(ctx context.Context, ops *fakeOps, j port.Job) error
+	}{
+		{"checkpoint error", func(ctx context.Context, ops *fakeOps, j port.Job) error {
+			return NewCheckpoint(ops, j.ID).Report(ctx, domain.Progress{})
+		}},
+		{"error that drops context.Canceled", func(ctx context.Context, _ *fakeOps, _ port.Job) error {
+			return fmt.Errorf("%w: gateway: %s", domain.ErrUnavailable, ctx.Err().Error())
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newClock()
+			ops := newOps(clock)
+			started := make(chan struct{})
+			r := testRunner(ops, clock, RunnerConfig{})
+			r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, j port.Job) error {
+				close(started)
+				<-ctx.Done()
+				return tt.stopIn(ctx, ops, j)
+			})
+			id := ops.add(port.Job{Bank: bankA, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:1", Attempt: 2})
+			stop := startRunner(t, r)
+			<-started
+			stop()
+			row := ops.row(id)
+			if row.status != domain.OperationStatusPending || !row.job.RunAt.Equal(clock.Now()) {
+				t.Fatalf("after shutdown: status %s run_at %v, want pending now", row.status, row.job.RunAt)
+			}
+		})
 	}
 }
 

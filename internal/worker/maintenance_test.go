@@ -164,6 +164,27 @@ func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 	}
 }
 
+// The reconcile joins a running automatic consolidate instead of queueing another one behind it.
+func TestConsolidationReconcileJoinsRunning(t *testing.T) {
+	clock := newClock()
+	ops := newOps(clock)
+	ops.add(consolidateJob(bankA))
+	kinds := []port.JobKind{domain.OperationKindConsolidate}
+	if js, _ := ops.Claim(context.Background(), "w1", kinds, 1); len(js) != 1 {
+		t.Fatal("setup claim")
+	}
+	deps := MaintenanceDeps{
+		Claimer: ops, Store: &fakeStore{ops: ops}, Clock: clock, Consolidation: fixedBanks{bankA}, Logger: quiet,
+	}.withDefaults()
+	n, err := reconcileConsolidation(context.Background(), deps)
+	if err != nil || n != 0 {
+		t.Fatalf("reconcile = %d, %v; want 0 inserted", n, err)
+	}
+	if c := ops.count(func(*fakeRow) bool { return true }); c != 1 {
+		t.Errorf("%d consolidate rows, want 1", c)
+	}
+}
+
 func TestPruneOperations(t *testing.T) {
 	clock := newClock()
 	ops := newOps(clock)

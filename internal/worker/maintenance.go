@@ -196,9 +196,11 @@ func enqueueCronRefreshes(ctx context.Context, d MaintenanceDeps) (int, error) {
 }
 
 // reconcileConsolidation enqueues a consolidate job for every bank with unconsolidated units, one short
-// transaction per bank. DedupePending joins the bank's queued automatic consolidate, so concurrent ticks
-// insert at most one. A bank being deleted (or already gone) is skipped; other errors don't stop the
-// remaining banks. It returns how many jobs it inserted.
+// transaction per bank. DedupePendingOrRunning joins the bank's queued or running automatic consolidate
+// (a running one re-enqueues itself while units remain), so concurrent ticks insert at most one, and a
+// tick never queues a job that would make a failing running consolidate skip its retry. A bank being
+// deleted (or already gone) is skipped; other errors don't stop the remaining banks. It returns how many
+// jobs it inserted.
 func reconcileConsolidation(ctx context.Context, d MaintenanceDeps) (int, error) {
 	if d.Consolidation == nil {
 		return 0, nil
@@ -231,7 +233,7 @@ func enqueueConsolidate(ctx context.Context, s port.Store, b port.BankRef) (join
 			Kind:      domain.OperationKindConsolidate,
 			SerialKey: consolidateSerialKey,
 			Payload:   json.RawMessage(`{}`),
-			Dedupe:    port.DedupePending,
+			Dedupe:    port.DedupePendingOrRunning,
 		})
 		joined = j
 		return err

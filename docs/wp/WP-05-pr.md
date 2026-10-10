@@ -11,7 +11,9 @@ No frozen path changed and no CCR.
     consolidate is claimed first and may use any slot;
   - dispatches by kind and claims only registered kinds;
   - heartbeats every 15 s until every handler has returned and been settled;
-  - stops a handler on `*LostJobsError`;
+  - stops a handler on `*LostJobsError`. It then writes nothing if `Alive` shows the row was re-claimed
+    by another worker, and otherwise calls `Fail(nil)`, which ends a cancel-requested row CANCELLED;
+  - on shutdown, releases interrupted jobs at once, deciding on the cancel cause, not on the error shape;
   - recovers panics;
   - defers Complete or Fail on every exit, including during shutdown.
   - `*Runner` implements `JobRunner`.
@@ -30,8 +32,8 @@ No frozen path changed and no CCR.
   2. the refresh-failure reconcile (carried-forward R10' item; consumer interface `RefreshFailureReconciler`
      for WP-12);
   3. cron refreshes (consumer interface `CronRefresher` for WP-12);
-  4. the consolidation reconcile (`ConsolidationCandidates`, then a `DedupePending` enqueue per bank in its
-     own tx);
+  4. the consolidation reconcile (`ConsolidationCandidates`, then a `DedupePendingOrRunning` enqueue per
+     bank in its own tx; see decision 502 for why it also joins a running consolidate);
   5. prune terminal operations (`PruneOperations`) and events.
 
   A failing step never stops the others.
@@ -54,9 +56,11 @@ All run against a test-local fake Claimer/Queue/Store and a manual Clock (`inter
 Supporting tests:
 - `TestRunnerPanicRetries`
 - `TestRunnerShutdownReleasesJobs`
+- `TestRunnerLostToAnotherWorkerLeavesRowAlone`
 - `TestRunnerReportsResult`
 - `TestRegisterStubs`
 - `TestMaintenanceStepOrderAndIsolation`
+- `TestConsolidationReconcileJoinsRunning`
 - `TestPruneOperations`
 - `TestCheckpointReport`
 - `TestOperationControl`
@@ -75,7 +79,7 @@ Gates:
   double run), shutdown releasing jobs with `retryAt = now` outside the cap, `ReportResult`, and the
   `JobRunner` interface.
 - `docs/decisions/502-maintenance-consumer-interfaces.md`: the consumer interfaces, the step order, the
-  consolidate job shape (payload `{}`, serial key `consolidate`, `DedupePending`) and the retention
+  consolidate job shape (payload `{}`, serial key `consolidate`, `DedupePendingOrRunning`) and the retention
   defaults (7 d operations, 30 d events).
 - `docs/decisions/503-prune-operations-clock.md`: `PruneOperations` takes a `port.Clock` (a deviation
   from the spec signature, so the code doesn't call `time.Now`).
@@ -92,8 +96,9 @@ Gates:
 - **Handlers are stubs** (by the card); WP-14 fills them.
 - **R7 known limit still applies.** A Complete or Fail from a worker whose job was reclaimed *and*
   re-claimed elsewhere can land on the other worker's row, because Complete and Fail carry no worker
-  token. The runner narrows this: lost jobs are never requeued.
+  token. The runner narrows this to the race between `Alive` and `Fail`: lost jobs are never requeued,
+  and a row `Alive` shows as re-claimed is left alone.
 - **Shutdown counts as an attempt.** A job released on shutdown still gets attempt+1 (`Fail` with retryAt
   always increments). Only the cap check is skipped for that call.
 - **Lint toolchain.** `golangci-lint` on the default PATH here resolves to a v1 binary in `~/go/bin`. The
-  gates were run with the v2 binary (`/opt/homebrew/bin`) first on PATH.
+  gates were run with the v2 binary first on PATH: `PATH="/opt/homebrew/bin:$PATH" make lint`.
