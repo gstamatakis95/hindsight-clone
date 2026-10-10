@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"memd/internal/adapter/postgres/db"
 	"memd/internal/domain"
 	"memd/internal/port"
@@ -95,7 +96,7 @@ func (r *bankRepo) DeleteBatch(ctx context.Context, b port.BankRef, limit int) (
 	if limit <= 0 {
 		return 0, fmt.Errorf("%w: delete batch limit %d", domain.ErrInvalidArgument, limit)
 	}
-	if err := r.requireTombstoned(ctx, b); err != nil {
+	if err := r.lockTombstoned(ctx, b); err != nil {
 		return 0, err
 	}
 	remaining, total := limit, 0
@@ -114,7 +115,8 @@ func (r *bankRepo) DeleteBatch(ctx context.Context, b port.BankRef, limit int) (
 
 // Delete removes the tombstoned bank's row first (an Enqueue holding FOR KEY SHARE on it makes this wait,
 // and an Enqueue after it finds no bank), then the bank's lifecycle events and operations, the running
-// delete_bank job's own row included. Content left behind cascades with the bank row. A live bank is
+// delete_bank job's own row included. Content with a foreign key to the bank cascades with the bank row;
+// the tables without one (bankUnkeyedTables) are deleted explicitly. A live bank is
 // domain.ErrFailedPrecondition, an unknown one domain.ErrNotFound.
 func (r *bankRepo) Delete(ctx context.Context, b port.BankRef) error {
 	n, err := r.q.BankDeleteRow(ctx, db.BankDeleteRowParams{TenantID: b.Tenant, ID: b.Bank})
@@ -127,11 +129,50 @@ func (r *bankRepo) Delete(ctx context.Context, b port.BankRef) error {
 		}
 		return fmt.Errorf("%w: bank %s/%s changed while being deleted", domain.ErrConflict, b.Tenant, b.Bank)
 	}
+	if err := r.deleteUnkeyed(ctx, b); err != nil {
+		return err
+	}
 	if err := r.q.BankDeleteEvents(ctx, db.BankDeleteEventsParams{TenantID: b.Tenant, BankID: b.Bank}); err != nil {
 		return mapErr(fmt.Sprintf("delete events of bank %s/%s", b.Tenant, b.Bank), err)
 	}
 	err = r.q.BankDeleteOperations(ctx, db.BankDeleteOperationsParams{TenantID: b.Tenant, BankID: b.Bank})
 	return mapErr(fmt.Sprintf("delete operations of bank %s/%s", b.Tenant, b.Bank), err)
+}
+
+// bankUnkeyedTables are the bank-keyed tables with no foreign key to the bank (decision 004): the bank row's
+// cascade misses them, so Delete removes their rows itself.
+var bankUnkeyedTables = map[string]bool{
+	"parked_links": true, "graph_dirty": true, "entity_maintenance": true, "observation_versions": true,
+	"memory_audit": true, "memory_units_archive": true,
+}
+
+// deleteUnkeyed deletes every row of b in bankUnkeyedTables.
+func (r *bankRepo) deleteUnkeyed(ctx context.Context, b port.BankRef) error {
+	for _, step := range bankDeleteSteps {
+		if !bankUnkeyedTables[step.table] {
+			continue
+		}
+		if _, err := step.run(ctx, r.q, b, math.MaxInt32); err != nil {
+			return mapErr(fmt.Sprintf("delete %s of bank %s/%s", step.table, b.Tenant, b.Bank), err)
+		}
+	}
+	return nil
+}
+
+// lockTombstoned takes FOR KEY SHARE on a tombstoned bank's row, so the bank row can't be deleted (and a new
+// bank of the same id can't appear) while this transaction deletes its content. Errors as requireTombstoned.
+func (r *bankRepo) lockTombstoned(ctx context.Context, b port.BankRef) error {
+	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, ID: b.Bank})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: bank %s/%s", domain.ErrNotFound, b.Tenant, b.Bank)
+	}
+	if err != nil {
+		return mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+	}
+	if deletingAt == nil {
+		return fmt.Errorf("%w: bank %s/%s is not being deleted", domain.ErrFailedPrecondition, b.Tenant, b.Bank)
+	}
+	return nil
 }
 
 // requireTombstoned returns nil for a tombstoned bank, domain.ErrNotFound for an unknown one and

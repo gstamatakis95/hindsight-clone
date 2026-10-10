@@ -20,6 +20,9 @@ import (
 // Image is the Postgres image; keep it in sync with docker-compose.yml (decision 003).
 const Image = "paradedb/paradedb:0.26.1-pg17"
 
+// RequireDockerEnv names the switch that turns "no Docker daemon" from a skip into a test failure.
+const RequireDockerEnv = "MEMD_REQUIRE_DOCKER"
+
 // MaxConns is the pool size: enough for the concurrent claim and seq tests plus readers.
 const MaxConns = 24
 
@@ -46,6 +49,11 @@ var (
 func Main(m *testing.M) int {
 	ctx := context.Background()
 	if err := dockerHealthy(ctx); err != nil {
+		if os.Getenv(RequireDockerEnv) != "" {
+			// CI sets the switch so a missing daemon fails the run instead of silently skipping the suites.
+			sharedErr = fmt.Errorf("docker unavailable and %s is set: %w", RequireDockerEnv, err)
+			return m.Run()
+		}
 		skipReason = fmt.Sprintf("pgtest: docker unavailable: %v", err)
 		return m.Run()
 	}

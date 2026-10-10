@@ -11,5 +11,6 @@
 //		...
 //	}
 //
-// Without a reachable Docker daemon every Fresh call skips its test.
+// Without a reachable Docker daemon every Fresh call skips its test, unless MEMD_REQUIRE_DOCKER is set, in
+// which case it fails.
 package pgtest

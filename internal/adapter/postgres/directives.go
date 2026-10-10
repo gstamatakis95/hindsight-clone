@@ -21,6 +21,9 @@ var _ port.DirectiveRepo = (*directiveRepo)(nil)
 // Upsert creates the directive (a new UUID string id when d.ID is empty) or replaces its name, rules, tags
 // and active flag, keeping created_at; it returns the id. An unknown bank is domain.ErrNotFound.
 func (r *directiveRepo) Upsert(ctx context.Context, d domain.Directive) (port.DirectiveID, error) {
+	if err := checkTags(d.Tags); err != nil {
+		return "", err
+	}
 	id := d.ID
 	if id == "" {
 		id = port.DirectiveID(uuid.NewString())

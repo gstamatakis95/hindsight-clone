@@ -42,6 +42,9 @@ func (r *unitRepo) Insert(ctx context.Context, us []domain.Unit) error {
 
 // unitInsertParams maps a unit to its insert parameters.
 func unitInsertParams(u domain.Unit) (db.UnitInsertParams, error) {
+	if err := checkTags(u.Tags); err != nil {
+		return db.UnitInsertParams{}, err
+	}
 	id, err := parseNewID(u.ID)
 	if err != nil {
 		return db.UnitInsertParams{}, err
@@ -145,10 +148,20 @@ func (r *unitRepo) Update(ctx context.Context, u domain.Unit) error {
 }
 
 // SetDocumentTags rewrites the tags and seq of the document's live units, clears both consolidation stamps
-// and returns their ids.
+// and returns their ids. The document's archived units get the new tags too, so a later Restore brings
+// them back under the document's current tags.
 func (r *unitRepo) SetDocumentTags(
 	ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64,
 ) ([]port.UnitID, error) {
+	if err := checkTags(tags); err != nil {
+		return nil, err
+	}
+	err := r.q.UnitSetArchivedDocumentTags(ctx, db.UnitSetArchivedDocumentTagsParams{
+		Tags: tagsOrEmpty(tags), TenantID: b.Tenant, BankID: b.Bank, DocumentID: textPtr(doc),
+	})
+	if err != nil {
+		return nil, mapErr("set archived document tags", err)
+	}
 	ids, err := r.q.UnitSetDocumentTags(ctx, db.UnitSetDocumentTagsParams{
 		Tags: tagsOrEmpty(tags), Seq: seq, TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
 	})

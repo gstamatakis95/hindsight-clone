@@ -87,6 +87,9 @@ func TestAcceptSeqOrder(t *testing.T) {
 				i, committed[i], i-1, committed[i-1])
 		}
 	}
+	if reads.Load() == 0 {
+		t.Errorf("the reader checked no snapshot while the writers ran")
+	}
 	t.Logf("%d commits in seq order; reader checked %d snapshots", len(committed), reads.Load())
 }
 

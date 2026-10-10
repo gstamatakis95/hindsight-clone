@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"memd/internal/adapter/postgres/db"
 	"memd/internal/domain"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -125,6 +126,15 @@ func tagsOrEmpty(tags []string) []string {
 		return []string{}
 	}
 	return tags
+}
+
+// checkTags rejects tags that are not in domain.NormalizeTags form (trimmed, lowercased, NFC, deduplicated,
+// sorted): stored tags are compared as plain arrays, so an unnormalized write would never match a filter.
+func checkTags(tags []string) error {
+	if !slices.Equal(tags, domain.NormalizeTags(tags)) {
+		return fmt.Errorf("%w: tags %q are not normalized (domain.NormalizeTags)", domain.ErrInvalidArgument, tags)
+	}
+	return nil
 }
 
 // marshal encodes v as a JSON column value.

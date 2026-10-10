@@ -437,11 +437,15 @@ func (q *Queries) UnitRestore(ctx context.Context, arg UnitRestoreParams) error 
 }
 
 const unitRestoreEntities = `-- name: UnitRestoreEntities :exec
-WITH ins AS (
+WITH locked AS (
+    SELECT e.tenant_id, e.bank_id, e.id FROM entities e
+    WHERE e.tenant_id = $1 AND e.bank_id = $2
+      AND e.id IN (SELECT (x.v->>'id')::uuid FROM jsonb_array_elements($3::jsonb) AS x(v))
+    ORDER BY e.id
+    FOR UPDATE
+), ins AS (
     INSERT INTO unit_entities (tenant_id, bank_id, unit_id, entity_id)
-    SELECT e.tenant_id, e.bank_id, $1::uuid, e.id FROM entities e
-    WHERE e.tenant_id = $2 AND e.bank_id = $3
-      AND e.id IN (SELECT (x.v->>'id')::uuid FROM jsonb_array_elements($4::jsonb) AS x(v))
+    SELECT l.tenant_id, l.bank_id, $4::uuid, l.id FROM locked l
     ON CONFLICT DO NOTHING
     RETURNING entity_id
 )
@@ -450,19 +454,19 @@ FROM ins WHERE e.id = ins.entity_id
 `
 
 type UnitRestoreEntitiesParams struct {
-	UnitID   uuid.UUID
 	TenantID string
 	BankID   string
 	Snapshot json.RawMessage
+	UnitID   uuid.UUID
 }
 
-// UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank and counts their mentions back.
+// UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank (locked in id order, so concurrent writers can't deadlock on them) and counts their mentions back.
 func (q *Queries) UnitRestoreEntities(ctx context.Context, arg UnitRestoreEntitiesParams) error {
 	_, err := q.db.Exec(ctx, unitRestoreEntities,
-		arg.UnitID,
 		arg.TenantID,
 		arg.BankID,
 		arg.Snapshot,
+		arg.UnitID,
 	)
 	return err
 }
@@ -519,6 +523,29 @@ func (q *Queries) UnitScopeUpsert(ctx context.Context, arg UnitScopeUpsertParams
 		arg.BankID,
 		arg.ScopeKey,
 		arg.Tags,
+	)
+	return err
+}
+
+const unitSetArchivedDocumentTags = `-- name: UnitSetArchivedDocumentTags :exec
+UPDATE memory_units_archive SET tags = $1
+WHERE tenant_id = $2 AND bank_id = $3 AND document_id = $4
+`
+
+type UnitSetArchivedDocumentTagsParams struct {
+	Tags       []string
+	TenantID   string
+	BankID     string
+	DocumentID *string
+}
+
+// UnitSetArchivedDocumentTags rewrites the tags of a document's archived units.
+func (q *Queries) UnitSetArchivedDocumentTags(ctx context.Context, arg UnitSetArchivedDocumentTagsParams) error {
+	_, err := q.db.Exec(ctx, unitSetArchivedDocumentTags,
+		arg.Tags,
+		arg.TenantID,
+		arg.BankID,
+		arg.DocumentID,
 	)
 	return err
 }

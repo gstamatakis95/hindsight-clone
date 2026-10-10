@@ -47,6 +47,9 @@ func (r *documentRepo) Get(ctx context.Context, b port.BankRef, id port.Document
 // Upsert inserts the document or replaces its tags, overrides and blob key, and clears extracted_at; the
 // hashes of the last completed retain stay until Complete. An unknown bank is domain.ErrNotFound.
 func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
+	if err := checkTags(d.Tags); err != nil {
+		return err
+	}
 	overrides, err := marshalPtr("document overrides", d.Overrides)
 	if err != nil {
 		return err
@@ -70,6 +73,9 @@ func (r *documentRepo) Complete(
 
 // SetTags replaces the document's tag set; an unknown id is domain.ErrNotFound.
 func (r *documentRepo) SetTags(ctx context.Context, b port.BankRef, id port.DocumentID, tags []string) error {
+	if err := checkTags(tags); err != nil {
+		return err
+	}
 	n, err := r.q.DocumentSetTags(ctx, db.DocumentSetTagsParams{
 		Tags: tagsOrEmpty(tags), TenantID: b.Tenant, BankID: b.Bank, ID: string(id),
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"memd/internal/adapter/postgres"
 	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
@@ -25,21 +26,32 @@ const (
 	serialDeadline = 2 * time.Minute
 )
 
-// keyHolders tracks which job holds each serial key while the test's workers run it.
+// keyHolders tracks which job holds each serial key while the test's workers run it, and the enqueue
+// index of the last job run per key.
 type keyHolders struct {
 	mu         sync.Mutex
 	held       map[string]port.OperationID
+	last       map[string]int
 	violations []string
 }
 
-// take records j as its key's holder, noting a violation if another job already holds the key.
+// take records j as its key's holder, noting a violation if another job already holds the key or if j was
+// enqueued before the key's previous job (per-key FIFO).
 func (h *keyHolders) take(j port.Job) {
+	var p struct{ I int }
+	if err := json.Unmarshal(j.Payload, &p); err != nil {
+		p.I = -1
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if prev, ok := h.held[j.SerialKey]; ok {
 		h.violations = append(h.violations, fmt.Sprintf("key %q held by %s and %s", j.SerialKey, prev, j.ID))
 	}
-	h.held[j.SerialKey] = j.ID
+	if prev, ok := h.last[j.SerialKey]; ok && p.I <= prev {
+		h.violations = append(h.violations, fmt.Sprintf("key %q ran job %d after job %d (not FIFO)", j.SerialKey,
+			p.I, prev))
+	}
+	h.held[j.SerialKey], h.last[j.SerialKey] = j.ID, p.I
 }
 
 // release clears j's key; called before Complete commits, so the next job of the key can't race it.
@@ -50,8 +62,9 @@ func (h *keyHolders) release(j port.Job) {
 }
 
 // TestAcceptSerialKeys is the WP-01 "serial keys" acceptance test: 8 concurrent claimers work through 500
-// jobs spread over 20 serial keys. No key is ever held by two jobs at once (checked by the workers and by
-// sampling the table), Claim never errors and every job completes.
+// jobs spread over 20 serial keys, holding each job 1-5 ms. No key is ever held by two jobs at once (checked by
+// the workers and by sampling the table), each key's jobs run in enqueue order, Claim never errors and every
+// job completes.
 func TestAcceptSerialKeys(t *testing.T) {
 	pool := pgtest.Fresh(t)
 	s := postgres.New(pool)
@@ -61,7 +74,7 @@ func TestAcceptSerialKeys(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), serialDeadline)
 	defer cancel()
-	holders := &keyHolders{held: map[string]port.OperationID{}}
+	holders := &keyHolders{held: map[string]port.OperationID{}, last: map[string]int{}}
 	var done, claimErrs atomic.Int64
 	stop := make(chan struct{})
 	sampled := make(chan sampleResult, 1)
@@ -140,6 +153,7 @@ func serialWorker(
 		for _, j := range js {
 			h.take(j)
 		}
+		time.Sleep(time.Duration(1000+rand.IntN(4000)) * time.Microsecond) //nolint:gosec // test jitter
 		for _, j := range js {
 			h.release(j)
 			if err := s.Complete(ctx, j.ID, json.RawMessage(`{}`), nil); err != nil {

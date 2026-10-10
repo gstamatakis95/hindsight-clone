@@ -20,48 +20,8 @@ var (
 	_ BlobFactory  = func(*testing.T) port.Blob { return nil }
 )
 
-// The suites run from the implementations' own packages. These placeholders name the work package that
-// wires each (suite, implementation) pair, so `go test -v` shows what is still pending.
-
-// TestStoreSuitePostgres is pending WP-01.
-func TestStoreSuitePostgres(t *testing.T) {
-	t.Skip("pending WP-01: internal/adapter/postgres runs RunStoreSuite on testcontainers")
-}
-
-// TestStoreSuiteFake is pending WP-02.
-func TestStoreSuiteFake(t *testing.T) {
-	t.Skip("pending WP-02: internal/fake runs RunStoreSuite")
-}
-
-// TestSeqSuitePostgres is pending WP-01.
-func TestSeqSuitePostgres(t *testing.T) {
-	t.Skip("pending WP-01: internal/adapter/postgres runs RunSeqSuite on testcontainers")
-}
-
-// TestSeqSuiteFake is pending WP-02.
-func TestSeqSuiteFake(t *testing.T) {
-	t.Skip("pending WP-02: internal/fake runs RunSeqSuite")
-}
-
-// TestQueueSuitePostgres is pending WP-01.
-func TestQueueSuitePostgres(t *testing.T) {
-	t.Skip("pending WP-01: internal/adapter/postgres runs RunQueueSuite on testcontainers")
-}
-
-// TestQueueSuiteFake is pending WP-02.
-func TestQueueSuiteFake(t *testing.T) {
-	t.Skip("pending WP-02: internal/fake runs RunQueueSuite")
-}
-
-// TestBlobSuiteS3 is pending WP-03.
-func TestBlobSuiteS3(t *testing.T) {
-	t.Skip("pending WP-03: internal/adapter/s3 runs RunBlobSuite on MinIO")
-}
-
-// TestBlobSuiteFake is pending WP-02.
-func TestBlobSuiteFake(t *testing.T) {
-	t.Skip("pending WP-02: internal/fake runs RunBlobSuite")
-}
+// The suites run from the implementations' own packages: internal/adapter/postgres (contract_test.go,
+// store_gaps_test.go, queue_gaps_test.go), internal/adapter/s3 and internal/fake.
 
 // TestNewUUID checks the id helper produces distinct canonical version-4 UUIDs (the uuid columns reject
 // anything else).

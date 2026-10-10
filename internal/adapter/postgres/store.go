@@ -48,9 +48,32 @@ func Open(ctx context.Context, dsn string) (*Store, func(), error) {
 // Read returns the long-lived read-only view over the pool; each call is its own statement.
 func (s *Store) Read() port.Reader { return s.reader }
 
+// txAttempts bounds how often InTx runs a transaction that loses a deadlock or serialization race.
+const txAttempts = 3
+
 // InTx runs fn in one READ COMMITTED transaction and commits when fn returns nil. Any error or panic
-// rolls back; a panic is re-raised after the rollback. fn's error is returned unchanged.
-func (s *Store) InTx(ctx context.Context, fn func(port.Tx) error) (err error) {
+// rolls back; a panic is re-raised after the rollback. fn's error is returned unchanged. A transaction that
+// fails with a deadlock (40P01) or serialization failure (40001) is rolled back and run again, up to
+// txAttempts times in all: fn never calls a model (port.Store), so re-running it only repeats short
+// database work (decision 100).
+func (s *Store) InTx(ctx context.Context, fn func(port.Tx) error) error {
+	var err error
+	for range txAttempts {
+		if err = s.runTx(ctx, fn); !retryableTxErr(err) || ctx.Err() != nil {
+			return err
+		}
+	}
+	return err
+}
+
+// retryableTxErr reports whether err is a lost deadlock or serialization race that a fresh transaction
+// may win.
+func retryableTxErr(err error) bool {
+	return isPgCode(err, codeDeadlockDetected) || isPgCode(err, codeSerializationFailure)
+}
+
+// runTx runs fn in one transaction (see InTx).
+func (s *Store) runTx(ctx context.Context, fn func(port.Tx) error) error {
 	pgTx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return mapErr("begin", err)

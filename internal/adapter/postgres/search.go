@@ -94,8 +94,9 @@ func (r *reader) SearchText(ctx context.Context, q port.TextQuery) ([]port.Hit, 
 // SearchTemporal is the temporal arm: units whose occurrence overlaps the half-open window, scored by
 // proximity and spread over q.Buckets sub-windows (decision 122).
 func (r *reader) SearchTemporal(ctx context.Context, q port.TemporalQuery) ([]port.Hit, error) {
-	if q.Limit <= 0 {
-		return []port.Hit{}, nil
+	w := q.Window
+	if q.Limit <= 0 || (!w.Start.IsZero() && !w.End.IsZero() && !w.End.After(w.Start)) {
+		return []port.Hit{}, nil // an empty or inverted window holds nothing
 	}
 	sql, args := temporalSQL(q)
 	return queryHits(ctx, r.conn, "search temporal", sql, args)
