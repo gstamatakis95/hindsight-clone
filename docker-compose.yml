@@ -1,0 +1,64 @@
+# Local dependencies for memd: Postgres (pgvector + pg_search + pg_trgm) and MinIO.
+# The LLM gateway is external. Image choices: docs/decisions/003-postgres-image.md.
+# Host ports are configurable so several checkouts can run side by side; the compose
+# project name is left directory-based for the same reason.
+
+services:
+  postgres:
+    # ParadeDB ships pgvector, pg_search and pg_trgm in one image. Keep this tag in sync
+    # with the testcontainers image used by the Postgres porttest suite.
+    image: paradedb/paradedb:0.26.1-pg17
+    environment:
+      POSTGRES_DB: memd
+      POSTGRES_USER: memd
+      POSTGRES_PASSWORD: memd
+    ports:
+      - "${MEMD_PG_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Hide the image's bootstrap script, which installs postgis, pg_ivm, pg_cron, ... into
+      # template1 and POSTGRES_DB. memd's database must start empty: migration 0001 creates the
+      # three extensions it needs, so the schema dump and downgrade stay clean.
+      - type: tmpfs
+        target: /docker-entrypoint-initdb.d
+    healthcheck:
+      # Over TCP: the entrypoint's temporary init server listens only on the unix socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U memd -d memd"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  minio:
+    # Community build of MinIO (upstream stopped publishing images on Docker Hub / quay).
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: memd
+      MINIO_ROOT_PASSWORD: memd-secret
+    ports:
+      - "${MEMD_MINIO_PORT:-59000}:9000"
+      - "${MEMD_MINIO_CONSOLE_PORT:-59001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 3s
+
+  minio-init:
+    # One-shot: creates the memd bucket, then exits 0.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - mc alias set local http://minio:9000 memd memd-secret && mc mb --ignore-existing local/memd
+    restart: "no"
+
+volumes:
+  pgdata:
+  miniodata:

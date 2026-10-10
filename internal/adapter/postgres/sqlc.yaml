@@ -1,0 +1,45 @@
+# sqlc config for the Postgres adapter. Run from this directory: `sqlc generate`.
+# Schema input is the pg_dump of the migrated database (alembic owns the schema; Go never
+# runs DDL). Queries live in queries/*.sql; generated code goes to db/ (package db).
+version: "2"
+sql:
+  - engine: postgresql
+    schema: "../../../schema/schema.sql"
+    queries: "queries/"
+    gen:
+      go:
+        package: db
+        out: db
+        sql_package: pgx/v5
+        emit_json_tags: false
+        emit_interface: true
+        emit_empty_slices: true
+        overrides:
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: NullUUID
+          - db_type: public.vector
+            go_type: github.com/pgvector/pgvector-go.Vector
+          - db_type: public.vector
+            nullable: true
+            go_type:
+              import: github.com/pgvector/pgvector-go
+              type: Vector
+              pointer: true
+          - db_type: pg_catalog.timestamptz
+            go_type: time.Time
+          - db_type: pg_catalog.timestamptz
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: jsonb
+            go_type: encoding/json.RawMessage
+          - db_type: jsonb
+            nullable: true
+            go_type: encoding/json.RawMessage
