@@ -22,7 +22,8 @@ type MemoryState string
 
 // Memory states, mirroring memory.v1.MemoryState.
 const (
-	// MemoryStateUnspecified is the zero value (list: live units).
+	// MemoryStateUnspecified is the zero value: ListMemories applies no state filter (both tables);
+	// UpdateMemory leaves the state unchanged.
 	MemoryStateUnspecified MemoryState = ""
 	// MemoryStateValid is a live unit in memory_units.
 	MemoryStateValid MemoryState = "valid"

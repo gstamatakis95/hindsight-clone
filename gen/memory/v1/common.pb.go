@@ -87,9 +87,9 @@ func (FactType) EnumDescriptor() ([]byte, []int) {
 	return file_memory_v1_common_proto_rawDescGZIP(), []int{0}
 }
 
-// Budget picks a size class for recall and reflect work. It maps to a token budget through
-// RecallConfig (budget_low / budget_mid / budget_high), to retriever caps of 100 / 300 / 1000
-// candidates, and scales reflect iterations (LOW halves, HIGH doubles the MID value).
+// Budget picks a size class for recall and reflect work. Through RecallConfig (budget_low / budget_mid /
+// budget_high, default 100 / 300 / 1000) it sets the per-arm candidate cap of recall, and it scales
+// reflect iterations (LOW halves, HIGH doubles the MID value).
 type Budget int32
 
 const (

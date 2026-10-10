@@ -70,7 +70,7 @@ Branch `wp/WP-00-contracts`. The plan is in `docs/wp/WP-00.md`. After merge, tag
 |---|---|---|
 | `make gen && make lint` pass; `go build ./...` succeeds | `make gen` (no diff in gen/, schema/, internal/mocks/), `make lint`, `go build ./...` | pass. golangci-lint 0 issues; ifacedoc clean; buf lint clean; ruff clean |
 | `buf lint` STANDARD + COMMENTS | `buf lint` | pass, 0 findings. `buf breaking` is skipped because main has no api/ yet |
-| `alembic upgrade head` then `downgrade base` on compose Postgres | `make up && make downgrade && make migrate` | pass. After base, only `alembic_version` and plpgsql remain. Every revision was also checked to round-trip byte-identically |
+| `alembic upgrade head` then `downgrade base` on compose Postgres | `make up && make downgrade && make migrate` | pass. After base, only `alembic_version` and plpgsql remain. The migrations subagent also round-tripped each revision and got byte-identical dumps; that per-revision check was not re-run at the end |
 | schema.sql diff check clean | `make migrate-check` | pass, "schema/schema.sql is up to date." |
 | porttest compiles; skips name the implementing WP | `go test -race -v ./internal/porttest/` | pass, 8 skip tests (see below) |
 | Tag merge commit `contracts-v1` | orchestrator | pending merge |
@@ -110,6 +110,10 @@ Unit tests shipped with the contracts, all passing under `-race`:
   name their WP.
 - `010-domain-representation.md`: string enums, pointer optionals, JSON tags, and `ExtractedFact` in
   domain.
+- `011-proto-comment-semantics.md`: behaviour the proto comments state where the spec is silent.
+  - Unset enums and ordering.
+  - Budgets are per-arm candidate caps.
+  - Unset `MemoryState` lists both tables.
 - **CCR `docs/ccr/WP-00-1.md`:** approve `golang.org/x/text` for NFC tag normalization, which the Ports
   block names explicitly.
 
@@ -133,9 +137,6 @@ Unit tests shipped with the contracts, all passing under `-race`:
 - **gofumpt groups `memd/...` imports with stdlib**, because the module path has no dot. This is
   consistent repo-wide.
 - **The gRPC server interfaces in `gen/` are not mocked.** WP-06 tests them over bufconn.
-- **Spec location.** On this branch the spec is still at `spec/SPEC.md` (from the Init commit), while
-  AGENTS.md refers to `docs/SPEC.md` per the playbook. The orchestrator's checkout moves it; nothing on
-  this branch moves it, to avoid a merge conflict.
 - **sqlc output.** The generated `internal/adapter/postgres/db` holds only the placeholder `Ping` query
   until WP-01 adds queries. `pgx/v5`, `google/uuid` and `pgvector-go` are already in `go.mod`, so
   `make gen && go build ./...` works.

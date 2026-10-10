@@ -94,15 +94,15 @@ func (ExtractionMode) EnumDescriptor() ([]byte, []int) {
 	return file_memory_v1_config_proto_rawDescGZIP(), []int{0}
 }
 
-// BudgetFunction picks how a recall Budget becomes a token budget.
+// BudgetFunction picks how a recall Budget becomes the per-arm candidate cap.
 type BudgetFunction int32
 
 const (
 	// Not set; inherit, ending at the server default.
 	BudgetFunction_BUDGET_FUNCTION_UNSPECIFIED BudgetFunction = 0
-	// Use budget_low / budget_mid / budget_high as fixed token counts.
+	// Use budget_low / budget_mid / budget_high as fixed candidate caps.
 	BudgetFunction_BUDGET_FUNCTION_FIXED BudgetFunction = 1
-	// Scale the budget to the query, clamped to [budget_min, budget_max].
+	// Scale the cap with the request's max_tokens, clamped to [budget_min, budget_max].
 	BudgetFunction_BUDGET_FUNCTION_ADAPTIVE BudgetFunction = 2
 )
 
@@ -955,13 +955,13 @@ func (x *RetainTuning) GetTemporalLinkCap() int32 {
 // RecallConfig tunes the recall pipeline: four arms, RRF fusion, rerank, boosts and packing.
 type RecallConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// How a Budget becomes a token budget.
+	// How a Budget becomes the per-arm candidate cap.
 	BudgetFunction BudgetFunction `protobuf:"varint,1,opt,name=budget_function,json=budgetFunction,proto3,enum=memory.v1.BudgetFunction" json:"budget_function,omitempty"`
-	// Tokens for BUDGET_LOW.
+	// Per-arm candidate cap for BUDGET_LOW, default 100.
 	BudgetLow *int32 `protobuf:"varint,2,opt,name=budget_low,json=budgetLow,proto3,oneof" json:"budget_low,omitempty"`
-	// Tokens for BUDGET_MID.
+	// Per-arm candidate cap for BUDGET_MID, default 300.
 	BudgetMid *int32 `protobuf:"varint,3,opt,name=budget_mid,json=budgetMid,proto3,oneof" json:"budget_mid,omitempty"`
-	// Tokens for BUDGET_HIGH.
+	// Per-arm candidate cap for BUDGET_HIGH, default 1000.
 	BudgetHigh *int32 `protobuf:"varint,4,opt,name=budget_high,json=budgetHigh,proto3,oneof" json:"budget_high,omitempty"`
 	// RRF weight per arm name (semantic, keyword, graph, temporal); missing = 1.
 	StrategyBoosts map[string]float64 `protobuf:"bytes,5,rep,name=strategy_boosts,json=strategyBoosts,proto3" json:"strategy_boosts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed64,2,opt,name=value"`
@@ -987,9 +987,9 @@ type RecallConfig struct {
 	TemporalBuckets *int32 `protobuf:"varint,15,opt,name=temporal_buckets,json=temporalBuckets,proto3,oneof" json:"temporal_buckets,omitempty"`
 	// Trigram similarity a fuzzy tag-leaf tag needs to match a stored tag.
 	FuzzyTagMinSimilarity *float64 `protobuf:"fixed64,16,opt,name=fuzzy_tag_min_similarity,json=fuzzyTagMinSimilarity,proto3,oneof" json:"fuzzy_tag_min_similarity,omitempty"`
-	// Lower clamp for BUDGET_FUNCTION_ADAPTIVE, default 20 tokens.
+	// Lower clamp of the adaptive candidate cap, default 20.
 	BudgetMin *int32 `protobuf:"varint,17,opt,name=budget_min,json=budgetMin,proto3,oneof" json:"budget_min,omitempty"`
-	// Upper clamp for BUDGET_FUNCTION_ADAPTIVE, default 2000 tokens.
+	// Upper clamp of the adaptive candidate cap, default 2000.
 	BudgetMax     *int32 `protobuf:"varint,18,opt,name=budget_max,json=budgetMax,proto3,oneof" json:"budget_max,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
