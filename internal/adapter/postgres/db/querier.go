@@ -6,12 +6,34 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 )
 
 type Querier interface {
-	// Placeholder: sqlc refuses to run with an empty queries/ directory. WP-01 adds the real
-	// queries next to this file; delete it then if nothing uses Ping.
-	Ping(ctx context.Context) (int32, error)
+	// BankChangeSeq returns the bank's latest committed change_seq.
+	BankChangeSeq(ctx context.Context, arg BankChangeSeqParams) (int64, error)
+	// BumpBankSeq increments a live bank's change_seq and returns it; the row lock is held until commit.
+	BumpBankSeq(ctx context.Context, arg BumpBankSeqParams) (int64, error)
+	// CreateBank inserts a new bank with its name and config.
+	CreateBank(ctx context.Context, arg CreateBankParams) error
+	// GetBank returns one bank, tombstoned or not.
+	GetBank(ctx context.Context, arg GetBankParams) (Bank, error)
+	// GetTenantConfig returns the tenant-level config.
+	GetTenantConfig(ctx context.Context, id string) (json.RawMessage, error)
+	// GetUnits returns the live units of a bank with the given ids, with their entity names and cited sources.
+	GetUnits(ctx context.Context, arg GetUnitsParams) ([]GetUnitsRow, error)
+	// InsertBankIfMissing creates a bank with empty overrides unless it exists.
+	InsertBankIfMissing(ctx context.Context, arg InsertBankIfMissingParams) error
+	// LinkInsert stores one edge; an existing (from, to, kind) edge keeps its row with the new weight.
+	LinkInsert(ctx context.Context, arg LinkInsertParams) error
+	// MarkBankDeleting sets deleting_at unless already set.
+	MarkBankDeleting(ctx context.Context, arg MarkBankDeletingParams) (int64, error)
+	// UnitInsert stores one unit exactly as given; a NULL created_at takes the database's now().
+	UnitInsert(ctx context.Context, arg UnitInsertParams) error
+	// UpsertBankConfig creates the bank if needed and replaces its overrides; a tombstoned bank matches nothing.
+	UpsertBankConfig(ctx context.Context, arg UpsertBankConfigParams) (int64, error)
+	// UpsertTenantConfig replaces the tenant-level config.
+	UpsertTenantConfig(ctx context.Context, arg UpsertTenantConfigParams) error
 }
 
 var _ Querier = (*Queries)(nil)

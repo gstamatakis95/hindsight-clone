@@ -43,3 +43,26 @@ sql:
           - db_type: jsonb
             nullable: true
             go_type: encoding/json.RawMessage
+          - db_type: text
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: pg_catalog.int4
+            nullable: true
+            go_type:
+              type: int32
+              pointer: true
+          - db_type: pg_catalog.int8
+            nullable: true
+            go_type:
+              type: int64
+              pointer: true
