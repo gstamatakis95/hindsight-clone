@@ -101,3 +101,9 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 PAUSED on the user's usage limit. In flight at pause: WP-01, WP-04, WP-06 workers; WP-02 and WP-05
   reviewers. Their worktrees under .claude/worktrees/ keep committed work. Next: collect the reviews, merge,
   then ask the user before Phase 2.
+- 2026-10-10 RESUMED after the usage-limit pause. WP-01, WP-04, WP-06 workers and the WP-02 reviewer were cut off
+  mid-task; all resumed with their context.
+- 2026-10-10 WP-05 review: BLOCK. Two HIGH: the same runner can re-claim its own running job (double run), and
+  Complete skips the Alive gate on lost jobs. Third HIGH: shutdown releases spend the attempt cap. Ruling:
+  documentation route plus a graceful drain before cancel, no CCR. Decisions 502 and 503 accepted. Fixes and
+  MEDIUMs (heartbeat timeout and self-fencing, HasPending scope, Complete/Fail retry) sent back to the worker.
