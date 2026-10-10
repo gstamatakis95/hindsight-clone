@@ -1,0 +1,401 @@
+package porttest
+
+import (
+	"fmt"
+	"memd/internal/domain"
+	"memd/internal/port"
+	"testing"
+)
+
+// ---------- BankRepo ----------
+
+// getBank reads a bank in its own transaction and returns Get's error unchanged.
+func getBank(t *testing.T, s port.Store, b port.BankRef) (domain.Bank, error) {
+	t.Helper()
+	var bank domain.Bank
+	err := s.InTx(t.Context(), func(tx port.Tx) error {
+		var err error
+		bank, err = tx.Banks().Get(t.Context(), b)
+		return err
+	})
+	return bank, err
+}
+
+// mustBank reads a bank and fails the test on error.
+func mustBank(t *testing.T, s port.Store, b port.BankRef) domain.Bank {
+	t.Helper()
+	bank, err := getBank(t, s, b)
+	if err != nil {
+		t.Fatalf("Banks().Get(%v): %v", b, err)
+	}
+	return bank
+}
+
+// ensureBank runs Ensure in its own transaction and returns its result unchanged.
+func ensureBank(t *testing.T, s port.Store, b port.BankRef) (domain.Bank, error) {
+	t.Helper()
+	var bank domain.Bank
+	err := s.InTx(t.Context(), func(tx port.Tx) error {
+		var err error
+		bank, err = tx.Banks().Ensure(t.Context(), b)
+		return err
+	})
+	return bank, err
+}
+
+// richConfig is a BankConfig with scalars, pointers, nested structs, a map and model bindings. It avoids
+// ModelBinding.Extra (numbers would come back as float64) and empty non-nil slices (omitempty drops them).
+func richConfig() domain.BankConfig {
+	return domain.BankConfig{
+		RetainMission:     "remember recipes",
+		ReflectMission:    "answer briefly",
+		Disposition:       &domain.Disposition{Skepticism: 4, Empathy: 2},
+		ExtractionMode:    domain.ExtractionModeVerbose,
+		AutoConsolidation: ptr(false),
+		DedupThreshold:    ptr(0.95),
+		EntityLabels: []domain.EntityLabel{{
+			Key: "cuisine", Type: domain.LabelTypeValue, Optional: ptr(true),
+			Values: []domain.LabelValue{{Value: "thai"}, {Value: "greek", Description: "Greek food"}},
+		}},
+		Recall: &domain.RecallConfig{
+			BudgetFunction: domain.BudgetFunctionAdaptive, BudgetMid: ptr(250), Rerank: ptr(true),
+			StrategyBoosts: map[string]float64{"semantic": 1.5, "graph": 0.5}, RecencyAlpha: ptr(0.3),
+		},
+		Models: []domain.SlotBinding{
+			{Slot: domain.ModelSlotExtract, Binding: domain.ModelBinding{Model: "gpt-x", Temperature: ptr(0.2)}},
+			{Slot: domain.ModelSlotReflect, Binding: domain.ModelBinding{Model: "claude-y", MaxOutputTokens: ptr(2048)}},
+		},
+		MentalModels: &domain.MentalModelConfig{DefaultMode: domain.RefreshModeDelta, HistoryMaxEntries: ptr(7)},
+		DefaultObservationScopes: &domain.ObservationScopes{
+			Mode: domain.ScopeModeCustom, Custom: []domain.TagSet{{Tags: []string{"a", "b"}}},
+		},
+		ConsolidationMaxUnitsPerRun: ptr(50),
+	}
+}
+
+// testBankUnknown: Get and Delete of an unknown bank are ErrNotFound.
+func testBankUnknown(t *testing.T, s port.Store) {
+	_, err := getBank(t, s, bankA)
+	wantErrIs(t, "Banks().Get(unknown)", err, domain.ErrNotFound)
+	err = txErr(t, s, func(tx port.Tx) error { return tx.Banks().Delete(t.Context(), bankA) })
+	wantErrIs(t, "Banks().Delete(unknown)", err, domain.ErrNotFound)
+}
+
+// testBankEnsure: Ensure creates a bank at ChangeSeq 0 and is idempotent; tenants are separate.
+func testBankEnsure(t *testing.T, s port.Store) {
+	first, err := ensureBank(t, s, bankA)
+	if err != nil {
+		t.Fatalf("Ensure(new): %v", err)
+	}
+	if first.Ref != bankA || first.ChangeSeq != 0 || first.DeletingAt != nil {
+		t.Errorf("Ensure(new) = %+v, want ref %v, change_seq 0, not deleting", first, bankA)
+	}
+	inTx(t, s, func(tx port.Tx) error {
+		_, err := tx.Seq(t.Context(), bankA)
+		return err
+	})
+	again, err := ensureBank(t, s, bankA)
+	if err != nil {
+		t.Fatalf("Ensure(existing): %v", err)
+	}
+	if again.ChangeSeq != 1 || !again.CreatedAt.Equal(first.CreatedAt) {
+		t.Errorf("Ensure(existing) = seq %d created %v, want the existing bank (seq 1, created %v)",
+			again.ChangeSeq, again.CreatedAt, first.CreatedAt)
+	}
+	if got := mustBank(t, s, bankA); got.Ref != bankA {
+		t.Errorf("Get after Ensure = %+v", got)
+	}
+	_, err = getBank(t, s, bankOtherTenant)
+	wantErrIs(t, "Get(same bank id, other tenant)", err, domain.ErrNotFound)
+}
+
+// testBankCreate: Create stores name and config; a second Create is ErrAlreadyExists; Ensure keeps them.
+func testBankCreate(t *testing.T, s port.Store) {
+	bank := domain.Bank{Ref: bankA, Name: "Research", Config: domain.BankConfig{RetainMission: "papers"}}
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().Create(t.Context(), bank) })
+	got := mustBank(t, s, bankA)
+	if got.Name != "Research" || got.ChangeSeq != 0 {
+		t.Errorf("Get after Create = name %q seq %d, want Research, 0", got.Name, got.ChangeSeq)
+	}
+	wantJSON(t, "config after Create", got.Config, bank.Config)
+	err := txErr(t, s, func(tx port.Tx) error { return tx.Banks().Create(t.Context(), bank) })
+	wantErrIs(t, "Create(duplicate)", err, domain.ErrAlreadyExists)
+	ensured, err := ensureBank(t, s, bankA)
+	if err != nil || ensured.Name != "Research" {
+		t.Errorf("Ensure after Create = %q, %v; want the created bank", ensured.Name, err)
+	}
+	inTx(t, s, func(tx port.Tx) error {
+		return tx.Banks().Create(t.Context(), domain.Bank{Ref: bankOtherTenant, Name: "Other tenant"})
+	})
+}
+
+// testBankSetConfig: SetConfig round-trips a rich config and replaces (does not merge) the previous one.
+func testBankSetConfig(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	cfg := richConfig()
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().SetConfig(t.Context(), bankA, cfg) })
+	wantJSON(t, "config after SetConfig", mustBank(t, s, bankA).Config, cfg)
+	small := domain.BankConfig{ObservationsMission: "only this"}
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().SetConfig(t.Context(), bankA, small) })
+	wantJSON(t, "config after second SetConfig", mustBank(t, s, bankA).Config, small)
+}
+
+// testBankMarkDeleting: MarkDeleting sets DeletingAt once; Ensure then fails with ErrBankDeleting.
+func testBankMarkDeleting(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA, bankB)
+	at1, at2 := day(10), day(11)
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().MarkDeleting(t.Context(), bankA, at1) })
+	got := mustBank(t, s, bankA)
+	if !sameTimePtr(got.DeletingAt, &at1) || !got.Deleting() {
+		t.Errorf("DeletingAt after MarkDeleting = %v, want %v", got.DeletingAt, at1)
+	}
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().MarkDeleting(t.Context(), bankA, at2) })
+	if got := mustBank(t, s, bankA); !sameTimePtr(got.DeletingAt, &at1) {
+		t.Errorf("DeletingAt after second MarkDeleting = %v, want the first time %v", got.DeletingAt, at1)
+	}
+	_, err := ensureBank(t, s, bankA)
+	wantErrIs(t, "Ensure(tombstoned)", err, domain.ErrBankDeleting)
+	wantErrIs(t, "Ensure(tombstoned) class", err, domain.ErrFailedPrecondition)
+	if got := mustBank(t, s, bankB); got.DeletingAt != nil {
+		t.Errorf("bank B DeletingAt = %v, want nil", got.DeletingAt)
+	}
+}
+
+// testBankDelete: Delete removes the bank; a later Ensure creates a new, empty one.
+func testBankDelete(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	inTx(t, s, func(tx port.Tx) error {
+		_, err := tx.Seq(t.Context(), bankA)
+		return err
+	})
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().Delete(t.Context(), bankA) })
+	_, err := getBank(t, s, bankA)
+	wantErrIs(t, "Get after Delete", err, domain.ErrNotFound)
+	_, err = s.Read().BankSeq(t.Context(), bankA)
+	wantErrIs(t, "BankSeq after Delete", err, domain.ErrNotFound)
+	fresh, err := ensureBank(t, s, bankA)
+	if err != nil || fresh.ChangeSeq != 0 || fresh.DeletingAt != nil {
+		t.Errorf("Ensure after Delete = %+v, %v; want a new bank at change_seq 0", fresh, err)
+	}
+}
+
+// tenantConfig reads a tenant's config.
+func tenantConfig(t *testing.T, s port.Store, tenant string) domain.BankConfig {
+	t.Helper()
+	var cfg domain.BankConfig
+	inTx(t, s, func(tx port.Tx) error {
+		var err error
+		cfg, err = tx.Banks().TenantConfig(t.Context(), tenant)
+		return err
+	})
+	return cfg
+}
+
+// testTenantConfig: an unset tenant config is zero; SetTenantConfig round-trips and replaces per tenant.
+func testTenantConfig(t *testing.T, s port.Store) {
+	wantJSON(t, "TenantConfig(unset)", tenantConfig(t, s, "tenant-1"), domain.BankConfig{})
+	cfg := richConfig()
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().SetTenantConfig(t.Context(), "tenant-1", cfg) })
+	wantJSON(t, "TenantConfig after set", tenantConfig(t, s, "tenant-1"), cfg)
+	wantJSON(t, "TenantConfig(other tenant)", tenantConfig(t, s, "tenant-2"), domain.BankConfig{})
+	small := domain.BankConfig{RetainMission: "tenant default"}
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().SetTenantConfig(t.Context(), "tenant-1", small) })
+	wantJSON(t, "TenantConfig after replace", tenantConfig(t, s, "tenant-1"), small)
+}
+
+// ---------- MentalModelRepo ----------
+
+// sampleModel is a mental model exercising every spec field.
+func sampleModel(b port.BankRef, id port.MentalModelID) domain.MentalModel {
+	return domain.MentalModel{
+		Bank: b,
+		Spec: domain.MentalModelSpec{
+			ID: id, Name: "Team overview", SourceQuery: "Who is on the team?", FolderPath: "teams/eng",
+			Tags: []string{"eng", "team"}, MaxTokens: ptr(2000),
+			Trigger: domain.RefreshTrigger{
+				Mode: domain.RefreshModeDelta, Strategy: domain.RefreshStrategySingleShot,
+				RefreshAfterConsolidation: true, MinRefreshIntervalSeconds: ptr(60),
+				TagsMatch: domain.TagsMatchAllStrict, FactTypes: []domain.FactType{domain.FactTypeWorld},
+				IncludeChunks: ptr(false), Budget: domain.BudgetHigh, KeepTrace: true,
+			},
+			Overrides: &domain.BankConfig{ReflectMission: "be brief", Recall: &domain.RecallConfig{BudgetLow: ptr(10)}},
+		},
+		ContentMD:   "# Team\n\n- Alice\n",
+		Version:     1,
+		LastSeqSeen: 5,
+		SourceIDs:   []port.UnitID{newID[port.UnitID]()},
+	}
+}
+
+// getModel reads a mental model in its own transaction and returns Get's error unchanged.
+func getModel(t *testing.T, s port.Store, id port.MentalModelID) (domain.MentalModel, error) {
+	t.Helper()
+	var m domain.MentalModel
+	err := s.InTx(t.Context(), func(tx port.Tx) error {
+		var err error
+		m, err = tx.MentalModels().Get(t.Context(), bankA, id)
+		return err
+	})
+	return m, err
+}
+
+// compareModel reports differing stored fields of a mental model.
+func compareModel(t *testing.T, step string, got, want domain.MentalModel) {
+	t.Helper()
+	wantJSON(t, step+": spec", got.Spec, want.Spec)
+	if got.Bank != want.Bank || got.ContentMD != want.ContentMD || got.Version != want.Version {
+		t.Errorf("%s: bank/content/version = %v %q %d, want %v %q %d", step, got.Bank, got.ContentMD, got.Version,
+			want.Bank, want.ContentMD, want.Version)
+	}
+	if got.LastSeqSeen != want.LastSeqSeen || got.AutoRefreshPaused != want.AutoRefreshPaused {
+		t.Errorf("%s: last_seq_seen/paused = %d %v, want %d %v", step, got.LastSeqSeen, got.AutoRefreshPaused,
+			want.LastSeqSeen, want.AutoRefreshPaused)
+	}
+	if !sameTimePtr(got.LastRefreshedAt, want.LastRefreshedAt) ||
+		!sameTimePtr(got.LastRefreshFailedAt, want.LastRefreshFailedAt) {
+		t.Errorf("%s: last refreshed/failed = %v/%v, want %v/%v", step, got.LastRefreshedAt,
+			got.LastRefreshFailedAt, want.LastRefreshedAt, want.LastRefreshFailedAt)
+	}
+	wantSet(t, step+": source ids", got.SourceIDs, want.SourceIDs)
+}
+
+// testModelCreateGet: Create then Get round-trips spec, content and refresh state.
+func testModelCreateGet(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	m := sampleModel(bankA, "team-overview")
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
+	got, err := getModel(t, s, m.Spec.ID)
+	if err != nil {
+		t.Fatalf("Get after Create: %v", err)
+	}
+	compareModel(t, "after Create", got, m)
+	_, err = getModel(t, s, "missing")
+	wantErrIs(t, "Get(unknown)", err, domain.ErrNotFound)
+}
+
+// testModelDuplicate: a second Create with the same id is ErrAlreadyExists.
+func testModelDuplicate(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA, bankB)
+	m := sampleModel(bankA, "dup")
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
+	err := txErr(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
+	wantErrIs(t, "Create(duplicate)", err, domain.ErrAlreadyExists)
+	other := sampleModel(bankB, "dup")
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), other) })
+}
+
+// testModelUpdate: Update replaces spec, content and refresh state; unknown ids are ErrNotFound.
+func testModelUpdate(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	m := sampleModel(bankA, "team-overview")
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
+	u := m
+	u.Spec.Name, u.Spec.Tags, u.Spec.Trigger = "Renamed", []string{"eng"}, domain.RefreshTrigger{RefreshCron: "0 * * * *"}
+	u.Spec.Overrides = nil
+	u.ContentMD, u.Version, u.LastSeqSeen, u.AutoRefreshPaused = "# Team v2", 2, 9, true
+	u.LastRefreshedAt, u.LastRefreshFailedAt = ptr(day(5)), ptr(day(6))
+	u.SourceIDs = []port.UnitID{newID[port.UnitID](), newID[port.UnitID]()}
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Update(t.Context(), u) })
+	got, err := getModel(t, s, m.Spec.ID)
+	if err != nil {
+		t.Fatalf("Get after Update: %v", err)
+	}
+	compareModel(t, "after Update", got, u)
+	missing := sampleModel(bankA, "missing")
+	err = txErr(t, s, func(tx port.Tx) error { return tx.MentalModels().Update(t.Context(), missing) })
+	wantErrIs(t, "Update(unknown)", err, domain.ErrNotFound)
+}
+
+// historyEntry builds a version or failure entry numbered n, written at day(n).
+func historyEntry(kind domain.HistoryKind, n int) domain.MentalModelHistoryEntry {
+	e := domain.MentalModelHistoryEntry{Kind: kind, ChangedAt: day(n)}
+	if kind == domain.HistoryKindVersion {
+		e.Version, e.PreviousContent, e.Outcome = int64(n), fmt.Sprintf("content %d", n), domain.RefreshOutcomeContentWritten
+	} else {
+		e.Outcome, e.FailureReason, e.ErrorMessage = domain.RefreshOutcomeFailed, "llm_error", fmt.Sprintf("failure %d", n)
+	}
+	return e
+}
+
+// history reads a model's history.
+func history(t *testing.T, s port.Store, id port.MentalModelID, kind domain.HistoryKind, limit int) []string {
+	t.Helper()
+	var es []domain.MentalModelHistoryEntry
+	inTx(t, s, func(tx port.Tx) error {
+		var err error
+		es, err = tx.MentalModels().History(t.Context(), bankA, id, kind, limit)
+		return err
+	})
+	out := make([]string, len(es))
+	for i, e := range es {
+		out[i] = describeEntry(e)
+	}
+	return out
+}
+
+// describeEntry renders the stored fields of a history entry for comparison.
+func describeEntry(e domain.MentalModelHistoryEntry) string {
+	return fmt.Sprintf("%s v%d %q %s %q %q @%s", e.Kind, e.Version, e.PreviousContent, e.Outcome, e.FailureReason,
+		e.ErrorMessage, e.ChangedAt.UTC().Format("2006-01-02"))
+}
+
+// describeEntries renders entries numbered ns of the given kinds (v = version, f = failure).
+func describeEntries(ns ...int) []string {
+	out := make([]string, len(ns))
+	for i, n := range ns {
+		kind := domain.HistoryKindVersion
+		if n < 0 {
+			kind, n = domain.HistoryKindRefreshFailed, -n
+		}
+		out[i] = describeEntry(historyEntry(kind, n))
+	}
+	return out
+}
+
+// testModelHistory: AppendHistory caps versions and failures separately; History is newest first and
+// filters by kind; keep <= 0 keeps all.
+func testModelHistory(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	m := sampleModel(bankA, "history")
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
+	// Interleaved: v1 v2 f3 v4 f5 v6 f7 (negative = failure), each in its own tx, keep 2 per kind.
+	for _, n := range []int{1, 2, -3, 4, -5, 6, -7} {
+		kind := domain.HistoryKindVersion
+		if n < 0 {
+			kind, n = domain.HistoryKindRefreshFailed, -n
+		}
+		e := historyEntry(kind, n)
+		inTx(t, s, func(tx port.Tx) error {
+			return tx.MentalModels().AppendHistory(t.Context(), bankA, m.Spec.ID, e, 2)
+		})
+	}
+	id := m.Spec.ID
+	wantSeq(t, "History(version)", history(t, s, id, domain.HistoryKindVersion, 10), describeEntries(6, 4))
+	wantSeq(t, "History(refresh_failed)", history(t, s, id, domain.HistoryKindRefreshFailed, 10),
+		describeEntries(-7, -5))
+	wantSeq(t, "History(all)", history(t, s, id, domain.HistoryKindUnspecified, 10), describeEntries(-7, 6, -5, 4))
+	wantSeq(t, "History(all, limit 2)", history(t, s, id, domain.HistoryKindUnspecified, 2), describeEntries(-7, 6))
+	e := historyEntry(domain.HistoryKindVersion, 8)
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().AppendHistory(t.Context(), bankA, id, e, 0) })
+	wantSeq(t, "History(version) after keep=0", history(t, s, id, domain.HistoryKindVersion, 10),
+		describeEntries(8, 6, 4))
+}
+
+// testModelDelete: Delete removes the model and its history; a second Delete is ErrNotFound.
+func testModelDelete(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	m := sampleModel(bankA, "doomed")
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
+	e := historyEntry(domain.HistoryKindVersion, 1)
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().AppendHistory(t.Context(), bankA, m.Spec.ID, e, 0) })
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Delete(t.Context(), bankA, m.Spec.ID) })
+	_, err := getModel(t, s, m.Spec.ID)
+	wantErrIs(t, "Get after Delete", err, domain.ErrNotFound)
+	err = txErr(t, s, func(tx port.Tx) error { return tx.MentalModels().Delete(t.Context(), bankA, m.Spec.ID) })
+	wantErrIs(t, "Delete(unknown)", err, domain.ErrNotFound)
+	// Re-creating the id starts with an empty history.
+	inTx(t, s, func(tx port.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
+	if h := history(t, s, m.Spec.ID, domain.HistoryKindUnspecified, 10); len(h) != 0 {
+		t.Errorf("History of a re-created model = %v, want empty (Delete removes history)", h)
+	}
+}
