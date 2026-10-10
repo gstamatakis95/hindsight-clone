@@ -132,3 +132,10 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   worker's claim) sent back as a one-line fix before merge.
 - Carried forward to WP-14: set RunnerConfig.StaleAfter and MaintenanceDeps.StaleAfter from one value.
 - Carried forward to WP-02: InTx must roll back on error (the WP-05 pending probe relies on it).
+- 2026-10-10 WP-04 review: BLOCK on 2 HIGH (timex out-of-range windows and fallback errors fail recall and
+  consolidation instead of degrading; fact_type label renamed from Hindsight's "assistant"). Fix list sent back.
+- Carried forward from the WP-04 review:
+  - WP-06/WP-14: proto3 can't tell an absent repeated field from an empty one. The request converter must not
+    turn an empty repeated override field into an explicit clear outside a FieldMask.
+  - WP-08: map extraction fact_type "assistant" to domain.FactTypeExperience.
+  - WP-10: inject the per-batch fact-id enum, minItems and maxItems into the consolidation schema per call.
