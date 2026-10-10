@@ -14,7 +14,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
 | WP-05 | Worker runtime | in progress | wp/WP-05-worker-runtime | — | — | — | — |
 | WP-06 | Server shell | in progress | wp/WP-06-server-shell | — | — | — | — |
-| WP-07 | Eval harness | in progress | wp/WP-07-eval | — | — | — | — |
+| WP-07 | Eval harness | merged (f5da652) | wp/WP-07-eval | 2b33aa0 | — | WP-07-1 approved + applied | follow-up: usage, timeouts, recall-mode N/A, fixture naming |
 | WP-08 | Retain engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-09 | Recall engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-10 | Consolidation engine | waiting | — | — | WP-02, WP-04 | — | — |
@@ -91,3 +91,6 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   no-choices response) and two cheap LOWs (negative config defaults, double Extra copy) went back to the worker
   as a follow-up. Remaining LOWs accepted: decode-retry on caller bug, duplicate rerank indices, seekable size
   check, MinIO suite skips without Docker, validator text sent to model.
+- 2026-10-10 WP-07 review: MERGE (0 CRITICAL/HIGH, 4 MEDIUM, 4 LOW). Merged into main as f5da652; gates pass.
+  The MEDIUMs went back to the worker as a follow-up, together with reading RetainResponse.usage. Accepted LOW:
+  Background sums all bank ops (a rerun needs a fresh -bank-prefix).
