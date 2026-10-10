@@ -51,7 +51,9 @@ func (r docRepo) Upsert(_ context.Context, d domain.Document) error {
 }
 
 // Complete stamps content_hash, overrides_hash and extracted_at (the transaction time).
-func (r docRepo) Complete(_ context.Context, b port.BankRef, id port.DocumentID, contentHash, overridesHash string) error {
+func (r docRepo) Complete(
+	_ context.Context, b port.BankRef, id port.DocumentID, contentHash, overridesHash string,
+) error {
 	k := docKey{b, id}
 	row, ok := r.t.st.documents[k]
 	if !ok {

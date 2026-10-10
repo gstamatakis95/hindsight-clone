@@ -211,12 +211,9 @@ func (q queue) Get(_ context.Context, b port.BankRef, id port.OperationID) (doma
 func (q queue) List(_ context.Context, b port.BankRef, f port.OperationFilter) ([]domain.Operation, string, error) {
 	var rows []opRow
 	for _, row := range q.t.st.ops {
-		op := row.op
-		if op.Bank != b || (f.Status != "" && op.Status != f.Status) || (f.Kind != "" && op.Kind != f.Kind) ||
-			(f.ExcludeParents && op.Kind == domain.OperationKindRetainBatch) {
-			continue
+		if opMatches(row.op, b, f) {
+			rows = append(rows, row)
 		}
-		rows = append(rows, row)
 	}
 	slices.SortFunc(rows, func(x, y opRow) int {
 		if olderOp(x, y) {
@@ -224,6 +221,17 @@ func (q queue) List(_ context.Context, b port.BankRef, f port.OperationFilter) (
 		}
 		return -1
 	})
+	return page(rows, f)
+}
+
+// opMatches reports whether op belongs to b and passes f's status, kind and parent filters.
+func opMatches(op domain.Operation, b port.BankRef, f port.OperationFilter) bool {
+	return op.Bank == b && (f.Status == "" || op.Status == f.Status) && (f.Kind == "" || op.Kind == f.Kind) &&
+		(!f.ExcludeParents || op.Kind != domain.OperationKindRetainBatch)
+}
+
+// page cuts one page out of sorted rows; the token is the offset of the next page ("" = last page).
+func page(rows []opRow, f port.OperationFilter) ([]domain.Operation, string, error) {
 	offset := 0
 	if f.PageToken != "" {
 		n, err := strconv.Atoi(f.PageToken)

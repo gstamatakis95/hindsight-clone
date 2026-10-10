@@ -20,7 +20,9 @@ var _ port.EntityRepo = entityRepo{}
 
 // Candidates returns up to limit entities of b whose canonical names have a pg_trgm similarity of at least
 // 0.3 to name, most similar first (ties by name).
-func (r entityRepo) Candidates(_ context.Context, b port.BankRef, name string, limit int) ([]domain.EntityCandidate, error) {
+func (r entityRepo) Candidates(
+	_ context.Context, b port.BankRef, name string, limit int,
+) ([]domain.EntityCandidate, error) {
 	var out []domain.EntityCandidate
 	for _, row := range r.t.st.entities {
 		if row.e.Bank != b {
@@ -38,7 +40,9 @@ func (r entityRepo) Candidates(_ context.Context, b port.BankRef, name string, l
 }
 
 // Cooccurrence returns how many of others share at least one unit with entity.
-func (r entityRepo) Cooccurrence(_ context.Context, b port.BankRef, entity port.EntityID, others []port.EntityID) (int, error) {
+func (r entityRepo) Cooccurrence(
+	_ context.Context, b port.BankRef, entity port.EntityID, others []port.EntityID,
+) (int, error) {
 	if !r.t.st.entityInBank(entity, b) {
 		return 0, nil
 	}

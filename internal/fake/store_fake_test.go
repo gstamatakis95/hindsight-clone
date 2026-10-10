@@ -52,7 +52,7 @@ func (f fixture) tx(fn func(tx port.Tx) error) {
 
 // txErr runs fn in its own transaction and returns its error.
 func (f fixture) txErr(fn func(tx port.Tx) error) error {
-	return f.s.InTx(f.t.Context(), fn)
+	return f.s.InTx(f.t.Context(), fn) //nolint:wrapcheck // tests assert on the store's error as returned
 }
 
 // unit inserts a world fact of b with an embedding and returns it.
@@ -153,7 +153,8 @@ func TestFailOnTombstonedBank(t *testing.T) {
 			t.Fatalf("Fail(retry): %v", err)
 		}
 	}
-	if js := f.claim(domain.OperationKindRetainDocument, 1); js[0].Attempt != domain.OperationKindRetainDocument.MaxAttempts()-1 {
+	last := domain.OperationKindRetainDocument.MaxAttempts() - 1
+	if js := f.claim(domain.OperationKindRetainDocument, 1); js[0].Attempt != last {
 		t.Fatalf("Attempt = %d, want the last one", js[0].Attempt)
 	}
 	f.tx(func(tx port.Tx) error { return tx.Banks().MarkDeleting(t.Context(), mine, f.clock.Now()) })
@@ -186,7 +187,11 @@ func TestTenantIsolationWritePorts(t *testing.T) {
 	u := f.unit(theirs, "u-theirs", "doc-1")
 	other := f.unit(mine, "u-mine", "")
 	checks := map[string]func(tx port.Tx) error{
-		"Units.Update": func(tx port.Tx) error { v := u; v.Bank = mine; return tx.Units().Update(ctx, v) },
+		"Units.Update": func(tx port.Tx) error {
+			v := u
+			v.Bank = mine
+			return tx.Units().Update(ctx, v)
+		},
 		"Units.Archive": func(tx port.Tx) error { return tx.Units().Archive(ctx, mine, u.ID, "x") },
 		"Units.Restore": func(tx port.Tx) error { return tx.Units().Restore(ctx, mine, u.ID) },
 		"Units.UpsertObservation": func(tx port.Tx) error {
@@ -215,7 +220,8 @@ func TestTenantIsolationWritePorts(t *testing.T) {
 		"Directives.Delete": func(tx port.Tx) error { return tx.Directives().Delete(ctx, mine, "d") },
 	}
 	f.tx(func(tx port.Tx) error {
-		if err := tx.MentalModels().Create(ctx, domain.MentalModel{Bank: theirs, Spec: domain.MentalModelSpec{ID: "m"}}); err != nil {
+		m := domain.MentalModel{Bank: theirs, Spec: domain.MentalModelSpec{ID: "m"}}
+		if err := tx.MentalModels().Create(ctx, m); err != nil {
 			return err
 		}
 		_, err := tx.Directives().Upsert(ctx, domain.Directive{ID: "d", Bank: theirs, Name: "d"})
@@ -268,28 +274,7 @@ func TestTenantIsolationBankWrites(t *testing.T) {
 		return tx.Entities().Detach(ctx, u.ID) // nothing attached; queues nothing
 	})
 	op := f.enqueue(port.Job{Bank: theirs, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate"})
-	f.tx(func(tx port.Tx) error {
-		if _, err := tx.Seq(ctx, mine); err != nil {
-			return err
-		}
-		if ids, err := tx.Units().SetDocumentTags(ctx, mine, "doc-1", []string{"x"}, 1); err != nil || len(ids) != 0 {
-			t.Errorf("SetDocumentTags(mine) = %v, %v; want nothing", ids, err)
-		}
-		if ids, err := tx.Units().DeleteByDocument(ctx, mine, "doc-1"); err != nil || len(ids) != 0 {
-			t.Errorf("DeleteByDocument(mine) = %v, %v; want nothing", ids, err)
-		}
-		if n, err := tx.Entities().PruneOrphans(ctx, mine, []port.EntityID{ent}); err != nil || n != 0 {
-			t.Errorf("PruneOrphans(mine, their entity) = %d, %v; want 0", n, err)
-		}
-		if n, err := tx.Queue().CancelBank(ctx, mine); err != nil || n != 0 {
-			t.Errorf("CancelBank(mine) = %d, %v; want 0", n, err)
-		}
-		_, err := tx.Entities().Upsert(ctx, domain.Entity{ID: ent, Bank: mine, CanonicalName: "Hijack"})
-		if !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("Entities.Upsert(mine, their id) = %v, want ErrNotFound", err)
-		}
-		return nil
-	})
+	f.myBankWrites(ent, u.ID)
 	for name, call := range map[string]func(port.Queue) error{
 		"Cancel": func(q port.Queue) error { _, err := q.Cancel(ctx, mine, op); return err },
 		"Retry":  func(q port.Queue) error { _, err := q.Retry(ctx, mine, op); return err },
@@ -371,4 +356,39 @@ func TestCompleteCancelledCommits(t *testing.T) {
 	if got := f.status(mine, id); got != domain.OperationStatusCancelled {
 		t.Errorf("status = %q, want cancelled", got)
 	}
+}
+
+// myBankWrites runs mine's bank-scoped bulk writes against ids and names owned by theirs and checks that
+// each touches nothing.
+func (f fixture) myBankWrites(ent port.EntityID, unit port.UnitID) {
+	f.t.Helper()
+	t, ctx := f.t, f.t.Context()
+	f.tx(func(tx port.Tx) error {
+		if _, err := tx.Seq(ctx, mine); err != nil {
+			return err
+		}
+		if ids, err := tx.Units().SetDocumentTags(ctx, mine, "doc-1", []string{"x"}, 1); err != nil || len(ids) != 0 {
+			t.Errorf("SetDocumentTags(mine) = %v, %v; want nothing", ids, err)
+		}
+		if ids, err := tx.Units().DeleteByDocument(ctx, mine, "doc-1"); err != nil || len(ids) != 0 {
+			t.Errorf("DeleteByDocument(mine) = %v, %v; want nothing", ids, err)
+		}
+		if n, err := tx.Entities().PruneOrphans(ctx, mine, []port.EntityID{ent}); err != nil || n != 0 {
+			t.Errorf("PruneOrphans(mine, their entity) = %d, %v; want 0", n, err)
+		}
+		if n, err := tx.Queue().CancelBank(ctx, mine); err != nil || n != 0 {
+			t.Errorf("CancelBank(mine) = %d, %v; want 0", n, err)
+		}
+		if _, _, err := tx.Evidence().DeleteCiting(ctx, mine, []port.UnitID{unit}); err != nil {
+			t.Errorf("DeleteCiting(mine): %v", err)
+		}
+		if err := tx.Links().ClearDirty(ctx, mine, []port.UnitID{unit}); err != nil {
+			t.Errorf("ClearDirty(mine): %v", err)
+		}
+		_, err := tx.Entities().Upsert(ctx, domain.Entity{ID: ent, Bank: mine, CanonicalName: "Hijack"})
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("Entities.Upsert(mine, their id) = %v, want ErrNotFound", err)
+		}
+		return nil
+	})
 }

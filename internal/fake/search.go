@@ -175,15 +175,10 @@ func searchTemporal(ctx context.Context, st *state, q port.TemporalQuery) ([]por
 	}
 	centre := windowCentre(w)
 	var hs []temporalHit
-	for id, row := range st.units {
-		start, end, ok := occurrence(row.u)
-		if !ok || !admit(row.u, q.Bank, q.Types, q.Tags, q.Seq) ||
-			(!w.End.IsZero() && !start.Before(w.End)) || (!w.Start.IsZero() && end.Before(w.Start)) {
-			continue
+	for _, row := range st.units {
+		if h, ok := temporalCandidate(row.u, q, centre); ok {
+			hs = append(hs, h)
 		}
-		mid := start.Add(end.Sub(start) / 2)
-		days := math.Abs(mid.Sub(centre).Hours()) / 24
-		hs = append(hs, temporalHit{port.Hit{ID: id, Score: 1 / (1 + days)}, mid})
 	}
 	if q.Buckets > 1 && !w.Start.IsZero() && !w.End.IsZero() && q.Limit > 0 && len(hs) > q.Limit {
 		hs = spreadBuckets(hs, w, q.Buckets, q.Limit)
@@ -193,6 +188,19 @@ func searchTemporal(ctx context.Context, st *state, q port.TemporalQuery) ([]por
 		out[i] = h.hit
 	}
 	return rank(out, q.Limit), nil
+}
+
+// temporalCandidate scores u when it passes q's filters and overlaps q's window.
+func temporalCandidate(u domain.Unit, q port.TemporalQuery, centre time.Time) (temporalHit, bool) {
+	w := q.Window
+	start, end, ok := occurrence(u)
+	if !ok || !admit(u, q.Bank, q.Types, q.Tags, q.Seq) ||
+		(!w.End.IsZero() && !start.Before(w.End)) || (!w.Start.IsZero() && end.Before(w.Start)) {
+		return temporalHit{}, false
+	}
+	mid := start.Add(end.Sub(start) / 2)
+	days := math.Abs(mid.Sub(centre).Hours()) / 24
+	return temporalHit{port.Hit{ID: u.ID, Score: 1 / (1 + days)}, mid}, true
 }
 
 // windowCentre is the reference time of proximity scores: the centre of a closed window, else its bound.
@@ -252,16 +260,7 @@ func expandGraph(ctx context.Context, st *state, q port.GraphQuery) ([]port.Hit,
 	}
 	best := map[port.UnitID]float64{}
 	for hop := 0; hop < q.MaxHops && len(frontier) > 0; hop++ {
-		next := map[port.UnitID]float64{}
-		for k, row := range st.links {
-			w, ok := frontier[k.from]
-			if !ok || seeds[k.to] || row.l.Bank != q.Bank || (len(q.Kinds) > 0 && !slices.Contains(q.Kinds, k.kind)) {
-				continue
-			}
-			if s := w * row.l.Weight; s > next[k.to] || !hasKey(next, k.to) {
-				next[k.to] = s
-			}
-		}
+		next := st.hop(q, seeds, frontier)
 		frontier = map[port.UnitID]float64{}
 		for id, s := range next {
 			if old, ok := best[id]; !ok || s > old {
@@ -278,8 +277,20 @@ func expandGraph(ctx context.Context, st *state, q port.GraphQuery) ([]port.Hit,
 	return rank(hs, q.Limit), nil
 }
 
-// hasKey reports whether m has k.
-func hasKey[K comparable, V any](m map[K]V, k K) bool {
-	_, ok := m[k]
-	return ok
+// hop follows one step of q's links out of frontier (unit -> path score) and returns the best score of
+// every non-seed unit reached.
+func (s *state) hop(
+	q port.GraphQuery, seeds map[port.UnitID]bool, frontier map[port.UnitID]float64,
+) map[port.UnitID]float64 {
+	next := map[port.UnitID]float64{}
+	for k, row := range s.links {
+		w, ok := frontier[k.from]
+		if !ok || seeds[k.to] || row.l.Bank != q.Bank || (len(q.Kinds) > 0 && !slices.Contains(q.Kinds, k.kind)) {
+			continue
+		}
+		if score, seen := next[k.to]; !seen || w*row.l.Weight > score {
+			next[k.to] = w * row.l.Weight
+		}
+	}
+	return next
 }

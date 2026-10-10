@@ -3,6 +3,7 @@ package fake
 import (
 	"cmp"
 	"context"
+	"maps"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -137,7 +138,9 @@ func (r evidenceRepo) Cites(_ context.Context, s port.ScopeKey, unit port.UnitID
 
 // DeleteCiting deletes the observations of b citing any of ids and clears consolidated_at on their other
 // live sources. It returns both sets, sorted.
-func (r evidenceRepo) DeleteCiting(_ context.Context, b port.BankRef, ids []port.UnitID) (deleted, reset []port.UnitID, err error) {
+func (r evidenceRepo) DeleteCiting(
+	_ context.Context, b port.BankRef, ids []port.UnitID,
+) (deleted, reset []port.UnitID, err error) {
 	st := r.t.st
 	doomed := map[port.UnitID]bool{}
 	for k := range st.evidence {
@@ -151,7 +154,7 @@ func (r evidenceRepo) DeleteCiting(_ context.Context, b port.BankRef, ids []port
 			resetSet[k.unit] = true
 		}
 	}
-	deleted, reset = slices.Sorted(slices.Values(mapKeys(doomed))), slices.Sorted(slices.Values(mapKeys(resetSet)))
+	deleted, reset = slices.Sorted(maps.Keys(doomed)), slices.Sorted(maps.Keys(resetSet))
 	st.removeUnits(b, deleted)
 	for _, id := range reset {
 		if row, ok := st.units[id]; ok {

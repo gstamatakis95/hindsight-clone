@@ -3,7 +3,6 @@ package fake
 import (
 	"context"
 	"fmt"
-	"maps"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -101,30 +100,48 @@ func (r bankRepo) DeleteBatch(_ context.Context, b port.BankRef, limit int) (int
 		func(n int) int {
 			return deleteWhere(st.cooc, n, func(k entityPair, _ int) bool { return st.entityInBank(k.a, b) })
 		},
-		func(n int) int { return deleteWhere(st.links, n, func(_ linkKey, v linkRow) bool { return v.l.Bank == b }) },
+		func(n int) int {
+			return deleteWhere(st.links, n, func(_ linkKey, v linkRow) bool { return v.l.Bank == b })
+		},
 		func(n int) int {
 			return deleteWhere(st.evidence, n, func(k evidenceKey, _ string) bool { return st.unitInBank(k.obs, b) })
 		},
-		func(n int) int { return deleteWhere(st.dirty, n, func(k bankUnitKey, _ int64) bool { return k.bank == b }) },
+		func(n int) int {
+			return deleteWhere(st.dirty, n, func(k bankUnitKey, _ int64) bool { return k.bank == b })
+		},
 		func(n int) int {
 			return deleteWhere(st.entMaint, n, func(k bankEntityKey, _ int64) bool { return k.bank == b })
 		},
-		func(n int) int { return deleteSlice(&st.obsVersions, n, func(v obsVersionRow) bool { return v.bank == b }) },
-		func(n int) int { return deleteSlice(&st.audit, n, func(v domain.AuditEntry) bool { return v.Bank == b }) },
-		func(n int) int { return deleteSlice(&st.history, n, func(v historyRow) bool { return v.key.bank == b }) },
-		func(n int) int { return deleteWhere(st.models, n, func(k modelKey, _ modelRow) bool { return k.bank == b }) },
+		func(n int) int {
+			return deleteSlice(&st.obsVersions, n, func(v obsVersionRow) bool { return v.bank == b })
+		},
+		func(n int) int {
+			return deleteSlice(&st.audit, n, func(v domain.AuditEntry) bool { return v.Bank == b })
+		},
+		func(n int) int {
+			return deleteSlice(&st.history, n, func(v historyRow) bool { return v.key.bank == b })
+		},
+		func(n int) int {
+			return deleteWhere(st.models, n, func(k modelKey, _ modelRow) bool { return k.bank == b })
+		},
 		func(n int) int {
 			return deleteWhere(st.directives, n, func(k directiveKey, _ directiveRow) bool { return k.bank == b })
 		},
 		func(n int) int {
 			return deleteWhere(st.archive, n, func(_ port.UnitID, v archiveRow) bool { return v.u.Bank == b })
 		},
-		func(n int) int { return deleteWhere(st.units, n, func(_ port.UnitID, v unitRow) bool { return v.u.Bank == b }) },
+		func(n int) int {
+			return deleteWhere(st.units, n, func(_ port.UnitID, v unitRow) bool { return v.u.Bank == b })
+		},
 		func(n int) int {
 			return deleteWhere(st.entities, n, func(_ port.EntityID, v entityRow) bool { return v.e.Bank == b })
 		},
-		func(n int) int { return deleteWhere(st.chunks, n, func(k chunkKey, _ domain.Chunk) bool { return k.bank == b }) },
-		func(n int) int { return deleteWhere(st.documents, n, func(k docKey, _ docRow) bool { return k.bank == b }) },
+		func(n int) int {
+			return deleteWhere(st.chunks, n, func(k chunkKey, _ domain.Chunk) bool { return k.bank == b })
+		},
+		func(n int) int {
+			return deleteWhere(st.documents, n, func(k docKey, _ docRow) bool { return k.bank == b })
+		},
 	}
 	for _, step := range steps {
 		if left <= 0 {
@@ -218,9 +235,4 @@ func deleteSlice[T any](xs *[]T, n int, del func(T) bool) int {
 		return false
 	})
 	return removed
-}
-
-// mapKeys returns the keys of m (any order).
-func mapKeys[K comparable, V any](m map[K]V) []K {
-	return slices.Collect(maps.Keys(m))
 }

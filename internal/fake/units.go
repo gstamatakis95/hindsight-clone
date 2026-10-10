@@ -266,7 +266,7 @@ func (r unitRepo) Restore(_ context.Context, b port.BankRef, id port.UnitID) err
 	u.ConsolidatedAt, u.ConsolidationFailedAt = nil, nil
 	delete(st.archive, id)
 	st.units[id] = unitRow{u: u, order: st.next()}
-	ents := entityRepo{r.t}
+	ents := entityRepo(r)
 	var keep []port.EntityID
 	for _, e := range a.entities {
 		if _, ok := st.entities[e]; ok {

@@ -48,7 +48,9 @@ func (r eventRepo) List(
 			rows = append(rows, row)
 		}
 	}
-	slices.SortFunc(rows, func(x, y eventRow) int { return cmp.Or(cmp.Compare(x.e.Seq, y.e.Seq), cmp.Compare(x.order, y.order)) })
+	slices.SortFunc(rows, func(x, y eventRow) int {
+		return cmp.Or(cmp.Compare(x.e.Seq, y.e.Seq), cmp.Compare(x.order, y.order))
+	})
 	var out []domain.LifecycleEvent
 	lastSeq := afterSeq
 	for i, row := range rows {
