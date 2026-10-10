@@ -2,6 +2,7 @@ package recall
 
 import (
 	"context"
+	"memd/internal/domain"
 	"memd/internal/port"
 )
 
@@ -24,14 +25,19 @@ var (
 	_ Retriever = (*temporal)(nil)
 )
 
-// NewSemantic returns the semantic arm: SearchVector with the min_scores.semantic floor.
+// graphLinkKinds are the links the graph arm follows: semantic and causal, never temporal (temporal
+// proximity is the temporal arm's job; decision 901).
+var graphLinkKinds = []domain.LinkKind{domain.LinkSemantic, domain.LinkCausal}
+
+// NewSemantic returns the semantic arm: SearchVector with the min_scores.semantic floor (default 0.3, as
+// Hindsight; an explicit 0 disables it).
 func NewSemantic(r port.Reader) Retriever { return &semantic{r: r} }
 
 // NewKeyword returns the keyword arm: SearchText (BM25) with the min_scores.keyword floor.
 func NewKeyword(r port.Reader) Retriever { return &keyword{r: r} }
 
 // NewGraph returns the graph arm: its own semantic seeds (the top 20 at cosine >= 0.3, as Hindsight), then
-// ExpandGraph over every link kind up to graph_max_hops (default 1).
+// ExpandGraph over semantic and causal links up to graph_max_hops (default 1).
 func NewGraph(r port.Reader) Retriever { return &graph{r: r} }
 
 // NewTemporal returns the temporal arm: SearchTemporal over the query window, spread over temporal_buckets
@@ -52,7 +58,10 @@ func (*temporal) Name() string { return ArmTemporal }
 
 // Retrieve implements Retriever.
 func (a *semantic) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, error) {
-	floor, _ := gate{}.ArmFloor(ArmSemantic, q.MinScores)
+	floor, ok := gate{}.ArmFloor(ArmSemantic, q.MinScores)
+	if !ok {
+		floor = semanticMinSimilarity // an explicit 0 disables it
+	}
 	hs, err := a.r.SearchVector(ctx, port.VectorQuery{
 		Bank: q.Bank, Embedding: q.Embedding, Types: q.Types, Tags: q.Predicate, MinSimilarity: floor,
 		Seq: q.Seq, Limit: q.Limit,
@@ -83,8 +92,8 @@ func (a *graph) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, erro
 		ids[i] = h.ID
 	}
 	hs, err := a.r.ExpandGraph(ctx, port.GraphQuery{
-		Bank: q.Bank, Seeds: ids, MaxHops: settingsOf(q.Config).graphMaxHops, Types: q.Types, Tags: q.Predicate,
-		Seq: q.Seq, Limit: q.Limit,
+		Bank: q.Bank, Seeds: ids, MaxHops: settingsOf(q.Config).graphMaxHops, Kinds: graphLinkKinds,
+		Types: q.Types, Tags: q.Predicate, Seq: q.Seq, Limit: q.Limit,
 	})
 	return candidates(ArmGraph, hs, q.Limit), err
 }

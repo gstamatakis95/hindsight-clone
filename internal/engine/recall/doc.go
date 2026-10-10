@@ -5,10 +5,11 @@
 // ParsedQuery: the query embedding, the time window (explicit, else from timex, which calls TIME_PARSE only
 // for a cue its rules can't resolve), the tag filter compiled once into a port.SQLPredicate (fuzzy leaves
 // resolved by trigram similarity) and the per-arm limit from BudgetLimit. The enabled Retrievers run
-// concurrently against port.Reader: semantic (HNSW cosine, min_scores.semantic), keyword (BM25,
-// min_scores.keyword), graph (link expansion from its own semantic seeds) and temporal (occurrence overlap;
-// skipped without a window). The Fuser merges their lists by reciprocal-rank fusion (k = 60, strategy boosts
-// in rank space). The top reranker_max_candidates are hydrated and handed to the Scorer, which takes the
+// concurrently against port.Reader: semantic (HNSW cosine, min_scores.semantic, default 0.3), keyword (BM25,
+// min_scores.keyword), graph (semantic and causal links from its own semantic seeds) and temporal
+// (occurrence overlap; skipped without a window). The Fuser merges their lists by reciprocal-rank fusion
+// (k = 60). The top reranker_max_candidates (strategy boosts decide that cut, in rank space) are hydrated
+// and handed to the Scorer, which takes the
 // cross-encoder score (RERANK slot) as the base, or an RRF-rank base when rerank is off, and multiplies in the
 // recency, temporal and proof boosts. The ScoreGate applies the result floors; the Packer (or, with
 // prefer_observations, the ObservationPreference) fits the result into max_tokens, skipping items that don't

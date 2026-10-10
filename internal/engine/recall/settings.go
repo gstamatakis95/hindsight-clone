@@ -33,6 +33,8 @@ const (
 	// GRAPH_SEED_LIMIT and graph_seed_min_similarity).
 	graphSeedLimit         = 20
 	graphSeedMinSimilarity = 0.3
+	// semanticMinSimilarity is the semantic arm's floor when min_scores.semantic is unset (Hindsight's 0.3).
+	semanticMinSimilarity = 0.3
 	// traceTopIDs is how many ids ArmTrace.TopIDs keeps.
 	traceTopIDs = 5
 )

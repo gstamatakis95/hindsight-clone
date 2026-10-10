@@ -62,14 +62,20 @@ func TestPreferObservations(t *testing.T) {
 		words("f2", 2, domain.FactTypeExperience),
 		words("f3", 2, domain.FactTypeWorld),
 		words("f4", 2, domain.FactTypeWorld),
-		words("o2", 2, domain.FactTypeObservation, "f4"), // never returned: it must not drop f4
+		words("o2", 2, domain.FactTypeObservation, "f4"),
 	}
 	if got := NewPacker(wordCounter{}).Pack(ranked, 6); !slices.Equal(candIDs(got), []string{"f1", "o1", "f2"}) {
 		t.Fatalf("plain pack = %v", candIDs(got))
 	}
-	got := NewObservationPreference().Apply(ranked, 6, wordCounter{})
+	// Window 2 covers o1 only: f1 and f2 go, o2 (below the window) doesn't drop f4.
+	got := NewObservationPreference().Apply(ranked, 2, 6, wordCounter{})
 	if want := []string{"o1", "f3", "f4"}; !slices.Equal(candIDs(got), want) {
-		t.Fatalf("prefer = %v, want %v", candIDs(got), want)
+		t.Fatalf("prefer window 2 = %v, want %v", candIDs(got), want)
+	}
+	// The whole list as window: o2 supersedes f4 although o2 itself doesn't make the budget-ordered cut first.
+	got = NewObservationPreference().Apply(ranked, 0, 6, wordCounter{})
+	if want := []string{"o1", "f3", "o2"}; !slices.Equal(candIDs(got), want) {
+		t.Fatalf("prefer whole window = %v, want %v", candIDs(got), want)
 	}
 }
 

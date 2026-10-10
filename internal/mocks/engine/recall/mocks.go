@@ -22,7 +22,7 @@ var _ recall.Fuser = &Fuser{}
 //
 //		// make and configure a mocked recall.Fuser
 //		mockedFuser := &Fuser{
-//			FuseFunc: func(lists map[string][]recall.Candidate, k int, boosts map[string]float64) []recall.Candidate {
+//			FuseFunc: func(lists map[string][]recall.Candidate, k int) []recall.Candidate {
 //				panic("mock out the Fuse method")
 //			},
 //		}
@@ -33,7 +33,7 @@ var _ recall.Fuser = &Fuser{}
 //	}
 type Fuser struct {
 	// FuseFunc mocks the Fuse method.
-	FuseFunc func(lists map[string][]recall.Candidate, k int, boosts map[string]float64) []recall.Candidate
+	FuseFunc func(lists map[string][]recall.Candidate, k int) []recall.Candidate
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -43,31 +43,27 @@ type Fuser struct {
 			Lists map[string][]recall.Candidate
 			// K is the k argument value.
 			K int
-			// Boosts is the boosts argument value.
-			Boosts map[string]float64
 		}
 	}
 	lockFuse sync.RWMutex
 }
 
 // Fuse calls FuseFunc.
-func (mock *Fuser) Fuse(lists map[string][]recall.Candidate, k int, boosts map[string]float64) []recall.Candidate {
+func (mock *Fuser) Fuse(lists map[string][]recall.Candidate, k int) []recall.Candidate {
 	if mock.FuseFunc == nil {
 		panic("Fuser.FuseFunc: method is nil but Fuser.Fuse was just called")
 	}
 	callInfo := struct {
-		Lists  map[string][]recall.Candidate
-		K      int
-		Boosts map[string]float64
+		Lists map[string][]recall.Candidate
+		K     int
 	}{
-		Lists:  lists,
-		K:      k,
-		Boosts: boosts,
+		Lists: lists,
+		K:     k,
 	}
 	mock.lockFuse.Lock()
 	mock.calls.Fuse = append(mock.calls.Fuse, callInfo)
 	mock.lockFuse.Unlock()
-	return mock.FuseFunc(lists, k, boosts)
+	return mock.FuseFunc(lists, k)
 }
 
 // FuseCalls gets all the calls that were made to Fuse.
@@ -75,14 +71,12 @@ func (mock *Fuser) Fuse(lists map[string][]recall.Candidate, k int, boosts map[s
 //
 //	len(mockedFuser.FuseCalls())
 func (mock *Fuser) FuseCalls() []struct {
-	Lists  map[string][]recall.Candidate
-	K      int
-	Boosts map[string]float64
+	Lists map[string][]recall.Candidate
+	K     int
 } {
 	var calls []struct {
-		Lists  map[string][]recall.Candidate
-		K      int
-		Boosts map[string]float64
+		Lists map[string][]recall.Candidate
+		K     int
 	}
 	mock.lockFuse.RLock()
 	calls = mock.calls.Fuse
@@ -222,7 +216,7 @@ var _ recall.Includer = &Includer{}
 //
 //		// make and configure a mocked recall.Includer
 //		mockedIncluder := &Includer{
-//			EnrichFunc: func(ctx context.Context, b port.BankRef, results []recall.Candidate, inc domain.RecallInclude) (recall.Enrichment, error) {
+//			EnrichFunc: func(ctx context.Context, b port.BankRef, seq port.SeqRange, results []recall.Candidate, inc domain.RecallInclude) (recall.Enrichment, error) {
 //				panic("mock out the Enrich method")
 //			},
 //		}
@@ -233,7 +227,7 @@ var _ recall.Includer = &Includer{}
 //	}
 type Includer struct {
 	// EnrichFunc mocks the Enrich method.
-	EnrichFunc func(ctx context.Context, b port.BankRef, results []recall.Candidate, inc domain.RecallInclude) (recall.Enrichment, error)
+	EnrichFunc func(ctx context.Context, b port.BankRef, seq port.SeqRange, results []recall.Candidate, inc domain.RecallInclude) (recall.Enrichment, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -243,6 +237,8 @@ type Includer struct {
 			Ctx context.Context
 			// B is the b argument value.
 			B port.BankRef
+			// Seq is the seq argument value.
+			Seq port.SeqRange
 			// Results is the results argument value.
 			Results []recall.Candidate
 			// Inc is the inc argument value.
@@ -253,25 +249,27 @@ type Includer struct {
 }
 
 // Enrich calls EnrichFunc.
-func (mock *Includer) Enrich(ctx context.Context, b port.BankRef, results []recall.Candidate, inc domain.RecallInclude) (recall.Enrichment, error) {
+func (mock *Includer) Enrich(ctx context.Context, b port.BankRef, seq port.SeqRange, results []recall.Candidate, inc domain.RecallInclude) (recall.Enrichment, error) {
 	if mock.EnrichFunc == nil {
 		panic("Includer.EnrichFunc: method is nil but Includer.Enrich was just called")
 	}
 	callInfo := struct {
 		Ctx     context.Context
 		B       port.BankRef
+		Seq     port.SeqRange
 		Results []recall.Candidate
 		Inc     domain.RecallInclude
 	}{
 		Ctx:     ctx,
 		B:       b,
+		Seq:     seq,
 		Results: results,
 		Inc:     inc,
 	}
 	mock.lockEnrich.Lock()
 	mock.calls.Enrich = append(mock.calls.Enrich, callInfo)
 	mock.lockEnrich.Unlock()
-	return mock.EnrichFunc(ctx, b, results, inc)
+	return mock.EnrichFunc(ctx, b, seq, results, inc)
 }
 
 // EnrichCalls gets all the calls that were made to Enrich.
@@ -281,12 +279,14 @@ func (mock *Includer) Enrich(ctx context.Context, b port.BankRef, results []reca
 func (mock *Includer) EnrichCalls() []struct {
 	Ctx     context.Context
 	B       port.BankRef
+	Seq     port.SeqRange
 	Results []recall.Candidate
 	Inc     domain.RecallInclude
 } {
 	var calls []struct {
 		Ctx     context.Context
 		B       port.BankRef
+		Seq     port.SeqRange
 		Results []recall.Candidate
 		Inc     domain.RecallInclude
 	}
@@ -856,7 +856,7 @@ var _ recall.ObservationPreference = &ObservationPreference{}
 //
 //		// make and configure a mocked recall.ObservationPreference
 //		mockedObservationPreference := &ObservationPreference{
-//			ApplyFunc: func(ranked []recall.Candidate, maxTokens int, count recall.TokenCounter) []recall.Candidate {
+//			ApplyFunc: func(ranked []recall.Candidate, window int, maxTokens int, count recall.TokenCounter) []recall.Candidate {
 //				panic("mock out the Apply method")
 //			},
 //		}
@@ -867,7 +867,7 @@ var _ recall.ObservationPreference = &ObservationPreference{}
 //	}
 type ObservationPreference struct {
 	// ApplyFunc mocks the Apply method.
-	ApplyFunc func(ranked []recall.Candidate, maxTokens int, count recall.TokenCounter) []recall.Candidate
+	ApplyFunc func(ranked []recall.Candidate, window int, maxTokens int, count recall.TokenCounter) []recall.Candidate
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -875,6 +875,8 @@ type ObservationPreference struct {
 		Apply []struct {
 			// Ranked is the ranked argument value.
 			Ranked []recall.Candidate
+			// Window is the window argument value.
+			Window int
 			// MaxTokens is the maxTokens argument value.
 			MaxTokens int
 			// Count is the count argument value.
@@ -885,23 +887,25 @@ type ObservationPreference struct {
 }
 
 // Apply calls ApplyFunc.
-func (mock *ObservationPreference) Apply(ranked []recall.Candidate, maxTokens int, count recall.TokenCounter) []recall.Candidate {
+func (mock *ObservationPreference) Apply(ranked []recall.Candidate, window int, maxTokens int, count recall.TokenCounter) []recall.Candidate {
 	if mock.ApplyFunc == nil {
 		panic("ObservationPreference.ApplyFunc: method is nil but ObservationPreference.Apply was just called")
 	}
 	callInfo := struct {
 		Ranked    []recall.Candidate
+		Window    int
 		MaxTokens int
 		Count     recall.TokenCounter
 	}{
 		Ranked:    ranked,
+		Window:    window,
 		MaxTokens: maxTokens,
 		Count:     count,
 	}
 	mock.lockApply.Lock()
 	mock.calls.Apply = append(mock.calls.Apply, callInfo)
 	mock.lockApply.Unlock()
-	return mock.ApplyFunc(ranked, maxTokens, count)
+	return mock.ApplyFunc(ranked, window, maxTokens, count)
 }
 
 // ApplyCalls gets all the calls that were made to Apply.
@@ -910,11 +914,13 @@ func (mock *ObservationPreference) Apply(ranked []recall.Candidate, maxTokens in
 //	len(mockedObservationPreference.ApplyCalls())
 func (mock *ObservationPreference) ApplyCalls() []struct {
 	Ranked    []recall.Candidate
+	Window    int
 	MaxTokens int
 	Count     recall.TokenCounter
 } {
 	var calls []struct {
 		Ranked    []recall.Candidate
+		Window    int
 		MaxTokens int
 		Count     recall.TokenCounter
 	}

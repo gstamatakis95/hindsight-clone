@@ -6,6 +6,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -83,6 +84,12 @@ func TestRecallTagGroups(t *testing.T) {
 		},
 		{"nested none_of(any_of)", domain.TagFilter{Groups: []domain.TagGroup{group(domain.TagGroupNoneOf,
 			group(domain.TagGroupAnyOf, leaf(strict, "a"), leaf(strict, "c")))}}, []string{"u3", "u4"}},
+		{"empty leaf is no filter (domain.MatchGroup, decision 903)", domain.TagFilter{Groups: []domain.TagGroup{
+			leaf(strict),
+		}}, []string{"u1", "u2", "u3", "u4", "u5"}},
+		{"empty exact leaf selects untagged", domain.TagFilter{Groups: []domain.TagGroup{
+			leaf(domain.TagsMatchExact),
+		}}, []string{"u4"}},
 		{"top-level groups AND-ed", domain.TagFilter{Groups: []domain.TagGroup{
 			leaf(strict, "b"),
 			group(domain.TagGroupNoneOf, leaf(strict, "a")),
@@ -275,6 +282,12 @@ func TestRecallArmsAndTrace(t *testing.T) {
 	seed.OccurredStart = at(-3)
 	e.add(t, seed, fact("hop", "unrelated words entirely"))
 	e.link(t, "seed", "hop", 0.8)
+	e.add(t, fact("tnext", "zzz qqq"))
+	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
+		return tx.Links().Insert(ctx, []domain.Link{{
+			Bank: testBank, From: "seed", To: "tnext", Kind: domain.LinkTemporal, Weight: 1,
+		}})
+	})
 	res := e.recall(t, RecallRequest{Query: "rocket launch schedule", Trace: true})
 	if got := sortedIDs(res); !slices.Equal(got, []string{"hop", "seed"}) {
 		t.Fatalf("results = %v, want the graph hop too", got)
@@ -338,7 +351,7 @@ func TestRecallUnknownBank(t *testing.T) {
 	if len(e.emb.Calls()) != 0 {
 		t.Fatal("embedded a query for an unknown bank")
 	}
-	_, err = e.rc.Recall(context.Background(), RecallRequest{Bank: testBank, Query: "  "})
+	_, err = e.rc.Recall(context.Background(), RecallRequest{Bank: port.BankRef{Tenant: "t1", Bank: "nope"}, Query: "  "})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("blank query: err = %v", err)
 	}
@@ -366,7 +379,7 @@ func TestRecallCueFallbackCallsTimeParse(t *testing.T) {
 	// Positive control for the no-cue test: a cue the rules can't resolve reaches TIME_PARSE once; the
 	// unscripted call fails and recall degrades to no window instead of failing.
 	e := newEnv(t, envOpts{})
-	e.add(t, fact("u1", "holiday dinner with family"))
+	e.add(t, fact("u1", "family dinner around the holidays"))
 	res := e.recall(t, RecallRequest{Query: "what did we do around the holidays?", Trace: true})
 	if n := len(e.llm.CallsFor(domain.ModelSlotTimeParse, "time_parse_system")); n != 1 {
 		t.Fatalf("TIME_PARSE calls = %d, want 1 (all calls: %d)", n, len(e.llm.Calls()))
@@ -391,5 +404,58 @@ func TestRecallSeqSnapshot(t *testing.T) {
 	}
 	if got := sortedIDs(e.recall(t, RecallRequest{Query: "fact"})); !slices.Equal(got, []string{"late", "old"}) {
 		t.Fatalf("unbounded results = %v", got)
+	}
+}
+
+func TestRecallSemanticDefaultFloor(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	e.add(t, fact("pie", "apple pie recipe"))
+	spy := &spyReader{Reader: e.store.Read()}
+	e.rc = NewRecaller(RecallerDeps{
+		Reader: spy, Config: e.rc.(*recaller).d.Config, Embedder: e.emb, Router: e.rc.(*recaller).d.Router,
+		Clock: e.clock, Count: wordCounter{}, Retrievers: []Retriever{NewSemantic(spy)},
+	})
+	for _, tt := range []struct {
+		name string
+		m    domain.MinScores
+		want float64
+	}{
+		{"unset = 0.3", domain.MinScores{}, 0.3},
+		{"explicit 0 disables", domain.MinScores{Semantic: ptr(0.0)}, 0},
+		{"explicit value", domain.MinScores{Semantic: ptr(0.7)}, 0.7},
+	} {
+		spy.vectors = nil
+		e.recall(t, RecallRequest{Query: "apple pie", MinScores: tt.m})
+		if len(spy.vectors) != 1 || spy.vectors[0].MinSimilarity != tt.want {
+			t.Fatalf("%s: vector queries = %+v", tt.name, spy.vectors)
+		}
+	}
+}
+
+// failingArm is a Retriever that always fails.
+type failingArm struct{}
+
+func (failingArm) Name() string { return ArmKeyword }
+
+func (failingArm) Retrieve(context.Context, *ParsedQuery) ([]Candidate, error) {
+	return nil, domain.ErrUnavailable
+}
+
+func TestRecallFailingArmFailsRecall(t *testing.T) {
+	e := newEnv(t, envOpts{arms: []Retriever{arm(ArmSemantic, "u1"), failingArm{}}})
+	e.add(t, fact("u1", "doc"))
+	_, err := e.rc.Recall(context.Background(), RecallRequest{Bank: testBank, Query: "doc"})
+	if !errors.Is(err, domain.ErrUnavailable) {
+		t.Fatalf("err = %v, want the arm's UNAVAILABLE", err)
+	}
+}
+
+func TestRecallLongQueryTruncated(t *testing.T) {
+	e := newEnv(t, envOpts{arms: []Retriever{arm(ArmSemantic)}})
+	long := strings.TrimSpace(strings.Repeat("word ", 600))
+	e.recall(t, RecallRequest{Query: long})
+	calls := e.emb.Calls()
+	if len(calls) != 1 || len(strings.Fields(calls[0].Texts[0])) != MaxQueryTokens {
+		t.Fatalf("embedded query has %d words, want %d", len(strings.Fields(calls[0].Texts[0])), MaxQueryTokens)
 	}
 }

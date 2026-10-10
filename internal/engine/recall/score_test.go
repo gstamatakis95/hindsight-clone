@@ -45,27 +45,65 @@ func TestBoostRecencyIsolated(t *testing.T) {
 }
 
 func TestBoostTemporalIsolated(t *testing.T) {
-	sem := arm(ArmSemantic, "a", "b")
-	tmp := &stubArm{name: ArmTemporal, hits: []port.Hit{{ID: "b", Score: 1}, {ID: "a", Score: 0.2}}}
+	// A real one-year window: 2025-06-01T12:00 .. 2026-06-01T12:00, midpoint 2025-12-01T00:00, half-width
+	// 182.5 days. Hindsight's linear proximity: 1 - min(|best - mid| / 182.5, 1).
+	w := &domain.TimeWindow{Start: testNow.AddDate(-1, 0, 0), End: testNow}
+	mid := time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)
+	sem := arm(ArmSemantic, "far", "centre", "span", "undated", "outside")
+	// The adapter's own scores order the arm (buckets) but must not reach the boost.
+	tmp := &stubArm{name: ArmTemporal, hits: []port.Hit{
+		{ID: "far", Score: 1}, {ID: "centre", Score: 0.01}, {ID: "span", Score: 0.5}, {ID: "undated", Score: 0.9},
+	}}
 	e := newEnv(t, envOpts{rerank: true, arms: []Retriever{sem, tmp}})
 	flatReranker(e)
-	a, b := fact("a", "alpha event"), fact("b", "beta event")
-	a.OccurredStart, b.OccurredStart = at(-1), at(-400) // recency would favour a; its alpha is 0
-	e.add(t, a, b)
-	w := &domain.TimeWindow{Start: testNow.AddDate(-2, 0, 0), End: testNow}
+	far, centre, span := fact("far", "far event"), fact("centre", "centre event"), fact("span", "span event")
+	undated, outside := fact("undated", "undated event"), fact("outside", "outside event")
+	farAt, spanStart, spanEnd := mid.AddDate(0, 0, -91), mid.AddDate(0, 0, -10), mid.AddDate(0, 0, 30)
+	far.OccurredStart = &farAt
+	centre.MentionedAt = &mid                                   // no occurrence: mentioned_at places it
+	span.OccurredStart, span.OccurredEnd = &spanStart, &spanEnd // midpoint = mid + 10 days
+	outside.OccurredStart = &mid                                // not returned by the temporal arm: neutral
+	e.add(t, far, centre, span, undated, outside)
 
 	res := e.recall(t, RecallRequest{Query: "event", Window: w, Overrides: alphas(0, 0.2, 0)})
-	if got := ids(res); !slices.Equal(got, []string{"b", "a"}) {
-		t.Fatalf("order = %v, want [b a]", got)
+	want := map[string]float64{
+		"centre":  1,
+		"span":    1 - 10/182.5,
+		"far":     1 - 91/182.5,
+		"undated": 0.5,
+		"outside": 0.5,
 	}
-	if f := res.Results[0].Scores.Final; !near(f, 0.5*1.1) {
-		t.Fatalf("final(b) = %v, want 0.55", f)
+	for _, m := range res.Results {
+		prox := want[string(m.Unit.ID)]
+		if f := m.Scores.Final; !near(f, 0.5*(1+0.2*(prox-0.5))) {
+			t.Errorf("final(%s) = %v, want proximity %v", m.Unit.ID, f, prox)
+		}
 	}
-	if f := res.Results[1].Scores.Final; !near(f, 0.5*(1+0.2*(0.2-0.5))) {
-		t.Fatalf("final(a) = %v, want 0.47", f)
+	if got := ids(res); !slices.Equal(got[:3], []string{"centre", "span", "far"}) || len(got) != 5 {
+		t.Fatalf("order = %v, want centre, span, far first", got)
 	}
 	if tmp.called != 1 {
 		t.Fatalf("temporal arm called %d times", tmp.called)
+	}
+}
+
+func TestTemporalProximityWindows(t *testing.T) {
+	at := testNow
+	u := domain.Unit{OccurredStart: &at}
+	if p := temporalProximity(u, domain.TimeWindow{Start: testNow, End: testNow}, 365); p != 1 {
+		t.Fatalf("zero-length window = %v, want 1", p)
+	}
+	hour := domain.TimeWindow{Start: testNow, End: testNow.Add(time.Hour)}
+	if p := temporalProximity(domain.Unit{}, hour, 365); p != 0.5 {
+		t.Fatalf("undated = %v, want 0.5", p)
+	}
+	// One open bound: anchored on the set bound, scaled by recency_horizon_days.
+	open := domain.TimeWindow{Start: testNow.AddDate(0, 0, -73)}
+	if p := temporalProximity(u, open, 365); !near(p, 0.8) {
+		t.Fatalf("open end = %v, want 0.8", p)
+	}
+	if p := temporalProximity(u, domain.TimeWindow{End: testNow.AddDate(0, 0, 400)}, 365); p != 0 {
+		t.Fatalf("beyond the horizon = %v, want 0", p)
 	}
 }
 

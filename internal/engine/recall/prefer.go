@@ -5,13 +5,14 @@ import (
 	"memd/internal/port"
 )
 
-// ObservationPreference drops raw facts covered by a returned observation and backfills.
+// ObservationPreference drops raw facts covered by an observation and backfills.
 type ObservationPreference interface {
-	// Apply packs ranked into maxTokens (counted with count, same rules as Packer) without the raw facts that
-	// a returned observation cites (Unit.SourceIDs), whatever their rank, and backfills the freed budget from
-	// the rest of ranked. Returned observations are found by packing to a fixed point: dropping facts can
-	// only free budget, so the set of dropped facts only grows and the loop ends.
-	Apply(ranked []Candidate, maxTokens int, count TokenCounter) []Candidate
+	// Apply follows Hindsight's prefer-observations dedup: every observation within the first window of ranked
+	// (window <= 0 = all of ranked; Recall passes 2 * the per-arm limit) supersedes the raw facts it cites
+	// (Unit.SourceIDs), which are dropped wherever they rank. The rest is packed into maxTokens (counted with
+	// count, same rules as Packer), so the freed budget backfills from lower-ranked candidates. An observation
+	// below the window never drops a fact.
+	Apply(ranked []Candidate, window, maxTokens int, count TokenCounter) []Candidate
 }
 
 // preference is the ObservationPreference.
@@ -23,31 +24,22 @@ var _ ObservationPreference = preference{}
 func NewObservationPreference() ObservationPreference { return preference{} }
 
 // Apply implements ObservationPreference.
-func (preference) Apply(ranked []Candidate, maxTokens int, count TokenCounter) []Candidate {
-	facts := map[port.UnitID]bool{}
-	for _, c := range ranked {
-		if c.Unit != nil && c.Unit.Type != domain.FactTypeObservation {
-			facts[c.ID] = true
-		}
+func (preference) Apply(ranked []Candidate, window, maxTokens int, count TokenCounter) []Candidate {
+	head := ranked
+	if window > 0 && len(head) > window {
+		head = head[:window]
 	}
-	dropped := map[port.UnitID]bool{}
-	skip := func(c Candidate) bool { return dropped[c.ID] }
-	for {
-		packed, _ := pack(ranked, maxTokens, count, skip)
-		grew := false
-		for _, c := range packed {
-			if c.Unit == nil || c.Unit.Type != domain.FactTypeObservation {
-				continue
-			}
+	superseded := map[port.UnitID]bool{}
+	for _, c := range head {
+		if c.Unit != nil && c.Unit.Type == domain.FactTypeObservation {
 			for _, src := range c.Unit.SourceIDs {
-				if facts[src] && !dropped[src] {
-					dropped[src] = true
-					grew = true
-				}
+				superseded[src] = true
 			}
 		}
-		if !grew {
-			return packed
-		}
 	}
+	skip := func(c Candidate) bool {
+		return c.Unit != nil && c.Unit.Type != domain.FactTypeObservation && superseded[c.ID]
+	}
+	out, _ := pack(ranked, maxTokens, count, skip)
+	return out
 }

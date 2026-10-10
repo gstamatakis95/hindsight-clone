@@ -12,11 +12,14 @@ type Includer interface {
 	// Enrich reads what inc asks for about results; each kind stays within its own budget.
 	//   - chunks: the results' chunks in result order within chunks_max_tokens (default 8192); the chunk that
 	//     crosses the budget is cut to the tokens left and marked Truncated, and the walk stops there.
-	//   - source facts: the facts cited by returned observations, in order of first citation, within
-	//     source_facts_max_tokens (default 4096); a fact that doesn't fit is skipped (later, shorter ones may
-	//     still fit) and SourceFactsTruncated is set.
+	//   - source facts: the facts cited by returned observations, in order of first citation (results in rank
+	//     order), within source_facts_max_tokens (default 4096) and seq (a fact rewritten outside the caller's
+	//     snapshot is left out); a fact that doesn't fit is skipped (later, shorter ones may still fit) and
+	//     SourceFactsTruncated is set.
 	//   - entities: the entity state of every entity attached to a result.
-	Enrich(ctx context.Context, b port.BankRef, results []Candidate, inc domain.RecallInclude) (Enrichment, error)
+	Enrich(
+		ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, inc domain.RecallInclude,
+	) (Enrichment, error)
 }
 
 // Enrichment is what an Includer attached to a result set.
@@ -60,7 +63,7 @@ func NewIncluder(r port.Reader, l Lookups, count TokenCounter) Includer {
 
 // Enrich implements Includer.
 func (in *includer) Enrich(
-	ctx context.Context, b port.BankRef, results []Candidate, inc domain.RecallInclude,
+	ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, inc domain.RecallInclude,
 ) (Enrichment, error) {
 	var e Enrichment
 	var err error
@@ -71,7 +74,7 @@ func (in *includer) Enrich(
 	}
 	if isSet(inc.SourceFacts) {
 		budget := intOr(inc.SourceFactsMaxTokens, DefaultSourceFactsMaxTokens)
-		if e.SourceFacts, e.SourceFactsTruncated, err = in.sourceFacts(ctx, b, results, budget); err != nil {
+		if e.SourceFacts, e.SourceFactsTruncated, err = in.sourceFacts(ctx, b, seq, results, budget); err != nil {
 			return Enrichment{}, err
 		}
 	}
@@ -121,7 +124,7 @@ func (in *includer) chunks(
 
 // sourceFacts reads the facts cited by the returned observations and fits them into budget tokens.
 func (in *includer) sourceFacts(
-	ctx context.Context, b port.BankRef, results []Candidate, budget int,
+	ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, budget int,
 ) (map[port.UnitID]domain.Unit, bool, error) {
 	var ids []port.UnitID
 	seen := map[port.UnitID]bool{}
@@ -144,8 +147,18 @@ func (in *includer) sourceFacts(
 	if err != nil {
 		return nil, false, err
 	}
-	used, truncated := 0, false
+	byID := make(map[port.UnitID]domain.Unit, len(units))
 	for _, u := range units {
+		if seq.Contains(u.Seq) {
+			byID[u.ID] = u
+		}
+	}
+	used, truncated := 0, false
+	for _, id := range ids {
+		u, ok := byID[id]
+		if !ok {
+			continue
+		}
 		t := in.count.Count(u.Text)
 		if used+t > budget {
 			truncated = true

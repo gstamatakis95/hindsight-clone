@@ -36,7 +36,8 @@ func (gate) ArmFloor(arm string, m domain.MinScores) (float64, bool) {
 
 // Keep implements ScoreGate.
 func (gate) Keep(c Candidate, m domain.MinScores) bool {
-	if m.Reranker != nil && c.Reranker != nil && *c.Reranker < *m.Reranker {
+	// Compared as float32: the cross-encoder scores are float32, so a floor equal to a score keeps it.
+	if m.Reranker != nil && c.Reranker != nil && float32(*c.Reranker) < float32(*m.Reranker) {
 		return false
 	}
 	return m.Final == nil || c.Final >= *m.Final

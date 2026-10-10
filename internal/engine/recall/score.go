@@ -13,10 +13,10 @@ import (
 
 // Scorer applies the cross-encoder, then recency, temporal and proof boosts.
 type Scorer interface {
-	// Score keeps the top reranker_max_candidates of cs (ordered by RRF, best first, units hydrated), scores
+	// Score keeps the top reranker_max_candidates of cs (already trimmed and hydrated by the caller), scores
 	// them with the cross-encoder (RERANK slot) when recall.rerank is on, else seeds the base score from the
-	// RRF rank (1.0 down to 0.1, as Hindsight does for a passthrough reranker), multiplies in the boosts, sets
-	// Candidate.Final and returns the kept candidates ordered by it, best first.
+	// unboosted RRF rank (1.0 down to 0.1, as Hindsight does for a passthrough reranker), multiplies in the
+	// boosts, sets Candidate.Final and returns the kept candidates ordered by it, best first.
 	Score(ctx context.Context, q *ParsedQuery, cs []Candidate) ([]Candidate, error)
 }
 
@@ -25,8 +25,8 @@ type Scorer interface {
 type Boosts struct {
 	// Recency favours recent units (recency_alpha, linear decay over recency_horizon_days).
 	Recency float64
-	// Temporal favours units close to the query's time window (temporal_alpha, the temporal arm's
-	// proximity; neutral for units the arm did not return).
+	// Temporal favours units close to the middle of the query's time window (temporal_alpha, Hindsight's
+	// linear proximity; neutral for units the temporal arm did not return).
 	Temporal float64
 	// Proof favours observations with many supporting facts (proof_alpha, log of proof_count).
 	Proof float64
@@ -118,9 +118,11 @@ func rerankDoc(u *domain.Unit) string {
 	return doc
 }
 
-// passthroughBase seeds the base score of RRF-ordered candidates from their rank: 1.0 for the first down to
-// 0.1 for the last, so the boosts modulate relevance instead of replacing it.
+// passthroughBase orders cs by their unboosted RRF score (strategy boosts only decide the cap trim, as in
+// Hindsight) and seeds the base score from that rank: 1.0 for the first down to 0.1 for the last, so the
+// boosts modulate relevance instead of replacing it.
 func passthroughBase(cs []Candidate) {
+	slices.SortStableFunc(cs, func(a, b Candidate) int { return cmp.Compare(b.RRF, a.RRF) })
 	denom := float64(max(1, len(cs)-1))
 	for i := range cs {
 		cs[i].Reranker = nil
@@ -131,8 +133,8 @@ func passthroughBase(cs []Candidate) {
 // boost returns the recency, temporal and proof multipliers of c under the settings s.
 func boost(c Candidate, q *ParsedQuery, s settings) Boosts {
 	temporal := 0.5
-	if a, ok := c.Arms[ArmTemporal]; ok {
-		temporal = min(max(a.Score, 0), 1)
+	if _, ok := c.Arms[ArmTemporal]; ok && c.Unit != nil && q.Window != nil {
+		temporal = temporalProximity(*c.Unit, *q.Window, s.recencyHorizonDays)
 	}
 	recency, proof := 0.5, 0.5
 	if c.Unit != nil {
@@ -143,6 +145,52 @@ func boost(c Candidate, q *ParsedQuery, s settings) Boosts {
 		Recency:  1 + s.recencyAlpha*(recency-0.5),
 		Temporal: 1 + s.temporalAlpha*(temporal-0.5),
 		Proof:    1 + s.proofAlpha*(proof-0.5),
+	}
+}
+
+// temporalProximity is Hindsight's linear proximity of a unit to the query window (pg/recall.py):
+// 1 - min(|best - mid| / half, 1), where best is the unit's occurrence midpoint, else occurred_start, else
+// occurred_end, else mentioned_at; mid is the window's midpoint and half its half-width in days. An undated
+// unit is neutral (0.5) and a zero-length window gives 1. A window with one open bound anchors on the set
+// bound with horizonDays as the scale (decision 901).
+func temporalProximity(u domain.Unit, w domain.TimeWindow, horizonDays int) float64 {
+	best := bestDate(u)
+	if best == nil {
+		return 0.5
+	}
+	var mid time.Time
+	var half float64
+	switch {
+	case !w.Start.IsZero() && !w.End.IsZero():
+		mid = w.Start.Add(w.End.Sub(w.Start) / 2)
+		half = w.End.Sub(w.Start).Hours() / 24 / 2
+		if half <= 0 {
+			return 1
+		}
+	case !w.Start.IsZero():
+		mid, half = w.Start, float64(horizonDays)
+	case !w.End.IsZero():
+		mid, half = w.End, float64(horizonDays)
+	default:
+		return 0.5
+	}
+	days := math.Abs(best.Sub(mid).Hours() / 24)
+	return 1 - min(days/half, 1)
+}
+
+// bestDate is the instant a unit is placed at for temporal proximity: the occurrence midpoint, else
+// occurred_start, else occurred_end, else mentioned_at; nil when the unit has none.
+func bestDate(u domain.Unit) *time.Time {
+	switch {
+	case u.OccurredStart != nil && u.OccurredEnd != nil:
+		m := u.OccurredStart.Add(u.OccurredEnd.Sub(*u.OccurredStart) / 2)
+		return &m
+	case u.OccurredStart != nil:
+		return u.OccurredStart
+	case u.OccurredEnd != nil:
+		return u.OccurredEnd
+	default:
+		return u.MentionedAt
 	}
 }
 

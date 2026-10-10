@@ -19,6 +19,8 @@ The spec lists recall's RecallConfig fields but leaves several defaults and edge
 - **Graph seeds:** the graph arm runs its own SearchVector for the top 20 units at cosine >= 0.3 (Hindsight's
   GRAPH_SEED_LIMIT and graph_seed_min_similarity). That keeps all four arms concurrent. These are
   constants, not knobs.
+- **Semantic floor:** when `min_scores.semantic` is unset, the semantic arm uses cosine >= 0.3 (Hindsight's
+  default). An explicit 0 disables the floor (review round 1).
 - **Budget:**
   - Unspecified means MID.
   - Fixed returns the configured level as is, with no clamp.

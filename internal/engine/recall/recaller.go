@@ -6,6 +6,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/timex"
 	"memd/internal/port"
+	"strings"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -80,6 +81,9 @@ func NewRecaller(d RecallerDeps) Recaller {
 // Recall implements Recaller.
 func (r *recaller) Recall(ctx context.Context, req RecallRequest) (RecallResult, error) {
 	start := r.d.Clock.Now()
+	if strings.TrimSpace(req.Query) == "" {
+		return RecallResult{}, fmt.Errorf("%w: recall: query is empty", domain.ErrInvalidArgument)
+	}
 	var overrides []domain.BankConfig
 	if req.Overrides != nil {
 		overrides = append(overrides, *req.Overrides)
@@ -99,7 +103,7 @@ func (r *recaller) Recall(ctx context.Context, req RecallRequest) (RecallResult,
 	if err != nil {
 		return RecallResult{}, err
 	}
-	fused := r.fuser.Fuse(lists, set.rrfK, set.boosts)
+	fused := r.fuser.Fuse(lists, set.rrfK)
 	ranked, reranked, err := r.rank(ctx, q, fused, set)
 	if err != nil {
 		return RecallResult{}, err
@@ -110,11 +114,11 @@ func (r *recaller) Recall(ctx context.Context, req RecallRequest) (RecallResult,
 	}
 	var packed []Candidate
 	if req.PreferObservations {
-		packed = r.prefer.Apply(ranked, maxTokens, r.d.Count)
+		packed = r.prefer.Apply(ranked, 2*q.Limit, maxTokens, r.d.Count)
 	} else {
 		packed = r.packer.Pack(ranked, maxTokens)
 	}
-	enr, err := r.includer.Enrich(ctx, req.Bank, packed, req.Include)
+	enr, err := r.includer.Enrich(ctx, req.Bank, req.Seq, packed, req.Include)
 	if err != nil {
 		return RecallResult{}, fmt.Errorf("recall: include: %w", err)
 	}
@@ -168,15 +172,13 @@ func (r *recaller) retrieve(ctx context.Context, q *ParsedQuery, set settings) (
 	return lists, traces, nil
 }
 
-// rank keeps the top reranker_max_candidates of fused, hydrates them (units archived since retrieval are
-// dropped), scores them and applies the result floors. It also returns how many the cross-encoder scored.
+// rank keeps the top reranker_max_candidates of fused (strategy boosts decide that cut), hydrates them
+// (units archived since retrieval are dropped), scores them and applies the result floors. It also returns
+// how many the cross-encoder scored.
 func (r *recaller) rank(ctx context.Context, q *ParsedQuery, fused []Candidate, set settings) (
 	[]Candidate, int, error,
 ) {
-	top := fused
-	if set.rerankMax > 0 && len(top) > set.rerankMax {
-		top = top[:set.rerankMax]
-	}
+	top := trimBoosted(fused, set.rerankMax, set.rrfK, set.boosts)
 	hydrated, err := r.hydrate(ctx, q.Bank, q.Seq, top)
 	if err != nil {
 		return nil, 0, err
