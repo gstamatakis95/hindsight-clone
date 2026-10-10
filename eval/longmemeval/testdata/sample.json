@@ -1,0 +1,38 @@
+[
+  {
+    "question_id": "q1",
+    "question_type": "temporal-reasoning",
+    "question": "How many days passed between my two trips?",
+    "answer": 10,
+    "question_date": "2023/05/30 (Tue) 23:40",
+    "haystack_session_ids": ["sess_b", "sess_a"],
+    "haystack_dates": ["2023/05/20 (Sat) 10:00", "2023/05/10 (Wed) 09:30"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I just got back from Rome.", "has_answer": true},
+        {"role": "assistant", "content": "Welcome back! How was it?"}
+      ],
+      [
+        {"role": "user", "content": "I am flying to Paris today.", "has_answer": true},
+        {"role": "assistant", "content": "Have a great trip!"}
+      ]
+    ],
+    "answer_session_ids": ["sess_a", "sess_b"]
+  },
+  {
+    "question_id": "q2_abs",
+    "question_type": "knowledge-update",
+    "question": "What is the name of my cat?",
+    "answer": "You did not mention a cat.",
+    "question_date": "2023/06/01 (Thu) 08:00",
+    "haystack_session_ids": ["sess_c"],
+    "haystack_dates": ["2023/05/31 (Wed) 18:15"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "My dog is called Rex."},
+        {"role": "assistant", "content": "Rex is a classic name."}
+      ]
+    ],
+    "answer_session_ids": []
+  }
+]

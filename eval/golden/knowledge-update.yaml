@@ -1,0 +1,21 @@
+{
+  "name": "knowledge-update",
+  "sessions": [
+    {
+      "id": "ku-1",
+      "time": "2024-01-10T08:00:00Z",
+      "context": "Chat between the user (Omar) and an assistant.",
+      "content": "user: I drive a blue Corolla to work every day.\nassistant: Noted.\nuser: My favourite coffee is a flat white."
+    },
+    {
+      "id": "ku-2",
+      "time": "2024-06-02T08:00:00Z",
+      "context": "Chat between the user (Omar) and an assistant.",
+      "content": "user: I sold the Corolla; now I drive an electric Ioniq car.\nassistant: Nice upgrade!\nuser: My coffee now is an oat cortado, not a flat white."
+    }
+  ],
+  "checks": [
+    {"id": "car", "category": "knowledge-update", "query": "What car does Omar drive now?", "accept": ["Ioniq"]},
+    {"id": "coffee", "category": "knowledge-update", "query": "What coffee does Omar drink now?", "accept": ["cortado"]}
+  ]
+}

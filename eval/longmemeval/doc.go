@@ -1,5 +1,4 @@
-// Package longmemeval loads the LongMemEval benchmark and drives it against memd: it retains each
-// question's conversation history into a fresh bank, waits for the pending-operations barrier, asks
-// the question through Recall or Reflect and hands the answer to the judge, reporting accuracy per
-// question category.
+// Package longmemeval loads the LongMemEval benchmark into harness conversations: one conversation per
+// question, holding that question's haystack chat sessions in chronological order and the question
+// itself with its gold answer, report category and judge kind.
 package longmemeval

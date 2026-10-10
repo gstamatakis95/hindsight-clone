@@ -1,0 +1,38 @@
+[
+  {
+    "sample_id": "conv-1",
+    "conversation": {
+      "speaker_a": "Caroline",
+      "speaker_b": "Melanie",
+      "session_10": [
+        {"speaker": "Caroline", "dia_id": "D10:1", "text": "I adopted a puppy!"}
+      ],
+      "session_10_date_time": "7:00 pm on 3 July, 2023",
+      "session_1": [
+        {"speaker": "Caroline", "dia_id": "D1:1", "text": "Hey Mel, I went to a support group yesterday."},
+        {
+          "speaker": "Melanie",
+          "dia_id": "D1:2",
+          "text": "That's great. Look at this!",
+          "img_url": ["https://example.com/sunset.jpg"],
+          "blip_caption": "a photo of a sunset over a lake"
+        }
+      ],
+      "session_1_date_time": "1:56 pm on 8 May, 2023",
+      "session_2": [
+        {"speaker": "Melanie", "dia_id": "D2:1", "text": "I ran a charity race last Saturday."}
+      ],
+      "session_2_date_time": "10:37 am on 27 June, 2023"
+    },
+    "qa": [
+      {"question": "When did Caroline go to the support group?", "answer": "7 May 2023", "evidence": ["D1:1"], "category": 2},
+      {"question": "In what year did Melanie run the race?", "answer": 2023, "evidence": ["D2:1"], "category": 1},
+      {"question": "What did Caroline's dog eat?", "evidence": [], "category": 5, "adversarial_answer": "kibble"},
+      {"question": "What did Melanie photograph?", "answer": "a sunset", "evidence": ["D1:2"], "category": 4},
+      {"question": "What is Caroline's pet?", "answer": "a puppy", "evidence": ["D10:1"], "category": 7}
+    ],
+    "event_summary": {"events_session_1": {}},
+    "observation": {"session_1_observation": {}},
+    "session_summary": {"session_1_summary": "Caroline talks about a support group."}
+  }
+]
