@@ -41,7 +41,7 @@ type SearchPagesRequest struct {
 }
 
 // pageSearcher ranks a bank's pages in memory: a bank holds tens to hundreds of pages, so v1 scores them
-// in Go over one listing instead of adding page search queries to the ports (decision 1206).
+// in Go over one listing instead of adding page search queries to the ports (decision 1205).
 type pageSearcher struct {
 	models ModelLister
 	emb    port.Embedder

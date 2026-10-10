@@ -42,7 +42,7 @@ func (r *runner) write(
 			t := trace
 			next.LastTrace = &t
 		}
-		if !dr.noNewFacts && p.mode == domain.RefreshModeFull {
+		if p.mode == domain.RefreshModeFull { // pruned on full, even to nothing when nothing is in scope
 			next.SourceIDs = slices.Clone(dr.sourceIDs)
 		}
 		if !dr.noNewFacts && dr.content != cur.ContentMD {
