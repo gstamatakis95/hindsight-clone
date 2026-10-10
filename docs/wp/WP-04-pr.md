@@ -111,6 +111,7 @@ Branch `wp/WP-04-config-prompts`, rebased on main (e3dae3b). `make gen` leaves n
 - **WP-08:**
   - Extraction's `fact_type` is Hindsight's `world | assistant`; map `assistant` to
     `domain.FactTypeExperience`.
+  - Get the extraction schema with `prompts.ExtractSchema(name, data.OptionalDimensions)`, not `Schema`.
   - Treat "N/A" and null dimension values as empty. Set `CausalLinks` from `retain.extract_causal_links`
     and `AgentName` when known.
   - Build fact text as `what | When: … | Involving: … | why`.

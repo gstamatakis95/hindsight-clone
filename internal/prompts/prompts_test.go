@@ -448,14 +448,38 @@ func TestExtractOptionalDimensions(t *testing.T) {
 	}
 }
 
-// checkNullableDimensions checks the static schema of name accepts null for every dimension it has, which
-// the flag-on prompt relies on.
+// checkNullableDimensions checks ExtractSchema follows the flag: plain strings when off (the static schema
+// as is), string-or-null when on (Hindsight #4457).
 func checkNullableDimensions(t *testing.T, name string) {
 	t.Helper()
-	raw, err := Schema(name)
+	static, err := Schema(name)
 	if err != nil {
 		t.Fatal(err)
 	}
+	off, err := ExtractSchema(name, false)
+	if err != nil || string(off) != string(static) {
+		t.Fatalf("%s: ExtractSchema(off) differs from the static schema (%v)", name, err)
+	}
+	on, err := ExtractSchema(name, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for mode, want := range map[string]string{"off": "string", "on": "[string null]"} {
+		raw := off
+		if mode == "on" {
+			raw = on
+		}
+		for dim, typ := range dimensionTypes(t, raw) {
+			if typ != want {
+				t.Errorf("%s (%s): %s type = %s, want %s", name, mode, dim, typ, want)
+			}
+		}
+	}
+}
+
+// dimensionTypes returns the type of each dimension field the extraction schema raw has.
+func dimensionTypes(t *testing.T, raw []byte) map[string]string {
+	t.Helper()
 	var schema struct {
 		Properties struct {
 			Facts struct {
@@ -470,15 +494,25 @@ func checkNullableDimensions(t *testing.T, name string) {
 	if err := json.Unmarshal(raw, &schema); err != nil {
 		t.Fatal(err)
 	}
-	props := schema.Properties.Facts.Items.Properties
-	for _, dim := range []string{"when", "where", "who", "why"} {
-		p, ok := props[dim]
-		if !ok && name == ExtractVerbatim && dim == "why" {
-			continue
+	out := map[string]string{}
+	for _, dim := range dimensionFields {
+		if p, ok := schema.Properties.Facts.Items.Properties[dim]; ok {
+			out[dim] = fmt.Sprint(p.Type)
 		}
-		if got := fmt.Sprint(p.Type); got != "[string null]" {
-			t.Errorf("%s %s type = %s, want [string null]", name, dim, got)
-		}
+	}
+	if len(out) < 3 {
+		t.Fatalf("schema has only %d dimensions", len(out))
+	}
+	return out
+}
+
+// TestConciseExampleUsesNAMarker checks the concise example's why follows the N/A marker.
+func TestConciseExampleUsesNAMarker(t *testing.T) {
+	if out := mustRender(t, ExtractConcise, &ExtractData{}); !strings.Contains(out, `why="N/A"`) {
+		t.Error(`default concise example must render why="N/A"`)
+	}
+	if out := mustRender(t, ExtractConcise, &ExtractData{OptionalDimensions: true}); !strings.Contains(out, "why=null") {
+		t.Error("optional-dimensions concise example must render why=null")
 	}
 }
 

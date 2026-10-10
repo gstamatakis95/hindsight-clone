@@ -8,8 +8,8 @@ are caused_by indexes; language rules and attachments dropped.
 Gates (as in Hindsight's _build_extraction_prompt_and_schema): the CAUSAL section renders only with
 .CausalLinks (the schema keeps caused_by; the engine ignores it when causal links are off).
 .OptionalDimensions (Hindsight's retain_optional_fact_dimensions, default off) swaps the "N/A" placeholder
-for null and adds the OPTIONAL FIELDS section; the schema types when/where/who/why as string-or-null in both
-modes so it can stay static.
+for null and adds the OPTIONAL FIELDS section; prompts.ExtractSchema types when/where/who/why as plain
+strings, nullable only with the flag on (Hindsight #4457).
 Hindsight falls back to the concise prompt when no custom instructions are set; the engine does that by
 picking extract_concise. Response schema: extract_custom.schema.json.
 Data (ExtractData): .CustomPrompt, .CausalLinks, .OptionalDimensions, .FreeFormEntities, .Labels.

@@ -159,6 +159,54 @@ func Schema(name string) (json.RawMessage, error) {
 	return readJSON(name + schemaExt)
 }
 
+// dimensionFields are the extraction dimensions Hindsight's optional-dimensions mode makes nullable.
+var dimensionFields = []string{"when", "where", "who", "why"}
+
+// ExtractSchema returns the response schema of extraction template name for ExtractData.OptionalDimensions.
+// Off (the default), when / where / who / why are plain strings, as the static schema says; on, each
+// present dimension also accepts null and its description says null instead of 'N/A' (Hindsight #4457).
+func ExtractSchema(name string, optionalDimensions bool) (json.RawMessage, error) {
+	raw, err := Schema(name)
+	if err != nil || !optionalDimensions {
+		return raw, err
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, fmt.Errorf("prompts: %s schema: %w", name, err)
+	}
+	props, ok := dig(schema, "properties", "facts", "items", "properties")
+	if !ok {
+		return nil, fmt.Errorf("%w: %s schema has no facts.items.properties", domain.ErrInvalidArgument, name)
+	}
+	for _, dim := range dimensionFields {
+		field, ok := props[dim].(map[string]any)
+		if !ok {
+			continue
+		}
+		field["type"] = []any{"string", "null"}
+		if desc, ok := field["description"].(string); ok {
+			field["description"] = strings.ReplaceAll(desc, "'N/A'", "null")
+		}
+	}
+	out, err := json.Marshal(schema)
+	if err != nil {
+		return nil, fmt.Errorf("prompts: %s schema: %w", name, err)
+	}
+	return out, nil
+}
+
+// dig walks nested JSON objects by key.
+func dig(m map[string]any, keys ...string) (map[string]any, bool) {
+	for _, k := range keys {
+		next, ok := m[k].(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		m = next
+	}
+	return m, true
+}
+
 // JSON returns the JSON asset in templates/<name>.json (for example a tool list whose descriptions are
 // prompt text). A missing asset is domain.ErrInvalidArgument.
 func JSON(name string) (json.RawMessage, error) {

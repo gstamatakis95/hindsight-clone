@@ -40,8 +40,12 @@ LLM call. It leaves several things open:
   models that otherwise invent dates.
   - BankConfig has no knob for it, so `ExtractData.OptionalDimensions` defaults to false (Hindsight's
     default).
-  - The schema types the fields `["string","null"]` in both modes, so engines treat "N/A" and null as
-    empty.
+  - The schemas follow the flag, as in Hindsight #4457. The static files type when/where/who/why as plain
+    strings (default mode, with "N/A" as the empty marker, including the concise example's `why`).
+    `prompts.ExtractSchema(name, optionalDimensions)` returns them unchanged when the flag is off. When it
+    is on, it patches each dimension to `["string","null"]` and says null instead of 'N/A'. This is
+    simpler than shipping two schema files per mode; `Version` hashes the static file.
+  - Engines treat "N/A" and null as empty.
 - **Narrator rule.** It is ported word for word (fact_extraction.py:1847-1861) into `extract_user`, as in
   Hindsight, with the optional `ExtractData.AgentName`.
 - **CAUSAL section.** It renders only when `ExtractData.CausalLinks` is set (never in verbatim).
