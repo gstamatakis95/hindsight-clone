@@ -171,13 +171,13 @@ func cosine(a, b []float32) float64 {
 	return dot / math.Sqrt(na*nb)
 }
 
-// snippet is the first content line holding a query term (else the first non-empty line), cut to
-// snippetRunes runes.
+// snippet is the first non-heading content line holding a query term (else the first non-heading line),
+// cut to snippetRunes runes.
 func snippet(content string, terms []string) string {
 	first := ""
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		if first == "" {
