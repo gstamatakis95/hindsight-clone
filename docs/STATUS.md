@@ -9,7 +9,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 |----|-------|-------|--------|----|----------|-----------|--------------|
 | WP-00 | Contracts and scaffold | merged (0374c87, tag contracts-v1) | wp/WP-00-contracts | f5ab75f | — | WP-00-1 approved + applied | see carried-forward |
 | WP-01 | Postgres adapter | in progress | wp/WP-01-postgres | — | — | — | — |
-| WP-02 | Fakes | in progress | wp/WP-02-fakes | — | — | — | — |
+| WP-02 | Fakes | merged | wp/WP-02-fakes | 0d2775e | — | — | 2 cosmetic LOW |
 | WP-03 | Gateway and S3 adapters | merged (8dd2090 + follow-up) | wp/WP-03-gateway-s3 | 20fab3d | — | — | 5 LOW accepted (see log) |
 | WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
 | WP-05 | Worker runtime | merged (08d057d) | wp/WP-05-worker-runtime | 7afa08e | — | — | H3 attempt-charge gap; LOWs in log |
@@ -145,3 +145,6 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   Accepted gaps: a shutdown release still spends an attempt (decision 501); a cancelled older run briefly holds
   an untracked slot; consolidate may take every free slot. k8s terminationGracePeriodSeconds >= 50s (60s
   recommended).
+- 2026-10-10 WP-02 review round 2: MERGE. Merged into main; gates pass. WP-02 done. internal/jsonschema is now a
+  shared package (gateway + fake). Cosmetic LOWs left: a no-op %w wrap in gateway chat.go:215; a broken doc
+  comment in fake/entities.go:58-61.
