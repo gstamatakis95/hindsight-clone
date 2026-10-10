@@ -96,3 +96,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   Background sums all bank ops (a rerun needs a fresh -bank-prefix).
 - 2026-10-10 WP-03 follow-up 20fab3d (usage sum on no-choices, positive defaults, single Extra copy) checked by
   the orchestrator and merged; lint and gateway tests pass. WP-03 done.
+- 2026-10-10 WP-02 handed in (8bf5ef7, rebased on main); reviewer spawned. Fakes pass all 4 porttest suites.
