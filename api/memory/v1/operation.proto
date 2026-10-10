@@ -26,7 +26,8 @@ service OperationService {
   // CancelOperation cancels a PENDING or PROCESSING operation. Cooperative: handlers stop at their next
   // checkpoint and committed work stays; workers never overwrite CANCELLED.
   rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse);
-  // RetryOperation re-queues a FAILED or CANCELLED operation (PENDING, run now); other states are rejected.
+  // RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
+  // next_run_at = now. Other states are rejected.
   rpc RetryOperation(RetryOperationRequest) returns (RetryOperationResponse);
   // ListEvents polls the bank's lifecycle events by sequence number.
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);

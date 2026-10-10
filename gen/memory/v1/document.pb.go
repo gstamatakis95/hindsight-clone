@@ -608,7 +608,8 @@ type ReprocessDocumentRequest struct {
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Document id.
 	DocumentId string `protobuf:"bytes,2,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
-	// New retain overrides; replace the stored ones. Unset = replay the stored overrides.
+	// New retain overrides, same reach as RetainRequest.overrides (other fields = INVALID_ARGUMENT); they
+	// replace the document's stored overrides. Unset = replay the stored overrides.
 	Overrides     *BankConfig `protobuf:"bytes,3,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

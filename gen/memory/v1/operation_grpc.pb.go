@@ -47,7 +47,8 @@ type OperationServiceClient interface {
 	// CancelOperation cancels a PENDING or PROCESSING operation. Cooperative: handlers stop at their next
 	// checkpoint and committed work stays; workers never overwrite CANCELLED.
 	CancelOperation(ctx context.Context, in *CancelOperationRequest, opts ...grpc.CallOption) (*CancelOperationResponse, error)
-	// RetryOperation re-queues a FAILED or CANCELLED operation (PENDING, run now); other states are rejected.
+	// RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
+	// next_run_at = now. Other states are rejected.
 	RetryOperation(ctx context.Context, in *RetryOperationRequest, opts ...grpc.CallOption) (*RetryOperationResponse, error)
 	// ListEvents polls the bank's lifecycle events by sequence number.
 	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
@@ -124,7 +125,8 @@ type OperationServiceServer interface {
 	// CancelOperation cancels a PENDING or PROCESSING operation. Cooperative: handlers stop at their next
 	// checkpoint and committed work stays; workers never overwrite CANCELLED.
 	CancelOperation(context.Context, *CancelOperationRequest) (*CancelOperationResponse, error)
-	// RetryOperation re-queues a FAILED or CANCELLED operation (PENDING, run now); other states are rejected.
+	// RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
+	// next_run_at = now. Other states are rejected.
 	RetryOperation(context.Context, *RetryOperationRequest) (*RetryOperationResponse, error)
 	// ListEvents polls the bank's lifecycle events by sequence number.
 	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)

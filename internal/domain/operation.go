@@ -42,6 +42,13 @@ func (k OperationKind) MaxAttempts() int {
 	return DefaultMaxAttempts
 }
 
+// HasFinalizer reports whether a job of kind k that exhausts its attempts through reclaim is handed back
+// to its handler's finalizer instead of being failed by the Claimer. Only refresh_mental_model has one:
+// its final failure must also pause the model and write REFRESH_FAILED history (decision 012, R10).
+func (k OperationKind) HasFinalizer() bool {
+	return k == OperationKindRefreshMentalModel
+}
+
 // OperationStatus is an operation's lifecycle state.
 type OperationStatus string
 

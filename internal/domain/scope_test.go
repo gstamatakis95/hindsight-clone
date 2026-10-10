@@ -58,6 +58,31 @@ func TestScopeKeyNoCollisions(t *testing.T) {
 	}
 }
 
+func TestParseScopeKeyCanonicalOnly(t *testing.T) {
+	b := BankRef{Tenant: "t", Bank: "b"}
+	k := NewScopeKey(b, []string{"Zed", "alpha", "é"})
+	got, err := ParseScopeKey(b, k.String())
+	if err != nil || !slices.Equal(got.Tags, k.Tags) || got.BankRef != b {
+		t.Fatalf("ParseScopeKey(%q) = %+v, %v; want %+v", k.String(), got, err, k)
+	}
+	if got, err := ParseScopeKey(b, ""); err != nil || len(got.Tags) != 0 {
+		t.Fatalf("shared scope: got %+v, %v", got, err)
+	}
+	for _, in := range []string{
+		EncodeScopeTags([]string{"b", "a"}), // unsorted
+		EncodeScopeTags([]string{"a", "a"}), // duplicate
+		EncodeScopeTags([]string{"A"}),      // not lowercased
+		EncodeScopeTags([]string{" a"}),     // not trimmed
+		EncodeScopeTags([]string{""}),       // empty tag
+		EncodeScopeTags([]string{"é"}),     // not NFC
+		"3:foo;",                            // garbage
+	} {
+		if _, err := ParseScopeKey(b, in); !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("ParseScopeKey(%q) err = %v, want ErrInvalidArgument", in, err)
+		}
+	}
+}
+
 func TestDecodeScopeTagsRejectsGarbage(t *testing.T) {
 	for _, in := range []string{"x", "3:fo", "3:foo;1:a", ":a", "-1:a"} {
 		if _, err := DecodeScopeTags(in); !errors.Is(err, ErrInvalidArgument) {

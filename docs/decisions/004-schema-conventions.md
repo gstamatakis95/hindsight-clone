@@ -47,7 +47,14 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
 - `operations.attempts` (not `attempt`) matches proto `Operation.attempts`.
 - `operations.parent_id` has no foreign key: pruning terminal operations must never cascade
   into, or be blocked by, other rows. Neither `operations` nor `lifecycle_events` references
-  banks: the delete_bank job and the event history outlive the bank row.
+  banks. They do not outlive the bank: delete_bank's final transaction deletes the bank's
+  remaining `lifecycle_events` and `operations` rows (its own row included) with explicit
+  DELETEs, together with the bank row. The runner's terminal Complete for that job must
+  therefore accept that the row is gone, and GetOperation on it afterwards returns NotFound.
+- Enqueue on a tombstoned bank (`deleting_at` set) fails with ErrBankDeleting, except for a
+  delete_bank job.
+- `lifecycle_events.type` is free text and `operation_id` is a nullable uuid, so terminal
+  failures (OPERATION_FAILED, written by Fail / ReclaimStale) need nothing beyond the table.
 - `lifecycle_events.seq` is not unique: events written in one transaction share the bank's
   change_seq.
 - `chunks.truncated` exists because proto `Chunk.truncated` does.
@@ -60,16 +67,77 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
   the shared scope can use whatever encoding `ScopeKey.String()` gives an empty tag set.
 - `memory_units.chunk_id` is `ON DELETE SET NULL`; `document_id` cascades through
   `(tenant_id, bank_id, document_id) -> documents` (MATCH SIMPLE, so NULL skips the check).
+- Every foreign key states its ON DELETE action; none is NO ACTION. The full list:
+
+  | Foreign key | References | ON DELETE | Why |
+  |---|---|---|---|
+  | `documents`, `entities`, `memory_units`, `observation_scopes`, `mental_model_folders`, `mental_models`, `directives` `(tenant_id, bank_id)` | `banks` | CASCADE | Bank-owned rows go with the bank row |
+  | `chunks (tenant_id, bank_id, document_id)` | `documents` | CASCADE | Chunks belong to their document |
+  | `memory_units (tenant_id, bank_id, document_id)` | `documents` | CASCADE | Deleting a document deletes its units |
+  | `memory_units.chunk_id` | `chunks` | SET NULL | Deleting a chunk keeps its units; `chunk_id` is provenance only |
+  | `unit_entities.unit_id`, `unit_entities.entity_id` | `memory_units`, `entities` | CASCADE | A join row is meaningless without either side |
+  | `entity_cooccurrences.entity_a`, `.entity_b` | `entities` | CASCADE | Same |
+  | `memory_links.from_unit_id`, `.to_unit_id` | `memory_units` | CASCADE | Same (invalidate snapshots causal links before the unit leaves) |
+  | `observation_evidence.observation_id`, `.unit_id` | `memory_units` | CASCADE | Evidence goes when either the observation or its source unit is deleted or archived |
+  | `mental_model_history (tenant_id, bank_id, mental_model_id)` | `mental_models` | CASCADE | History belongs to its model |
 - `entities` has no unique name: resolution may keep two entities with the same name. Label
   entities are unique on `(tenant_id, bank_id, kind, label_value) WHERE label_value IS NOT NULL`.
 - `graph_dirty`, `entity_maintenance`, `parked_links`, `memory_units_archive`, `memory_audit`
   and `observation_versions` have no foreign keys: maintenance tolerates vanished rows and
-  history outlives what it describes. delete_bank must delete these rows explicitly.
+  history outlives the units it describes (not the bank). delete_bank must delete these rows
+  explicitly.
+- `parked_links` mirrors `memory_links`: `kind IN ('temporal', 'semantic', 'causal')` and
+  `archived_unit_id <> other_unit_id` (`parked_links_kind`, `parked_links_no_self_link`).
 - `memory_units_archive` stores no embedding: restore re-embeds through rederive_memory.
 - `mental_models.folder_path` has no FK to `mental_model_folders`: `''` is the root and folders
   can be implicit.
 - `mental_models.refresh_cron` duplicates `trigger.refresh_cron` so the cron tick can use a
   partial index; writers keep the two in sync.
+
+**Operations: dedupe, cancel and the claim**
+
+- `operations.joinable boolean NOT NULL DEFAULT false`. Enqueue sets it true only for a row
+  inserted under a dedupe policy (Pending or PendingOrRunning) without overrides, except
+  refresh_mental_model rows, which are always joinable. Dedupe lookups match joinable rows
+  only, so a row enqueued with overrides (or with no dedupe policy) is never joined. The
+  schema doesn't encode this policy (no CHECK on kind or overrides); Go owns it.
+- Dedupe Enqueue is race-safe without a leader: before its dedupe SELECT, and in the same
+  transaction as the INSERT, the Postgres adapter takes
+  `pg_advisory_xact_lock(hashtextextended(tenant_id || '/' || bank_id || '/' || kind || '/' || serial_key, 0))`,
+  so two concurrent enqueuers of the same (tenant, bank, kind, serial key) never both insert.
+  Dedupe enqueues always carry a serial key (a NULL key would hash to NULL and take no lock).
+  Hash collisions only serialize unrelated enqueues, which is harmless.
+- `finished_at` is set only on terminal rows
+  (`operations_finished_at_terminal_only CHECK (finished_at IS NULL OR status IN ('completed', 'failed', 'cancelled'))`),
+  so Retry must clear it when it re-queues a row. Terminal rows are not required to have it
+  set: a cancelled row with `finished_at` NULL is still running.
+- Cancel on a PENDING row sets `status = 'cancelled'`, `finished_at = now()`. Cancel on a
+  PROCESSING row sets `status = 'cancelled'` and leaves `finished_at` NULL: the row keeps
+  holding its serial key until the handler stops. The handler's terminal Complete / Fail
+  then sets only `finished_at` (status stays `cancelled`); ReclaimStale sets `finished_at`
+  on cancelled-but-unfinished rows whose heartbeat is stale.
+- Prune deletes terminal rows with `finished_at < cutoff`, so it never removes a row that
+  still holds its key.
+- The claim is the spec's SQL plus one clause: a cancelled-but-unfinished row holds the key.
+  `joinable` plays no part in it.
+
+  ```sql
+  SELECT o.* FROM operations o
+  JOIN banks b ON (b.tenant_id, b.id) = (o.tenant_id, o.bank_id)
+  WHERE o.status = 'pending' AND o.run_at <= now() AND o.kind = ANY($1)
+    AND (b.deleting_at IS NULL OR o.kind = 'delete_bank')
+    AND NOT EXISTS (
+      SELECT 1 FROM operations p
+      WHERE (p.tenant_id, p.bank_id, p.serial_key) = (o.tenant_id, o.bank_id, o.serial_key)
+        AND (p.status = 'processing'
+             OR (p.status = 'cancelled' AND p.finished_at IS NULL)
+             OR (p.status = 'pending' AND p.run_at <= now()
+                 AND (p.created_at, p.id) < (o.created_at, o.id))))
+  ORDER BY o.created_at
+  LIMIT $2
+  FOR UPDATE OF o SKIP LOCKED;
+  -- then: UPDATE operations SET status = 'processing', worker_id = $3, heartbeat_at = now() WHERE id = ANY(...)
+  ```
 
 **Indexes**
 
@@ -85,10 +153,24 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
 - Mental models have no BM25 index (composite text key; would need a surrogate uuid). Page
   search uses `mental_models_embedding_hnsw`.
 - HNSW indexes use `vector_cosine_ops` with default `m` / `ef_construction`.
-- The reclaim index is `operations (heartbeat_at) WHERE status = 'processing'` rather than
-  `(status, heartbeat_at)`: the predicate already fixes status, so the column would add nothing.
+- The unconsolidated index (`memory_units_unconsolidated_idx`) has the predicate
+  `consolidated_at IS NULL AND consolidation_failed_at IS NULL AND fact_type <> 'observation'`:
+  observations are consolidation's output and are never consolidated themselves.
+- `operations_active_serial_key_idx` is `(tenant_id, bank_id, serial_key, kind) WHERE status
+  IN ('pending', 'processing') OR (status = 'cancelled' AND finished_at IS NULL)`: every row
+  that holds or queues a key. The claim's NOT EXISTS uses its first three columns, and the
+  dedupe lookup uses all four (with `joinable` as a filter), so no separate dedupe index is
+  needed. Both plans were checked with EXPLAIN.
+- The reclaim index `operations_running_heartbeat_idx` is `(heartbeat_at) WHERE status =
+  'processing' OR (status = 'cancelled' AND finished_at IS NULL)`, so ReclaimStale finds stale
+  cancelled-but-running rows too. Status isn't a column: the predicate already fixes it.
 - Unique `operations (tenant_id, bank_id, serial_key) WHERE status = 'processing'` backs the
-  claim; NULL serial keys never conflict.
+  claim, exactly as in the spec; NULL serial keys never conflict. It isn't widened to
+  cancelled rows: Cancel only turns the one processing holder into a cancelled holder, and the
+  claim's NOT EXISTS already waits on cancelled holders.
+- `parked_links_archived_unit_idx (tenant_id, bank_id, archived_unit_id)` serves restore and
+  bank-scoped deletes; `parked_links_other_unit_idx (other_unit_id)` serves deletes of the
+  other unit.
 
 ## Alternatives
 
@@ -104,7 +186,8 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
   1017 (alembic owns the schema, raw SQL via `op.execute()`).
 - SPEC.md 1089-1314, "Ports": `Seq` (1124), `BankSeq` (1144), `UnitRepo.Archive` (1162), EventRepo,
   Claimer.
-- SPEC.md 1903-1955, "Jobs": the claim SQL and the unique processing index (1928).
+- SPEC.md 1903-1955, "Jobs": the claim SQL (amended above for cancelled-but-running rows),
+  dedupe policies and the unique processing index (1928).
 - SPEC.md 1957-1971, "Curation": archive, audit, observation_versions.
 - SPEC.md 1973-2015, "Behavioural rules": unknown bank creation (1979), DeleteBank (1980), change
   sequence (1984).

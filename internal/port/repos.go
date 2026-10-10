@@ -12,22 +12,37 @@ type UnitRepo interface {
 	// Callers set every field they care about; a zero CreatedAt means the store's current time.
 	Insert(ctx context.Context, us []domain.Unit) error
 	// UpsertObservation inserts an observation or replaces the text, proof count, embedding, version and
-	// seq of the existing one with the same id.
+	// seq of the existing one with the same id. Its scope is its Tags. History rows are written separately
+	// with RecordObservationVersion.
 	UpsertObservation(ctx context.Context, o domain.Unit) error
+	// RecordObservationVersion appends one observation_versions row (written on every create and update).
+	RecordObservationVersion(ctx context.Context, b BankRef, obs UnitID, v domain.ObservationVersion) error
+	// Update replaces a live fact's curated fields (text, context, occurred dates, fact type, edited_at,
+	// seq) and its embedding: a nil Embedding clears it, so the unit leaves semantic search until
+	// rederive sets it again. Unknown or archived ids return domain.ErrNotFound.
+	Update(ctx context.Context, u domain.Unit) error
+	// SetDocumentTags rewrites the tags (and seq) of every live unit of a document and returns their ids.
+	SetDocumentTags(ctx context.Context, b BankRef, doc DocumentID, tags []string, seq int64) ([]UnitID, error)
+	// AppendAudit writes one memory_audit row.
+	AppendAudit(ctx context.Context, a domain.AuditEntry) error
 	// Unconsolidated returns the bank's oldest units with consolidated_at and consolidation_failed_at
 	// unset, optionally only those whose tags contain one of scopes. Facts only: observations are never
-	// consolidated. Oldest = created_at, then id.
+	// consolidated (the partial index excludes fact_type 'observation'). Oldest = created_at, then id.
 	Unconsolidated(ctx context.Context, b BankRef, scopes []ScopeKey, limit int) ([]domain.Unit, error)
 	// MarkConsolidated stamps units once every scope they belong to has been decided.
 	MarkConsolidated(ctx context.Context, ids []UnitID, at time.Time) error
 	// MarkConsolidationFailed parks a unit that fails even in a batch of one, so it can't block the bank.
 	MarkConsolidationFailed(ctx context.Context, ids []UnitID, at time.Time) error
-	// DeleteByDocument removes a document's units and records their link neighbours in graph_dirty.
+	// DeleteByDocument removes a document's units, records their link neighbours in graph_dirty and their
+	// entities in entity_maintenance, and returns the removed ids.
 	DeleteByDocument(ctx context.Context, b BankRef, doc DocumentID) ([]UnitID, error)
 	// Archive moves a unit to memory_units_archive with snapshots of its entities and causal links.
-	// Nothing references the archive by foreign key; the unit's links and entity rows are deleted.
+	// Nothing references the archive by foreign key; the unit's links and entity rows are deleted, its
+	// link neighbours go to graph_dirty and its entities to entity_maintenance.
 	Archive(ctx context.Context, b BankRef, id UnitID, reason string) error
-	// Restore moves an archived unit back; the embedding is recomputed by rederive.
+	// Restore moves an archived unit back and reattaches its entities and causal links from the snapshot
+	// (links whose other unit is gone are dropped). The embedding stays empty until rederive recomputes it.
+	// An id that is not archived returns domain.ErrNotFound.
 	Restore(ctx context.Context, b BankRef, id UnitID) error
 }
 
@@ -63,12 +78,23 @@ type EntityRepo interface {
 	Upsert(ctx context.Context, e domain.Entity) (EntityID, error)
 	// Attach links a unit to entities and bumps their co-occurrence counts; re-attaching is a no-op.
 	Attach(ctx context.Context, unit UnitID, ents []EntityID) error
+	// PendingMaintenance returns up to limit entity ids queued in entity_maintenance for b.
+	PendingMaintenance(ctx context.Context, b BankRef, limit int) ([]EntityID, error)
+	// PruneOrphans deletes those of ids that no live unit references (with their co-occurrences), removes
+	// all of ids from entity_maintenance and returns how many entities it deleted.
+	PruneOrphans(ctx context.Context, b BankRef, ids []EntityID) (int, error)
 }
 
 // LinkRepo stores temporal, semantic and causal edges.
 type LinkRepo interface {
 	// Insert stores links; an existing (from, to, kind) edge is kept with the new weight.
 	Insert(ctx context.Context, ls []domain.Link) error
+	// Count returns how many links of kind touch unit (either direction), for the per-unit caps.
+	Count(ctx context.Context, unit UnitID, kind domain.LinkKind) (int, error)
+	// Dirty returns up to limit live units queued in graph_dirty for b, oldest first.
+	Dirty(ctx context.Context, b BankRef, limit int) ([]UnitID, error)
+	// ClearDirty removes ids from graph_dirty.
+	ClearDirty(ctx context.Context, b BankRef, ids []UnitID) error
 }
 
 // EvidenceRepo links observations to the facts they rest on.
@@ -86,8 +112,23 @@ type EvidenceRepo interface {
 type EventRepo interface {
 	// Append stores e; e.Seq must be the tx's change seq (from Tx.Seq).
 	Append(ctx context.Context, e domain.LifecycleEvent) error
-	// List returns up to limit events of the bank with seq > afterSeq, in seq order.
+	// List returns events of the bank with seq > afterSeq in seq order. The limit is soft: a page never
+	// splits a seq group (one transaction's events), so it ends with every event of its last seq. The
+	// next poll passes the highest returned seq (or the same afterSeq when the page is empty).
 	List(ctx context.Context, b BankRef, afterSeq int64, limit int) ([]domain.LifecycleEvent, error)
+	// Prune deletes events written before before and returns how many.
+	Prune(ctx context.Context, before time.Time) (int, error)
+}
+
+// DirectiveRepo stores a bank's directives.
+type DirectiveRepo interface {
+	// Upsert creates the directive (a new id when d.ID is empty) or replaces it; it returns the id.
+	Upsert(ctx context.Context, d domain.Directive) (DirectiveID, error)
+	// List returns the bank's directives (only active ones when activeOnly), oldest first. Tag selection
+	// is the DirectiveSelector's job.
+	List(ctx context.Context, b BankRef, activeOnly bool) ([]domain.Directive, error)
+	// Delete removes the directive; unknown = domain.ErrNotFound.
+	Delete(ctx context.Context, b BankRef, id DirectiveID) error
 }
 
 // BankRepo stores banks and tenant configuration. A write to an unknown bank creates it with tenant
@@ -104,7 +145,14 @@ type BankRepo interface {
 	SetConfig(ctx context.Context, b BankRef, cfg domain.BankConfig) error
 	// MarkDeleting tombstones the bank by setting deleting_at; marking it again keeps the first time.
 	MarkDeleting(ctx context.Context, b BankRef, at time.Time) error
-	// Delete removes the bank row (the last step of delete_bank); unknown = domain.ErrNotFound.
+	// DeleteBatch deletes up to limit of the bank's content rows (units, archive, documents, chunks,
+	// entities, links, observations, mental models, directives, queues) and returns how many it deleted;
+	// 0 means nothing is left but the bank row, its events and its operations.
+	DeleteBatch(ctx context.Context, b BankRef, limit int) (int, error)
+	// Delete removes the bank row together with the bank's remaining lifecycle events and operations
+	// (including the running delete_bank job's own row, so its Complete then reports domain.ErrNotFound,
+	// which the runner treats as done). A write afterwards creates a fresh, empty bank. Unknown =
+	// domain.ErrNotFound.
 	Delete(ctx context.Context, b BankRef) error
 	// TenantConfig returns the tenant-level config; a tenant with none set returns the zero config.
 	TenantConfig(ctx context.Context, tenant string) (domain.BankConfig, error)

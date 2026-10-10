@@ -2,8 +2,8 @@
 //
 // Retain is synchronous by default, returning once units are committed; run_async=true makes it return
 // operation ids instead. Recall and Reflect are synchronous. Every request takes a full BankConfig as
-// overrides, merged as server < tenant < bank < request (< item, for retain); fields the RPC cannot use
-// are rejected with INVALID_ARGUMENT.
+// overrides, merged as server < tenant < bank < strategy < request (< item, for retain; strategies only
+// apply to consolidation); fields the RPC cannot use are rejected with INVALID_ARGUMENT.
 syntax = "proto3";
 
 package memory.v1;
@@ -61,7 +61,9 @@ message RetainItem {
   repeated EntityHint entities = 9;
   // false = take entity names literally instead of resolving them to existing entities; unset = true.
   optional bool resolve_entities = 10;
-  // Item-level overrides, the most specific level. Stored on the document and part of its no-op hash.
+  // Item-level overrides, the most specific level (over the request's). Same reach as
+  // RetainRequest.overrides; other fields = INVALID_ARGUMENT. Stored on the document and part of its
+  // no-op hash, so ReprocessDocument replays them unless given new overrides.
   BankConfig overrides = 11;
   // Re-extract even when the content hash and overrides hash are unchanged.
   bool force_reextract = 12;
@@ -76,7 +78,8 @@ message RetainRequest {
   // Tags added to every item's units.
   repeated string document_tags = 3;
   // Request-level overrides (extraction mode and prompt, retain mission, labels, retain tuning, EXTRACT
-  // and TIME_PARSE models). Stored on each document; never inherited by automatic consolidation.
+  // and TIME_PARSE models); other fields = INVALID_ARGUMENT. Stored on each document (part of its no-op
+  // hash); never inherited by automatic consolidation.
   BankConfig overrides = 4;
   // Do not enqueue consolidation after this retain, so a manual Consolidate can run with its own settings.
   bool skip_consolidation = 5;
@@ -128,11 +131,12 @@ message RecallRequest {
   string query = 2;
   // Fact types to return; empty = all.
   repeated FactType types = 3;
-  // Flat tag filter; mutually exclusive with tag_groups.
+  // Flat tag filter; mutually exclusive with tag_groups (both set = INVALID_ARGUMENT).
   repeated string tags = 4;
   // How tags must match.
   TagsMatch tags_match = 5;
-  // Boolean tag filter, all groups AND-ed; mutually exclusive with tags.
+  // Boolean tag filter, top-level groups AND-ed; mutually exclusive with tags (both set =
+  // INVALID_ARGUMENT).
   repeated TagGroup tag_groups = 6;
   // Size class: retriever caps (100 / 300 / 1000) and the token budget when max_tokens is unset.
   Budget budget = 7;
@@ -152,7 +156,8 @@ message RecallRequest {
   RecallInclude include = 14;
   // Return a RecallTrace.
   bool trace = 15;
-  // Request-only overrides: every RecallConfig field and the TIME_PARSE / RERANK models.
+  // Request-only overrides: every RecallConfig field and the TIME_PARSE / RERANK models; other fields =
+  // INVALID_ARGUMENT.
   BankConfig overrides = 16;
 }
 
@@ -200,11 +205,13 @@ message ReflectRequest {
   string bank_id = 1;
   // The question to answer in natural language.
   string query = 2;
-  // Flat tag filter for retrieval and directive selection; mutually exclusive with tag_groups.
+  // Flat tag filter for retrieval and directive selection; mutually exclusive with tag_groups (both set =
+  // INVALID_ARGUMENT).
   repeated string tags = 3;
   // How tags must match.
   TagsMatch tags_match = 4;
-  // Boolean tag filter for retrieval, all groups AND-ed.
+  // Boolean tag filter for retrieval, top-level groups AND-ed; mutually exclusive with tags (both set =
+  // INVALID_ARGUMENT).
   repeated TagGroup tag_groups = 5;
   // Size class scaling iterations and recall budgets, default BUDGET_LOW.
   Budget budget = 6;
@@ -221,7 +228,8 @@ message ReflectRequest {
   // Reference time for relative expressions; unset = now.
   google.protobuf.Timestamp query_time = 12;
   // Request-only overrides: missions, disposition, ReflectConfig, nested RecallConfig and the REFLECT,
-  // STRUCTURED_OUTPUT and RERANK models.
+  // STRUCTURED_OUTPUT and RERANK models; other fields = INVALID_ARGUMENT. Extra directives come through
+  // extra_directives.
   BankConfig overrides = 13;
 }
 

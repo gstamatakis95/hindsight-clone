@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // FactType classifies a memory unit.
 type FactType string
@@ -228,3 +231,24 @@ const (
 	// CurationReprocess tags audit rows of units replaced by ReprocessDocument.
 	CurationReprocess CurationAction = "reprocess"
 )
+
+// AuditEntry is one memory_audit row: what a curation action changed and why. Rows of units replaced by
+// a reprocess are kept and tagged with the reprocess operation id.
+type AuditEntry struct {
+	// Bank owns the unit.
+	Bank BankRef
+	// UnitID is the curated unit.
+	UnitID UnitID
+	// Action is edit, invalidate, restore or reprocess.
+	Action CurationAction
+	// Reason is the caller's reason.
+	Reason string
+	// Before is a JSON snapshot of the changed fields before the action; nil = none.
+	Before json.RawMessage
+	// After is a JSON snapshot of the changed fields after the action; nil = none.
+	After json.RawMessage
+	// OperationID is the rederive or reprocess operation, if any.
+	OperationID OperationID
+	// At is when the action committed.
+	At time.Time
+}

@@ -323,14 +323,29 @@ var _ port.Queue = &Queue{}
 //
 //		// make and configure a mocked port.Queue
 //		mockedQueue := &Queue{
+//			CancelFunc: func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+//				panic("mock out the Cancel method")
+//			},
 //			CancelBankFunc: func(ctx context.Context, b port.BankRef) (int, error) {
 //				panic("mock out the CancelBank method")
 //			},
 //			EnqueueFunc: func(ctx context.Context, j port.Job) (port.OperationID, bool, error) {
 //				panic("mock out the Enqueue method")
 //			},
+//			GetFunc: func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+//				panic("mock out the Get method")
+//			},
+//			ListFunc: func(ctx context.Context, b port.BankRef, f port.OperationFilter) ([]domain.Operation, string, error) {
+//				panic("mock out the List method")
+//			},
+//			PruneFunc: func(ctx context.Context, before time.Time) (int, error) {
+//				panic("mock out the Prune method")
+//			},
 //			RescheduleFunc: func(ctx context.Context, id port.OperationID, at time.Time) error {
 //				panic("mock out the Reschedule method")
+//			},
+//			RetryFunc: func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+//				panic("mock out the Retry method")
 //			},
 //			UpgradeFunc: func(ctx context.Context, id port.OperationID, payload json.RawMessage, o *domain.BankConfig) error {
 //				panic("mock out the Upgrade method")
@@ -342,20 +357,44 @@ var _ port.Queue = &Queue{}
 //
 //	}
 type Queue struct {
+	// CancelFunc mocks the Cancel method.
+	CancelFunc func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
+
 	// CancelBankFunc mocks the CancelBank method.
 	CancelBankFunc func(ctx context.Context, b port.BankRef) (int, error)
 
 	// EnqueueFunc mocks the Enqueue method.
 	EnqueueFunc func(ctx context.Context, j port.Job) (port.OperationID, bool, error)
 
+	// GetFunc mocks the Get method.
+	GetFunc func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
+
+	// ListFunc mocks the List method.
+	ListFunc func(ctx context.Context, b port.BankRef, f port.OperationFilter) ([]domain.Operation, string, error)
+
+	// PruneFunc mocks the Prune method.
+	PruneFunc func(ctx context.Context, before time.Time) (int, error)
+
 	// RescheduleFunc mocks the Reschedule method.
 	RescheduleFunc func(ctx context.Context, id port.OperationID, at time.Time) error
+
+	// RetryFunc mocks the Retry method.
+	RetryFunc func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
 
 	// UpgradeFunc mocks the Upgrade method.
 	UpgradeFunc func(ctx context.Context, id port.OperationID, payload json.RawMessage, o *domain.BankConfig) error
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// Cancel holds details about calls to the Cancel method.
+		Cancel []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.OperationID
+		}
 		// CancelBank holds details about calls to the CancelBank method.
 		CancelBank []struct {
 			// Ctx is the ctx argument value.
@@ -370,6 +409,31 @@ type Queue struct {
 			// J is the j argument value.
 			J port.Job
 		}
+		// Get holds details about calls to the Get method.
+		Get []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.OperationID
+		}
+		// List holds details about calls to the List method.
+		List []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// F is the f argument value.
+			F port.OperationFilter
+		}
+		// Prune holds details about calls to the Prune method.
+		Prune []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Before is the before argument value.
+			Before time.Time
+		}
 		// Reschedule holds details about calls to the Reschedule method.
 		Reschedule []struct {
 			// Ctx is the ctx argument value.
@@ -378,6 +442,15 @@ type Queue struct {
 			ID port.OperationID
 			// At is the at argument value.
 			At time.Time
+		}
+		// Retry holds details about calls to the Retry method.
+		Retry []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.OperationID
 		}
 		// Upgrade holds details about calls to the Upgrade method.
 		Upgrade []struct {
@@ -391,10 +464,55 @@ type Queue struct {
 			O *domain.BankConfig
 		}
 	}
+	lockCancel     sync.RWMutex
 	lockCancelBank sync.RWMutex
 	lockEnqueue    sync.RWMutex
+	lockGet        sync.RWMutex
+	lockList       sync.RWMutex
+	lockPrune      sync.RWMutex
 	lockReschedule sync.RWMutex
+	lockRetry      sync.RWMutex
 	lockUpgrade    sync.RWMutex
+}
+
+// Cancel calls CancelFunc.
+func (mock *Queue) Cancel(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+	if mock.CancelFunc == nil {
+		panic("Queue.CancelFunc: method is nil but Queue.Cancel was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.OperationID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockCancel.Lock()
+	mock.calls.Cancel = append(mock.calls.Cancel, callInfo)
+	mock.lockCancel.Unlock()
+	return mock.CancelFunc(ctx, b, id)
+}
+
+// CancelCalls gets all the calls that were made to Cancel.
+// Check the length with:
+//
+//	len(mockedQueue.CancelCalls())
+func (mock *Queue) CancelCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.OperationID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.OperationID
+	}
+	mock.lockCancel.RLock()
+	calls = mock.calls.Cancel
+	mock.lockCancel.RUnlock()
+	return calls
 }
 
 // CancelBank calls CancelBankFunc.
@@ -469,6 +587,122 @@ func (mock *Queue) EnqueueCalls() []struct {
 	return calls
 }
 
+// Get calls GetFunc.
+func (mock *Queue) Get(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+	if mock.GetFunc == nil {
+		panic("Queue.GetFunc: method is nil but Queue.Get was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.OperationID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockGet.Lock()
+	mock.calls.Get = append(mock.calls.Get, callInfo)
+	mock.lockGet.Unlock()
+	return mock.GetFunc(ctx, b, id)
+}
+
+// GetCalls gets all the calls that were made to Get.
+// Check the length with:
+//
+//	len(mockedQueue.GetCalls())
+func (mock *Queue) GetCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.OperationID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.OperationID
+	}
+	mock.lockGet.RLock()
+	calls = mock.calls.Get
+	mock.lockGet.RUnlock()
+	return calls
+}
+
+// List calls ListFunc.
+func (mock *Queue) List(ctx context.Context, b port.BankRef, f port.OperationFilter) ([]domain.Operation, string, error) {
+	if mock.ListFunc == nil {
+		panic("Queue.ListFunc: method is nil but Queue.List was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		F   port.OperationFilter
+	}{
+		Ctx: ctx,
+		B:   b,
+		F:   f,
+	}
+	mock.lockList.Lock()
+	mock.calls.List = append(mock.calls.List, callInfo)
+	mock.lockList.Unlock()
+	return mock.ListFunc(ctx, b, f)
+}
+
+// ListCalls gets all the calls that were made to List.
+// Check the length with:
+//
+//	len(mockedQueue.ListCalls())
+func (mock *Queue) ListCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	F   port.OperationFilter
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		F   port.OperationFilter
+	}
+	mock.lockList.RLock()
+	calls = mock.calls.List
+	mock.lockList.RUnlock()
+	return calls
+}
+
+// Prune calls PruneFunc.
+func (mock *Queue) Prune(ctx context.Context, before time.Time) (int, error) {
+	if mock.PruneFunc == nil {
+		panic("Queue.PruneFunc: method is nil but Queue.Prune was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Before time.Time
+	}{
+		Ctx:    ctx,
+		Before: before,
+	}
+	mock.lockPrune.Lock()
+	mock.calls.Prune = append(mock.calls.Prune, callInfo)
+	mock.lockPrune.Unlock()
+	return mock.PruneFunc(ctx, before)
+}
+
+// PruneCalls gets all the calls that were made to Prune.
+// Check the length with:
+//
+//	len(mockedQueue.PruneCalls())
+func (mock *Queue) PruneCalls() []struct {
+	Ctx    context.Context
+	Before time.Time
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Before time.Time
+	}
+	mock.lockPrune.RLock()
+	calls = mock.calls.Prune
+	mock.lockPrune.RUnlock()
+	return calls
+}
+
 // Reschedule calls RescheduleFunc.
 func (mock *Queue) Reschedule(ctx context.Context, id port.OperationID, at time.Time) error {
 	if mock.RescheduleFunc == nil {
@@ -506,6 +740,46 @@ func (mock *Queue) RescheduleCalls() []struct {
 	mock.lockReschedule.RLock()
 	calls = mock.calls.Reschedule
 	mock.lockReschedule.RUnlock()
+	return calls
+}
+
+// Retry calls RetryFunc.
+func (mock *Queue) Retry(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+	if mock.RetryFunc == nil {
+		panic("Queue.RetryFunc: method is nil but Queue.Retry was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.OperationID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockRetry.Lock()
+	mock.calls.Retry = append(mock.calls.Retry, callInfo)
+	mock.lockRetry.Unlock()
+	return mock.RetryFunc(ctx, b, id)
+}
+
+// RetryCalls gets all the calls that were made to Retry.
+// Check the length with:
+//
+//	len(mockedQueue.RetryCalls())
+func (mock *Queue) RetryCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.OperationID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.OperationID
+	}
+	mock.lockRetry.RLock()
+	calls = mock.calls.Retry
+	mock.lockRetry.RUnlock()
 	return calls
 }
 
@@ -1523,6 +1797,9 @@ var _ port.UnitRepo = &UnitRepo{}
 //
 //		// make and configure a mocked port.UnitRepo
 //		mockedUnitRepo := &UnitRepo{
+//			AppendAuditFunc: func(ctx context.Context, a domain.AuditEntry) error {
+//				panic("mock out the AppendAudit method")
+//			},
 //			ArchiveFunc: func(ctx context.Context, b port.BankRef, id port.UnitID, reason string) error {
 //				panic("mock out the Archive method")
 //			},
@@ -1538,11 +1815,20 @@ var _ port.UnitRepo = &UnitRepo{}
 //			MarkConsolidationFailedFunc: func(ctx context.Context, ids []port.UnitID, at time.Time) error {
 //				panic("mock out the MarkConsolidationFailed method")
 //			},
+//			RecordObservationVersionFunc: func(ctx context.Context, b port.BankRef, obs port.UnitID, v domain.ObservationVersion) error {
+//				panic("mock out the RecordObservationVersion method")
+//			},
 //			RestoreFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) error {
 //				panic("mock out the Restore method")
 //			},
+//			SetDocumentTagsFunc: func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64) ([]port.UnitID, error) {
+//				panic("mock out the SetDocumentTags method")
+//			},
 //			UnconsolidatedFunc: func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey, limit int) ([]domain.Unit, error) {
 //				panic("mock out the Unconsolidated method")
+//			},
+//			UpdateFunc: func(ctx context.Context, u domain.Unit) error {
+//				panic("mock out the Update method")
 //			},
 //			UpsertObservationFunc: func(ctx context.Context, o domain.Unit) error {
 //				panic("mock out the UpsertObservation method")
@@ -1554,6 +1840,9 @@ var _ port.UnitRepo = &UnitRepo{}
 //
 //	}
 type UnitRepo struct {
+	// AppendAuditFunc mocks the AppendAudit method.
+	AppendAuditFunc func(ctx context.Context, a domain.AuditEntry) error
+
 	// ArchiveFunc mocks the Archive method.
 	ArchiveFunc func(ctx context.Context, b port.BankRef, id port.UnitID, reason string) error
 
@@ -1569,17 +1858,33 @@ type UnitRepo struct {
 	// MarkConsolidationFailedFunc mocks the MarkConsolidationFailed method.
 	MarkConsolidationFailedFunc func(ctx context.Context, ids []port.UnitID, at time.Time) error
 
+	// RecordObservationVersionFunc mocks the RecordObservationVersion method.
+	RecordObservationVersionFunc func(ctx context.Context, b port.BankRef, obs port.UnitID, v domain.ObservationVersion) error
+
 	// RestoreFunc mocks the Restore method.
 	RestoreFunc func(ctx context.Context, b port.BankRef, id port.UnitID) error
 
+	// SetDocumentTagsFunc mocks the SetDocumentTags method.
+	SetDocumentTagsFunc func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64) ([]port.UnitID, error)
+
 	// UnconsolidatedFunc mocks the Unconsolidated method.
 	UnconsolidatedFunc func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey, limit int) ([]domain.Unit, error)
+
+	// UpdateFunc mocks the Update method.
+	UpdateFunc func(ctx context.Context, u domain.Unit) error
 
 	// UpsertObservationFunc mocks the UpsertObservation method.
 	UpsertObservationFunc func(ctx context.Context, o domain.Unit) error
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// AppendAudit holds details about calls to the AppendAudit method.
+		AppendAudit []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// A is the a argument value.
+			A domain.AuditEntry
+		}
 		// Archive holds details about calls to the Archive method.
 		Archive []struct {
 			// Ctx is the ctx argument value.
@@ -1625,6 +1930,17 @@ type UnitRepo struct {
 			// At is the at argument value.
 			At time.Time
 		}
+		// RecordObservationVersion holds details about calls to the RecordObservationVersion method.
+		RecordObservationVersion []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Obs is the obs argument value.
+			Obs port.UnitID
+			// V is the v argument value.
+			V domain.ObservationVersion
+		}
 		// Restore holds details about calls to the Restore method.
 		Restore []struct {
 			// Ctx is the ctx argument value.
@@ -1633,6 +1949,19 @@ type UnitRepo struct {
 			B port.BankRef
 			// ID is the id argument value.
 			ID port.UnitID
+		}
+		// SetDocumentTags holds details about calls to the SetDocumentTags method.
+		SetDocumentTags []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Doc is the doc argument value.
+			Doc port.DocumentID
+			// Tags is the tags argument value.
+			Tags []string
+			// Seq is the seq argument value.
+			Seq int64
 		}
 		// Unconsolidated holds details about calls to the Unconsolidated method.
 		Unconsolidated []struct {
@@ -1645,6 +1974,13 @@ type UnitRepo struct {
 			// Limit is the limit argument value.
 			Limit int
 		}
+		// Update holds details about calls to the Update method.
+		Update []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// U is the u argument value.
+			U domain.Unit
+		}
 		// UpsertObservation holds details about calls to the UpsertObservation method.
 		UpsertObservation []struct {
 			// Ctx is the ctx argument value.
@@ -1653,14 +1989,54 @@ type UnitRepo struct {
 			O domain.Unit
 		}
 	}
-	lockArchive                 sync.RWMutex
-	lockDeleteByDocument        sync.RWMutex
-	lockInsert                  sync.RWMutex
-	lockMarkConsolidated        sync.RWMutex
-	lockMarkConsolidationFailed sync.RWMutex
-	lockRestore                 sync.RWMutex
-	lockUnconsolidated          sync.RWMutex
-	lockUpsertObservation       sync.RWMutex
+	lockAppendAudit              sync.RWMutex
+	lockArchive                  sync.RWMutex
+	lockDeleteByDocument         sync.RWMutex
+	lockInsert                   sync.RWMutex
+	lockMarkConsolidated         sync.RWMutex
+	lockMarkConsolidationFailed  sync.RWMutex
+	lockRecordObservationVersion sync.RWMutex
+	lockRestore                  sync.RWMutex
+	lockSetDocumentTags          sync.RWMutex
+	lockUnconsolidated           sync.RWMutex
+	lockUpdate                   sync.RWMutex
+	lockUpsertObservation        sync.RWMutex
+}
+
+// AppendAudit calls AppendAuditFunc.
+func (mock *UnitRepo) AppendAudit(ctx context.Context, a domain.AuditEntry) error {
+	if mock.AppendAuditFunc == nil {
+		panic("UnitRepo.AppendAuditFunc: method is nil but UnitRepo.AppendAudit was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		A   domain.AuditEntry
+	}{
+		Ctx: ctx,
+		A:   a,
+	}
+	mock.lockAppendAudit.Lock()
+	mock.calls.AppendAudit = append(mock.calls.AppendAudit, callInfo)
+	mock.lockAppendAudit.Unlock()
+	return mock.AppendAuditFunc(ctx, a)
+}
+
+// AppendAuditCalls gets all the calls that were made to AppendAudit.
+// Check the length with:
+//
+//	len(mockedUnitRepo.AppendAuditCalls())
+func (mock *UnitRepo) AppendAuditCalls() []struct {
+	Ctx context.Context
+	A   domain.AuditEntry
+} {
+	var calls []struct {
+		Ctx context.Context
+		A   domain.AuditEntry
+	}
+	mock.lockAppendAudit.RLock()
+	calls = mock.calls.AppendAudit
+	mock.lockAppendAudit.RUnlock()
+	return calls
 }
 
 // Archive calls ArchiveFunc.
@@ -1863,6 +2239,50 @@ func (mock *UnitRepo) MarkConsolidationFailedCalls() []struct {
 	return calls
 }
 
+// RecordObservationVersion calls RecordObservationVersionFunc.
+func (mock *UnitRepo) RecordObservationVersion(ctx context.Context, b port.BankRef, obs port.UnitID, v domain.ObservationVersion) error {
+	if mock.RecordObservationVersionFunc == nil {
+		panic("UnitRepo.RecordObservationVersionFunc: method is nil but UnitRepo.RecordObservationVersion was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Obs port.UnitID
+		V   domain.ObservationVersion
+	}{
+		Ctx: ctx,
+		B:   b,
+		Obs: obs,
+		V:   v,
+	}
+	mock.lockRecordObservationVersion.Lock()
+	mock.calls.RecordObservationVersion = append(mock.calls.RecordObservationVersion, callInfo)
+	mock.lockRecordObservationVersion.Unlock()
+	return mock.RecordObservationVersionFunc(ctx, b, obs, v)
+}
+
+// RecordObservationVersionCalls gets all the calls that were made to RecordObservationVersion.
+// Check the length with:
+//
+//	len(mockedUnitRepo.RecordObservationVersionCalls())
+func (mock *UnitRepo) RecordObservationVersionCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Obs port.UnitID
+	V   domain.ObservationVersion
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Obs port.UnitID
+		V   domain.ObservationVersion
+	}
+	mock.lockRecordObservationVersion.RLock()
+	calls = mock.calls.RecordObservationVersion
+	mock.lockRecordObservationVersion.RUnlock()
+	return calls
+}
+
 // Restore calls RestoreFunc.
 func (mock *UnitRepo) Restore(ctx context.Context, b port.BankRef, id port.UnitID) error {
 	if mock.RestoreFunc == nil {
@@ -1900,6 +2320,54 @@ func (mock *UnitRepo) RestoreCalls() []struct {
 	mock.lockRestore.RLock()
 	calls = mock.calls.Restore
 	mock.lockRestore.RUnlock()
+	return calls
+}
+
+// SetDocumentTags calls SetDocumentTagsFunc.
+func (mock *UnitRepo) SetDocumentTags(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64) ([]port.UnitID, error) {
+	if mock.SetDocumentTagsFunc == nil {
+		panic("UnitRepo.SetDocumentTagsFunc: method is nil but UnitRepo.SetDocumentTags was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Doc  port.DocumentID
+		Tags []string
+		Seq  int64
+	}{
+		Ctx:  ctx,
+		B:    b,
+		Doc:  doc,
+		Tags: tags,
+		Seq:  seq,
+	}
+	mock.lockSetDocumentTags.Lock()
+	mock.calls.SetDocumentTags = append(mock.calls.SetDocumentTags, callInfo)
+	mock.lockSetDocumentTags.Unlock()
+	return mock.SetDocumentTagsFunc(ctx, b, doc, tags, seq)
+}
+
+// SetDocumentTagsCalls gets all the calls that were made to SetDocumentTags.
+// Check the length with:
+//
+//	len(mockedUnitRepo.SetDocumentTagsCalls())
+func (mock *UnitRepo) SetDocumentTagsCalls() []struct {
+	Ctx  context.Context
+	B    port.BankRef
+	Doc  port.DocumentID
+	Tags []string
+	Seq  int64
+} {
+	var calls []struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Doc  port.DocumentID
+		Tags []string
+		Seq  int64
+	}
+	mock.lockSetDocumentTags.RLock()
+	calls = mock.calls.SetDocumentTags
+	mock.lockSetDocumentTags.RUnlock()
 	return calls
 }
 
@@ -1944,6 +2412,42 @@ func (mock *UnitRepo) UnconsolidatedCalls() []struct {
 	mock.lockUnconsolidated.RLock()
 	calls = mock.calls.Unconsolidated
 	mock.lockUnconsolidated.RUnlock()
+	return calls
+}
+
+// Update calls UpdateFunc.
+func (mock *UnitRepo) Update(ctx context.Context, u domain.Unit) error {
+	if mock.UpdateFunc == nil {
+		panic("UnitRepo.UpdateFunc: method is nil but UnitRepo.Update was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		U   domain.Unit
+	}{
+		Ctx: ctx,
+		U:   u,
+	}
+	mock.lockUpdate.Lock()
+	mock.calls.Update = append(mock.calls.Update, callInfo)
+	mock.lockUpdate.Unlock()
+	return mock.UpdateFunc(ctx, u)
+}
+
+// UpdateCalls gets all the calls that were made to Update.
+// Check the length with:
+//
+//	len(mockedUnitRepo.UpdateCalls())
+func (mock *UnitRepo) UpdateCalls() []struct {
+	Ctx context.Context
+	U   domain.Unit
+} {
+	var calls []struct {
+		Ctx context.Context
+		U   domain.Unit
+	}
+	mock.lockUpdate.RLock()
+	calls = mock.calls.Update
+	mock.lockUpdate.RUnlock()
 	return calls
 }
 
@@ -2388,6 +2892,12 @@ var _ port.EntityRepo = &EntityRepo{}
 //			CooccurrenceFunc: func(ctx context.Context, b port.BankRef, entity port.EntityID, others []port.EntityID) (int, error) {
 //				panic("mock out the Cooccurrence method")
 //			},
+//			PendingMaintenanceFunc: func(ctx context.Context, b port.BankRef, limit int) ([]port.EntityID, error) {
+//				panic("mock out the PendingMaintenance method")
+//			},
+//			PruneOrphansFunc: func(ctx context.Context, b port.BankRef, ids []port.EntityID) (int, error) {
+//				panic("mock out the PruneOrphans method")
+//			},
 //			UpsertFunc: func(ctx context.Context, e domain.Entity) (port.EntityID, error) {
 //				panic("mock out the Upsert method")
 //			},
@@ -2406,6 +2916,12 @@ type EntityRepo struct {
 
 	// CooccurrenceFunc mocks the Cooccurrence method.
 	CooccurrenceFunc func(ctx context.Context, b port.BankRef, entity port.EntityID, others []port.EntityID) (int, error)
+
+	// PendingMaintenanceFunc mocks the PendingMaintenance method.
+	PendingMaintenanceFunc func(ctx context.Context, b port.BankRef, limit int) ([]port.EntityID, error)
+
+	// PruneOrphansFunc mocks the PruneOrphans method.
+	PruneOrphansFunc func(ctx context.Context, b port.BankRef, ids []port.EntityID) (int, error)
 
 	// UpsertFunc mocks the Upsert method.
 	UpsertFunc func(ctx context.Context, e domain.Entity) (port.EntityID, error)
@@ -2443,6 +2959,24 @@ type EntityRepo struct {
 			// Others is the others argument value.
 			Others []port.EntityID
 		}
+		// PendingMaintenance holds details about calls to the PendingMaintenance method.
+		PendingMaintenance []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Limit is the limit argument value.
+			Limit int
+		}
+		// PruneOrphans holds details about calls to the PruneOrphans method.
+		PruneOrphans []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.EntityID
+		}
 		// Upsert holds details about calls to the Upsert method.
 		Upsert []struct {
 			// Ctx is the ctx argument value.
@@ -2451,10 +2985,12 @@ type EntityRepo struct {
 			E domain.Entity
 		}
 	}
-	lockAttach       sync.RWMutex
-	lockCandidates   sync.RWMutex
-	lockCooccurrence sync.RWMutex
-	lockUpsert       sync.RWMutex
+	lockAttach             sync.RWMutex
+	lockCandidates         sync.RWMutex
+	lockCooccurrence       sync.RWMutex
+	lockPendingMaintenance sync.RWMutex
+	lockPruneOrphans       sync.RWMutex
+	lockUpsert             sync.RWMutex
 }
 
 // Attach calls AttachFunc.
@@ -2585,6 +3121,86 @@ func (mock *EntityRepo) CooccurrenceCalls() []struct {
 	return calls
 }
 
+// PendingMaintenance calls PendingMaintenanceFunc.
+func (mock *EntityRepo) PendingMaintenance(ctx context.Context, b port.BankRef, limit int) ([]port.EntityID, error) {
+	if mock.PendingMaintenanceFunc == nil {
+		panic("EntityRepo.PendingMaintenanceFunc: method is nil but EntityRepo.PendingMaintenance was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Limit: limit,
+	}
+	mock.lockPendingMaintenance.Lock()
+	mock.calls.PendingMaintenance = append(mock.calls.PendingMaintenance, callInfo)
+	mock.lockPendingMaintenance.Unlock()
+	return mock.PendingMaintenanceFunc(ctx, b, limit)
+}
+
+// PendingMaintenanceCalls gets all the calls that were made to PendingMaintenance.
+// Check the length with:
+//
+//	len(mockedEntityRepo.PendingMaintenanceCalls())
+func (mock *EntityRepo) PendingMaintenanceCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Limit int
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}
+	mock.lockPendingMaintenance.RLock()
+	calls = mock.calls.PendingMaintenance
+	mock.lockPendingMaintenance.RUnlock()
+	return calls
+}
+
+// PruneOrphans calls PruneOrphansFunc.
+func (mock *EntityRepo) PruneOrphans(ctx context.Context, b port.BankRef, ids []port.EntityID) (int, error) {
+	if mock.PruneOrphansFunc == nil {
+		panic("EntityRepo.PruneOrphansFunc: method is nil but EntityRepo.PruneOrphans was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.EntityID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockPruneOrphans.Lock()
+	mock.calls.PruneOrphans = append(mock.calls.PruneOrphans, callInfo)
+	mock.lockPruneOrphans.Unlock()
+	return mock.PruneOrphansFunc(ctx, b, ids)
+}
+
+// PruneOrphansCalls gets all the calls that were made to PruneOrphans.
+// Check the length with:
+//
+//	len(mockedEntityRepo.PruneOrphansCalls())
+func (mock *EntityRepo) PruneOrphansCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.EntityID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.EntityID
+	}
+	mock.lockPruneOrphans.RLock()
+	calls = mock.calls.PruneOrphans
+	mock.lockPruneOrphans.RUnlock()
+	return calls
+}
+
 // Upsert calls UpsertFunc.
 func (mock *EntityRepo) Upsert(ctx context.Context, e domain.Entity) (port.EntityID, error) {
 	if mock.UpsertFunc == nil {
@@ -2631,6 +3247,15 @@ var _ port.LinkRepo = &LinkRepo{}
 //
 //		// make and configure a mocked port.LinkRepo
 //		mockedLinkRepo := &LinkRepo{
+//			ClearDirtyFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) error {
+//				panic("mock out the ClearDirty method")
+//			},
+//			CountFunc: func(ctx context.Context, unit port.UnitID, kind domain.LinkKind) (int, error) {
+//				panic("mock out the Count method")
+//			},
+//			DirtyFunc: func(ctx context.Context, b port.BankRef, limit int) ([]port.UnitID, error) {
+//				panic("mock out the Dirty method")
+//			},
 //			InsertFunc: func(ctx context.Context, ls []domain.Link) error {
 //				panic("mock out the Insert method")
 //			},
@@ -2641,11 +3266,47 @@ var _ port.LinkRepo = &LinkRepo{}
 //
 //	}
 type LinkRepo struct {
+	// ClearDirtyFunc mocks the ClearDirty method.
+	ClearDirtyFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) error
+
+	// CountFunc mocks the Count method.
+	CountFunc func(ctx context.Context, unit port.UnitID, kind domain.LinkKind) (int, error)
+
+	// DirtyFunc mocks the Dirty method.
+	DirtyFunc func(ctx context.Context, b port.BankRef, limit int) ([]port.UnitID, error)
+
 	// InsertFunc mocks the Insert method.
 	InsertFunc func(ctx context.Context, ls []domain.Link) error
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// ClearDirty holds details about calls to the ClearDirty method.
+		ClearDirty []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.UnitID
+		}
+		// Count holds details about calls to the Count method.
+		Count []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Unit is the unit argument value.
+			Unit port.UnitID
+			// Kind is the kind argument value.
+			Kind domain.LinkKind
+		}
+		// Dirty holds details about calls to the Dirty method.
+		Dirty []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Limit is the limit argument value.
+			Limit int
+		}
 		// Insert holds details about calls to the Insert method.
 		Insert []struct {
 			// Ctx is the ctx argument value.
@@ -2654,7 +3315,130 @@ type LinkRepo struct {
 			Ls []domain.Link
 		}
 	}
-	lockInsert sync.RWMutex
+	lockClearDirty sync.RWMutex
+	lockCount      sync.RWMutex
+	lockDirty      sync.RWMutex
+	lockInsert     sync.RWMutex
+}
+
+// ClearDirty calls ClearDirtyFunc.
+func (mock *LinkRepo) ClearDirty(ctx context.Context, b port.BankRef, ids []port.UnitID) error {
+	if mock.ClearDirtyFunc == nil {
+		panic("LinkRepo.ClearDirtyFunc: method is nil but LinkRepo.ClearDirty was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockClearDirty.Lock()
+	mock.calls.ClearDirty = append(mock.calls.ClearDirty, callInfo)
+	mock.lockClearDirty.Unlock()
+	return mock.ClearDirtyFunc(ctx, b, ids)
+}
+
+// ClearDirtyCalls gets all the calls that were made to ClearDirty.
+// Check the length with:
+//
+//	len(mockedLinkRepo.ClearDirtyCalls())
+func (mock *LinkRepo) ClearDirtyCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}
+	mock.lockClearDirty.RLock()
+	calls = mock.calls.ClearDirty
+	mock.lockClearDirty.RUnlock()
+	return calls
+}
+
+// Count calls CountFunc.
+func (mock *LinkRepo) Count(ctx context.Context, unit port.UnitID, kind domain.LinkKind) (int, error) {
+	if mock.CountFunc == nil {
+		panic("LinkRepo.CountFunc: method is nil but LinkRepo.Count was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		Unit port.UnitID
+		Kind domain.LinkKind
+	}{
+		Ctx:  ctx,
+		Unit: unit,
+		Kind: kind,
+	}
+	mock.lockCount.Lock()
+	mock.calls.Count = append(mock.calls.Count, callInfo)
+	mock.lockCount.Unlock()
+	return mock.CountFunc(ctx, unit, kind)
+}
+
+// CountCalls gets all the calls that were made to Count.
+// Check the length with:
+//
+//	len(mockedLinkRepo.CountCalls())
+func (mock *LinkRepo) CountCalls() []struct {
+	Ctx  context.Context
+	Unit port.UnitID
+	Kind domain.LinkKind
+} {
+	var calls []struct {
+		Ctx  context.Context
+		Unit port.UnitID
+		Kind domain.LinkKind
+	}
+	mock.lockCount.RLock()
+	calls = mock.calls.Count
+	mock.lockCount.RUnlock()
+	return calls
+}
+
+// Dirty calls DirtyFunc.
+func (mock *LinkRepo) Dirty(ctx context.Context, b port.BankRef, limit int) ([]port.UnitID, error) {
+	if mock.DirtyFunc == nil {
+		panic("LinkRepo.DirtyFunc: method is nil but LinkRepo.Dirty was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Limit: limit,
+	}
+	mock.lockDirty.Lock()
+	mock.calls.Dirty = append(mock.calls.Dirty, callInfo)
+	mock.lockDirty.Unlock()
+	return mock.DirtyFunc(ctx, b, limit)
+}
+
+// DirtyCalls gets all the calls that were made to Dirty.
+// Check the length with:
+//
+//	len(mockedLinkRepo.DirtyCalls())
+func (mock *LinkRepo) DirtyCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Limit int
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}
+	mock.lockDirty.RLock()
+	calls = mock.calls.Dirty
+	mock.lockDirty.RUnlock()
+	return calls
 }
 
 // Insert calls InsertFunc.
@@ -2899,6 +3683,9 @@ var _ port.EventRepo = &EventRepo{}
 //			ListFunc: func(ctx context.Context, b port.BankRef, afterSeq int64, limit int) ([]domain.LifecycleEvent, error) {
 //				panic("mock out the List method")
 //			},
+//			PruneFunc: func(ctx context.Context, before time.Time) (int, error) {
+//				panic("mock out the Prune method")
+//			},
 //		}
 //
 //		// use mockedEventRepo in code that requires port.EventRepo
@@ -2911,6 +3698,9 @@ type EventRepo struct {
 
 	// ListFunc mocks the List method.
 	ListFunc func(ctx context.Context, b port.BankRef, afterSeq int64, limit int) ([]domain.LifecycleEvent, error)
+
+	// PruneFunc mocks the Prune method.
+	PruneFunc func(ctx context.Context, before time.Time) (int, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -2932,9 +3722,17 @@ type EventRepo struct {
 			// Limit is the limit argument value.
 			Limit int
 		}
+		// Prune holds details about calls to the Prune method.
+		Prune []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Before is the before argument value.
+			Before time.Time
+		}
 	}
 	lockAppend sync.RWMutex
 	lockList   sync.RWMutex
+	lockPrune  sync.RWMutex
 }
 
 // Append calls AppendFunc.
@@ -3017,6 +3815,226 @@ func (mock *EventRepo) ListCalls() []struct {
 	return calls
 }
 
+// Prune calls PruneFunc.
+func (mock *EventRepo) Prune(ctx context.Context, before time.Time) (int, error) {
+	if mock.PruneFunc == nil {
+		panic("EventRepo.PruneFunc: method is nil but EventRepo.Prune was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Before time.Time
+	}{
+		Ctx:    ctx,
+		Before: before,
+	}
+	mock.lockPrune.Lock()
+	mock.calls.Prune = append(mock.calls.Prune, callInfo)
+	mock.lockPrune.Unlock()
+	return mock.PruneFunc(ctx, before)
+}
+
+// PruneCalls gets all the calls that were made to Prune.
+// Check the length with:
+//
+//	len(mockedEventRepo.PruneCalls())
+func (mock *EventRepo) PruneCalls() []struct {
+	Ctx    context.Context
+	Before time.Time
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Before time.Time
+	}
+	mock.lockPrune.RLock()
+	calls = mock.calls.Prune
+	mock.lockPrune.RUnlock()
+	return calls
+}
+
+// Ensure that DirectiveRepo does implement port.DirectiveRepo.
+// If this is not the case, regenerate this file with mockery.
+var _ port.DirectiveRepo = &DirectiveRepo{}
+
+// DirectiveRepo is a mock implementation of port.DirectiveRepo.
+//
+//	func TestSomethingThatUsesDirectiveRepo(t *testing.T) {
+//
+//		// make and configure a mocked port.DirectiveRepo
+//		mockedDirectiveRepo := &DirectiveRepo{
+//			DeleteFunc: func(ctx context.Context, b port.BankRef, id port.DirectiveID) error {
+//				panic("mock out the Delete method")
+//			},
+//			ListFunc: func(ctx context.Context, b port.BankRef, activeOnly bool) ([]domain.Directive, error) {
+//				panic("mock out the List method")
+//			},
+//			UpsertFunc: func(ctx context.Context, d domain.Directive) (port.DirectiveID, error) {
+//				panic("mock out the Upsert method")
+//			},
+//		}
+//
+//		// use mockedDirectiveRepo in code that requires port.DirectiveRepo
+//		// and then make assertions.
+//
+//	}
+type DirectiveRepo struct {
+	// DeleteFunc mocks the Delete method.
+	DeleteFunc func(ctx context.Context, b port.BankRef, id port.DirectiveID) error
+
+	// ListFunc mocks the List method.
+	ListFunc func(ctx context.Context, b port.BankRef, activeOnly bool) ([]domain.Directive, error)
+
+	// UpsertFunc mocks the Upsert method.
+	UpsertFunc func(ctx context.Context, d domain.Directive) (port.DirectiveID, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Delete holds details about calls to the Delete method.
+		Delete []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.DirectiveID
+		}
+		// List holds details about calls to the List method.
+		List []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ActiveOnly is the activeOnly argument value.
+			ActiveOnly bool
+		}
+		// Upsert holds details about calls to the Upsert method.
+		Upsert []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// D is the d argument value.
+			D domain.Directive
+		}
+	}
+	lockDelete sync.RWMutex
+	lockList   sync.RWMutex
+	lockUpsert sync.RWMutex
+}
+
+// Delete calls DeleteFunc.
+func (mock *DirectiveRepo) Delete(ctx context.Context, b port.BankRef, id port.DirectiveID) error {
+	if mock.DeleteFunc == nil {
+		panic("DirectiveRepo.DeleteFunc: method is nil but DirectiveRepo.Delete was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.DirectiveID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockDelete.Lock()
+	mock.calls.Delete = append(mock.calls.Delete, callInfo)
+	mock.lockDelete.Unlock()
+	return mock.DeleteFunc(ctx, b, id)
+}
+
+// DeleteCalls gets all the calls that were made to Delete.
+// Check the length with:
+//
+//	len(mockedDirectiveRepo.DeleteCalls())
+func (mock *DirectiveRepo) DeleteCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.DirectiveID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.DirectiveID
+	}
+	mock.lockDelete.RLock()
+	calls = mock.calls.Delete
+	mock.lockDelete.RUnlock()
+	return calls
+}
+
+// List calls ListFunc.
+func (mock *DirectiveRepo) List(ctx context.Context, b port.BankRef, activeOnly bool) ([]domain.Directive, error) {
+	if mock.ListFunc == nil {
+		panic("DirectiveRepo.ListFunc: method is nil but DirectiveRepo.List was just called")
+	}
+	callInfo := struct {
+		Ctx        context.Context
+		B          port.BankRef
+		ActiveOnly bool
+	}{
+		Ctx:        ctx,
+		B:          b,
+		ActiveOnly: activeOnly,
+	}
+	mock.lockList.Lock()
+	mock.calls.List = append(mock.calls.List, callInfo)
+	mock.lockList.Unlock()
+	return mock.ListFunc(ctx, b, activeOnly)
+}
+
+// ListCalls gets all the calls that were made to List.
+// Check the length with:
+//
+//	len(mockedDirectiveRepo.ListCalls())
+func (mock *DirectiveRepo) ListCalls() []struct {
+	Ctx        context.Context
+	B          port.BankRef
+	ActiveOnly bool
+} {
+	var calls []struct {
+		Ctx        context.Context
+		B          port.BankRef
+		ActiveOnly bool
+	}
+	mock.lockList.RLock()
+	calls = mock.calls.List
+	mock.lockList.RUnlock()
+	return calls
+}
+
+// Upsert calls UpsertFunc.
+func (mock *DirectiveRepo) Upsert(ctx context.Context, d domain.Directive) (port.DirectiveID, error) {
+	if mock.UpsertFunc == nil {
+		panic("DirectiveRepo.UpsertFunc: method is nil but DirectiveRepo.Upsert was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		D   domain.Directive
+	}{
+		Ctx: ctx,
+		D:   d,
+	}
+	mock.lockUpsert.Lock()
+	mock.calls.Upsert = append(mock.calls.Upsert, callInfo)
+	mock.lockUpsert.Unlock()
+	return mock.UpsertFunc(ctx, d)
+}
+
+// UpsertCalls gets all the calls that were made to Upsert.
+// Check the length with:
+//
+//	len(mockedDirectiveRepo.UpsertCalls())
+func (mock *DirectiveRepo) UpsertCalls() []struct {
+	Ctx context.Context
+	D   domain.Directive
+} {
+	var calls []struct {
+		Ctx context.Context
+		D   domain.Directive
+	}
+	mock.lockUpsert.RLock()
+	calls = mock.calls.Upsert
+	mock.lockUpsert.RUnlock()
+	return calls
+}
+
 // Ensure that BankRepo does implement port.BankRepo.
 // If this is not the case, regenerate this file with mockery.
 var _ port.BankRepo = &BankRepo{}
@@ -3032,6 +4050,9 @@ var _ port.BankRepo = &BankRepo{}
 //			},
 //			DeleteFunc: func(ctx context.Context, b port.BankRef) error {
 //				panic("mock out the Delete method")
+//			},
+//			DeleteBatchFunc: func(ctx context.Context, b port.BankRef, limit int) (int, error) {
+//				panic("mock out the DeleteBatch method")
 //			},
 //			EnsureFunc: func(ctx context.Context, b port.BankRef) (domain.Bank, error) {
 //				panic("mock out the Ensure method")
@@ -3063,6 +4084,9 @@ type BankRepo struct {
 
 	// DeleteFunc mocks the Delete method.
 	DeleteFunc func(ctx context.Context, b port.BankRef) error
+
+	// DeleteBatchFunc mocks the DeleteBatch method.
+	DeleteBatchFunc func(ctx context.Context, b port.BankRef, limit int) (int, error)
 
 	// EnsureFunc mocks the Ensure method.
 	EnsureFunc func(ctx context.Context, b port.BankRef) (domain.Bank, error)
@@ -3097,6 +4121,15 @@ type BankRepo struct {
 			Ctx context.Context
 			// B is the b argument value.
 			B port.BankRef
+		}
+		// DeleteBatch holds details about calls to the DeleteBatch method.
+		DeleteBatch []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Limit is the limit argument value.
+			Limit int
 		}
 		// Ensure holds details about calls to the Ensure method.
 		Ensure []struct {
@@ -3149,6 +4182,7 @@ type BankRepo struct {
 	}
 	lockCreate          sync.RWMutex
 	lockDelete          sync.RWMutex
+	lockDeleteBatch     sync.RWMutex
 	lockEnsure          sync.RWMutex
 	lockGet             sync.RWMutex
 	lockMarkDeleting    sync.RWMutex
@@ -3226,6 +4260,46 @@ func (mock *BankRepo) DeleteCalls() []struct {
 	mock.lockDelete.RLock()
 	calls = mock.calls.Delete
 	mock.lockDelete.RUnlock()
+	return calls
+}
+
+// DeleteBatch calls DeleteBatchFunc.
+func (mock *BankRepo) DeleteBatch(ctx context.Context, b port.BankRef, limit int) (int, error) {
+	if mock.DeleteBatchFunc == nil {
+		panic("BankRepo.DeleteBatchFunc: method is nil but BankRepo.DeleteBatch was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Limit: limit,
+	}
+	mock.lockDeleteBatch.Lock()
+	mock.calls.DeleteBatch = append(mock.calls.DeleteBatch, callInfo)
+	mock.lockDeleteBatch.Unlock()
+	return mock.DeleteBatchFunc(ctx, b, limit)
+}
+
+// DeleteBatchCalls gets all the calls that were made to DeleteBatch.
+// Check the length with:
+//
+//	len(mockedBankRepo.DeleteBatchCalls())
+func (mock *BankRepo) DeleteBatchCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Limit int
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}
+	mock.lockDeleteBatch.RLock()
+	calls = mock.calls.DeleteBatch
+	mock.lockDeleteBatch.RUnlock()
 	return calls
 }
 
@@ -3955,6 +5029,9 @@ var _ port.Tx = &Tx{}
 //			ChunksFunc: func() port.ChunkRepo {
 //				panic("mock out the Chunks method")
 //			},
+//			DirectivesFunc: func() port.DirectiveRepo {
+//				panic("mock out the Directives method")
+//			},
 //			DocumentsFunc: func() port.DocumentRepo {
 //				panic("mock out the Documents method")
 //			},
@@ -4013,6 +5090,9 @@ type Tx struct {
 	// ChunksFunc mocks the Chunks method.
 	ChunksFunc func() port.ChunkRepo
 
+	// DirectivesFunc mocks the Directives method.
+	DirectivesFunc func() port.DirectiveRepo
+
 	// DocumentsFunc mocks the Documents method.
 	DocumentsFunc func() port.DocumentRepo
 
@@ -4069,6 +5149,9 @@ type Tx struct {
 		}
 		// Chunks holds details about calls to the Chunks method.
 		Chunks []struct {
+		}
+		// Directives holds details about calls to the Directives method.
+		Directives []struct {
 		}
 		// Documents holds details about calls to the Documents method.
 		Documents []struct {
@@ -4142,6 +5225,7 @@ type Tx struct {
 	lockBankSeq        sync.RWMutex
 	lockBanks          sync.RWMutex
 	lockChunks         sync.RWMutex
+	lockDirectives     sync.RWMutex
 	lockDocuments      sync.RWMutex
 	lockEntities       sync.RWMutex
 	lockEvents         sync.RWMutex
@@ -4245,6 +5329,33 @@ func (mock *Tx) ChunksCalls() []struct {
 	mock.lockChunks.RLock()
 	calls = mock.calls.Chunks
 	mock.lockChunks.RUnlock()
+	return calls
+}
+
+// Directives calls DirectivesFunc.
+func (mock *Tx) Directives() port.DirectiveRepo {
+	if mock.DirectivesFunc == nil {
+		panic("Tx.DirectivesFunc: method is nil but Tx.Directives was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockDirectives.Lock()
+	mock.calls.Directives = append(mock.calls.Directives, callInfo)
+	mock.lockDirectives.Unlock()
+	return mock.DirectivesFunc()
+}
+
+// DirectivesCalls gets all the calls that were made to Directives.
+// Check the length with:
+//
+//	len(mockedTx.DirectivesCalls())
+func (mock *Tx) DirectivesCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockDirectives.RLock()
+	calls = mock.calls.Directives
+	mock.lockDirectives.RUnlock()
 	return calls
 }
 

@@ -57,7 +57,9 @@ def upgrade() -> None:
             direction        text             NOT NULL CHECK (direction IN ('out', 'in')),
             weight           double precision NOT NULL DEFAULT 1,
             created_at       timestamptz      NOT NULL DEFAULT now(),
-            PRIMARY KEY (archived_unit_id, other_unit_id, kind, direction)
+            PRIMARY KEY (archived_unit_id, other_unit_id, kind, direction),
+            CONSTRAINT parked_links_kind CHECK (kind IN ('temporal', 'semantic', 'causal')),
+            CONSTRAINT parked_links_no_self_link CHECK (archived_unit_id <> other_unit_id)
         )
     """)
     op.execute("""
@@ -99,6 +101,7 @@ def upgrade() -> None:
         CREATE INDEX memory_units_archive_operation_idx
             ON memory_units_archive (operation_id) WHERE operation_id IS NOT NULL
     """)
+    op.execute("CREATE INDEX parked_links_archived_unit_idx ON parked_links (tenant_id, bank_id, archived_unit_id)")
     op.execute("CREATE INDEX parked_links_other_unit_idx ON parked_links (other_unit_id)")
     op.execute("CREATE INDEX memory_audit_unit_idx ON memory_audit (tenant_id, bank_id, unit_id, at)")
     op.execute("""

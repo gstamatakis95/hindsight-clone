@@ -652,8 +652,8 @@ type UpdateMemoryRequest struct {
 	State MemoryState `protobuf:"varint,11,opt,name=state,proto3,enum=memory.v1.MemoryState" json:"state,omitempty"`
 	// Why the change was made; stored on the audit row.
 	Reason string `protobuf:"bytes,12,opt,name=reason,proto3" json:"reason,omitempty"`
-	// Overrides for re-deriving (entity resolution, EXTRACT / TIME_PARSE models); kept on the rederive
-	// operation.
+	// Overrides for re-deriving (entity resolution, EXTRACT / TIME_PARSE models); other fields =
+	// INVALID_ARGUMENT. Kept on the rederive operation row.
 	Overrides     *BankConfig `protobuf:"bytes,13,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

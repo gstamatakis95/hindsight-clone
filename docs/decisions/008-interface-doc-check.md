@@ -16,7 +16,8 @@ What it checks:
 
 What it skips:
 - Files marked `// Code generated ... DO NOT EDIT.`
-- The `gen/`, `internal/mocks/`, `tools/mockery/` and `third_party/` directories.
+- The `gen/`, `internal/mocks/`, `tools/mockery/` and `third_party/` directories, matched as a path
+  suffix so the check gives the same result from any root (review round 1).
 - `testdata` and hidden directories.
 
 It prints `file:line: method I.M has no doc comment` per finding and exits 1 if there are any.

@@ -154,8 +154,8 @@ message UpdateMemoryRequest {
   MemoryState state = 11;
   // Why the change was made; stored on the audit row.
   string reason = 12;
-  // Overrides for re-deriving (entity resolution, EXTRACT / TIME_PARSE models); kept on the rederive
-  // operation.
+  // Overrides for re-deriving (entity resolution, EXTRACT / TIME_PARSE models); other fields =
+  // INVALID_ARGUMENT. Kept on the rederive operation row.
   BankConfig overrides = 13;
 }
 

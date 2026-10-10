@@ -37,8 +37,9 @@ service BankService {
   // PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
   rpc PreviewPrompt(PreviewPromptRequest) returns (PreviewPromptResponse);
   // DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one
-  // transaction. The only bulk hard delete: afterwards writes fail FAILED_PRECONDITION and reads NOT_FOUND
-  // until the bank is gone.
+  // transaction. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION and reads
+  // NOT_FOUND. Once delete_bank has removed the bank row, a write creates a new, empty bank with no old
+  // events or operations.
   rpc DeleteBank(DeleteBankRequest) returns (DeleteBankResponse);
   // ExportBankTemplate exports the bank's config, directives and mental-model specs.
   rpc ExportBankTemplate(ExportBankTemplateRequest) returns (ExportBankTemplateResponse);
@@ -64,7 +65,7 @@ message Bank {
   BankConfig config = 3;
   // When the bank was created.
   google.protobuf.Timestamp created_at = 4;
-  // Tombstoned by DeleteBank; writes fail FAILED_PRECONDITION.
+  // Tombstoned by DeleteBank; writes fail FAILED_PRECONDITION and reads NOT_FOUND.
   bool deleting = 5;
 }
 

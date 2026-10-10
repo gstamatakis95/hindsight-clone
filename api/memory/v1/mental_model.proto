@@ -72,7 +72,7 @@ message RefreshTrigger {
   optional int32 min_refresh_interval_seconds = 4;
   // How the model's tags filter memories, default TAGS_MATCH_ALL_STRICT when the model is tagged.
   TagsMatch tags_match = 5;
-  // Boolean tag filter; overrides the model's tags and tags_match.
+  // Boolean tag filter, top-level groups AND-ed; when set it replaces the model's tags and tags_match.
   repeated TagGroup tag_groups = 6;
   // Fact types in scope; empty = all.
   repeated FactType fact_types = 7;
@@ -114,8 +114,9 @@ message MentalModelSpec {
   optional int32 max_tokens = 6;
   // Refresh trigger, mode, strategy and scope.
   RefreshTrigger trigger = 7;
-  // Overrides applied to every refresh (reflect and mental-model config, REFLECT / SYNTHESIZE /
-  // MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models).
+  // Overrides stored on the model and applied to every refresh (reflect and mental-model config, refresh
+  // strategy, REFLECT / SYNTHESIZE / MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models); other fields =
+  // INVALID_ARGUMENT.
   BankConfig overrides = 8;
 }
 
@@ -233,7 +234,9 @@ message RefreshMentalModelRequest {
   string mental_model_id = 2;
   // Force a full refresh; OR-ed into a queued refresh this joins.
   bool force_full = 3;
-  // Overrides for this refresh only; kept on the operation and replace a queued refresh's overrides.
+  // Overrides for this refresh only (reflect and mental-model config, refresh strategy, REFLECT /
+  // SYNTHESIZE / MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models); other fields = INVALID_ARGUMENT. Kept on
+  // the operation; they replace a queued refresh's overrides.
   BankConfig overrides = 4;
   // Per-call override of the trigger's strategy; unset = the trigger's.
   RefreshStrategy strategy = 5;
@@ -340,7 +343,7 @@ message ResolvedScope {
   repeated string tags = 1;
   // Effective tag match.
   TagsMatch tags_match = 2;
-  // Effective tag groups; when set they replace tags and tags_match.
+  // Effective tag groups, top-level groups AND-ed; when set they replace tags and tags_match.
   repeated TagGroup tag_groups = 3;
   // Effective fact types; empty = all.
   repeated FactType fact_types = 4;

@@ -24,7 +24,7 @@ BREAKING_AGAINST ?= main
 export MEMD_PG_PORT ?= 55432
 export MEMD_DSN ?= postgresql+psycopg://memd:memd@localhost:$(MEMD_PG_PORT)/memd
 
-.PHONY: help gen gen-proto gen-sqlc gen-mocks lint lint-go lint-ifacedoc lint-proto lint-py fmt test e2e \
+.PHONY: help gen gen-proto gen-sqlc gen-mocks lint lint-go lint-ifacedoc lint-proto lint-py ruff fmt test e2e \
 	up down migrate migrate-check downgrade run tools venv
 
 help: ## list targets
@@ -59,13 +59,20 @@ lint-go:
 lint-ifacedoc:
 	go run ./tools/ifacedoc .
 
+# buf breaking runs against BREAKING_AGAINST (default main; after the contracts merge, use
+# BREAKING_AGAINST=contracts-v1 to check against the frozen tag). An unresolvable ref fails the target; the
+# check is skipped only when the ref exists but has no protos yet (the WP-00 branch against an empty main).
 lint-proto:
 	buf lint
-	@if git cat-file -e $(BREAKING_AGAINST):api/memory/v1 2>/dev/null; then \
-		buf breaking --against '.git#branch=$(BREAKING_AGAINST)'; \
+	@git rev-parse --verify --quiet '$(BREAKING_AGAINST)^{commit}' >/dev/null || \
+		{ echo "buf breaking: ref '$(BREAKING_AGAINST)' does not resolve" >&2; exit 1; }
+	@if git cat-file -e '$(BREAKING_AGAINST):api/memory/v1' 2>/dev/null; then \
+		buf breaking --against '.git#ref=$(BREAKING_AGAINST)'; \
 	else \
 		echo "buf breaking: skipped ($(BREAKING_AGAINST) has no api/memory/v1 yet)"; \
 	fi
+
+ruff: lint-py ## ruff check + format --check over migrations
 
 lint-py: venv
 	$(RUFF) check migrations

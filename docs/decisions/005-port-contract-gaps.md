@@ -33,24 +33,34 @@ any downstream CCR starts from an honest baseline.
   - The `SeqRange` is what lets a mental-model refresh read "a snapshot holding everything at or below S"
     and "only what changed since last_seq_seen" without a later port change.
   - `Hit` is (ID, Score), and a higher score is better.
-- **Jobs.**
-  - Dedupe matches (bank, kind, serial key) only among rows without overrides. A job with overrides
-    never joins and is never joined, in either direction.
+- **Jobs** (amended by decision 012, orchestrator ruling, review round 1).
+  - Dedupe matches (bank, kind, serial key) only among joinable rows (`operations.joinable`): rows
+    enqueued with a dedupe policy and no overrides, plus every refresh_mental_model row (R1).
   - `Attempt` counts earlier failed or reclaimed runs and is 0 on the first run.
   - `domain.OperationKind.MaxAttempts()` returns 3 for every kind and 0 (unbounded) for consolidate.
-  - ReclaimStale fails a job when attempt+1 >= max.
-  - Upgrade replaces the payload (if non-nil) and the overrides of a still-pending row. Otherwise it
-    returns `ErrFailedPrecondition`.
-  - Reschedule parks or releases a pending row, or returns a processing row to pending.
-  - The Claimer never overwrites CANCELLED.
-  - `Alive` stays true for a delete_bank job of a tombstoned bank.
+  - ReclaimStale fails a job when attempt+1 >= max, except kinds with `HasFinalizer` (R10).
+  - Upgrade shallow-merges the payload (booleans OR-ed) and replaces overrides only when given (R2).
+  - Reschedule acts on PENDING rows only and returns `ErrFailedPrecondition` otherwise (R3).
+  - Progress, Complete and Fail are fenced to PROCESSING rows (R7). Cancelling a processing row keeps
+    its serial key until the handler stops (R8).
+  - `Alive` is true only while PROCESSING, and stays true for a delete_bank job of a tombstoned bank.
 - **Chat types** follow the OpenAI chat-completions shape: `ChatMessage`, `ToolSpec`, `ToolCall` (raw
   JSON arguments, possibly malformed), `ChatResponse` and `ChatRole`. `StructuredRequest` and
   `ChatRequest` also carry a `Name` (prompt template name), which the scripted LLM fake keys on
   ("(slot, prompt name)" in WP-02's card).
-- **Reader** is exactly the spec's six methods. The API path will need more reads: documents, memory
-  lists, stats, operations, directives, scopes, events, tags and pages. The spec gives no port for them,
-  so they are left to CCRs from the WPs that need them rather than invented here.
+- **Write-side ports the spec clearly requires were added** in review round 1 (decision 012):
+  `Tx.Directives()` / `DirectiveRepo`; `UnitRepo.Update`, `SetDocumentTags`, `AppendAudit` and
+  `RecordObservationVersion`; `EntityRepo.PendingMaintenance` and `PruneOrphans`; `LinkRepo.Count`,
+  `Dirty` and `ClearDirty`; `BankRepo.DeleteBatch`; `Queue.Get`, `List`, `Cancel`, `Retry` and `Prune`;
+  `EventRepo.Prune`.
+- **Reader** is still exactly the spec's six methods. Expected CCRs for API-path reads:
+  - document get / list (WP-13, WP-06);
+  - memory list over both tables and observation history (WP-13);
+  - stats and tag counts (WP-13);
+  - directive selection by tags (WP-11, WP-13; today via `DirectiveRepo.List` in a tx);
+  - scope listing and per-scope unconsolidated counts (WP-10);
+  - mental-model list / search / page reads and the max seq in a model's scope (WP-12);
+  - the reprocess operation id on archive and audit rows of replaced units (WP-08).
 
 ## Alternatives
 - Copy the spec's `type BankRef struct{...}` into port and duplicate it in domain. Rejected: domain types

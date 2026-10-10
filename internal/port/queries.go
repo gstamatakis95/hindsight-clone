@@ -2,19 +2,24 @@ package port
 
 import "memd/internal/domain"
 
-// SeqRange bounds a search to units whose seq is in (After, UpTo]. Zero values mean unbounded, so the
-// zero SeqRange matches everything. Mental-model refreshes use it to read a stable snapshot (UpTo = the
-// BankSeq they read first) or only what changed since last_seq_seen (After).
+// SeqRange bounds a search to units whose seq is in (After, *UpTo]. The zero SeqRange matches everything.
+// Mental-model refreshes use it to read a stable snapshot (UpTo = the BankSeq S they read first; S = 0
+// means an empty snapshot that matches nothing) or only what changed since last_seq_seen (After).
 type SeqRange struct {
-	// After excludes units with seq <= After; 0 = no lower bound.
+	// After excludes units with seq <= After; 0 = no lower bound (every seq is >= 1).
 	After int64
-	// UpTo excludes units with seq > UpTo; 0 = no upper bound.
-	UpTo int64
+	// UpTo excludes units with seq > *UpTo; nil = no upper bound. A non-nil 0 matches nothing.
+	UpTo *int64
+}
+
+// SeqUpTo returns a SeqRange holding everything with seq in (after, upTo].
+func SeqUpTo(after, upTo int64) SeqRange {
+	return SeqRange{After: after, UpTo: &upTo}
 }
 
 // Contains reports whether seq lies in the range.
 func (r SeqRange) Contains(seq int64) bool {
-	return seq > r.After && (r.UpTo == 0 || seq <= r.UpTo)
+	return seq > r.After && (r.UpTo == nil || seq <= *r.UpTo)
 }
 
 // PredicateOp names a node of an SQLPredicate tree.
@@ -28,7 +33,7 @@ const (
 	PredicateAnd PredicateOp = "and"
 	// PredicateOr holds when at least one argument holds (an empty Or is false).
 	PredicateOr PredicateOp = "or"
-	// PredicateNot holds when its single argument does not.
+	// PredicateNot holds when its single argument does not (a not without exactly one argument is false).
 	PredicateNot PredicateOp = "not"
 )
 
@@ -48,7 +53,8 @@ type SQLPredicate struct {
 }
 
 // Eval reports whether a unit with the given tags satisfies p. It is the reference semantics every
-// adapter's rendering must agree with.
+// adapter's rendering must agree with, and it matches domain.MatchGroup: an empty and is true, an empty or
+// is false, and a malformed node (unknown op, a not without exactly one argument) matches nothing.
 func (p *SQLPredicate) Eval(unitTags []string) bool {
 	if p == nil {
 		return true
@@ -71,7 +77,7 @@ func (p *SQLPredicate) Eval(unitTags []string) bool {
 		}
 		return false
 	case PredicateNot:
-		return len(p.Args) != 1 || !p.Args[0].Eval(unitTags)
+		return len(p.Args) == 1 && !p.Args[0].Eval(unitTags)
 	default:
 		return false
 	}

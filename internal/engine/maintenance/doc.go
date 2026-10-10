@@ -4,5 +4,5 @@
 // entities and co-occurrences no live unit references. It works in short committed batches within a
 // time budget measured on the injected port.Clock and resumes where it stopped.
 //
-// maintenance declares the small Linker it consumes; retain.Linker satisfies it.
+// maintenance declares the small Linker it consumes (no import of retain); retain.Linker satisfies it.
 package maintenance

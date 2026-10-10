@@ -102,6 +102,7 @@ func (EventType) EnumDescriptor() ([]byte, []int) {
 type LifecycleEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The bank's change_seq for the change: commit-ordered within the bank, so polling by seq never skips.
+	// All events written by one transaction share its seq.
 	Seq int64 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
 	// What happened.
 	Type EventType `protobuf:"varint,2,opt,name=type,proto3,enum=memory.v1.EventType" json:"type,omitempty"`
@@ -196,7 +197,8 @@ type ListEventsRequest struct {
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Return only events with seq greater than this; 0 = from the oldest retained event.
 	AfterSeq int64 `protobuf:"varint,2,opt,name=after_seq,json=afterSeq,proto3" json:"after_seq,omitempty"`
-	// Maximum events to return; 0 = server default.
+	// Soft maximum of events to return; 0 = server default. A page never splits a seq group: it is
+	// extended past the limit to finish the last seq it includes.
 	Limit int32 `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	// Only these event types; empty = all types.
 	Types         []EventType `protobuf:"varint,4,rep,packed,name=types,proto3,enum=memory.v1.EventType" json:"types,omitempty"`
@@ -267,7 +269,8 @@ type ListEventsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Events with seq > after_seq, ascending.
 	Events []*LifecycleEvent `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
-	// Seq to pass as after_seq on the next poll.
+	// Seq to pass as after_seq on the next poll: the highest seq in this page, or the request's after_seq
+	// when the page is empty (so never 0 unless after_seq was 0).
 	LastSeq       int64 `protobuf:"varint,2,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

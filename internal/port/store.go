@@ -12,7 +12,10 @@ type Store interface {
 	// InTx runs fn in one transaction and commits when fn returns nil; any error (or panic) rolls back.
 	// fn must not call a model: read, call the gateway, then write in a short InTx.
 	InTx(ctx context.Context, fn func(Tx) error) error
-	// Read returns the read-only view used by the stateless API path; each call is its own snapshot.
+	// Read returns the read-only view used by the stateless API path. The Reader is long-lived and safe
+	// for concurrent use; each method runs as its own statement against the latest committed data (no
+	// snapshot spans two calls, so recall arms may see a write that lands between them). It never blocks
+	// on an open InTx.
 	Read() Reader
 }
 
@@ -41,7 +44,10 @@ type Tx interface {
 	Evidence() EvidenceRepo
 	// MentalModels returns the mental-model repository bound to this transaction.
 	MentalModels() MentalModelRepo
-	// Queue returns the job producer; job rows are visible to workers only after commit.
+	// Directives returns the directive repository bound to this transaction.
+	Directives() DirectiveRepo
+	// Queue returns the operations table (producer side and operation control); job rows are visible to
+	// workers only after commit.
 	Queue() Queue
 	// Events returns the lifecycle-event repository bound to this transaction.
 	Events() EventRepo

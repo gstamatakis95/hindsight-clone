@@ -2,9 +2,16 @@
 
 Retrieval: HNSW (vector_cosine_ops) on memory_units and mental_models embeddings, a
 pg_search BM25 index on memory_units, a trigram index on entity names, tag GIN indexes.
-Jobs: the partial pending-claim index and the unique (tenant, bank, serial_key) WHERE
-processing index that backs the one-at-a-time-per-key claim. Constraint-like unique
-indexes stay with their tables (e.g. entities_label_uniq in 0003).
+Jobs: the partial pending-claim index, the unique (tenant, bank, serial_key) WHERE
+processing index that backs the one-at-a-time-per-key claim, and the active index over
+every row that holds or queues a serial key (pending, processing, and cancelled rows whose
+handler is still running, i.e. finished_at IS NULL). The claim's NOT EXISTS and the dedupe
+lookup (equality on all four columns, plus ``joinable``) both use it. The reclaim index
+covers cancelled-but-running rows too, so ReclaimStale can finish them. Constraint-like
+unique indexes stay with their tables (e.g. entities_label_uniq in 0003).
+
+The unconsolidated index excludes observations (``fact_type <> 'observation'``): only raw
+facts are consolidated; observations are its output and are never consolidated themselves.
 
 pg_search 0.26 made the ``key_field`` option a deprecated no-op, so it is omitted; the uuid
 ``id`` is listed first, following ParadeDB's convention for the key column. Filter columns use the ``pdb.literal``
@@ -40,7 +47,8 @@ INDEXES: list[tuple[str, str]] = [
         "memory_units_occurred_start_idx",
         "CREATE INDEX memory_units_occurred_start_idx ON memory_units (tenant_id, bank_id, occurred_start)",
     ),
-    # memory_units: consolidation, staleness, lists, cascades
+    # memory_units: consolidation, staleness, lists, cascades. Observations are never
+    # consolidated (they are consolidation's output), hence fact_type <> 'observation'.
     (
         "memory_units_unconsolidated_idx",
         """CREATE INDEX memory_units_unconsolidated_idx ON memory_units (tenant_id, bank_id, created_at)
@@ -109,13 +117,14 @@ INDEXES: list[tuple[str, str]] = [
                WHERE status = 'processing'""",
     ),
     (
-        "operations_active_dedupe_idx",
-        """CREATE INDEX operations_active_dedupe_idx ON operations (tenant_id, bank_id, kind, serial_key)
-               WHERE status IN ('pending', 'processing')""",
+        "operations_active_serial_key_idx",
+        """CREATE INDEX operations_active_serial_key_idx ON operations (tenant_id, bank_id, serial_key, kind)
+               WHERE status IN ('pending', 'processing') OR (status = 'cancelled' AND finished_at IS NULL)""",
     ),
     (
-        "operations_processing_heartbeat_idx",
-        "CREATE INDEX operations_processing_heartbeat_idx ON operations (heartbeat_at) WHERE status = 'processing'",
+        "operations_running_heartbeat_idx",
+        """CREATE INDEX operations_running_heartbeat_idx ON operations (heartbeat_at)
+               WHERE status = 'processing' OR (status = 'cancelled' AND finished_at IS NULL)""",
     ),
     (
         "operations_parent_idx",

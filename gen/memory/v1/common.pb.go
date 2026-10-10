@@ -151,7 +151,8 @@ func (Budget) EnumDescriptor() ([]byte, []int) {
 type TagsMatch int32
 
 const (
-	// Not set; the field's documented default applies.
+	// Not set; behaves as TAGS_MATCH_ANY unless the field documents another default (TagLeaf and
+	// ListDocuments: ANY_STRICT; RefreshTrigger on a tagged model: ALL_STRICT).
 	TagsMatch_TAGS_MATCH_UNSPECIFIED TagsMatch = 0
 	// At least one of the tags, or untagged.
 	TagsMatch_TAGS_MATCH_ANY TagsMatch = 1
@@ -605,8 +606,10 @@ func (x *ObservationScopes) GetMaxCombinations() int32 {
 	return 0
 }
 
-// TagGroup is one node of a boolean tag-filter tree; a list of groups is AND-ed. Groups override flat
-// tags + tags_match wherever both could apply.
+// TagGroup is one node of a boolean tag-filter tree; a repeated top-level tag_groups list is AND-ed. On
+// RecallRequest and ReflectRequest, tags and tag_groups are mutually exclusive: setting both is
+// INVALID_ARGUMENT. Only a mental model's RefreshTrigger.tag_groups (and the matching
+// ResolvedScope.tag_groups) replace the model's tags + tags_match.
 type TagGroup struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The node: a leaf test or a boolean combination of child groups.

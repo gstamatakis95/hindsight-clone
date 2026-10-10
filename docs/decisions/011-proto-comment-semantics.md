@@ -38,6 +38,20 @@ comments say the same thing.
     every scope.
   - `UpdateDocumentResponse.operation` is unset when the update is a set-equal no-op.
 
+- **Review round 1** (orchestrator rulings; see decision 012):
+  - ModelBinding merges per slot as a whole binding. Unset binding fields mean the gateway / adapter
+    default, not an inherited value (R4).
+  - tags and tag_groups are mutually exclusive on Recall and Reflect. Only RefreshTrigger /
+    ResolvedScope tag_groups override a model's tags (R5).
+  - ListEvents' limit is soft and never splits a seq group. `last_seq` is the highest returned seq, or
+    the request's after_seq when the page is empty (R6).
+  - Unset `TagsMatch` behaves as ANY unless a field documents another default (TagLeaf and
+    ListDocuments: ANY_STRICT; RefreshTrigger on a tagged model: ALL_STRICT).
+  - Every `overrides` comment lists exactly the reach in SPEC 898-906; other fields are
+    INVALID_ARGUMENT.
+  - `Bank.deleting` is kept as the spec lists it, though reads of a deleting bank return NOT_FOUND, so
+    clients normally never see it set.
+
 ## Alternatives
 Leave the comments vague. Rejected: buf COMMENTS only checks presence, but vague comments in a frozen
 contract would push each choice down to the implementing WP, so several WPs could each make it

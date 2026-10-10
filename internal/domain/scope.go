@@ -43,7 +43,24 @@ func EncodeScopeTags(tags []string) string {
 	return b.String()
 }
 
-// DecodeScopeTags parses an EncodeScopeTags string back into its tags.
+// ParseScopeKey decodes a stored scope key (ScopeKey.String) for bank b. It accepts only the canonical
+// encoding: every tag normalized and non-empty, strictly increasing (sorted, no duplicates). Anything else
+// is ErrInvalidArgument, so one scope has exactly one key.
+func ParseScopeKey(b BankRef, s string) (ScopeKey, error) {
+	tags, err := DecodeScopeTags(s)
+	if err != nil {
+		return ScopeKey{}, err
+	}
+	for i, t := range tags {
+		if t == "" || NormalizeTag(t) != t || (i > 0 && tags[i-1] >= t) {
+			return ScopeKey{}, fmt.Errorf("%w: scope key %q is not canonical", ErrInvalidArgument, s)
+		}
+	}
+	return ScopeKey{BankRef: b, Tags: tags}, nil
+}
+
+// DecodeScopeTags parses an EncodeScopeTags string back into its tags exactly as encoded (no
+// canonicality check; use ParseScopeKey for stored keys).
 func DecodeScopeTags(s string) ([]string, error) {
 	tags := []string{}
 	for i := 0; i < len(s); {

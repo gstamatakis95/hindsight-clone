@@ -33,6 +33,7 @@ enum EventType {
 // LifecycleEvent is one row of the lifecycle_events table, written in the state change's transaction.
 message LifecycleEvent {
   // The bank's change_seq for the change: commit-ordered within the bank, so polling by seq never skips.
+  // All events written by one transaction share its seq.
   int64 seq = 1;
   // What happened.
   EventType type = 2;
@@ -52,7 +53,8 @@ message ListEventsRequest {
   string bank_id = 1;
   // Return only events with seq greater than this; 0 = from the oldest retained event.
   int64 after_seq = 2;
-  // Maximum events to return; 0 = server default.
+  // Soft maximum of events to return; 0 = server default. A page never splits a seq group: it is
+  // extended past the limit to finish the last seq it includes.
   int32 limit = 3;
   // Only these event types; empty = all types.
   repeated EventType types = 4;
@@ -62,6 +64,7 @@ message ListEventsRequest {
 message ListEventsResponse {
   // Events with seq > after_seq, ascending.
   repeated LifecycleEvent events = 1;
-  // Seq to pass as after_seq on the next poll.
+  // Seq to pass as after_seq on the next poll: the highest seq in this page, or the request's after_seq
+  // when the page is empty (so never 0 unless after_seq was 0).
   int64 last_seq = 2;
 }

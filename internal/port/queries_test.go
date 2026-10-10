@@ -38,6 +38,9 @@ func TestSQLPredicateEval(t *testing.T) {
 	if !(&SQLPredicate{Op: PredicateAnd}).Eval(nil) {
 		t.Error("an empty and must be true")
 	}
+	if (&SQLPredicate{Op: PredicateNot}).Eval(nil) || (&SQLPredicate{Op: "bogus"}).Eval(nil) {
+		t.Error("malformed nodes must match nothing")
+	}
 }
 
 func TestSeqRangeContains(t *testing.T) {
@@ -49,9 +52,10 @@ func TestSeqRangeContains(t *testing.T) {
 		{SeqRange{}, 1, true},
 		{SeqRange{After: 5}, 5, false},
 		{SeqRange{After: 5}, 6, true},
-		{SeqRange{UpTo: 5}, 5, true},
-		{SeqRange{UpTo: 5}, 6, false},
-		{SeqRange{After: 2, UpTo: 4}, 3, true},
+		{SeqUpTo(0, 5), 5, true},
+		{SeqUpTo(0, 5), 6, false},
+		{SeqUpTo(2, 4), 3, true},
+		{SeqUpTo(0, 0), 1, false},
 	}
 	for _, tc := range cases {
 		if got := tc.r.Contains(tc.seq); got != tc.want {

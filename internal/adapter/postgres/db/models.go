@@ -273,6 +273,7 @@ type Operation struct {
 	SerialKey   pgtype.Text
 	Payload     json.RawMessage
 	Overrides   json.RawMessage
+	Joinable    bool
 	ParentID    uuid.NullUUID
 	Attempts    int32
 	RunAt       time.Time

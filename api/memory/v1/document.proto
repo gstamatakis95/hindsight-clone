@@ -130,7 +130,8 @@ message ReprocessDocumentRequest {
   string bank_id = 1;
   // Document id.
   string document_id = 2;
-  // New retain overrides; replace the stored ones. Unset = replay the stored overrides.
+  // New retain overrides, same reach as RetainRequest.overrides (other fields = INVALID_ARGUMENT); they
+  // replace the document's stored overrides. Unset = replay the stored overrides.
   BankConfig overrides = 3;
 }
 

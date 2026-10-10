@@ -12,14 +12,14 @@ trimmed, lowercased, deduplicated, sorted". The example is ambiguous: it could e
 - **Bank is not part of it.** Storage keys scopes by (tenant_id, bank_id, scope_key), so repeating the
   bank inside the string would add nothing.
 - **Decoding.** `domain.DecodeScopeTags` reverses the encoding and rejects malformed input with
-  `ErrInvalidArgument`.
+  `ErrInvalidArgument`. `domain.ParseScopeKey` also rejects non-canonical keys (unsorted, duplicate,
+  non-normalized or empty tags), so one scope has exactly one key (review round 1).
 - **Where it lives.** Encoding and normalization are in `internal/domain` (`scope.go`, `tags.go`).
   `port.ScopeKey` is an alias.
-- **Normalization.** Each tag is trimmed with `strings.TrimSpace` and lowercased with `strings.ToLower`.
-  Empty tags are dropped, the rest are sorted and deduplicated, and the result is never nil.
-- **NFC is pending.** NFC needs `golang.org/x/text/unicode/norm`, which is not an approved dependency,
-  so NFC is requested in CCR `docs/ccr/WP-00-1.md` and not applied yet. Until it lands, a precomposed
-  "é" and a decomposed "e" + combining accent are different tags.
+- **Normalization.** Each tag is NFC-normalized (`golang.org/x/text/unicode/norm`, CCR WP-00-1
+  approved in review round 1), trimmed with `strings.TrimSpace`, lowercased with `strings.ToLower` and
+  NFC-normalized again. Empty tags are dropped, the rest are sorted and deduplicated, and the result is
+  never nil.
 - **Matching semantics.** `domain.MatchTags`, `MatchGroup` and `MatchFilter` follow Hindsight's
   `search/tags.py`:
   - any / all admit untagged units;
@@ -32,7 +32,7 @@ trimmed, lowercased, deduplicated, sorted". The example is ambiguous: it could e
 ## Alternatives
 - Encode `tenant/bank` into the key. Rejected: redundant with the columns, and it would make the key
   differ between banks for the same scope.
-- Hand-roll NFC composition tables. Rejected: error-prone; the dependency is the right fix.
+- Hand-roll NFC composition tables. Rejected: error-prone; the dependency is the right fix (now approved).
 
 ## Spec lines involved
 Ports `ScopeKey`; proto `TagsMatch`, `TagLeaf` ("default TAGS_MATCH_ANY_STRICT"); Hindsight

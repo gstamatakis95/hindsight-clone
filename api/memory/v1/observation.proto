@@ -40,7 +40,7 @@ message ConsolidateRequest {
   // Scopes to consolidate; empty = every scope.
   repeated TagSet scopes = 2;
   // Overrides for this run only (observations mission, caps, dedup threshold, strategies, CONSOLIDATE /
-  // DEDUP_CHECK models); kept on the operation row.
+  // DEDUP_CHECK models); other fields = INVALID_ARGUMENT. Kept on the operation row.
   BankConfig overrides = 3;
 }
 

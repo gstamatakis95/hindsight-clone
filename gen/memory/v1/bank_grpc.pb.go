@@ -66,8 +66,9 @@ type BankServiceClient interface {
 	// PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
 	PreviewPrompt(ctx context.Context, in *PreviewPromptRequest, opts ...grpc.CallOption) (*PreviewPromptResponse, error)
 	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one
-	// transaction. The only bulk hard delete: afterwards writes fail FAILED_PRECONDITION and reads NOT_FOUND
-	// until the bank is gone.
+	// transaction. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION and reads
+	// NOT_FOUND. Once delete_bank has removed the bank row, a write creates a new, empty bank with no old
+	// events or operations.
 	DeleteBank(ctx context.Context, in *DeleteBankRequest, opts ...grpc.CallOption) (*DeleteBankResponse, error)
 	// ExportBankTemplate exports the bank's config, directives and mental-model specs.
 	ExportBankTemplate(ctx context.Context, in *ExportBankTemplateRequest, opts ...grpc.CallOption) (*ExportBankTemplateResponse, error)
@@ -253,8 +254,9 @@ type BankServiceServer interface {
 	// PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
 	PreviewPrompt(context.Context, *PreviewPromptRequest) (*PreviewPromptResponse, error)
 	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one
-	// transaction. The only bulk hard delete: afterwards writes fail FAILED_PRECONDITION and reads NOT_FOUND
-	// until the bank is gone.
+	// transaction. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION and reads
+	// NOT_FOUND. Once delete_bank has removed the bank row, a write creates a new, empty bank with no old
+	// events or operations.
 	DeleteBank(context.Context, *DeleteBankRequest) (*DeleteBankResponse, error)
 	// ExportBankTemplate exports the bank's config, directives and mental-model specs.
 	ExportBankTemplate(context.Context, *ExportBankTemplateRequest) (*ExportBankTemplateResponse, error)

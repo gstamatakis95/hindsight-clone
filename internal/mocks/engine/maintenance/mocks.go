@@ -8,7 +8,6 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/maintenance"
-	"memd/internal/engine/retain"
 	"memd/internal/port"
 	"sync"
 	"time"
@@ -102,7 +101,7 @@ var _ maintenance.Linker = &Linker{}
 //
 //		// make and configure a mocked maintenance.Linker
 //		mockedLinker := &Linker{
-//			LinkFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap) error {
+//			LinkFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error {
 //				panic("mock out the Link method")
 //			},
 //		}
@@ -113,7 +112,7 @@ var _ maintenance.Linker = &Linker{}
 //	}
 type Linker struct {
 	// LinkFunc mocks the Link method.
-	LinkFunc func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap) error
+	LinkFunc func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -128,14 +127,14 @@ type Linker struct {
 			// Units is the units argument value.
 			Units []domain.Unit
 			// Causes is the causes argument value.
-			Causes retain.CauseMap
+			Causes map[port.UnitID][]port.UnitID
 		}
 	}
 	lockLink sync.RWMutex
 }
 
 // Link calls LinkFunc.
-func (mock *Linker) Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap) error {
+func (mock *Linker) Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error {
 	if mock.LinkFunc == nil {
 		panic("Linker.LinkFunc: method is nil but Linker.Link was just called")
 	}
@@ -144,7 +143,7 @@ func (mock *Linker) Link(ctx context.Context, tx port.Tx, b port.BankRef, units 
 		Tx     port.Tx
 		B      port.BankRef
 		Units  []domain.Unit
-		Causes retain.CauseMap
+		Causes map[port.UnitID][]port.UnitID
 	}{
 		Ctx:    ctx,
 		Tx:     tx,
@@ -167,14 +166,14 @@ func (mock *Linker) LinkCalls() []struct {
 	Tx     port.Tx
 	B      port.BankRef
 	Units  []domain.Unit
-	Causes retain.CauseMap
+	Causes map[port.UnitID][]port.UnitID
 } {
 	var calls []struct {
 		Ctx    context.Context
 		Tx     port.Tx
 		B      port.BankRef
 		Units  []domain.Unit
-		Causes retain.CauseMap
+		Causes map[port.UnitID][]port.UnitID
 	}
 	mock.lockLink.RLock()
 	calls = mock.calls.Link

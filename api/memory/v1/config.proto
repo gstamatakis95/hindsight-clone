@@ -1,10 +1,12 @@
 // Configuration for memd.
 //
 // BankConfig is the one config shape used at every level: server < tenant < bank < strategy < request
-// (< item, for retain). Scalars: a set value replaces an unset one. models: merged per slot. Other
-// lists: a set list replaces the inherited one (no append). Patch RPCs take a FieldMask, which is also
-// how a list is cleared. Every request that does work takes a full BankConfig as overrides; fields the
-// RPC cannot use are rejected with INVALID_ARGUMENT, never silently ignored.
+// (< item, for retain). Scalars: a set value replaces an unset one. models: merged per slot, where the
+// most specific level that sets a slot supplies its whole ModelBinding (unset binding fields mean the
+// gateway / adapter default, not the less specific level's value). Other lists: a set list replaces the
+// inherited one (no append). Patch RPCs take a FieldMask, which is also how a list is cleared. Every
+// request that does work takes a full BankConfig as overrides; fields the RPC cannot use are rejected
+// with INVALID_ARGUMENT, never silently ignored.
 syntax = "proto3";
 
 package memory.v1;
@@ -69,7 +71,8 @@ message BankConfig {
   repeated ConsolidationStrategy consolidation_strategies = 12;
   // Recall tuning, also used by reflect, consolidation and single-shot refresh.
   RecallConfig recall = 13;
-  // Model bindings, merged per slot across levels. MODEL_SLOT_EMBED is rejected.
+  // Model bindings, merged per slot across levels: a slot set here replaces that slot's whole binding
+  // from less specific levels; slots not set here are kept. MODEL_SLOT_EMBED is rejected.
   repeated SlotBinding models = 14;
   // Retain chunking, entity resolution and linking tuning.
   RetainTuning retain = 15;
@@ -167,7 +170,8 @@ message ConsolidationStrategy {
   optional int32 source_facts_max_tokens = 5;
   // Token budget for the source facts shown per existing observation.
   optional int32 source_facts_max_tokens_per_observation = 6;
-  // Model bindings for matched scopes, merged per slot over the bank's.
+  // Model bindings for matched scopes, merged per slot over the bank's: a slot set here replaces the
+  // bank's whole binding for that slot; slots not set here keep the bank's.
   repeated SlotBinding models = 7;
 }
 

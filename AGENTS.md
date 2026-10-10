@@ -27,7 +27,7 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 
 ## Commands
 - make gen      # buf generate, sqlc, mockery
-- make lint     # golangci-lint, buf lint + breaking, ruff
+- make lint     # golangci-lint, buf lint + breaking, ruff (BREAKING_AGAINST=contracts-v1 checks the frozen tag)
 - make test     # go test -race ./...
 - make up       # docker compose: postgres, minio
 - make migrate  # alembic upgrade head, then dump schema/schema.sql

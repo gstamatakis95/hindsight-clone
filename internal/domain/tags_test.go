@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"slices"
 	"testing"
 )
@@ -65,5 +66,51 @@ func TestMatchGroup(t *testing.T) {
 	f := TagFilter{Groups: []TagGroup{leaf("", "a"), leaf("", "c")}}
 	if MatchFilter([]string{"a"}, f) || !MatchFilter([]string{"a", "c"}, f) {
 		t.Fatal("top-level groups must be AND-ed")
+	}
+}
+
+func TestNormalizeTagNFC(t *testing.T) {
+	got := NormalizeTags([]string{"é", "é", "É", "É"})
+	if want := []string{"é"}; !slices.Equal(got, want) {
+		t.Fatalf("NormalizeTags = %q, want %q (NFC, lowercased, one tag)", got, want)
+	}
+}
+
+func TestEmptyAndMalformedGroups(t *testing.T) {
+	cases := []struct {
+		name string
+		g    TagGroup
+		want bool
+	}{
+		{"empty all_of", TagGroup{Kind: TagGroupAllOf}, true},
+		{"empty any_of", TagGroup{Kind: TagGroupAnyOf}, false},
+		{"leaf without leaf", TagGroup{Kind: TagGroupLeaf}, false},
+		{"none_of without child", TagGroup{Kind: TagGroupNoneOf}, false},
+		{"unknown kind", TagGroup{Kind: "bogus"}, false},
+	}
+	for _, tc := range cases {
+		if got := MatchGroup([]string{"a"}, tc.g); got != tc.want {
+			t.Errorf("%s: MatchGroup = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestTagFilterValidate(t *testing.T) {
+	leaf := TagGroup{Kind: TagGroupLeaf, Leaf: &TagLeaf{Tags: []string{"a"}}}
+	both := TagFilter{Tags: []string{"a"}, Groups: []TagGroup{leaf}}
+	if err := both.Validate(); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("tags + groups: err = %v, want ErrInvalidArgument", err)
+	}
+	bad := TagFilter{Groups: []TagGroup{{Kind: TagGroupNoneOf}}}
+	if err := bad.Validate(); !errors.Is(err, ErrInvalidArgument) {
+		t.Fatalf("malformed group: err = %v, want ErrInvalidArgument", err)
+	}
+	if err := (TagFilter{Groups: []TagGroup{leaf}}).Validate(); err != nil {
+		t.Fatalf("valid filter: %v", err)
+	}
+	// MatchFilter never drops a part: both parts must hold.
+	f := TagFilter{Tags: []string{"b"}, Match: TagsMatchAnyStrict, Groups: []TagGroup{leaf}}
+	if MatchFilter([]string{"a"}, f) || !MatchFilter([]string{"a", "b"}, f) {
+		t.Fatal("MatchFilter must AND flat tags and groups")
 	}
 }

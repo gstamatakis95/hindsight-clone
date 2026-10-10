@@ -269,7 +269,7 @@ type Bank struct {
 	Config *BankConfig `protobuf:"bytes,3,opt,name=config,proto3" json:"config,omitempty"`
 	// When the bank was created.
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	// Tombstoned by DeleteBank; writes fail FAILED_PRECONDITION.
+	// Tombstoned by DeleteBank; writes fail FAILED_PRECONDITION and reads NOT_FOUND.
 	Deleting      bool `protobuf:"varint,5,opt,name=deleting,proto3" json:"deleting,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

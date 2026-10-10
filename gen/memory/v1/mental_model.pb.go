@@ -291,7 +291,7 @@ type RefreshTrigger struct {
 	MinRefreshIntervalSeconds *int32 `protobuf:"varint,4,opt,name=min_refresh_interval_seconds,json=minRefreshIntervalSeconds,proto3,oneof" json:"min_refresh_interval_seconds,omitempty"`
 	// How the model's tags filter memories, default TAGS_MATCH_ALL_STRICT when the model is tagged.
 	TagsMatch TagsMatch `protobuf:"varint,5,opt,name=tags_match,json=tagsMatch,proto3,enum=memory.v1.TagsMatch" json:"tags_match,omitempty"`
-	// Boolean tag filter; overrides the model's tags and tags_match.
+	// Boolean tag filter, top-level groups AND-ed; when set it replaces the model's tags and tags_match.
 	TagGroups []*TagGroup `protobuf:"bytes,6,rep,name=tag_groups,json=tagGroups,proto3" json:"tag_groups,omitempty"`
 	// Fact types in scope; empty = all.
 	FactTypes []FactType `protobuf:"varint,7,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`
@@ -492,8 +492,9 @@ type MentalModelSpec struct {
 	MaxTokens *int32 `protobuf:"varint,6,opt,name=max_tokens,json=maxTokens,proto3,oneof" json:"max_tokens,omitempty"`
 	// Refresh trigger, mode, strategy and scope.
 	Trigger *RefreshTrigger `protobuf:"bytes,7,opt,name=trigger,proto3" json:"trigger,omitempty"`
-	// Overrides applied to every refresh (reflect and mental-model config, REFLECT / SYNTHESIZE /
-	// MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models).
+	// Overrides stored on the model and applied to every refresh (reflect and mental-model config, refresh
+	// strategy, REFLECT / SYNTHESIZE / MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models); other fields =
+	// INVALID_ARGUMENT.
 	Overrides     *BankConfig `protobuf:"bytes,8,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1242,7 +1243,9 @@ type RefreshMentalModelRequest struct {
 	MentalModelId string `protobuf:"bytes,2,opt,name=mental_model_id,json=mentalModelId,proto3" json:"mental_model_id,omitempty"`
 	// Force a full refresh; OR-ed into a queued refresh this joins.
 	ForceFull bool `protobuf:"varint,3,opt,name=force_full,json=forceFull,proto3" json:"force_full,omitempty"`
-	// Overrides for this refresh only; kept on the operation and replace a queued refresh's overrides.
+	// Overrides for this refresh only (reflect and mental-model config, refresh strategy, REFLECT /
+	// SYNTHESIZE / MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models); other fields = INVALID_ARGUMENT. Kept on
+	// the operation; they replace a queued refresh's overrides.
 	Overrides *BankConfig `protobuf:"bytes,4,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	// Per-call override of the trigger's strategy; unset = the trigger's.
 	Strategy      RefreshStrategy `protobuf:"varint,5,opt,name=strategy,proto3,enum=memory.v1.RefreshStrategy" json:"strategy,omitempty"`
@@ -1677,7 +1680,7 @@ type ResolvedScope struct {
 	Tags []string `protobuf:"bytes,1,rep,name=tags,proto3" json:"tags,omitempty"`
 	// Effective tag match.
 	TagsMatch TagsMatch `protobuf:"varint,2,opt,name=tags_match,json=tagsMatch,proto3,enum=memory.v1.TagsMatch" json:"tags_match,omitempty"`
-	// Effective tag groups; when set they replace tags and tags_match.
+	// Effective tag groups, top-level groups AND-ed; when set they replace tags and tags_match.
 	TagGroups []*TagGroup `protobuf:"bytes,3,rep,name=tag_groups,json=tagGroups,proto3" json:"tag_groups,omitempty"`
 	// Effective fact types; empty = all.
 	FactTypes     []FactType `protobuf:"varint,4,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`

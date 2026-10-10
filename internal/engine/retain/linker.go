@@ -14,5 +14,6 @@ type Linker interface {
 }
 
 // CauseMap maps an effect unit to the units that caused it, from the batch-local
-// domain.ExtractedFact.Causes indexes once the units have ids. Nil = no causal edges.
-type CauseMap map[port.UnitID][]port.UnitID
+// domain.ExtractedFact.Causes indexes once the units have ids. Nil = no causal edges. It is an alias of
+// the plain map type so consumers (maintenance) can declare Linker without importing retain.
+type CauseMap = map[port.UnitID][]port.UnitID

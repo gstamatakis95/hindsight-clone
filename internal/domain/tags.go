@@ -1,8 +1,11 @@
 package domain
 
 import (
+	"fmt"
 	"slices"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // TagsMatch is how a filter's tags compare against a unit's tags (Hindsight's five modes).
@@ -74,15 +77,56 @@ type TagGroup struct {
 	Not *TagGroup `json:"not,omitempty"`
 }
 
-// TagFilter is a request's tag filter: flat tags with a match mode, or tag groups (mutually exclusive).
-// Several top-level groups are AND-ed.
+// TagFilter is a request's tag filter: flat tags with a match mode, or tag groups. On Recall and Reflect
+// the two are mutually exclusive (Validate rejects both with ErrInvalidArgument). Several top-level groups
+// are AND-ed. Only a mental model's RefreshTrigger.tag_groups override its tags; that is resolved before a
+// TagFilter is built.
 type TagFilter struct {
 	// Tags are flat filter tags.
 	Tags []string `json:"tags,omitempty"`
 	// Match is how Tags compare.
 	Match TagsMatch `json:"match,omitempty"`
-	// Groups are tag groups; they override Tags and Match.
+	// Groups are tag groups, AND-ed; mutually exclusive with Tags on Recall and Reflect.
 	Groups []TagGroup `json:"groups,omitempty"`
+}
+
+// Validate rejects a filter that sets both flat tags and tag groups (INVALID_ARGUMENT on Recall and
+// Reflect) and groups whose Kind and branches disagree.
+func (f TagFilter) Validate() error {
+	if len(f.Tags) > 0 && len(f.Groups) > 0 {
+		return fmt.Errorf("%w: tags and tag_groups are mutually exclusive", ErrInvalidArgument)
+	}
+	for _, g := range f.Groups {
+		if err := g.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Validate checks that exactly the branch named by Kind is set, recursively.
+func (g TagGroup) Validate() error {
+	ok := false
+	switch g.Kind {
+	case TagGroupLeaf:
+		ok = g.Leaf != nil && len(g.Groups) == 0 && g.Not == nil
+	case TagGroupAllOf, TagGroupAnyOf:
+		ok = g.Leaf == nil && g.Not == nil
+	case TagGroupNoneOf:
+		ok = g.Leaf == nil && len(g.Groups) == 0 && g.Not != nil
+	}
+	if !ok {
+		return fmt.Errorf("%w: malformed tag group %q", ErrInvalidArgument, g.Kind)
+	}
+	for _, c := range g.Groups {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+	}
+	if g.Not != nil {
+		return g.Not.Validate()
+	}
+	return nil
 }
 
 // IsEmpty reports whether the filter selects every unit.
@@ -90,14 +134,14 @@ func (f TagFilter) IsEmpty() bool {
 	return len(f.Groups) == 0 && len(f.Tags) == 0 && f.Match != TagsMatchExact
 }
 
-// NormalizeTag trims and lowercases one tag. Unicode NFC normalization is pending CCR WP-00-1
-// (golang.org/x/text is not an approved dependency yet).
+// NormalizeTag applies Unicode NFC, then trims and lowercases one tag (NFC again after lowercasing, so
+// the result is always in NFC).
 func NormalizeTag(tag string) string {
-	return strings.ToLower(strings.TrimSpace(tag))
+	return norm.NFC.String(strings.ToLower(strings.TrimSpace(norm.NFC.String(tag))))
 }
 
-// NormalizeTags returns the canonical form of a tag set: each tag trimmed and lowercased, empty tags
-// dropped, deduplicated and sorted. The result is never nil.
+// NormalizeTags returns the canonical form of a tag set: each tag NFC-normalized, trimmed and lowercased,
+// empty tags dropped, deduplicated and sorted. The result is never nil.
 func NormalizeTags(tags []string) []string {
 	out := make([]string, 0, len(tags))
 	for _, t := range tags {
@@ -139,12 +183,14 @@ func MatchTags(unitTags, filterTags []string, mode TagsMatch) bool {
 }
 
 // MatchGroup evaluates a tag group against a unit's tags. Leaves use MatchTags with their own mode
-// (unset = any_strict) and must already hold resolved names.
+// (unset = any_strict) and must already hold resolved names. Semantics match port.SQLPredicate.Eval: an
+// empty all_of is true, an empty any_of is false, a leaf with no tags is no filter (except exact), and a
+// malformed group (unknown kind, missing leaf or child) matches nothing.
 func MatchGroup(unitTags []string, g TagGroup) bool {
 	switch g.Kind {
 	case TagGroupLeaf:
 		if g.Leaf == nil {
-			return true
+			return false
 		}
 		mode := g.Leaf.Match
 		if mode == TagsMatchUnspecified {
@@ -164,23 +210,21 @@ func MatchGroup(unitTags []string, g TagGroup) bool {
 				return true
 			}
 		}
-		return len(g.Groups) == 0
+		return false
 	case TagGroupNoneOf:
-		return g.Not == nil || !MatchGroup(unitTags, *g.Not)
+		return g.Not != nil && !MatchGroup(unitTags, *g.Not)
 	default:
-		return true
+		return false
 	}
 }
 
-// MatchFilter evaluates a whole TagFilter: groups (AND-ed) when present, else the flat tags.
+// MatchFilter evaluates a whole TagFilter: the flat tags AND every group. It never drops a part of the
+// filter; callers on Recall and Reflect run Validate first, so at most one part is set there.
 func MatchFilter(unitTags []string, f TagFilter) bool {
-	if len(f.Groups) > 0 {
-		for _, g := range f.Groups {
-			if !MatchGroup(unitTags, g) {
-				return false
-			}
+	for _, g := range f.Groups {
+		if !MatchGroup(unitTags, g) {
+			return false
 		}
-		return true
 	}
 	return MatchTags(unitTags, f.Tags, f.Match)
 }

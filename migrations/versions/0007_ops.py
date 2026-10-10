@@ -1,9 +1,17 @@
 """Operations (the job queue) and lifecycle_events.
 
 Every background job is an operations row, claimed with FOR UPDATE SKIP LOCKED. Neither
-table has a foreign key to banks: the delete_bank job and the bank's event history must
-outlive the bank row. Several events written in one transaction share the bank change_seq,
-so lifecycle_events.seq is not unique; id orders events within a seq.
+table has a foreign key to banks: delete_bank's final transaction deletes the bank's
+remaining operations and lifecycle_events explicitly, together with the bank row.
+
+``joinable`` marks rows a deduplicating enqueue may join: true only for rows inserted under
+a dedupe policy without overrides (refresh_mental_model rows are always joinable); Go owns
+that policy. ``finished_at`` is set only on terminal rows. A cancelled row whose handler is
+still running has ``finished_at`` NULL and keeps holding its serial key until the handler's
+terminal call (or ReclaimStale) sets it.
+
+Several events written in one transaction share the bank change_seq, so
+lifecycle_events.seq is not unique; id orders events within a seq.
 
 Revision ID: 0007
 Revises: 0006
@@ -33,6 +41,7 @@ def upgrade() -> None:
             serial_key   text        NULL,
             payload      jsonb       NOT NULL DEFAULT '{}',
             overrides    jsonb       NULL,
+            joinable     boolean     NOT NULL DEFAULT false,
             parent_id    uuid        NULL,
             attempts     integer     NOT NULL DEFAULT 0,
             run_at       timestamptz NOT NULL DEFAULT now(),
@@ -44,7 +53,9 @@ def upgrade() -> None:
             error        text        NULL,
             created_at   timestamptz NOT NULL DEFAULT now(),
             updated_at   timestamptz NOT NULL DEFAULT now(),
-            finished_at  timestamptz NULL
+            finished_at  timestamptz NULL,
+            CONSTRAINT operations_finished_at_terminal_only
+                CHECK (finished_at IS NULL OR status IN ('completed', 'failed', 'cancelled'))
         )
     """)
     op.execute("""

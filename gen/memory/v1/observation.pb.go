@@ -36,7 +36,7 @@ type ConsolidateRequest struct {
 	// Scopes to consolidate; empty = every scope.
 	Scopes []*TagSet `protobuf:"bytes,2,rep,name=scopes,proto3" json:"scopes,omitempty"`
 	// Overrides for this run only (observations mission, caps, dedup threshold, strategies, CONSOLIDATE /
-	// DEDUP_CHECK models); kept on the operation row.
+	// DEDUP_CHECK models); other fields = INVALID_ARGUMENT. Kept on the operation row.
 	Overrides     *BankConfig `protobuf:"bytes,3,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

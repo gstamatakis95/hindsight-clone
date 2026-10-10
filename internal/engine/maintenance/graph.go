@@ -3,7 +3,6 @@ package maintenance
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/engine/retain"
 	"memd/internal/port"
 	"time"
 )
@@ -19,5 +18,5 @@ type GraphMaintainer interface {
 // it.
 type Linker interface {
 	// Link adds temporal + semantic (+ causal) edges for units within the per-unit caps, in tx.
-	Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap) error
+	Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error
 }

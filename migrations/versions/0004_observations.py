@@ -4,6 +4,10 @@ Observations themselves are memory_units rows with fact_type 'observation'. Evid
 an observation to each source unit it cites (unique per pair); observation_scopes lists the
 scopes (canonical tag sets) a bank has observations in, for ListScopes.
 
+Both observation_evidence foreign keys are ON DELETE CASCADE on purpose: an evidence row is
+meaningless once either its observation or its source unit is gone (deleted, or moved to
+the archive by invalidate), so it goes with whichever is removed first.
+
 Revision ID: 0004
 Revises: 0003
 Create Date: 2026-10-10

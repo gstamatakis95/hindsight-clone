@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// skipDirs are directory paths (slash-separated, relative to a root) the check never enters.
+// skipDirs are directory paths (slash-separated, matched as a path suffix) the check never enters.
 var skipDirs = map[string]bool{
 	"gen":            true,
 	"internal/mocks": true,
@@ -82,19 +82,26 @@ func check(root string) ([]string, error) {
 	return findings, nil
 }
 
-// skipDir reports whether the walk should not descend into path.
+// skipDir reports whether the walk should not descend into path. Skipped directories are matched by
+// their path suffix, so the check works whatever root it is started from ("." or a subdirectory).
 func skipDir(root, path, name string) bool {
-	if path == root {
+	if filepath.Clean(path) == filepath.Clean(root) {
 		return false
 	}
 	if strings.HasPrefix(name, ".") || name == "testdata" {
 		return true
 	}
-	rel, err := filepath.Rel(root, path)
+	abs, err := filepath.Abs(path)
 	if err != nil {
 		return false
 	}
-	return skipDirs[filepath.ToSlash(rel)]
+	abs = filepath.ToSlash(abs)
+	for dir := range skipDirs {
+		if strings.HasSuffix(abs, "/"+dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkFile parses one file and reports interface methods without a leading doc comment.

@@ -45,7 +45,8 @@ enum Budget {
 // TagsMatch decides how a tag list filters memories. The STRICT variants exclude untagged memories; the
 // plain variants also accept untagged (global) ones.
 enum TagsMatch {
-  // Not set; the field's documented default applies.
+  // Not set; behaves as TAGS_MATCH_ANY unless the field documents another default (TagLeaf and
+  // ListDocuments: ANY_STRICT; RefreshTrigger on a tagged model: ALL_STRICT).
   TAGS_MATCH_UNSPECIFIED = 0;
   // At least one of the tags, or untagged.
   TAGS_MATCH_ANY = 1;
@@ -127,8 +128,10 @@ message ObservationScopes {
   optional int32 max_combinations = 3;
 }
 
-// TagGroup is one node of a boolean tag-filter tree; a list of groups is AND-ed. Groups override flat
-// tags + tags_match wherever both could apply.
+// TagGroup is one node of a boolean tag-filter tree; a repeated top-level tag_groups list is AND-ed. On
+// RecallRequest and ReflectRequest, tags and tag_groups are mutually exclusive: setting both is
+// INVALID_ARGUMENT. Only a mental model's RefreshTrigger.tag_groups (and the matching
+// ResolvedScope.tag_groups) replace the model's tags + tags_match.
 message TagGroup {
   // The node: a leaf test or a boolean combination of child groups.
   oneof node {
