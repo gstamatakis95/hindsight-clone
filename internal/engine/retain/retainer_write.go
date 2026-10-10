@@ -59,7 +59,7 @@ func (r *retainer) prepare(
 		})
 		usage = append(usage, u...)
 		if err != nil {
-			return nil, usage, err
+			return nil, usage, fmt.Errorf("retain: extract chunk %d: %w", c.Index, err)
 		}
 		base := len(pb.facts)
 		for _, f := range facts {
@@ -88,7 +88,10 @@ func (r *retainer) normalize(ctx context.Context, rn *run, f *ExtractedFact) err
 	if f.OccurredStart != nil || f.TimeExpression == "" || r.d.Dates == nil || rn.mentioned == nil {
 		return nil
 	}
-	return r.d.Dates.Normalize(ctx, rn.cfg, f, *rn.mentioned)
+	if err := r.d.Dates.Normalize(ctx, rn.cfg, f, *rn.mentioned); err != nil {
+		return fmt.Errorf("retain: normalize dates: %w", err)
+	}
+	return nil
 }
 
 // embed embeds every fact of the batch in one call.
@@ -145,14 +148,14 @@ func (r *retainer) writeUnits(ctx context.Context, tx port.Tx, rn *run, pb *prep
 	for i, pf := range pb.facts {
 		labelIDs, labelTags, err := r.d.Labels.Resolve(ctx, tx, b, rn.cfg.EntityLabels, pf.fact.Labels)
 		if err != nil {
-			return err
+			return fmt.Errorf("retain: labels: %w", err)
 		}
 		entityIDs, err := r.d.Entities.Resolve(ctx, tx, b, ResolveInput{
 			Mentions: pf.fact.Entities, Hints: rn.p.hints(), Literal: !boolOr(rn.p.ResolveEntities, true),
 			At: factTime(pf.fact, rn.mentioned), Threshold: rn.t.matchThreshold,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("retain: entities: %w", err)
 		}
 		units[i] = r.unit(rn, pf, seq, labelTags)
 		ents[i] = slices.Compact(slices.Sorted(slices.Values(append(entityIDs, labelIDs...))))
@@ -173,7 +176,10 @@ func (r *retainer) writeUnits(ctx context.Context, tx port.Tx, rn *run, pb *prep
 			causes[units[i].ID] = append(causes[units[i].ID], units[c].ID)
 		}
 	}
-	return r.d.Linker.LinkWith(ctx, tx, b, units, causes, rn.cfg)
+	if err := r.d.Linker.LinkWith(ctx, tx, b, units, causes, rn.cfg); err != nil {
+		return fmt.Errorf("retain: link: %w", err)
+	}
+	return nil
 }
 
 // unit builds the stored unit of one fact.

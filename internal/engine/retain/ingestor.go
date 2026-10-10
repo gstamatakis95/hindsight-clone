@@ -255,8 +255,10 @@ func (i *ingestor) mergeOverrides(req, item *domain.BankConfig) (*domain.BankCon
 // ALL_COMBINATIONS subsets (2^n - 1) against max_combinations.
 func (i *ingestor) checkFanout(b port.BankRef, tags []string, s domain.ObservationScopes) error {
 	if i.d.Scopes != nil {
-		_, err := i.d.Scopes.Expand(b, tags, s)
-		return err
+		if _, err := i.d.Scopes.Expand(b, tags, s); err != nil {
+			return fmt.Errorf("retain: observation scopes: %w", err)
+		}
+		return nil
 	}
 	if s.Mode != domain.ScopeModeAllCombinations {
 		return nil

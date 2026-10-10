@@ -282,16 +282,22 @@ func scopeMode(item *domain.ObservationScopes, cfg domain.BankConfig) domain.Obs
 
 // checkpoint reports progress for a job and stops it once cancelled.
 func (r *retainer) checkpoint(ctx context.Context, id port.OperationID, done, total int) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", domain.ErrCancelled, err)
+	}
 	if id == "" || r.d.Checkpoint == nil {
-		return ctx.Err()
+		return nil
 	}
 	cp := r.d.Checkpoint(id)
 	if cp == nil {
 		return nil
 	}
-	return cp.Report(ctx, domain.Progress{
+	if err := cp.Report(ctx, domain.Progress{
 		Stage: "retain_chunks", At: r.now(), Processed: int64(done), Total: int64(total),
-	})
+	}); err != nil {
+		return fmt.Errorf("retain: checkpoint: %w", err)
+	}
+	return nil
 }
 
 // now reads the injected clock.

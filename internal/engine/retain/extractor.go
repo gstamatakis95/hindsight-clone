@@ -84,7 +84,7 @@ func (e *extractor) Extract(ctx context.Context, in ExtractInput) ([]ExtractedFa
 	}
 	p, err := s.Prompt(in.Config, in)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("retain: %s prompt: %w", mode, err)
 	}
 	binding, err := e.router.Resolve(in.Config, domain.ModelSlotExtract)
 	if err != nil {
