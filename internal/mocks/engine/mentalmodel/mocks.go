@@ -836,6 +836,90 @@ func (mock *DirectiveSelector) SelectCalls() []struct {
 	return calls
 }
 
+// Ensure that RefreshQueuer does implement mentalmodel.RefreshQueuer.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.RefreshQueuer = &RefreshQueuer{}
+
+// RefreshQueuer is a mock implementation of mentalmodel.RefreshQueuer.
+//
+//	func TestSomethingThatUsesRefreshQueuer(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.RefreshQueuer
+//		mockedRefreshQueuer := &RefreshQueuer{
+//			QueueRefreshFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error) {
+//				panic("mock out the QueueRefresh method")
+//			},
+//		}
+//
+//		// use mockedRefreshQueuer in code that requires mentalmodel.RefreshQueuer
+//		// and then make assertions.
+//
+//	}
+type RefreshQueuer struct {
+	// QueueRefreshFunc mocks the QueueRefresh method.
+	QueueRefreshFunc func(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// QueueRefresh holds details about calls to the QueueRefresh method.
+		QueueRefresh []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.MentalModelID
+		}
+	}
+	lockQueueRefresh sync.RWMutex
+}
+
+// QueueRefresh calls QueueRefreshFunc.
+func (mock *RefreshQueuer) QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error) {
+	if mock.QueueRefreshFunc == nil {
+		panic("RefreshQueuer.QueueRefreshFunc: method is nil but RefreshQueuer.QueueRefresh was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		ID  port.MentalModelID
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockQueueRefresh.Lock()
+	mock.calls.QueueRefresh = append(mock.calls.QueueRefresh, callInfo)
+	mock.lockQueueRefresh.Unlock()
+	return mock.QueueRefreshFunc(ctx, tx, b, id)
+}
+
+// QueueRefreshCalls gets all the calls that were made to QueueRefresh.
+// Check the length with:
+//
+//	len(mockedRefreshQueuer.QueueRefreshCalls())
+func (mock *RefreshQueuer) QueueRefreshCalls() []struct {
+	Ctx context.Context
+	Tx  port.Tx
+	B   port.BankRef
+	ID  port.MentalModelID
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		ID  port.MentalModelID
+	}
+	mock.lockQueueRefresh.RLock()
+	calls = mock.calls.QueueRefresh
+	mock.lockQueueRefresh.RUnlock()
+	return calls
+}
+
 // Ensure that ScopeReader does implement mentalmodel.ScopeReader.
 // If this is not the case, regenerate this file with mockery.
 var _ mentalmodel.ScopeReader = &ScopeReader{}

@@ -84,7 +84,8 @@ type FailedRefresh struct {
 
 // FailureSource finds failed refreshes across all banks.
 type FailureSource interface {
-	// FailedRefreshes returns, per model, its latest terminal refresh_mental_model operation when that
-	// operation is FAILED, on banks that are not tombstoned. Operations of deleted models are skipped.
+	// FailedRefreshes returns, per model, its latest COMPLETED or FAILED refresh_mental_model operation
+	// (CANCELLED ones are ignored) when that operation is FAILED, on banks that are not tombstoned.
+	// Operations of deleted models are skipped.
 	FailedRefreshes(ctx context.Context) ([]FailedRefresh, error)
 }

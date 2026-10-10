@@ -24,11 +24,13 @@ const (
 	reasonEmptyBlock   = "block text is empty"
 	reasonEmptyHeading = "heading is empty"
 	reasonReplaceCount = "replace_block needs exactly one block"
+	reasonFragment     = "block must be one markdown fragment: no heading, blank line or unclosed code fence " +
+		"outside a code fence"
 )
 
 var (
 	headingRx        = regexp.MustCompile(`^(#{1,6})\s+(.*\S)\s*$`)
-	fenceRx          = regexp.MustCompile("^\\s*(```+|~~~+)")
+	fenceRx          = regexp.MustCompile("^\\s*(`{3,}|~{3,})(.*)$")
 	slugRx           = regexp.MustCompile(`[^a-z0-9]+`)
 	tableRowRx       = regexp.MustCompile(`^\s*\|`)
 	tableSeparatorRx = regexp.MustCompile(`^\s*\|?[\s:]*-{2,}[\s:|-]*\|?\s*$`)
@@ -130,19 +132,63 @@ func splitLines(md string) []string {
 	return strings.Split(md, "\n")
 }
 
-// trackFence updates the open fence marker for line and reports whether line is a fence line.
+// trackFence updates the open fence (its opening run) for line and reports whether line opens or closes a
+// fence. As in CommonMark, a backtick opener's info string has no backtick, and a closer is a run of the
+// opener's character at least as long as the opener with only whitespace after it.
 func trackFence(fence *string, line string) bool {
 	m := fenceRx.FindStringSubmatch(line)
 	if m == nil {
 		return false
 	}
-	marker := m[1][:3]
+	run, rest := m[1], m[2]
 	if *fence == "" {
-		*fence = marker
-	} else if marker == *fence {
-		*fence = ""
+		if run[0] == '`' && strings.Contains(rest, "`") {
+			return false
+		}
+		*fence = run
+		return true
 	}
-	return true
+	if run[0] == (*fence)[0] && len(run) >= len(*fence) && strings.TrimSpace(rest) == "" {
+		*fence = ""
+		return true
+	}
+	return false
+}
+
+// isFragment reports whether text splits into exactly one block: no heading or blank line outside a code
+// fence, and every fence it opens is closed.
+func isFragment(text string) bool {
+	fence := ""
+	for _, line := range splitLines(normalizeBlockText(text)) {
+		if trackFence(&fence, line) || fence != "" {
+			continue
+		}
+		if strings.TrimSpace(line) == "" || headingRx.MatchString(line) {
+			return false
+		}
+	}
+	return fence == ""
+}
+
+// badFragments reports whether any non-blank text is not a single markdown fragment.
+func badFragments(texts []string) bool {
+	for _, t := range texts {
+		if strings.TrimSpace(t) != "" && !isFragment(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// usesBlocks reports whether an op kind reads BlocksMD.
+func usesBlocks(kind domain.DeltaOpKind) bool {
+	switch kind {
+	case domain.DeltaOpAddSection, domain.DeltaOpReplaceSectionBlocks, domain.DeltaOpAppendBlock,
+		domain.DeltaOpInsertBlock, domain.DeltaOpReplaceBlock:
+		return true
+	default:
+		return false
+	}
 }
 
 // splitBlocks groups a section's lines into blocks on blank lines, ignoring blank lines inside fences.
@@ -396,8 +442,12 @@ func unknownSection(id string) string {
 	return "unknown section_id: " + id
 }
 
-// apply applies one op and returns "" when applied, else the skip reason.
+// apply applies one op and returns "" when applied, else the skip reason. An op whose BlocksMD has an entry
+// that is not one markdown fragment is skipped whole.
 func (e *editor) apply(op EditOp) string {
+	if usesBlocks(op.Kind) && badFragments(op.BlocksMD) {
+		return reasonFragment
+	}
 	switch op.Kind {
 	case domain.DeltaOpAddSection:
 		return e.addSection(op)

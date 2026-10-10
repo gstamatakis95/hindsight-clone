@@ -197,8 +197,8 @@ func TestPauseAndManualUnpause(t *testing.T) {
 	}
 }
 
-// TestCronRefreshes checks that a cron refresh is due once its schedule fires after the last enqueue,
-// and that a repeated tick joins rather than inserts.
+// TestCronRefreshes checks that a cron refresh is due at an unserved fire time, that a repeated tick joins
+// rather than inserts, and that an enqueue at the fire time serves it.
 func TestCronRefreshes(t *testing.T) {
 	e := newEnv(t)
 	tr, _ := newTriggers(e)

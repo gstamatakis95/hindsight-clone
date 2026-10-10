@@ -49,8 +49,12 @@ buf, ruff), `go test -race ./...` (all pass, Postgres suites included).
     terminal op, idempotent via `last_refresh_failed_at`);
   - `Triggers.EnqueueDueCronRefreshes` (structurally `worker.CronRefresher`, due-ness keyed on the fire
     time);
-  - `Admin`: `server.MentalModelAdmin` with mirror types (decision 1205; WP-14 adds a conversion shim);
-  - `RunJob` for the worker's refresh handler.
+  - `Admin`: `server.MentalModelAdmin` with mirror types (decision 1205). WP-14 either aliases the
+    server's six request types to the engine's (then no shim) or copies `RefreshRequest` fields;
+  - `RunJob` for the worker's refresh handler;
+  - `RefreshQueuer` (`queuer.go`): the in-transaction `QueueRefresh(ctx, tx, b, id)` that WP-13 expects as
+    `bank.RefreshQueuer` / `curate.RefreshQueuer` (its decision 1303). It skips paused models, runs a
+    never-built model now in full, and otherwise parks the run for the debounce.
 
 ## Acceptance tests
 | Card "Accept" | Test | Result |
@@ -66,9 +70,9 @@ buf, ruff), `go test -race ./...` (all pass, Postgres suites included).
 Supporting tests:
 - refresh: `TestDeltaRetrySucceedsAndSourcesAccumulate`, `TestModeFallbackReasons`, `TestDryRunWritesNothing`,
   `TestRefreshConflictWhenModelChanged`, `TestStructuredOutputProjectedFromFinalPage`,
-  `TestMaxDeltaRatioFallsBackToFull`;
+  `TestMaxDeltaRatioFallsBackToFull`, `TestFullWithNothingDraftedKeepsLiveSources`;
 - scheduling and triggers: `TestDecide`, `TestCronRefreshes`, `TestRetractedSourceTriggersRefresh`,
-  `TestRunJob`;
+  `TestRunJob`, `TestRefreshQueuer`;
 - admin and pages: `TestCreateMentalModelValidatesAndQueuesBuild`, `TestAdminGetDetailAndStale`,
   `TestAdminUpdateResetsWatermarkOnScopeChange`, `TestAdminClearKeepsHistory`, `TestFoldersListAndDelete`,
   `TestSearchPages`;
@@ -89,9 +93,12 @@ Supporting tests:
 ## Known gaps
 - **CCR WP-12-1 reads are not implemented** in the fake or Postgres. Until WP-15 lands, WP-14 can't wire
   the detector, runner pre-check, listing, cron or reconcile.
-- **Refresh context for the agentic loop.** `reflect.ReflectRequest` (WP-11) has no free-form context
-  field, so the `mm_refresh_context` prompt (full vs delta advice) isn't passed to the loop. Suggested
-  fix: WP-11/WP-14 add `Context string` and the runner renders `prompts.MentalModelRefreshContext`.
+- **Refresh context for the agentic loop.** WP-11's branch adds `ReflectRequest.Context`, but main doesn't
+  have it yet, so `agentic.request` doesn't set it. Once WP-11 merges, this is a one-line follow-up in
+  `agentic.go`: `Context` = `prompts.Render(prompts.MentalModelRefreshContext,
+  prompts.RefreshContextData{Name: m.Spec.Name, Delta: <window.After > 0>})`. Every other field WP-11 lists
+  is already set: AsDocument, Seq, Types, the exclusions, RecallInclude, and budget with a MID default.
+  Also wire `reflect.NewStructuredProjector(llm, router, config)` as the runner's `Projector`.
 - **Agentic overrides.** The agentic synthesizer passes the merged effective config as
   `ReflectRequest.Overrides`. This is fine as long as the reflect engine doesn't re-validate overrides
   against the Reflect RPC allowlist.
@@ -102,4 +109,27 @@ Supporting tests:
 - **Fuzzy tag leaves** are matched as exact names in the staleness check only (decision 1203).
 - **Cron race.** A cron refresh can be enqueued a second time if another worker claims the first between
   two ticks. That costs one NO_NEW_FACTS run with no LLM call (decision 1204).
+- **No CONTENT_UNCHANGED outcome.** A delta whose ops change nothing is reported as NO_NEW_FACTS,
+  although the domain doc for that value says "no LLM call was made". The proto has no content_unchanged
+  value.
 - **Page search** scores pages in memory over one listing; fine for tens to hundreds of pages per bank.
+
+## Review round 1 fixes
+| Finding | Fix | Test |
+|---|---|---|
+| H1 fuzzy leaves | tag predicate dropped (pre-check and detector) when any leaf is fuzzy; untagged rule kept (1203) | `TestFuzzyScopeDropsTagPredicate` |
+| H2 pre-check | runner pre-check reads untagged units; only the detector excludes them (1202) | `TestDeltaPreCheckReadsUntaggedUnits` |
+| H3 scope edit mid-build | write tx conflicts on a changed scope / source query / response schema | `TestScopeEditDuringFirstBuildConflicts` |
+| H4 lost updates | `tx.Seq` first in write (all paths), reconcile, Update, Clear | `TestReconcileInterleavedWithWrite` (fake serializes; Postgres is where the lock matters) |
+| Automatic re-check | automatic runs skip fresh models (nothing-in-scope path); in-floor runs re-park with run_at = the floor's end | `TestAutomaticRunSkipsFreshOrFlooredModel` |
+| Cron off-schedule | due only within 5 min of the fire time, keyed on it (1204) | `TestCronFiresOnScheduleWithinGrace` |
+| Delta retry | `[]` after all-rejected fails; retry also on bad references after a partial apply | `TestDeltaEmptyRetryAfterAllRejectedFails`, `TestDeltaRetryOnBadReferenceAfterPartialApply` |
+| Fences / fragments | CommonMark fence closing; op entries must be one fragment | `TestSplitMarkdownFences`, `TestApplyEditsRejectsMultiFragmentBlocks` |
+| scopeChanged | set comparison, nil == empty | `TestScopeChangedComparesSets` |
+| Queuer on a gone model | `("", nil)`; never-built = `last_refreshed_at` nil | `TestRefreshQueuer`, `TestQueuerNeverBuiltIsLastRefreshedAtNil` |
+| SPEC 2002 literal | nothing in scope: only `last_refreshed_at` (content, sources, watermark kept) | `TestFullWithNothingInScopeKeepsSourcesAndWatermark` |
+| Tests | weaker joiner, which model retraction queues, RunJob errors and options | `TestWeakerJoinerKeepsUpgrade`, `TestRetractedSourceTriggersRefresh`, `TestRunJobErrorKindAndOptions` |
+| LOW | strict 5-field cron; reconcile skips failures older than the model; COMPLETED/FAILED only (WP-15, CCR updated); no empty history entry after Clear; is_stale only at FULL; agentic answer without citations fails; page search survives an embedder error; go mod tidy | `TestParseCronStrict`, `TestReconcileSkipsFailureOfEarlierModel`, `TestRebuildAfterClearAddsNoEmptyVersionEntry`, `TestAdminGetDetailAndStale`, `TestAgenticAnswerWithoutCitationsFails`, `TestSearchPagesEmbedderDown` |
+| WP-11 Context | `refreshContext` renders `mm_refresh_context`; `TODO(WP-11)` in `agentic.request` to assign it | `TestRefreshContextRendersNameAndMode` |
+
+Accepted trade-offs: an automatic run that lands inside the interval floor re-parks itself at the floor's end and writes nothing else. A model whose sources were all retracted and has nothing in scope keeps the dead ids and stays stale, re-running cheaply (no LLM call). A cron fire missed by more than 5 minutes waits for the next fire time.

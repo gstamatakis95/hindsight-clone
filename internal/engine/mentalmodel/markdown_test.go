@@ -400,3 +400,62 @@ func TestChangedFraction(t *testing.T) {
 		})
 	}
 }
+
+// TestSplitMarkdownFences checks CommonMark fence rules: a fence closes only on the opener's character with
+// a run at least as long and nothing but whitespace after it, and a backtick info string has no backtick.
+func TestSplitMarkdownFences(t *testing.T) {
+	cases := map[string]struct {
+		in   string
+		want []string
+	}{
+		"longer opener":       {"````\n```\n\n## x\n````", []string{"````\n```\n\n## x\n````"}},
+		"other character":     {"~~~ \n```\n\n# x\n~~~", []string{"~~~ \n```\n\n# x\n~~~"}},
+		"closer with text":    {"```\n``` not a closer\n\n# x\n```", []string{"```\n``` not a closer\n\n# x\n```"}},
+		"longer closer":       {"```\na\n\nb\n`````\n\nafter", []string{"```\na\n\nb\n`````", "after"}},
+		"backtick in info":    {"```cmd``` runs it\n\nnext", []string{"```cmd``` runs it", "next"}},
+		"tilde info backtick": {"~~~ a`b\n\n~~~", []string{"~~~ a`b\n\n~~~"}},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := splitMarkdown(c.in)
+			if len(d.Sections) != 1 || d.Sections[0].ID != preambleSectionID {
+				t.Fatalf("sections = %v", sectionIDs(d))
+			}
+			if got := blockTexts(d.Sections[0]); !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("blocks = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestApplyEditsRejectsMultiFragmentBlocks checks that an op whose BlocksMD entry is not one markdown
+// fragment (heading, blank line or unclosed fence outside a fence) is skipped whole.
+func TestApplyEditsRejectsMultiFragmentBlocks(t *testing.T) {
+	first := blockID(t, splitMarkdown(editDoc), "alpha", "first")
+	bad := map[string]string{
+		"unclosed fence": "```python\nprint(1)",
+		"heading":        "para\n## Injected",
+		"blank line":     "p1\n\np2",
+		"short closer":   "````\ncode\n```",
+	}
+	for name, text := range bad {
+		for _, op := range []EditOp{
+			{Kind: domain.DeltaOpAppendBlock, SectionID: "alpha", BlocksMD: []string{"ok", text}},
+			{Kind: domain.DeltaOpInsertBlock, SectionID: "alpha", BlocksMD: []string{text}},
+			{Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: first, BlocksMD: []string{text}},
+			{Kind: domain.DeltaOpReplaceSectionBlocks, SectionID: "alpha", BlocksMD: []string{text}},
+			{Kind: domain.DeltaOpAddSection, Heading: "New", BlocksMD: []string{text}},
+		} {
+			got, outcome := applyEdits(editDoc, []EditOp{op})
+			if outcome[0].Applied || outcome[0].SkipReason != reasonFragment || got != editDoc {
+				t.Fatalf("%s %s: outcome %+v doc %q", name, op.Kind, outcome[0], got)
+			}
+		}
+	}
+	good := "```\ncode\n\n# comment\n```"
+	op := EditOp{Kind: domain.DeltaOpAppendBlock, SectionID: "beta", BlocksMD: []string{good}}
+	got, outcome := applyEdits(editDoc, []EditOp{op})
+	if !outcome[0].Applied || got != editDoc+"\n"+good+"\n" {
+		t.Fatalf("fenced fragment rejected: %+v %q", outcome[0], got)
+	}
+}

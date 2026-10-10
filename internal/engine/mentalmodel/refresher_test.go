@@ -96,7 +96,7 @@ func TestNothingInScopeMeansNoLLMCall(t *testing.T) {
 			e := newEnv(t)
 			e.addUnit(domain.FactTypeWorld, "unrelated", "other")
 			e.addModel(deltaSpec("status", strategy))
-			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true})
 			if err != nil {
 				t.Fatal(err)
 			}

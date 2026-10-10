@@ -42,7 +42,7 @@ func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
 	}
 }
 
-// TestAdminGetDetailAndStale checks detail trimming, is_stale and NOT_FOUND.
+// TestAdminGetDetailAndStale checks detail trimming, is_stale (computed at full detail only) and NOT_FOUND.
 func TestAdminGetDetailAndStale(t *testing.T) {
 	e := newEnv(t)
 	_, adm := newTriggers(e)
@@ -53,8 +53,8 @@ func TestAdminGetDetailAndStale(t *testing.T) {
 		t.Fatalf("get full: stale %v err %v", full.IsStale, err)
 	}
 	meta, _ := adm.GetMentalModel(e.ctx, e.bank, "status", domain.DetailMetadata)
-	if meta.ContentMD != "" {
-		t.Fatal("metadata detail returned content")
+	if meta.ContentMD != "" || meta.IsStale {
+		t.Fatalf("metadata detail returned content or computed is_stale (%v)", meta.IsStale)
 	}
 	if _, err := adm.GetMentalModel(e.ctx, e.bank, "nope", domain.DetailFull); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown model: %v", err)
@@ -163,5 +163,29 @@ func TestSearchPages(t *testing.T) {
 	if _, err := ps.Search(e.ctx, SearchPagesRequest{Bank: e.bank, Query: " ? "}); !errors.Is(err,
 		domain.ErrInvalidArgument) {
 		t.Fatalf("empty query: %v", err)
+	}
+}
+
+// TestScopeChangedComparesSets checks that scopeChanged treats tags and fact types as sets and tag groups
+// by value, with nil equal to empty, and still sees real changes.
+func TestScopeChangedComparesSets(t *testing.T) {
+	leaf := domain.TagGroup{Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{Tags: []string{"a"}}}
+	base := domain.MentalModelSpec{SourceQuery: "q", Trigger: domain.RefreshTrigger{
+		FactTypes: []domain.FactType{domain.FactTypeWorld, domain.FactTypeExperience},
+		TagGroups: []domain.TagGroup{leaf},
+	}}
+	same := base
+	same.Tags = []string{}
+	same.Trigger.FactTypes = []domain.FactType{domain.FactTypeExperience, domain.FactTypeWorld}
+	same.Trigger.TagGroups = []domain.TagGroup{leaf}
+	empty, emptied := domain.MentalModelSpec{}, domain.MentalModelSpec{Tags: []string{}}
+	emptied.Trigger.FactTypes, emptied.Trigger.TagGroups = []domain.FactType{}, []domain.TagGroup{}
+	if scopeChanged(base, same) || scopeChanged(empty, emptied) {
+		t.Fatal("equal scopes reported changed")
+	}
+	other := same
+	other.Trigger.FactTypes = []domain.FactType{domain.FactTypeWorld}
+	if !scopeChanged(base, other) || !scopeChanged(empty, base) {
+		t.Fatal("changed scope not reported")
 	}
 }

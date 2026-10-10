@@ -23,11 +23,13 @@ type Triggers interface {
 	// Retracted refreshes b's models whose source_ids include any of ids (invalidated or replaced units),
 	// and returns how many refreshes it inserted.
 	Retracted(ctx context.Context, b port.BankRef, ids []port.UnitID) (int, error)
-	// EnqueueDueCronRefreshes enqueues one refresh per model whose refresh_cron fired at or before now
-	// since its newest refresh operation was created (or since the model was created), skipping paused
-	// and fresh models and tombstoned banks; it returns how many it inserted. It is idempotent under
-	// concurrent callers: due-ness is keyed on the fire time, and a second enqueue joins the queued one.
-	// It implements worker.CronRefresher.
+	// EnqueueDueCronRefreshes enqueues one refresh per model whose refresh_cron has an unserved fire
+	// time F in (now - cronGrace, now]: no refresh operation of the model was created at or after F, and
+	// F is not before the model's creation. Paused and fresh models and tombstoned banks are skipped; it
+	// returns how many it inserted. A fire time missed by more than cronGrace (the service was down) is
+	// skipped, so a refresh never runs off-schedule. It is idempotent under concurrent callers: due-ness
+	// is keyed on the fire time, and a second enqueue joins the queued one. It implements
+	// worker.CronRefresher.
 	EnqueueDueCronRefreshes(ctx context.Context, now time.Time) (int, error)
 }
 
@@ -48,7 +50,7 @@ type TriggerDeps struct {
 // triggers is the Triggers implementation.
 type triggers struct {
 	d      TriggerDeps
-	parser cron.Parser
+	parser cronSpecParser
 }
 
 var _ Triggers = (*triggers)(nil)
@@ -58,9 +60,38 @@ func NewTriggers(d TriggerDeps) Triggers {
 	return &triggers{d: d, parser: cronParser()}
 }
 
-// cronParser parses 5-field (minute hour dom month dow) UTC cron expressions.
-func cronParser() cron.Parser {
-	return cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+// cronGrace is how long after a fire time the cron sweep still serves it. The maintenance tick runs every
+// minute, so a few minutes absorb a slow or skipped tick; an older fire time waits for the next one.
+const cronGrace = 5 * time.Minute
+
+// cronSpecParser parses refresh_cron expressions with parseCron.
+type cronSpecParser struct{}
+
+// Parse parses expr with parseCron.
+func (cronSpecParser) Parse(expr string) (cron.Schedule, error) { return parseCron(expr) }
+
+// cronParser returns the refresh_cron parser (UTC, exactly 5 fields).
+func cronParser() cronSpecParser { return cronSpecParser{} }
+
+// parseCron parses a refresh_cron expression: exactly 5 fields (minute hour dom month dow), evaluated in
+// UTC. It rejects @ descriptors and a TZ= or CRON_TZ= prefix.
+func parseCron(expr string) (cron.Schedule, error) {
+	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=") {
+		return nil, fmt.Errorf("mentalmodel: cron %q: a time zone prefix is not allowed (UTC only)", expr)
+	}
+	if strings.Contains(expr, "@") {
+		return nil, fmt.Errorf("mentalmodel: cron %q: @ descriptors are not allowed", expr)
+	}
+	if n := len(strings.Fields(expr)); n != 5 {
+		return nil, fmt.Errorf("mentalmodel: cron %q: want 5 fields (minute hour dom month dow), got %d", expr, n)
+	}
+	// minute hour dom month dow: no seconds field and no @ descriptors.
+	sched, err := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(expr)
+	if err != nil {
+		return nil, fmt.Errorf("mentalmodel: cron %q: %w", expr, err)
+	}
+	return sched, nil
 }
 
 // AfterConsolidation lists the bank's refresh_after_consolidation models and triggers each.
@@ -87,7 +118,7 @@ func (t *triggers) Retracted(ctx context.Context, b port.BankRef, ids []port.Uni
 	return t.triggerAll(ctx, citing)
 }
 
-// EnqueueDueCronRefreshes triggers every cron model whose schedule fired since its last refresh enqueue.
+// EnqueueDueCronRefreshes triggers every cron model whose latest fire time in the grace window is unserved.
 func (t *triggers) EnqueueDueCronRefreshes(ctx context.Context, now time.Time) (int, error) {
 	if t.d.Cron == nil {
 		return 0, nil
@@ -105,7 +136,9 @@ func (t *triggers) EnqueueDueCronRefreshes(ctx context.Context, now time.Time) (
 	return t.triggerAll(ctx, due)
 }
 
-// cronDue reports whether cm's schedule fired in (last enqueue, now]; an unparsable schedule never fires.
+// cronDue reports whether cm's schedule has a fire time F in (now - cronGrace, now] that is not yet served
+// (no refresh operation created at or after F) and not before the model's creation. An unparsable schedule
+// never fires.
 func (t *triggers) cronDue(cm CronModel, now time.Time) bool {
 	expr := strings.TrimSpace(cm.Model.Spec.Trigger.RefreshCron)
 	if expr == "" {
@@ -115,11 +148,16 @@ func (t *triggers) cronDue(cm CronModel, now time.Time) bool {
 	if err != nil {
 		return false
 	}
-	base := cm.LastRefreshEnqueuedAt
-	if base.IsZero() {
-		base = cm.Model.CreatedAt
+	fire, ok := latestFire(sched, now.UTC())
+	return ok && cm.LastRefreshEnqueuedAt.Before(fire) && !fire.Before(cm.Model.CreatedAt)
+}
+
+// latestFire is sched's latest fire time in (now - cronGrace, now]; ok is false when there is none.
+func latestFire(sched cron.Schedule, now time.Time) (fire time.Time, ok bool) {
+	for at := sched.Next(now.Add(-cronGrace)); !at.IsZero() && !at.After(now); at = sched.Next(at) {
+		fire, ok = at, true
 	}
-	return !sched.Next(base.UTC()).After(now.UTC())
+	return fire, ok
 }
 
 // triggerAll decides and enqueues each model's refresh, continuing past per-model errors.

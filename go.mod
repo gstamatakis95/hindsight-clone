@@ -15,6 +15,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pgvector/pgvector-go v0.4.1
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	golang.org/x/sync v0.22.0
 	golang.org/x/text v0.40.0
@@ -69,7 +70,6 @@ require (
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
-	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect

@@ -37,25 +37,51 @@ func (s ResolvedScope) tagFilter() domain.TagFilter {
 
 // predicate compiles the scope's tag filter (nil = no filter). With stalenessOnly, a tagged scope also
 // excludes untagged units: untagged writes never make a tagged model stale, even when its refresh reads
-// untagged memories (tags_match any / all). Fuzzy leaves are compiled as exact names here (decision 1203).
+// untagged memories (tags_match any / all). A scope with a fuzzy leaf anywhere drops the tag filter (only
+// the untagged rule stays for staleness): fuzzy names resolve in recall, so over-matching costs at most
+// one retrieval, while compiling them as exact names would miss real matches (decision 1203).
 func (s ResolvedScope) predicate(stalenessOnly bool) *port.SQLPredicate {
-	var p *port.SQLPredicate
-	switch {
-	case len(s.TagGroups) > 0:
-		args := make([]port.SQLPredicate, len(s.TagGroups))
-		for i, g := range s.TagGroups {
-			args[i] = compileGroup(g)
-		}
-		p = &port.SQLPredicate{Op: port.PredicateAnd, Args: args}
-	case len(s.Tags) > 0 || s.TagsMatch == domain.TagsMatchExact:
-		p = &port.SQLPredicate{Op: port.PredicateTags, Tags: slices.Clone(s.Tags), Match: s.TagsMatch}
-	}
-	if !stalenessOnly || p == nil || (len(s.TagGroups) == 0 && len(s.Tags) == 0) {
+	p := s.tagPredicate()
+	if !stalenessOnly || (len(s.TagGroups) == 0 && len(s.Tags) == 0) {
 		return p
 	}
 	untagged := port.SQLPredicate{Op: port.PredicateTags, Tags: []string{}, Match: domain.TagsMatchExact}
 	tagged := port.SQLPredicate{Op: port.PredicateNot, Args: []port.SQLPredicate{untagged}}
+	if p == nil {
+		return &tagged
+	}
 	return &port.SQLPredicate{Op: port.PredicateAnd, Args: []port.SQLPredicate{*p, tagged}}
+}
+
+// tagPredicate compiles the tags or tag groups alone; nil = no tag filter (none set, or a fuzzy leaf).
+func (s ResolvedScope) tagPredicate() *port.SQLPredicate {
+	switch {
+	case len(s.TagGroups) > 0:
+		if hasFuzzyLeaf(s.TagGroups) {
+			return nil
+		}
+		args := make([]port.SQLPredicate, len(s.TagGroups))
+		for i, g := range s.TagGroups {
+			args[i] = compileGroup(g)
+		}
+		return &port.SQLPredicate{Op: port.PredicateAnd, Args: args}
+	case len(s.Tags) > 0 || s.TagsMatch == domain.TagsMatchExact:
+		return &port.SQLPredicate{Op: port.PredicateTags, Tags: slices.Clone(s.Tags), Match: s.TagsMatch}
+	}
+	return nil
+}
+
+// hasFuzzyLeaf reports whether any leaf in gs (at any depth) resolves its names fuzzily.
+func hasFuzzyLeaf(gs []domain.TagGroup) bool {
+	for _, g := range gs {
+		if g.Leaf != nil && g.Leaf.Resolve == domain.TagResolveFuzzy {
+			return true
+		}
+		if hasFuzzyLeaf(g.Groups) || (g.Not != nil && hasFuzzyLeaf([]domain.TagGroup{*g.Not})) {
+			return true
+		}
+	}
+	return false
 }
 
 // compileGroup turns a tag group into a predicate node with domain.MatchGroup semantics; a malformed

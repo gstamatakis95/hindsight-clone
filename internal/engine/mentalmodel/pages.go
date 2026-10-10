@@ -64,7 +64,8 @@ type pageScore struct {
 
 // Search lists the folder's pages, scores each by term overlap (name weighted double) and by cosine
 // similarity to the query embedding, and fuses the two rankings with RRF (k = 60). A page that matches
-// neither (no shared term, similarity <= 0) is not a hit.
+// neither (no shared term, similarity <= 0) is not a hit. When the embedder fails the search ranks by
+// terms only.
 func (s *pageSearcher) Search(ctx context.Context, req SearchPagesRequest) ([]PageHit, error) {
 	terms := tokenize(req.Query)
 	if len(terms) == 0 {
@@ -77,7 +78,7 @@ func (s *pageSearcher) Search(ctx context.Context, req SearchPagesRequest) ([]Pa
 	var qv []float32
 	if s.emb != nil {
 		if qv, err = s.emb.EmbedQuery(ctx, req.Query); err != nil {
-			return nil, fmt.Errorf("mentalmodel: embed page query: %w", err)
+			qv = nil // the embedder is down: rank by terms only rather than fail the search
 		}
 	}
 	scores := make([]pageScore, len(models))

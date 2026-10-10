@@ -8,6 +8,7 @@ import (
 	"memd/internal/port"
 	"memd/internal/prompts"
 	"slices"
+	"strings"
 )
 
 // DirectiveSelector is the part of bank.DirectiveSelector the single-shot synthesizer consumes to put the
@@ -31,7 +32,8 @@ type ModelDeps struct {
 }
 
 // deltaPlanner makes the MENTAL_MODEL_DELTA call: edit ops over the current document's sections and
-// blocks, applied at once, with one retry that shows the model the rejected ops when none applied.
+// blocks, applied at once, with one retry that shows the model the rejected ops when none applied or when
+// any op named a section or block id the document does not have.
 type deltaPlanner struct{ d ModelDeps }
 
 // deltaResponse is the MENTAL_MODEL_DELTA response schema's shape.
@@ -57,20 +59,54 @@ func (p deltaPlanner) plan(
 		DocumentBudget: maxContentTokens(m, cfg), MaxOutputTokens: derefInt(binding.MaxOutputTokens),
 	}
 	draft := DeltaDraft{ContentMD: m.ContentMD, SourceIDs: unitIDs(facts), FactsRetrieved: len(facts)}
-	for attempt := 0; attempt < 2; attempt++ {
-		ops, usage, err := p.call(ctx, binding, data)
-		draft.Usage = append(draft.Usage, usage)
-		if err != nil {
-			return draft, err
-		}
-		draft.ContentMD, draft.Ops = applyEdits(m.ContentMD, ops)
-		if len(ops) == 0 || appliedCount(draft.Ops) > 0 {
-			return draft, nil
-		}
-		data.Rejected = rejectedOps(draft.Ops)
+	ops, usage, err := p.call(ctx, binding, data)
+	draft.Usage = append(draft.Usage, usage)
+	if err != nil {
+		return draft, err
+	}
+	draft.ContentMD, draft.Ops = applyEdits(m.ContentMD, ops)
+	retry := retryOps(draft.Ops)
+	if len(retry) == 0 {
+		return draft, nil
+	}
+	first := draft
+	data.Rejected = rejectedOps(retry)
+	ops, usage, err = p.call(ctx, binding, data)
+	draft.Usage = append(draft.Usage, usage)
+	if err != nil {
+		return draft, err
+	}
+	draft.ContentMD, draft.Ops = applyEdits(m.ContentMD, ops)
+	switch {
+	case appliedCount(draft.Ops) > 0:
+		return draft, nil
+	case appliedCount(first.Ops) > 0:
+		// The retry was empty or fully rejected after a partial first attempt: keep attempt 1's good ops.
+		first.Usage = draft.Usage
+		return first, nil
 	}
 	draft.ContentMD = m.ContentMD
 	return draft, fmt.Errorf("%w: %d ops after one retry", ErrAllOpsRejected, len(draft.Ops))
+}
+
+// retryOps returns the skipped ops that earn the one retry: every op when none applied, else only the ops
+// skipped for an id the document does not have (Hindsight's _is_bad_reference). The retry's reply replaces
+// the first one wholesale.
+func retryOps(ops []EditOp) []EditOp {
+	all := appliedCount(ops) == 0
+	var out []EditOp
+	for _, op := range ops {
+		if !op.Applied && (all || isBadReference(op.SkipReason)) {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
+// isBadReference reports whether a skip reason is an unknown or wrong-section section or block id.
+func isBadReference(reason string) bool {
+	return strings.HasPrefix(reason, "unknown section_id") || strings.HasPrefix(reason, "unknown block_id") ||
+		strings.Contains(reason, " belongs to section ")
 }
 
 // call renders the delta prompts with data and makes one structured MENTAL_MODEL_DELTA call.

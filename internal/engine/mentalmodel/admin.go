@@ -1,6 +1,7 @@
 package mentalmodel
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"memd/internal/port"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -214,7 +216,7 @@ func (a *admin) UpdateMentalModel(
 ) (domain.MentalModel, error) {
 	var m domain.MentalModel
 	err := a.d.Store.InTx(ctx, func(tx port.Tx) error {
-		cur, err := tx.MentalModels().Get(ctx, b, id)
+		cur, err := lockedModel(ctx, tx, b, id)
 		if err != nil {
 			return err
 		}
@@ -276,7 +278,7 @@ func (a *admin) ClearMentalModel(
 	keep := a.historyKeep(ctx, b)
 	var m domain.MentalModel
 	err := a.d.Store.InTx(ctx, func(tx port.Tx) error {
-		cur, err := tx.MentalModels().Get(ctx, b, id)
+		cur, err := lockedModel(ctx, tx, b, id)
 		if err != nil {
 			return err
 		}
@@ -381,9 +383,10 @@ func (a *admin) DeleteFolder(ctx context.Context, b port.BankRef, path string) (
 	return n, nil
 }
 
-// present computes is_stale (content and full detail only) and trims m to detail.
+// present computes is_stale (full detail only; other details leave it false) and trims m to detail.
 func (a *admin) present(ctx context.Context, m domain.MentalModel, detail domain.Detail) (domain.MentalModel, error) {
-	if a.d.Detector != nil {
+	m.IsStale = false
+	if a.d.Detector != nil && detail == domain.DetailFull {
 		stale, _, err := a.d.Detector.NeedsRefresh(ctx, m)
 		if err != nil {
 			return domain.MentalModel{}, fmt.Errorf("mentalmodel: staleness of %s: %w", m.Spec.ID, err)
@@ -398,6 +401,15 @@ func (a *admin) present(ctx context.Context, m domain.MentalModel, detail domain
 		m.LastTrace = nil
 	}
 	return m, nil
+}
+
+// lockedModel takes tx.Seq(b) first, which locks the bank row and so serializes every read-modify-write
+// of a model row (runner write, reconcile, update, clear), then reads the model.
+func lockedModel(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error) {
+	if _, err := tx.Seq(ctx, b); err != nil {
+		return domain.MentalModel{}, err
+	}
+	return tx.MentalModels().Get(ctx, b, id)
 }
 
 // historyKeep reads history_max_entries for b (default on any error).
@@ -442,9 +454,29 @@ func normalizeSpec(spec domain.MentalModelSpec) (domain.MentalModelSpec, error) 
 func normalizeFolder(p string) string { return strings.Trim(strings.TrimSpace(p), "/") }
 
 // scopeChanged reports whether the source query or the read scope (tags, tag groups, match, fact types)
-// differs between two specs.
+// differs between two specs. Tags and fact types compare as sets and tag groups by value, nil equal to empty.
 func scopeChanged(a, b domain.MentalModelSpec) bool {
 	return a.SourceQuery != b.SourceQuery || !domain.SameTagSet(a.Tags, b.Tags) ||
-		a.Trigger.TagsMatch != b.Trigger.TagsMatch || !reflect.DeepEqual(a.Trigger.TagGroups, b.Trigger.TagGroups) ||
-		!reflect.DeepEqual(a.Trigger.FactTypes, b.Trigger.FactTypes)
+		a.Trigger.TagsMatch != b.Trigger.TagsMatch || !sameTagGroups(a.Trigger.TagGroups, b.Trigger.TagGroups) ||
+		!sameFactTypes(a.Trigger.FactTypes, b.Trigger.FactTypes)
+}
+
+// sameFactTypes compares two fact-type lists as sets (order and duplicates ignored, nil equal to empty).
+func sameFactTypes(a, b []domain.FactType) bool {
+	return slices.Equal(sortedSet(a), sortedSet(b))
+}
+
+// sortedSet returns the sorted distinct values of s.
+func sortedSet[T cmp.Ordered](s []T) []T {
+	out := slices.Clone(s)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
+// sameTagGroups compares two tag-group lists by value, nil equal to empty.
+func sameTagGroups(a, b []domain.TagGroup) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == len(b)
+	}
+	return reflect.DeepEqual(a, b)
 }

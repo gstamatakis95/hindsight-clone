@@ -14,6 +14,20 @@ alone can't: it writes a document, not edit ops.
   was rejected; after the retry an all-rejected result returns the draft plus an error wrapping
   `ErrAllOpsRejected`, and the runner keeps the document. Partially applied ops are kept (only the
   all-rejected case is a failure, per SPEC 2001).
+- **Retry rules** (Hindsight's `request_delta_operations`). The one retry also fires when some ops applied
+  but any op was skipped for an unknown section/block id or a block id from another section
+  (`_is_bad_reference`); `Rejected` then lists only those ops (all skipped ops when none applied). The
+  retry's reply replaces the first when any of its ops applies. When the retry after a partially applied
+  first reply is empty or fully rejected, attempt 1's partial draft is kept (its good ops apply and the
+  watermark advances with them). After a fully rejected first reply, an all-rejected or empty retry is
+  `ErrAllOpsRejected`. An empty first reply is a success with no retry. The retry prompt
+  (`mm_structured_delta_user`) now says "These operations ... could not be applied", true in both cases.
+- **Fragment validation.** Each `blocks_md` entry of add_section, replace_section_blocks, append_block,
+  insert_block and replace_block must be one markdown fragment: no ATX heading or blank line outside a
+  code fence, and no unclosed fence. Otherwise the whole op is skipped ("block must be one markdown
+  fragment ..."); it is not a bad reference, so it alone does not trigger a retry after a partial apply.
+  Fences follow CommonMark: a fence closes only on a run of the opener's character at least as long, with
+  only whitespace after it, and a backtick opener's info string may not contain a backtick.
 - Both constructors take `ModelDeps{LLM, Router, Clock, Directives}`: the agentic delta needs the
   MENTAL_MODEL_DELTA call too, and SYNTHESIZE renders the bank's directives.
 - **Agentic delta** (Hindsight's flow, #5272): the reflect loop runs over the window

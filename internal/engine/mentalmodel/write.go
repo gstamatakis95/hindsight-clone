@@ -15,9 +15,11 @@ const (
 	defaultDebounceSeconds   = 30
 )
 
-// write commits a successful run in one short transaction: the watermark and last_refreshed_at always; a
-// new version, its history entry and a MENTAL_MODEL_REFRESHED event when the content changed. It returns
-// the version written (0 = none). A model changed since the run read it (cleared, its query or scope
+// write commits a successful run in one short transaction: last_refreshed_at always; the watermark and
+// source_ids unless nothing was in scope (SPEC 2002: such a run only records that it ran); a new version,
+// its history entry and a MENTAL_MODEL_REFRESHED event when the content changed. It returns the version
+// written (0 = none). It takes tx.Seq first, so the bank row lock serializes it with every other
+// read-modify-write of the model row. A model changed since the run read it (cleared, its query or scope
 // edited, or another version written) is domain.ErrConflict and nothing is written; the job retries.
 func (r *runner) write(
 	ctx context.Context, p *refreshPlan, dr drafted, opts RefreshOptions, trace domain.RefreshTrace,
@@ -26,27 +28,30 @@ func (r *runner) write(
 	var version int64
 	err := r.d.Store.InTx(ctx, func(tx port.Tx) error {
 		version = 0
+		seq, err := tx.Seq(ctx, p.m.Bank)
+		if err != nil {
+			return err
+		}
 		cur, err := tx.MentalModels().Get(ctx, p.m.Bank, p.m.Spec.ID)
 		if err != nil {
 			return err
 		}
-		if cur.Version != p.m.Version || cur.ContentMD != p.m.ContentMD || cur.LastSeqSeen != p.m.LastSeqSeen {
-			return fmt.Errorf("%w: mental model %s changed during the refresh", domain.ErrConflict, cur.Spec.ID)
+		if err := unchangedSince(p.m, cur); err != nil {
+			return err
 		}
-		next := cur
-		next.LastRefreshedAt, next.LastSeqSeen, next.IsStale = &now, p.upTo, false
-		if opts.Manual {
-			next.AutoRefreshPaused = false
+		next := ranModel(cur, opts, trace, now)
+		if dr.nothingInScope {
+			return tx.MentalModels().Update(ctx, next)
 		}
-		if cur.Spec.Trigger.KeepTrace {
-			t := trace
-			next.LastTrace = &t
-		}
-		if p.mode == domain.RefreshModeFull { // pruned on full, even to nothing when nothing is in scope
-			next.SourceIDs = slices.Clone(dr.sourceIDs)
+		next.LastSeqSeen, next.IsStale = p.upTo, false
+		if p.mode == domain.RefreshModeFull {
+			if next.SourceIDs, err = prunedSources(ctx, tx, cur, dr); err != nil {
+				return err
+			}
 		}
 		if !dr.noNewFacts && dr.content != cur.ContentMD {
-			if version, err = writeVersion(ctx, tx, cur, &next, dr, p.cfg, opts.OperationID, now); err != nil {
+			version, err = writeVersion(ctx, tx, seq, cur, &next, dr, versionMeta{p.cfg, opts.OperationID, now})
+			if err != nil {
 				return err
 			}
 		}
@@ -58,22 +63,72 @@ func (r *runner) write(
 	return version, nil
 }
 
-// writeVersion moves cur's content to history and puts the draft into next, stamping the event with the
-// transaction's change seq.
-func writeVersion(
-	ctx context.Context, tx port.Tx, cur domain.MentalModel, next *domain.MentalModel, dr drafted,
-	cfg domain.BankConfig, op port.OperationID, now time.Time,
-) (int64, error) {
-	seq, err := tx.Seq(ctx, cur.Bank)
-	if err != nil {
-		return 0, err
+// unchangedSince is domain.ErrConflict when cur moved since the run read read: another version, cleared
+// content, a moved watermark, or an edited source query, read scope or response schema (the draft was
+// made for the old ones).
+func unchangedSince(read, cur domain.MentalModel) error {
+	if cur.Version != read.Version || cur.ContentMD != read.ContentMD || cur.LastSeqSeen != read.LastSeqSeen ||
+		scopeChanged(read.Spec, cur.Spec) ||
+		cur.Spec.Trigger.ResponseSchemaJSON != read.Spec.Trigger.ResponseSchemaJSON {
+		return fmt.Errorf("%w: mental model %s changed during the refresh", domain.ErrConflict, cur.Spec.ID)
 	}
-	if cur.Version > 0 || cur.ContentMD != "" {
+	return nil
+}
+
+// ranModel is cur after any successful run: last_refreshed_at set, the pause cleared by a manual run and
+// the trace kept when keep_trace.
+func ranModel(
+	cur domain.MentalModel, opts RefreshOptions, trace domain.RefreshTrace, now time.Time,
+) domain.MentalModel {
+	next := cur
+	next.LastRefreshedAt = &now
+	if opts.Manual {
+		next.AutoRefreshPaused = false
+	}
+	if cur.Spec.Trigger.KeepTrace {
+		t := trace
+		next.LastTrace = &t
+	}
+	return next
+}
+
+// prunedSources is a full refresh's source_ids: the draft's, or, when it drafted nothing (the content
+// stays), the model's sources that are still live, so provenance of kept content survives and dead ids go.
+func prunedSources(ctx context.Context, tx port.Tx, cur domain.MentalModel, dr drafted) ([]port.UnitID, error) {
+	if !dr.noNewFacts {
+		return slices.Clone(dr.sourceIDs), nil
+	}
+	if len(cur.SourceIDs) == 0 {
+		return nil, nil
+	}
+	live, err := tx.GetUnits(ctx, cur.Bank, cur.SourceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("mentalmodel: read sources: %w", err)
+	}
+	return unitIDs(live), nil
+}
+
+// versionMeta is what a version write records besides the draft: the config (history cap), the operation
+// and the time.
+type versionMeta struct {
+	cfg domain.BankConfig
+	op  port.OperationID
+	now time.Time
+}
+
+// writeVersion moves cur's content to history (when there is any: the first build and a rebuild after a
+// Clear, which recorded the content itself, add no entry) and puts the draft into next, stamping the event
+// with the transaction's change seq.
+func writeVersion(
+	ctx context.Context, tx port.Tx, seq int64, cur domain.MentalModel, next *domain.MentalModel, dr drafted,
+	meta versionMeta,
+) (int64, error) {
+	if cur.ContentMD != "" {
 		e := domain.MentalModelHistoryEntry{
 			Kind: domain.HistoryKindVersion, Version: cur.Version, PreviousContent: cur.ContentMD,
-			ChangedAt: now, Outcome: domain.RefreshOutcomeContentWritten,
+			ChangedAt: meta.now, Outcome: domain.RefreshOutcomeContentWritten,
 		}
-		if err := tx.MentalModels().AppendHistory(ctx, cur.Bank, cur.Spec.ID, e, historyKeep(cfg)); err != nil {
+		if err := tx.MentalModels().AppendHistory(ctx, cur.Bank, cur.Spec.ID, e, historyKeep(meta.cfg)); err != nil {
 			return 0, err
 		}
 	}
@@ -83,9 +138,9 @@ func writeVersion(
 	if dr.embedding != nil {
 		next.Embedding = dr.embedding
 	}
-	err = tx.Events().Append(ctx, domain.LifecycleEvent{
-		Seq: seq, Type: domain.EventTypeMentalModelRefreshed, Bank: cur.Bank, At: now,
-		OperationID: op, SubjectID: string(cur.Spec.ID),
+	err := tx.Events().Append(ctx, domain.LifecycleEvent{
+		Seq: seq, Type: domain.EventTypeMentalModelRefreshed, Bank: cur.Bank, At: meta.now,
+		OperationID: meta.op, SubjectID: string(cur.Spec.ID),
 	})
 	if err != nil {
 		return 0, err

@@ -8,18 +8,27 @@ Fuzzy tag leaves need a trigram lookup against the bank's tags (recall's TagFilt
 
 ## Decision
 - The scope compiles to a `port.SQLPredicate` in the engine (`ResolvedScope.predicate`). For staleness
-  (and the delta window check) a scoped model's predicate is AND-ed with "has at least one tag"
-  (`not(exact [])`), so untagged units never stale it even under `tags_match any / all`. An untagged model
-  with `exact []` keeps the untagged scope.
-- Fuzzy leaves are compiled as exact names for staleness. Recall and reflect still receive the
-  `domain.TagFilter` and resolve fuzzy leaves themselves, so only the staleness check is affected (a
-  fuzzy-only match can be missed until the next exact-name or cron trigger).
+  (`ChangeDetector.NeedsRefresh`, also the re-check an automatic run makes when it starts) a scoped model's
+  predicate is AND-ed with "has at least one tag" (`not(exact [])`), so untagged units never stale it even
+  under `tags_match any / all`. An untagged model with `exact []` keeps the untagged scope. The runner's
+  no-LLM pre-check reads the model's read scope instead (untagged units included where the scope reads
+  them), so a manual or forced refresh never skips memories its retrieval would use (decision 1202).
+- A scope with a fuzzy leaf anywhere in its tag groups drops the tag predicate, in both the pre-check and
+  the detector; fact types, the seq window and the untagged rule (for staleness) stay. Recall and reflect
+  still receive the `domain.TagFilter` and resolve fuzzy leaves themselves. Cost: such a model looks stale
+  after every tagged write, so each trigger runs a full refresh (for the agentic strategy, a whole reflect
+  loop), bounded only by the debounce and the interval floor. Compiling fuzzy names as exact ones instead
+  would miss real matches (a model could never build).
+- **Follow-up:** once CCR WP-09-1 (`Reader.BankTags`) lands, resolve fuzzy names to the bank's exact tags
+  before compiling, so the predicate is precise again and the over-triggering goes away.
 - Retraction: any `source_ids` entry that `GetUnits` no longer returns (archived or replaced) makes the
   model stale.
 
 ## Alternatives
 - Depending on recall's TagFilterCompiler: an extra engine dependency and a DB round trip per check for a
   rare case. Deferred.
+- Compiling fuzzy leaves as exact names: cheaper, but a fuzzy-only scope then never looks stale and its
+  pre-check always says "nothing in scope".
 
 ## Spec lines involved
 Behavioural rules (Staleness), gRPC surface (RefreshTrigger.tags_match, tag_groups).

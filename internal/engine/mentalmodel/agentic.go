@@ -6,6 +6,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/reflect"
 	"memd/internal/port"
+	"memd/internal/prompts"
 	"slices"
 	"strings"
 )
@@ -46,8 +47,14 @@ func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.Ban
 		ContentMD: strings.TrimSpace(res.Text), SourceIDs: unitIDs(res.BasedOn.Memories), Usage: res.Usage,
 		ToolCalls: toolCalls(res), FactsRetrieved: len(res.BasedOn.Memories),
 	}
-	if d.ContentMD == "" && len(res.BasedOn.Memories) == 0 {
+	switch {
+	case d.ContentMD == "" && len(res.BasedOn.Memories) == 0:
 		return d, ErrNoNewFacts
+	case len(res.BasedOn.Memories) == 0:
+		// An answer that cites nothing is not grounded in the scope: fail rather than write it with no
+		// sources (which would also prune source_ids and advance the watermark).
+		return d, fmt.Errorf("%w: mentalmodel: no_citations: the reflect answer cites no memories",
+			domain.ErrUnavailable)
 	}
 	return d, nil
 }
@@ -74,10 +81,10 @@ func (a *agentic) Delta(
 func (a *agentic) request(m domain.MentalModel, cfg domain.BankConfig, window port.SeqRange) reflect.ReflectRequest {
 	scope := resolveScope(m)
 	t := m.Spec.Trigger
-	facts, calls := true, true
+	facts, outputs := true, false
 	req := reflect.ReflectRequest{
 		Bank: m.Bank, Query: m.Spec.SourceQuery, Tags: scope.tagFilter(), Budget: budget(m),
-		Include:   reflect.ReflectInclude{Facts: &facts, ToolCalls: calls},
+		Include:   reflect.ReflectInclude{Facts: &facts, ToolCalls: true, ToolOutputs: &outputs},
 		Overrides: &cfg, Seq: window, Types: scope.FactTypes,
 		ExcludeMentalModels:   t.ExcludeMentalModels,
 		ExcludeMentalModelIDs: appendUnique(slices.Clone(t.ExcludeMentalModelIDs), m.Spec.ID),
@@ -87,7 +94,20 @@ func (a *agentic) request(m domain.MentalModel, cfg domain.BankConfig, window po
 	if n := maxContentTokens(m, cfg); n > 0 {
 		req.MaxTokens = &n
 	}
+	// TODO(WP-11): once ReflectRequest.Context merges, set req.Context from refreshContext(m, window):
+	// prompts.MentalModelRefreshContext with RefreshContextData{Name: m.Spec.Name, Delta: window.After > 0}.
 	return req
+}
+
+// refreshContext renders the reflect context of an agentic refresh over window: the document's name and
+// whether the loop sees only the delta window.
+func refreshContext(m domain.MentalModel, window port.SeqRange) (string, error) {
+	out, err := prompts.Render(prompts.MentalModelRefreshContext,
+		prompts.RefreshContextData{Name: m.Spec.Name, Delta: window.After > 0})
+	if err != nil {
+		return "", fmt.Errorf("mentalmodel: refresh context: %w", err)
+	}
+	return out, nil
 }
 
 // toolCalls returns the loop's tool calls, if traced.

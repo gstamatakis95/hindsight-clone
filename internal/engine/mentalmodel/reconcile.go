@@ -71,7 +71,10 @@ func (r *reconciler) ReconcileFailedRefreshes(ctx context.Context) (int, error) 
 	return n, errors.Join(errs...)
 }
 
-// record pauses f's model and writes the failure, unless a later refresh succeeded or it is recorded.
+// record pauses f's model and writes the failure, unless it is stale (see skipFailure). A cheap check
+// first skips without taking the bank lock (so a paused model doesn't bump the seq every tick); then
+// tx.Seq locks the bank row, which serializes this with every other model-row write, and the check is
+// repeated on a fresh read.
 func (r *reconciler) record(ctx context.Context, f FailedRefresh) (bool, error) {
 	keep := defaultHistoryMaxEntries
 	if cfg, err := r.config.Effective(ctx, f.Bank); err == nil {
@@ -81,15 +84,14 @@ func (r *reconciler) record(ctx context.Context, f FailedRefresh) (bool, error) 
 	err := r.store.InTx(ctx, func(tx port.Tx) error {
 		paused = false
 		m, err := tx.MentalModels().Get(ctx, f.Bank, f.ModelID)
-		if err != nil {
+		if err != nil || skipFailure(m, f) {
 			return err
-		}
-		if (m.LastRefreshedAt != nil && !m.LastRefreshedAt.Before(f.FailedAt)) ||
-			(m.LastRefreshFailedAt != nil && !m.LastRefreshFailedAt.Before(f.FailedAt)) {
-			return nil
 		}
 		seq, err := tx.Seq(ctx, f.Bank)
 		if err != nil {
+			return err
+		}
+		if m, err = tx.MentalModels().Get(ctx, f.Bank, f.ModelID); err != nil || skipFailure(m, f) {
 			return err
 		}
 		at := f.FailedAt
@@ -111,6 +113,14 @@ func (r *reconciler) record(ctx context.Context, f FailedRefresh) (bool, error) 
 		return tx.MentalModels().Update(ctx, m)
 	})
 	return paused, err
+}
+
+// skipFailure reports whether f is not to be recorded on m: it predates the model (a model recreated with
+// the same id), a later refresh succeeded, or it is already recorded.
+func skipFailure(m domain.MentalModel, f FailedRefresh) bool {
+	return f.FailedAt.Before(m.CreatedAt) ||
+		(m.LastRefreshedAt != nil && !m.LastRefreshedAt.Before(f.FailedAt)) ||
+		(m.LastRefreshFailedAt != nil && !m.LastRefreshFailedAt.Before(f.FailedAt))
 }
 
 // failureReason classifies a failed refresh's error text.

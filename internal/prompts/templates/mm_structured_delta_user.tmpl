@@ -47,7 +47,7 @@ Your JSON response must fit within ~{{.MaxOutputTokens}} tokens. If you would ne
 {{- if .Rejected}}
 
 ## Previous attempt rejected
-None of the operations in your previous response could be applied:
+These operations in your previous response could not be applied:
 {{- range .Rejected}}
 - {{.Op}} — {{.Reason}}
 {{- end}}
