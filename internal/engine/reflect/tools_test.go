@@ -167,6 +167,11 @@ func testReadPages(t *testing.T, tools []rf.Tool) {
 	if res.Error == "" {
 		t.Errorf("read without ids must go back to the model")
 	}
+	st = newState(rf.ReflectRequest{})
+	if _, err := toolByName(t, tools, rf.ToolReadMentalModels).Call(context.Background(), st,
+		json.RawMessage(`{"mental_model_ids":["missing"]}`)); err != nil || st.Searched {
+		t.Errorf("reading no page is not a retrieval (searched=%v, err=%v)", st.Searched, err)
+	}
 }
 
 func TestToolExpand(t *testing.T) {
@@ -205,5 +210,11 @@ func TestToolExpand(t *testing.T) {
 	}
 	if len(st.RetrievedUnits) != 0 {
 		t.Errorf("expand must not register citable ids")
+	}
+	st = newState(rf.ReflectRequest{Types: []domain.FactType{domain.FactTypeWorld}})
+	res, err = toolByName(t, tools, rf.ToolExpand).Call(context.Background(), st,
+		json.RawMessage(`{"memory_ids":["o1","f1"]}`))
+	if err != nil || !containsAll(string(res.Output), "Memory not found: o1", `"memory_id":"f1","memory"`) {
+		t.Errorf("expand must filter units by the request's types: %s %v", res.Output, err)
 	}
 }

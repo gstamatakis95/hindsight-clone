@@ -103,14 +103,14 @@ func decodeArgs(name string, raw json.RawMessage, v any) (ToolResult, bool) {
 	return ToolResult{}, true
 }
 
-// retrievalError classifies a dependency error: a caller's ctx error passes through, anything else fails
-// reflect as UNAVAILABLE (strict: it never answers from evidence it could not gather). The one argument error
-// the model controls, an over-long query, is caught before the call (checkQuery).
+// retrievalError classifies a dependency error; it always fails reflect (strict: it never answers from
+// evidence it could not gather). A caller's ctx error and an already classified error (invalid argument,
+// failed precondition, not found, unavailable) keep their class; anything else is UNAVAILABLE. The one
+// argument error the model controls, an over-long query, is caught before the call (checkQuery).
 func retrievalError(ctx context.Context, name string, err error) (ToolResult, error) {
 	switch {
-	case ctx.Err() != nil:
-		return ToolResult{}, fmt.Errorf("reflect: %s: %w", name, err)
-	case errors.Is(err, domain.ErrUnavailable):
+	case ctx.Err() != nil, errors.Is(err, domain.ErrInvalidArgument), errors.Is(err, domain.ErrFailedPrecondition),
+		errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrUnavailable):
 		return ToolResult{}, fmt.Errorf("reflect: %s: %w", name, err)
 	default:
 		return ToolResult{}, fmt.Errorf("%w: reflect: %s: %w", domain.ErrUnavailable, name, err)
@@ -244,17 +244,18 @@ func (t *recallTool) Call(ctx context.Context, st *AgentState, args json.RawMess
 	return output(out)
 }
 
-// factTypes returns the raw-fact types the recall tool searches: the request's (internal callers), minus
-// observations, else world and experience.
+// factTypes returns the raw-fact types the recall tool searches: world and experience for an unrestricted
+// request, else the request's types (internal callers) minus observations, possibly none (then recall is not
+// offered).
 func factTypes(req []domain.FactType) []domain.FactType {
+	if len(req) == 0 {
+		return []domain.FactType{domain.FactTypeWorld, domain.FactTypeExperience}
+	}
 	var out []domain.FactType
 	for _, t := range req {
 		if t != domain.FactTypeObservation {
 			out = append(out, t)
 		}
-	}
-	if len(out) == 0 {
-		return []domain.FactType{domain.FactTypeWorld, domain.FactTypeExperience}
 	}
 	return out
 }

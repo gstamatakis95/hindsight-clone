@@ -189,7 +189,6 @@ func (t *readPagesTool) Call(ctx context.Context, st *AgentState, args json.RawM
 	if err != nil {
 		return retrievalError(ctx, ToolReadMentalModels, err)
 	}
-	st.Searched = true
 	budget := tokenArg(a.MaxTokens, defaultReadPagesMaxTokens)
 	var read []domain.MentalModel
 	var notRead []port.MentalModelID
@@ -204,6 +203,7 @@ func (t *readPagesTool) Call(ctx context.Context, st *AgentState, args json.RawM
 		read = append(read, ms[i])
 	}
 	rememberPages(st, read)
+	st.Searched = st.Searched || len(read) > 0
 	out := make([]pageOut, 0, len(read))
 	for _, m := range read {
 		out = append(out, fullPage(m))

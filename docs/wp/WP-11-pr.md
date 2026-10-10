@@ -32,7 +32,7 @@ Plan: `docs/wp/WP-11.md`.
 ## Acceptance tests (`go test -race ./internal/engine/reflect`, all pass)
 | Accept item | Test |
 |---|---|
-| Retrieval error → UNAVAILABLE (db, reranker, embedder, pages) | `TestReflectRetrievalErrorIsUnavailable` |
+| Retrieval error fails the call: unclassified → UNAVAILABLE, classified errors keep their class | `TestReflectRetrievalErrorIsUnavailable` |
 | Empty retrieval is not a failure | `TestReflectEmptyRetrievalIsNotFailure` |
 | Empty final answer fails (done and synthesis) | `TestReflectEmptyAnswerFails` |
 | Model that can't drive tools fails | `TestReflectModelWithoutToolCallsFails` |
@@ -68,6 +68,31 @@ Gates: `make gen` (no diff), `make lint BREAKING_AGAINST=contracts-v1` (0 issues
 - `NewPromptBuilder(clock)`.
 - The agentic refresh should set `AsDocument`, `Context` (rendered `mm_refresh_context`), `Seq`, `Types`,
   `ExcludeMentalModels`/`ExcludeMentalModelIDs`, `RecallInclude` and the model's budget (refresh default MID).
+
+## Review round 1 fixes
+| Item | Fix | Test |
+|---|---|---|
+| H1 | tool_choice `required` until the first tool call, then `auto`; a prose reply is retried once before failing | `TestReflectModelWithoutToolCallsFails` (incl. "prose once, then a tool call") |
+| H2 | `ReflectRequest.Types` honoured: search_observations / recall offered only for matching types, no recall fallback, expand filters by type | `TestReflectHonoursTypes`, `TestToolExpand` |
+| M3 | INVALID_ARGUMENT, FAILED_PRECONDITION, NOT_FOUND from retrieval pass through; only unclassified errors become UNAVAILABLE (decision 1100) | `TestReflectRetrievalErrorIsUnavailable` |
+| M4 | closing done keeps the evidence guard: one forced retrieval turn, else synthesis | `TestReflectClosingDoneKeepsEvidenceGuard` |
+| M5 | model-facing tool error instructions in `reflect_tool_error_{search_first,unknown,done}.tmpl`, rendered with the offered-tool flags | `TestReflectToolErrorsNameOfferedTools` |
+| M6 | max_total_tokens charged on the synthesis call and the structured pass | `TestReflectMaxTotalTokensExhausted` ("synthesis call", "structured pass") |
+| LOW | "too many tokens" marker dropped; read_mental_models sets Searched only when a page was read; extras never in directive_ids | `TestIsContextOverflow`, `TestToolsMentalModels`, `TestReflectExtraDirectivesAdded` |
+
+Round 2 follow-up:
+| Item | Fix | Test |
+|---|---|---|
+| MEDIUM | `reflect_system`: raw-facts level, MANDATORY recall lines, workflow step and other recall() mentions only with `.Recall` | `TestReflectSystemWithoutRecallGolden` (golden `testdata/reflect_system_no_recall.golden`), `TestReflectHonoursTypes` |
+| LOW | require_evidence with no search tool offered → FAILED_PRECONDITION before any model call | `TestReflectNoSearchToolFailsFast` |
+| LOW | `ReflectData.MentalModels` split into `SearchMentalModels` / `ReadMentalModels` | `TestReflectToolErrorsNameOfferedTools` ("search without read"), `TestBranchVariants` |
+
+M5 touches `internal/prompts` (outside this card's Owns, at the coordinator's request): three templates and
+fixtures, three name constants, `ReflectData.Recall` (offered-tool flag read by the new templates) and their
+`dataFor` entries in `prompts_test.go`. The round 2 follow-up also edits `reflect_system.tmpl`, renames
+`ReflectData.MentalModels` to `SearchMentalModels` + `ReadMentalModels` (fixtures and `TestBranchVariants`
+updated) and adds `reflect_golden_test.go` with its fixture and golden file. Any other `ReflectData` user
+(e.g. a WP-13 prompt preview) must set the per-tool flags, `Recall` included.
 
 ## Known gaps
 - No forced tool order (Hindsight forces mental models → observations → recall with named tool choice); the

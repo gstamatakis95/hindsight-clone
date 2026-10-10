@@ -9,8 +9,8 @@ surfaces an overflow as a non-retried `ErrUnavailable` whose message carries the
 - File CCR WP-11-1 for `domain.ErrContextOverflow` (wrapping `ErrUnavailable`).
 - Meanwhile `isContextOverflow` matches the lowercased error text against Hindsight's markers
   (`context_length_exceeded`, `context length exceeded`, `maximum context length`, `prompt_too_long`,
-  `prompt is too long`, `input is too long`, `too many tokens`) plus `context window`. Hindsight's
-  `resource_exhausted` marker is left out: Google uses it for rate limits too, and memd's own
+  `prompt is too long`, `input is too long`) plus `context window`. Hindsight's `resource_exhausted` and
+  `too many tokens` markers are left out: both can appear in rate-limit (429) errors, and memd's own
   `ErrResourceExhausted` must never be read as an overflow.
 - On an overflow in a loop turn or the closing turn, reflect makes one tool-less `reflect_final` call with
   every successful tool output so far (stop reason `context_full`). If that call overflows too, it drops the

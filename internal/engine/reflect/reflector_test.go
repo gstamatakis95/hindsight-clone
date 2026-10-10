@@ -17,23 +17,31 @@ import (
 )
 
 func TestReflectRetrievalErrorIsUnavailable(t *testing.T) {
-	cases := map[string]error{
-		"database":      errors.New("connection refused"),
-		"reranker":      fmt.Errorf("%w: rerank: 503", domain.ErrUnavailable),
-		"embedder":      fmt.Errorf("%w: embed: timeout", domain.ErrUnavailable),
-		"bank vanished": fmt.Errorf("%w: bank", domain.ErrNotFound),
-		"unbound slot":  fmt.Errorf("%w: no model bound to slot \"rerank\"", domain.ErrInvalidArgument),
+	cases := map[string]struct {
+		cause, want error
+	}{
+		"database":      {errors.New("connection refused"), domain.ErrUnavailable},
+		"reranker":      {fmt.Errorf("%w: rerank: 503", domain.ErrUnavailable), domain.ErrUnavailable},
+		"embedder":      {fmt.Errorf("%w: embed: timeout", domain.ErrUnavailable), domain.ErrUnavailable},
+		"bank vanished": {fmt.Errorf("%w: bank", domain.ErrNotFound), domain.ErrNotFound},
+		"unbound slot": {
+			fmt.Errorf("%w: no model bound to slot \"rerank\"", domain.ErrInvalidArgument), domain.ErrInvalidArgument,
+		},
+		"bank deleting": {domain.ErrBankDeleting, domain.ErrFailedPrecondition},
 	}
-	for name, cause := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, domain.BankConfig{})
 			h.rc.RecallFunc = func(context.Context, recall.RecallRequest) (recall.RecallResult, error) {
-				return recall.RecallResult{}, cause
+				return recall.RecallResult{}, tc.cause
 			}
 			h.turns(recallCall(), doneCall("never"))
 			_, err := h.reflect(nil)
-			if !errors.Is(err, domain.ErrUnavailable) {
-				t.Fatalf("err = %v, want UNAVAILABLE", err)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if !errors.Is(tc.want, domain.ErrUnavailable) && errors.Is(err, domain.ErrUnavailable) {
+				t.Errorf("a classified error must keep its class, not become UNAVAILABLE: %v", err)
 			}
 			if n := len(h.loopCalls()); n != 1 {
 				t.Errorf("loop turns = %d, want 1 (no answer from missing evidence)", n)
@@ -93,9 +101,27 @@ func TestReflectModelWithoutToolCallsFails(t *testing.T) {
 	if !errors.Is(err, domain.ErrUnavailable) || !strings.Contains(err.Error(), "tool") {
 		t.Fatalf("err = %v, want UNAVAILABLE about tool calls", err)
 	}
-	if n := len(h.llm.Calls()); n != 1 {
-		t.Errorf("LLM calls = %d, want 1 (no salvage of the prose)", n)
+	all := h.llm.Calls()
+	if len(all) != 2 || all[0].Chat.ToolChoice != "required" || all[1].Chat.ToolChoice != "required" {
+		t.Errorf("want one retry under tool_choice=required and no salvage of the prose; calls = %d", len(all))
 	}
+
+	t.Run("prose once, then a tool call", func(t *testing.T) {
+		h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
+		h.turns(text("Alice likes tea."), recallCall(), doneCall("Alice likes tea.", "u1"))
+		res, err := h.reflect(nil)
+		if err != nil || res.Text != "Alice likes tea." {
+			t.Fatalf("res %q err %v", res.Text, err)
+		}
+		turns := h.loopCalls()
+		var choices []string
+		for _, c := range turns {
+			choices = append(choices, c.Chat.ToolChoice)
+		}
+		if !slices.Equal(choices, []string{"required", "required", "auto"}) {
+			t.Errorf("tool choices = %v, want required until the first tool call, then auto", choices)
+		}
+	})
 }
 
 // errOverflow is a gateway error for a prompt over the context window.
@@ -172,6 +198,29 @@ func TestReflectMaxTotalTokensExhausted(t *testing.T) {
 		t.Errorf("loop turns = %d, want 2", n)
 	}
 
+	t.Run("synthesis call", func(t *testing.T) {
+		cfg := domain.BankConfig{Reflect: &domain.ReflectConfig{MaxTotalTokens: ptr(int64(100)), MaxIterations: ptr(2)}}
+		h := newHarness(t, cfg, unit("u1", "Alice likes tea"))
+		h.turns(withUsage(recallCall(), 40, 10), text("prose"))
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectDoneRequest, withUsage(text("prose"), 10, 10))
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectFinal, withUsage(text("Tea."), 30, 10))
+		if _, err := h.reflect(nil); !errors.Is(err, domain.ErrResourceExhausted) {
+			t.Fatalf("err = %v, want RESOURCE_EXHAUSTED from the synthesis call", err)
+		}
+	})
+	t.Run("structured pass", func(t *testing.T) {
+		cfg := domain.BankConfig{Reflect: &domain.ReflectConfig{MaxTotalTokens: ptr(int64(100))}}
+		h := newHarness(t, cfg, unit("u1", "Alice likes tea"))
+		h.turns(withUsage(recallCall(), 40, 10), withUsage(doneCall("tea", "u1"), 30, 10))
+		h.llm.Script(domain.ModelSlotStructuredOutput, prompts.StructuredOutputSystem,
+			fake.Reply{JSON: `{"drink":"tea"}`, Usage: port.Usage{InputTokens: 15, OutputTokens: 5}})
+		_, err := h.reflect(func(r *rf.ReflectRequest) {
+			r.ResponseSchemaJSON = `{"type":"object","properties":{"drink":{"type":"string"}}}`
+		})
+		if !errors.Is(err, domain.ErrResourceExhausted) {
+			t.Fatalf("err = %v, want RESOURCE_EXHAUSTED from the structured pass", err)
+		}
+	})
 	t.Run("request override", func(t *testing.T) {
 		h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
 		h.turns(withUsage(recallCall(), 60, 20), withUsage(doneCall("tea", "u1"), 10, 10))
@@ -382,9 +431,12 @@ func TestReflectExtraDirectivesAdded(t *testing.T) {
 	if !containsAll(systemPrompt(call), "Answer formally.", "Mention team A.") || len(res.Trace.DirectiveIDs) != 2 {
 		t.Errorf("tagged reflect should apply the global and the team-a directive: %v", res.Trace.DirectiveIDs)
 	}
-	res, _ = run(func(r *rf.ReflectRequest) { r.ApplyAllDirectives = true })
+	res, _ = run(func(r *rf.ReflectRequest) {
+		r.ApplyAllDirectives = true
+		r.ExtraDirectives = []domain.Directive{{ID: "caller-id", Rules: []string{"Extra rule."}}}
+	})
 	if !slices.Equal(res.BasedOn.DirectiveIDs, []port.DirectiveID{global, teamA}) {
-		t.Errorf("apply_all ids = %v", res.BasedOn.DirectiveIDs)
+		t.Errorf("apply_all ids = %v (extras never appear as stored directive ids)", res.BasedOn.DirectiveIDs)
 	}
 	_, call = run(nil)
 	if strings.Contains(systemPrompt(call), "Mention team A.") {
@@ -545,4 +597,160 @@ func hasUsage(usage []domain.Usage, slot domain.ModelSlot, in, out int64) bool {
 		}
 	}
 	return false
+}
+
+func TestReflectHonoursTypes(t *testing.T) {
+	obs := unit("o1", "Alice is a tea person")
+	obs.Type = domain.FactTypeObservation
+	cases := []struct {
+		name      string
+		types     []domain.FactType
+		offered   []string
+		withheld  []string
+		recallFor []domain.FactType
+	}{
+		{
+			"observations only",
+			[]domain.FactType{domain.FactTypeObservation},
+			[]string{rf.ToolSearchObservations},
+			[]string{rf.ToolRecall},
+			nil,
+		},
+		{
+			"world only",
+			[]domain.FactType{domain.FactTypeWorld},
+			[]string{rf.ToolRecall},
+			[]string{rf.ToolSearchObservations},
+			[]domain.FactType{domain.FactTypeWorld},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"), obs)
+			var asked [][]domain.FactType
+			h.rc.RecallFunc = func(_ context.Context, req recall.RecallRequest) (recall.RecallResult, error) {
+				asked = append(asked, req.Types)
+				return recall.RecallResult{}, nil
+			}
+			h.build()
+			h.turns(calls(tc.offered[0], `{"query":"alice"}`), calls(tc.withheld[0], `{"query":"alice"}`),
+				doneCall("tea"))
+			if _, err := h.reflect(func(r *rf.ReflectRequest) { r.Types = tc.types }); err != nil {
+				t.Fatal(err)
+			}
+			first := h.loopCalls()[0]
+			if !slices.Contains(tc.offered, rf.ToolRecall) && strings.Contains(systemPrompt(first), "recall()") {
+				t.Errorf("the system prompt orders a withheld recall")
+			}
+			for _, name := range tc.offered {
+				if _, ok := toolSpec(first, name); !ok {
+					t.Errorf("%s not offered", name)
+				}
+			}
+			for _, name := range tc.withheld {
+				if _, ok := toolSpec(first, name); ok {
+					t.Errorf("%s offered for types %v", name, tc.types)
+				}
+			}
+			if msgs := toolMessages(h.loopCalls()[2]); len(msgs) != 2 || !strings.Contains(msgs[1], "is not available") {
+				t.Errorf("a withheld tool must be rejected: %v", msgs)
+			}
+			if len(asked) != 1 || (tc.recallFor != nil && !slices.Equal(asked[0], tc.recallFor)) {
+				t.Errorf("recall asked for %v", asked)
+			}
+		})
+	}
+}
+
+func TestReflectClosingDoneKeepsEvidenceGuard(t *testing.T) {
+	t.Run("forces one retrieval turn", func(t *testing.T) {
+		h := newHarness(t, domain.BankConfig{Reflect: &domain.ReflectConfig{MaxIterations: ptr(4)}},
+			unit("u1", "Alice likes tea"))
+		h.turns(calls(rf.ToolRecall, `{"reason":"no query"}`), text("prose"), recallCall())
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectDoneRequest, doneCall("Alice likes tea.", "u1"))
+		res, err := h.reflect(nil)
+		if err != nil || res.Text != "Alice likes tea." {
+			t.Fatalf("res %q err %v", res.Text, err)
+		}
+		turns := h.loopCalls()
+		if len(turns) != 3 || turns[2].Chat.ToolChoice != rf.ToolRecall {
+			t.Errorf("want a third turn forcing recall; got %d turns", len(turns))
+		}
+	})
+	t.Run("no retrieval: synthesis, never done", func(t *testing.T) {
+		h := newHarness(t, domain.BankConfig{Reflect: &domain.ReflectConfig{MaxIterations: ptr(4)}})
+		h.turns(calls(rf.ToolRecall, `{"reason":"no query"}`), text("prose"), doneCall("made up"))
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectDoneRequest, doneCall("made up"))
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectFinal, text("No data was retrieved."))
+		res, err := h.reflect(nil)
+		if err != nil || res.Text != "No data was retrieved." {
+			t.Fatalf("res %q err %v", res.Text, err)
+		}
+		if n := len(h.llm.CallsFor(domain.ModelSlotReflect, prompts.ReflectDoneRequest)); n != 0 {
+			t.Errorf("closing done turns = %d, want 0 without evidence", n)
+		}
+	})
+}
+
+func TestReflectToolErrorsNameOfferedTools(t *testing.T) {
+	cfg := domain.BankConfig{Reflect: &domain.ReflectConfig{EnabledTools: []string{rf.ToolRecall}}}
+	h := newHarness(t, cfg, unit("u1", "Alice likes tea"))
+	h.turns(calls(rf.ToolDone, `{"answer":"guess"}`, rf.ToolExpand, `{}`), calls(rf.ToolSearchObservations, `{}`),
+		recallCall(), calls(rf.ToolDone, `{"memory_ids":["u1"]}`), doneCall("tea", "u1"))
+	if _, err := h.reflect(nil); err != nil {
+		t.Fatal(err)
+	}
+	turns := h.loopCalls()
+	last := func(c fake.LLMCall) string { m := toolMessages(c); return m[len(m)-1] }
+	guard, unknown, done := last(turns[1]), last(turns[2]), last(turns[4])
+	if !containsAll(guard, "You must search for information first. Use recall()") ||
+		strings.Contains(guard, "search_mental_models") || strings.Contains(guard, "search_observations") {
+		t.Errorf("guard message = %s", guard)
+	}
+	if !containsAll(unknown, "Tool 'search_observations' is not available", "recall, done") ||
+		strings.Contains(unknown, "search_mental_models") {
+		t.Errorf("unknown-tool message = %s", unknown)
+	}
+	if !containsAll(done, "missing 'answer'", "Call done() again with an 'answer' string") {
+		t.Errorf("done message = %s", done)
+	}
+
+	t.Run("search without read", func(t *testing.T) {
+		cfg := domain.BankConfig{Reflect: &domain.ReflectConfig{EnabledTools: []string{rf.ToolSearchMentalModels}}}
+		h := newHarness(t, cfg)
+		h.turns(calls(rf.ToolReadMentalModels, `{"mental_model_ids":["x"]}`), doneCall("tea"))
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectDoneRequest, doneCall("tea"))
+		h.llm.Script(domain.ModelSlotReflect, prompts.ReflectFinal, text("tea"))
+		if _, err := h.reflect(nil); err != nil {
+			t.Fatal(err)
+		}
+		msg := last(h.loopCalls()[1])
+		if !containsAll(msg, "Tool 'read_mental_models' is not available", "search_mental_models, done") ||
+			strings.Contains(strings.TrimPrefix(msg, `{"error":"Tool 'read_mental_models'`), "read_mental_models") {
+			t.Errorf("unknown-tool message = %s", msg)
+		}
+		if strings.Contains(systemPrompt(h.loopCalls()[0]), "call read_mental_models") {
+			t.Errorf("the system prompt names a withheld read_mental_models")
+		}
+	})
+}
+
+func TestReflectNoSearchToolFailsFast(t *testing.T) {
+	cfg := domain.BankConfig{Reflect: &domain.ReflectConfig{EnabledTools: []string{rf.ToolExpand}}}
+	h := newHarness(t, cfg)
+	_, err := h.reflect(nil)
+	if !errors.Is(err, domain.ErrFailedPrecondition) || len(h.llm.Calls()) != 0 {
+		t.Fatalf("err = %v, calls %d; want FAILED_PRECONDITION before any model call", err, len(h.llm.Calls()))
+	}
+
+	t.Run("require_evidence off", func(t *testing.T) {
+		cfg := domain.BankConfig{Reflect: &domain.ReflectConfig{
+			EnabledTools: []string{rf.ToolExpand}, RequireEvidence: ptr(false),
+		}}
+		h := newHarness(t, cfg)
+		h.turns(doneCall("Nothing to search."))
+		if res, err := h.reflect(nil); err != nil || res.Text != "Nothing to search." {
+			t.Fatalf("res %q err %v", res.Text, err)
+		}
+	})
 }

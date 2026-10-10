@@ -33,7 +33,7 @@ func NewPromptBuilder(clock port.Clock) PromptBuilder {
 
 // System implements PromptBuilder.
 func (p *promptBuilder) System(cfg domain.BankConfig, directives []domain.Directive) string {
-	data := promptData(cfg, directives, toolSet(cfg, true), p.clock.Now())
+	data := promptData(cfg, directives, toolSet(cfg, true, nil), p.clock.Now())
 	out, err := prompts.Render(prompts.ReflectSystem, &data)
 	if err != nil {
 		return ""
@@ -48,13 +48,15 @@ func promptData(
 	cfg domain.BankConfig, directives []domain.Directive, tools map[string]bool, now time.Time,
 ) prompts.ReflectData {
 	return prompts.ReflectData{
-		Mission:      strings.TrimSpace(cfg.ReflectMission),
-		Disposition:  cfg.Disposition,
-		Directives:   directives,
-		MentalModels: tools[ToolSearchMentalModels] || tools[ToolReadMentalModels],
-		Observations: tools[ToolSearchObservations],
-		Expand:       tools[ToolExpand],
-		Now:          now,
+		Mission:            strings.TrimSpace(cfg.ReflectMission),
+		Disposition:        cfg.Disposition,
+		Directives:         directives,
+		SearchMentalModels: tools[ToolSearchMentalModels],
+		ReadMentalModels:   tools[ToolReadMentalModels],
+		Observations:       tools[ToolSearchObservations],
+		Expand:             tools[ToolExpand],
+		Recall:             tools[ToolRecall],
+		Now:                now,
 	}
 }
 
@@ -63,25 +65,25 @@ var retrievalTools = []string{
 	ToolSearchMentalModels, ToolReadMentalModels, ToolSearchObservations, ToolRecall, ToolExpand,
 }
 
-// toolSet returns the retrieval tools cfg enables (ReflectConfig.EnabledTools; nil = all); pages = false
-// drops the page tools. recall is always offered when nothing else is, so the agent can retrieve.
-func toolSet(cfg domain.BankConfig, pages bool) map[string]bool {
+// toolSet returns the retrieval tools cfg enables (ReflectConfig.EnabledTools; nil = all) for a request
+// limited to types (empty = all): pages = false drops the page tools, search_observations needs observations
+// among the types and recall needs a raw-fact type.
+func toolSet(cfg domain.BankConfig, pages bool, types []domain.FactType) map[string]bool {
 	var enabled []string
 	if cfg.Reflect != nil {
 		enabled = cfg.Reflect.EnabledTools
 	}
+	off := map[string]bool{
+		ToolSearchMentalModels: !pages,
+		ToolReadMentalModels:   !pages,
+		ToolSearchObservations: len(types) > 0 && !slices.Contains(types, domain.FactTypeObservation),
+		ToolRecall:             len(types) > 0 && len(factTypes(types)) == 0,
+	}
 	out := map[string]bool{}
 	for _, name := range retrievalTools {
-		if enabled != nil && !slices.Contains(enabled, name) {
-			continue
+		if !off[name] && (enabled == nil || slices.Contains(enabled, name)) {
+			out[name] = true
 		}
-		if !pages && (name == ToolSearchMentalModels || name == ToolReadMentalModels) {
-			continue
-		}
-		out[name] = true
-	}
-	if !out[ToolRecall] && !out[ToolSearchObservations] && !out[ToolSearchMentalModels] {
-		out[ToolRecall] = true
 	}
 	return out
 }

@@ -55,7 +55,8 @@ func allBasedOn(st *AgentState) BasedOn {
 	return b
 }
 
-// directiveIDs lists the ids of the applied directives (request-only extras have none and are skipped).
+// directiveIDs lists the ids of the applied stored directives (callers pass the stored selection only, so
+// request-only extras never appear; an empty id is skipped).
 func directiveIDs(ds []domain.Directive) []port.DirectiveID {
 	var out []port.DirectiveID
 	for _, d := range ds {

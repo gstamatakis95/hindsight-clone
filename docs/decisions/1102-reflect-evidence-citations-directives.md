@@ -8,9 +8,9 @@ tags (apply_all, extra_directives)"; a request can never remove the bank's store
 - **Evidence guard.** With `require_evidence` (nil = true) a `done` is rejected (tool error back to the model,
   costing an iteration) until a retrieval tool has run successfully. A retrieval that found nothing counts:
   Hindsight requires a retrieved id, but on an empty bank that burns every iteration, and SPEC says "a
-  retrieval that returns nothing is not a failure". `expand` does not count (it reads ids found earlier).
-  The closing `done` turn after max_iterations is not guarded (as Hindsight's last iteration): it can only
-  run after at least one tool turn, and its answer cites only what was retrieved.
+  retrieval that returns nothing is not a failure". `expand` does not count (it reads ids found earlier), and
+  read_mental_models counts only when it actually read a page. The closing `done` turn is guarded as well
+  (decision 1100: one forced retrieval turn, else synthesis), unlike Hindsight's last iteration.
 - **What is retrievable.** recall and search_observations register the units they return; search_mental_models
   (snippet hits included, as in Hindsight) and read_mental_models register the pages they return. `expand`
   registers nothing, so its source facts can't be cited unless a search returned them (Hindsight).
@@ -27,7 +27,8 @@ tags (apply_all, extra_directives)"; a request can never remove the bank's store
   and its tags satisfy it (flat tags with the request's `tags_match`, and every tag group). An untagged
   request gets only untagged directives. `extra_directives` are appended after the stored ones and never
   replace or filter them; they are applied whatever their `active` flag (proto bool defaults to false).
-  `BasedOn.DirectiveIDs` / `Trace.DirectiveIDs` list the applied stored directives (extras have no id).
+  `BasedOn.DirectiveIDs` / `Trace.DirectiveIDs` list the applied stored directives only; extras never appear
+  there, even when the caller gave them an id.
 - The directive-aware `done` variant is offered when some applied directive has rules (the reflect_system
   predicate); `directive_compliance` is not checked (Hindsight doesn't either).
 

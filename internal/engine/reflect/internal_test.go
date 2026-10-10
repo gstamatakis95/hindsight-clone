@@ -82,6 +82,7 @@ func TestIsContextOverflow(t *testing.T) {
 		"unavailable: gateway: status 400: This model's maximum context length is 8192 tokens": true,
 		"error code: context_length_exceeded":                                                  true,
 		"prompt is too long: 210000 tokens > 200000 maximum":                                   true,
+		"unavailable: gateway: status 429: too many tokens per minute":                         false,
 		"unavailable: gateway: status 503":                                                     false,
 	} {
 		if got := isContextOverflow(errString(msg)); got != want {

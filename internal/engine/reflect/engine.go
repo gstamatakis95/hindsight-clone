@@ -8,6 +8,7 @@ import (
 	"memd/internal/jsonschema"
 	"memd/internal/port"
 	"memd/internal/prompts"
+	"slices"
 	"strings"
 )
 
@@ -68,7 +69,8 @@ func (r *reflector) Reflect(ctx context.Context, req ReflectRequest) (ReflectRes
 	if err != nil {
 		return ReflectResult{}, err
 	}
-	directives := selectDirectives(stored, req.Tags, req.ApplyAllDirectives, req.ExtraDirectives)
+	applied := selectDirectives(stored, req.Tags, req.ApplyAllDirectives, nil)
+	directives := append(slices.Clone(applied), req.ExtraDirectives...)
 	rn, err := r.newRun(req, cfg, directives, bankName)
 	if err != nil {
 		return ReflectResult{}, err
@@ -77,7 +79,7 @@ func (r *reflector) Reflect(ctx context.Context, req ReflectRequest) (ReflectRes
 	if err != nil {
 		return ReflectResult{}, err
 	}
-	res := r.result(rn, ans, directives)
+	res := r.result(rn, ans, directiveIDs(applied))
 	if req.ResponseSchemaJSON != "" {
 		if err := r.structured(ctx, rn, cfg, &res); err != nil {
 			return ReflectResult{}, err
@@ -166,7 +168,7 @@ func (r *reflector) newRun(
 	if req.QueryTime != nil {
 		queryTime = *req.QueryTime
 	}
-	tools := r.offered(cfg, req.ExcludeMentalModels)
+	tools := r.offered(cfg, req.ExcludeMentalModels, req.Types)
 	data := promptData(cfg, directives, toolNames(tools), queryTime)
 	data.BankName, data.Context, data.Query = bankName, req.Context, req.Query
 	data.Budget, data.AnswerAsDocument = string(effectiveBudget(req.Budget)), req.AsDocument
@@ -179,9 +181,13 @@ func (r *reflector) newRun(
 	if err != nil {
 		return nil, fmt.Errorf("reflect: %w", err)
 	}
+	instructions, err := renderInstructions(&data)
+	if err != nil {
+		return nil, err
+	}
 	rn := &run{
 		llm: r.d.LLM, clock: r.d.Clock, binding: binding, tools: tools, specs: specs, data: data,
-		maxIter: maxIterations(cfg, req.Budget), callIDs: map[string]bool{}, requireEv: true,
+		maxIter: maxIterations(cfg, req.Budget), callIDs: map[string]bool{}, requireEv: true, instructions: instructions,
 		st: &AgentState{Request: req, Config: cfg, QueryTime: queryTime},
 		messages: []port.ChatMessage{
 			{Role: port.ChatRoleSystem, Content: system}, {Role: port.ChatRoleUser, Content: req.Query},
@@ -193,7 +199,21 @@ func (r *reflector) newRun(
 			rn.requireEv = *cfg.Reflect.RequireEvidence
 		}
 	}
+	if rn.requireEv && !canSearch(tools) {
+		return nil, fmt.Errorf("%w: reflect requires evidence but no search tool is offered "+
+			"(reflect.enabled_tools, request types or excluded mental models leave none)", domain.ErrFailedPrecondition)
+	}
 	return rn, nil
+}
+
+// canSearch reports whether tools include a search tool that can satisfy the evidence guard.
+func canSearch(tools map[string]Tool) bool {
+	for _, name := range []string{ToolSearchMentalModels, ToolSearchObservations, ToolRecall} {
+		if _, ok := tools[name]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // answerTokens is the answer's soft length target: the request's max_tokens, else max_answer_tokens.
@@ -208,10 +228,10 @@ func answerTokens(cfg domain.BankConfig, reqMax *int) int {
 	}
 }
 
-// offered returns the retrieval tools this reflect offers: wired, enabled by the config, and no page tools
-// when mental models are excluded.
-func (r *reflector) offered(cfg domain.BankConfig, excludePages bool) map[string]Tool {
-	enabled := toolSet(cfg, !excludePages)
+// offered returns the retrieval tools this reflect offers: wired, enabled by the config, allowed by the
+// request's fact types, and no page tools when mental models are excluded.
+func (r *reflector) offered(cfg domain.BankConfig, excludePages bool, types []domain.FactType) map[string]Tool {
+	enabled := toolSet(cfg, !excludePages, types)
 	out := map[string]Tool{}
 	for name := range enabled {
 		if t, ok := r.tools[name]; ok {
@@ -280,7 +300,7 @@ func doneSpec(plain port.ToolSpec, data *prompts.ReflectData) (port.ToolSpec, er
 }
 
 // result assembles the answer, its evidence and the trace (without duration and usage).
-func (r *reflector) result(rn *run, ans answer, directives []domain.Directive) ReflectResult {
+func (r *reflector) result(rn *run, ans answer, directives []port.DirectiveID) ReflectResult {
 	req := rn.st.Request
 	res := ReflectResult{Text: ans.text}
 	if req.Include.Facts == nil || *req.Include.Facts {
@@ -290,7 +310,7 @@ func (r *reflector) result(rn *run, ans answer, directives []domain.Directive) R
 			res.BasedOn = allBasedOn(rn.st)
 		}
 	}
-	res.BasedOn.DirectiveIDs = directiveIDs(directives)
+	res.BasedOn.DirectiveIDs = directives
 	res.Trace = &ReflectTrace{
 		Iterations: rn.st.Iteration, StopReason: ans.stop, DirectiveIDs: res.BasedOn.DirectiveIDs,
 	}

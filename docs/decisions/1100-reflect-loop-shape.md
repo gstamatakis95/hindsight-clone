@@ -8,31 +8,42 @@ sequence, retries on LLM errors, a proactive context guard, map-reduce synthesis
 ## Decision
 - **Iterations.** `max_iterations = max(1, base x {low 0.5, mid 1, high 2})`, base = `ReflectConfig.max_iterations`
   (default 10), unspecified budget = low (the Reflect RPC default). The loop makes at most that many
-  tool-calling turns (`ChatRequest.Name = reflect_system`, tool_choice `auto`). If none of them ends in an
+  tool-calling turns (`ChatRequest.Name = reflect_system`; tool_choice `required` until the model's first
+  tool call, then `auto`). If none of them ends in an
   accepted `done`, one closing turn (`reflect_done_request`, tool_choice `done`) asks for the answer; if the
   model doesn't comply, a tool-less synthesis call (`reflect_final`) answers from the gathered tool results.
   `Trace.Iterations` is the last loop turn reached. (Hindsight counts the closing call as the last of N; ours
   is N tool turns + 1, which is easier to state and test.)
 - **No forced tool sequence.** Hindsight forces search_mental_models → search_observations → recall with named
-  tool_choice. memd offers everything with `auto` and relies on the evidence guard (decision 1102). Known gap.
-- **Plain text.** A turn with no tool call fails the call with `UNAVAILABLE` if the model has not made a single
-  tool call yet ("a model that cannot drive tool calls"). After at least one tool call, prose ends the loop:
+  tool_choice. memd only requires *some* tool call until the first one and relies on the evidence guard
+  (decision 1102). Known gap.
+- **Plain text.** Before the model's first tool call, a prose reply (under `required`) is retried once per run,
+  without spending an iteration; a second prose reply fails the call with `UNAVAILABLE` ("a model that cannot
+  drive tool calls"). After at least one tool call, prose ends the loop:
   the closing turn / synthesis produces the answer (stop reason `answered`); the prose itself is discarded.
 - **Error classes.**
   - Back to the model as `{"error": ...}` (the loop continues): unknown or disabled tool, arguments that are
     not JSON for the tool, a missing query or id list, a query over recall's 500-token limit (checked by the
     tool before calling recall), a malformed `done` (bad JSON, missing answer/document) and `done` before any
-    retrieval. An `ErrInvalidArgument` *from* recall is not sent back: it can also mean a misconfiguration (an
-    unbound RERANK slot), and bouncing it would let reflect answer with no evidence.
-  - Fail with `UNAVAILABLE`: any error from Recaller, PageReader, Reader or ChunkReader (database,
-    embedder, reranker, configuration), any REFLECT chat error in a loop turn other than a context overflow
-    (the gateway already retried),
-    a model that never calls a tool, and an empty final answer (a `done` whose answer is blank, or a blank
-    synthesis). These are failed dependencies from the caller's point of view.
+    retrieval. The instruction parts of these messages (what to call instead, how to retry done) come from the
+    `reflect_tool_error_*` templates rendered with the offered-tool flags, so the model is only told about
+    tools it has; short validator messages (missing query, bad JSON) stay in Go.
+  - Every error from Recaller, PageReader, Reader or ChunkReader fails the call; none is sent back to the
+    model (it could be a misconfiguration such as an unbound RERANK slot, and bouncing it would let reflect
+    answer with no evidence). Errors that are already classified keep their class (orchestrator ruling,
+    review round 1): `INVALID_ARGUMENT`, `FAILED_PRECONDITION` and `NOT_FOUND` pass through unchanged; only
+    unclassified errors (and `ErrUnavailable` ones) are `UNAVAILABLE`.
+  - Fail with `UNAVAILABLE`: any REFLECT chat error in a loop turn other than a context overflow (the gateway
+    already retried), a model that never calls a tool, and an empty final answer (a `done` whose answer is
+    blank, or a blank synthesis). These are failed dependencies from the caller's point of view.
   - Fail with `RESOURCE_EXHAUSTED`: input + output tokens of every LLM call so far (REFLECT and
     STRUCTURED_OUTPUT, failed calls included when the gateway reports their usage) above
     `max_total_tokens` (nil or <= 0 = unlimited).
   - The caller's own cancellation is returned as is.
+- **Closing turn and evidence.** The closing `done` is subject to the evidence guard too: with
+  `require_evidence` and no retrieval yet, one more turn is forced to call a search tool (tool_choice
+  `recall`, else `search_observations`, else `search_mental_models`); if that retrieves nothing either, no
+  done is accepted and the answer is synthesised from the (empty) results.
 - **Closing turn failure.** The closing `done` turn is optional and retrieves nothing, so if it fails for any
   reason other than the caller's ctx or the token budget, reflect synthesises instead (Hindsight does the
   same; it also covers OpenAI-compatible backends that reject a named tool_choice).

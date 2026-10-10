@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"slices"
 )
 
 // expandTool is expand: the source facts behind observations and the source chunks behind facts.
@@ -79,7 +80,7 @@ func (t *expandTool) Call(ctx context.Context, st *AgentState, args json.RawMess
 	return output(map[string]any{"results": items, "count": len(items)})
 }
 
-// visibleUnits reads units and keeps those inside the request's tag filter and seq range, by id.
+// visibleUnits reads units and keeps those inside the request's fact types, tag filter and seq range, by id.
 func (t *expandTool) visibleUnits(
 	ctx context.Context, st *AgentState, ids []port.UnitID,
 ) (map[port.UnitID]domain.Unit, error) {
@@ -91,7 +92,8 @@ func (t *expandTool) visibleUnits(
 	unbounded := seq.After == 0 && seq.UpTo == nil
 	out := make(map[port.UnitID]domain.Unit, len(us))
 	for _, u := range us {
-		if domain.MatchFilter(u.Tags, st.Request.Tags) && (unbounded || seq.Contains(u.Seq)) {
+		typed := len(st.Request.Types) == 0 || slices.Contains(st.Request.Types, u.Type)
+		if typed && domain.MatchFilter(u.Tags, st.Request.Tags) && (unbounded || seq.Contains(u.Seq)) {
 			out[u.ID] = u
 		}
 	}

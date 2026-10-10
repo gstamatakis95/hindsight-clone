@@ -11,15 +11,11 @@ import (
 	"strings"
 )
 
-// errMustSearch is the tool error a done call gets before any retrieval (Hindsight's wording).
-const errMustSearch = "You must search for information first. Use search_mental_models(), search_observations(), " +
-	"or recall() before providing your final answer."
-
 // overflowMarkers are the provider error texts that mean the prompt overflowed the context window
 // (Hindsight's _is_context_overflow list, minus the ambiguous resource_exhausted; decision 1101).
 var overflowMarkers = []string{
 	"context_length_exceeded", "context length exceeded", "maximum context length", "prompt_too_long",
-	"prompt is too long", "input is too long", "too many tokens", "context window",
+	"prompt is too long", "input is too long", "context window",
 }
 
 // isContextOverflow reports whether a chat error is a context-window overflow.
@@ -56,7 +52,34 @@ type run struct {
 	messages    []port.ChatMessage
 	outputs     []prompts.ToolOutput
 	sawToolCall bool
+	retried     bool
 	callIDs     map[string]bool
+	// instructions are the rendered model-facing tool errors (reflect_tool_error_* templates).
+	instructions toolInstructions
+}
+
+// toolInstructions are the model-facing tool error texts, rendered once per run for the offered tools.
+type toolInstructions struct {
+	searchFirst string
+	unknown     string
+	done        string
+}
+
+// renderInstructions renders the tool error templates with the run's prompt data.
+func renderInstructions(data *prompts.ReflectData) (toolInstructions, error) {
+	var in toolInstructions
+	for name, dst := range map[string]*string{
+		prompts.ReflectToolErrorSearchFirst: &in.searchFirst,
+		prompts.ReflectToolErrorUnknown:     &in.unknown,
+		prompts.ReflectToolErrorDone:        &in.done,
+	} {
+		out, err := prompts.Render(name, data)
+		if err != nil {
+			return in, fmt.Errorf("reflect: %w", err)
+		}
+		*dst = strings.TrimSpace(out)
+	}
+	return in, nil
 }
 
 // loop runs up to maxIter tool-calling turns, then a closing done turn and, failing that, a tool-less
@@ -64,7 +87,7 @@ type run struct {
 func (r *run) loop(ctx context.Context) (answer, error) {
 	for i := 1; i <= r.maxIter; i++ {
 		r.st.Iteration = i
-		resp, err := r.chat(ctx, prompts.ReflectSystem, r.specs, "auto")
+		resp, err := r.turn(ctx)
 		if err != nil {
 			if isContextOverflow(err) {
 				return r.synthesize(ctx, StopContextFull)
@@ -85,6 +108,20 @@ func (r *run) loop(ctx context.Context) (answer, error) {
 		}
 	}
 	return r.finish(ctx, StopMaxIterations)
+}
+
+// turn makes one loop turn. Until the model's first tool call the turn requires a tool call, and a prose reply
+// is retried once (per run) before reflect concludes the model can't drive tools.
+func (r *run) turn(ctx context.Context) (port.ChatResponse, error) {
+	if r.sawToolCall {
+		return r.chat(ctx, prompts.ReflectSystem, r.specs, "auto")
+	}
+	resp, err := r.chat(ctx, prompts.ReflectSystem, r.specs, "required")
+	if err != nil || len(resp.Message.ToolCalls) > 0 || r.retried {
+		return resp, err
+	}
+	r.retried = true
+	return r.chat(ctx, prompts.ReflectSystem, r.specs, "required")
 }
 
 // chat makes one REFLECT chat call over the conversation and charges its usage.
@@ -117,8 +154,9 @@ func (r *run) uniqueCalls(calls []port.ToolCall) []port.ToolCall {
 	out := make([]port.ToolCall, len(calls))
 	for i, c := range calls {
 		c.Name = normalizeName(c.Name)
-		if c.ID == "" || r.callIDs[c.ID] {
-			c.ID = fmt.Sprintf("call_%d_%d", r.st.Iteration, i)
+		c.ID = strings.TrimSpace(c.ID)
+		for n := len(r.callIDs) + 1; c.ID == "" || r.callIDs[c.ID]; n++ {
+			c.ID = fmt.Sprintf("call_%d", n)
 		}
 		r.callIDs[c.ID] = true
 		out[i] = c
@@ -148,12 +186,12 @@ func (r *run) handle(ctx context.Context, calls []port.ToolCall) (answer, bool, 
 func (r *run) handleDone(c port.ToolCall) (answer, bool, error) {
 	r.messages = append(r.messages, port.ChatMessage{Role: port.ChatRoleAssistant, ToolCalls: []port.ToolCall{c}})
 	if r.requireEv && !r.st.Searched {
-		r.toolMessage(c.ID, malformed("%s", errMustSearch).Output)
+		r.toolMessage(c.ID, malformed("%s", r.instructions.searchFirst).Output)
 		return answer{}, false, nil
 	}
 	text, cited, problem := parseDone(c.Arguments, r.data.AnswerAsDocument)
 	if problem != "" {
-		r.toolMessage(c.ID, malformed("%s", problem).Output)
+		r.toolMessage(c.ID, malformed("%s. %s", problem, r.instructions.done).Output)
 		return answer{}, false, nil
 	}
 	if strings.TrimSpace(text) == "" {
@@ -166,7 +204,7 @@ func (r *run) handleDone(c port.ToolCall) (answer, bool, error) {
 var errEmptyAnswer = fmt.Errorf("%w: reflect: the model returned an empty answer", domain.ErrUnavailable)
 
 // parseDone decodes done's arguments: the answer (or the document rendered to markdown) and every cited id.
-// problem explains malformed arguments to the model.
+// problem says briefly what is wrong; the caller adds the retry instruction.
 func parseDone(raw json.RawMessage, asDocument bool) (text string, cited []string, problem string) {
 	var a struct {
 		Answer         *string       `json:"answer"`
@@ -176,15 +214,15 @@ func parseDone(raw json.RawMessage, asDocument bool) (text string, cited []strin
 		ObservationIDs []string      `json:"observation_ids"`
 	}
 	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", nil, fmt.Sprintf("done: arguments are not valid JSON for this tool: %v. Call done() again.", err)
+		return "", nil, fmt.Sprintf("done: arguments are not valid JSON for this tool: %v", err)
 	}
 	switch {
 	case asDocument && a.Document == nil:
-		return "", nil, "done requires a 'document' with a 'sections' array. Call done() again."
+		return "", nil, "done: missing 'document'"
 	case asDocument:
 		text = a.Document.markdown()
 	case a.Answer == nil:
-		return "", nil, "done requires an 'answer'. Call done() again."
+		return "", nil, "done: missing 'answer'"
 	default:
 		text = *a.Answer
 	}
@@ -199,7 +237,7 @@ func (r *run) callTool(ctx context.Context, c port.ToolCall) error {
 	tool, ok := r.tools[c.Name]
 	var res ToolResult
 	if !ok {
-		res = malformed("Tool '%s' is not available. Use only the tools provided to you.", c.Name)
+		res = malformed("Tool '%s' is not available. %s", c.Name, r.instructions.unknown)
 	} else {
 		var err error
 		if res, err = tool.Call(ctx, r.st, c.Arguments); err != nil {
@@ -223,9 +261,15 @@ func (r *run) toolMessage(id string, out json.RawMessage) {
 }
 
 // finish asks for the answer as a done call when the conversation ends on tool results; otherwise, or if
-// the model doesn't comply or the call fails, it synthesises the answer in a tool-less call. The closing done
-// skips the evidence guard, as Hindsight's last iteration does.
+// the model doesn't comply or the call fails, it synthesises the answer in a tool-less call. The evidence
+// guard holds here too: with require_evidence and no retrieval yet, one turn is forced to call a search tool;
+// if that retrieves nothing either, no done is accepted and the answer is synthesised.
 func (r *run) finish(ctx context.Context, stop StopReason) (answer, error) {
+	if r.requireEv && !r.st.Searched {
+		if ans, ended, err := r.ensureEvidence(ctx, stop); ended || err != nil {
+			return ans, err
+		}
+	}
 	if n := len(r.messages); n == 0 || r.messages[n-1].Role != port.ChatRoleTool {
 		return r.synthesize(ctx, stop)
 	}
@@ -260,6 +304,53 @@ func (r *run) finish(ctx context.Context, stop StopReason) (answer, error) {
 		return answer{text: text, cited: cited, viaDone: true, stop: stop}, nil
 	}
 	return r.synthesize(ctx, stop)
+}
+
+// ensureEvidence forces one retrieval turn; ended reports that the run ended there (a synthesis because
+// nothing was retrieved or the context overflowed, or an error).
+func (r *run) ensureEvidence(ctx context.Context, stop StopReason) (ans answer, ended bool, err error) {
+	if err := r.forceRetrieval(ctx); err != nil {
+		if isContextOverflow(err) {
+			ans, err = r.synthesize(ctx, StopContextFull)
+			return ans, true, err
+		}
+		return answer{}, true, err
+	}
+	if !r.st.Searched {
+		ans, err = r.synthesize(ctx, stop)
+		return ans, true, err
+	}
+	return answer{}, false, nil
+}
+
+// forceRetrieval makes one turn whose tool choice is an offered search tool (recall, else search_observations,
+// else search_mental_models) and runs the calls it returns, except done.
+func (r *run) forceRetrieval(ctx context.Context) error {
+	var name string
+	for _, n := range []string{ToolRecall, ToolSearchObservations, ToolSearchMentalModels} {
+		if _, ok := r.tools[n]; ok {
+			name = n
+			break
+		}
+	}
+	if name == "" {
+		return nil
+	}
+	resp, err := r.chat(ctx, prompts.ReflectSystem, r.specs, name)
+	if err != nil {
+		return err
+	}
+	var calls []port.ToolCall
+	for _, c := range resp.Message.ToolCalls {
+		if normalizeName(c.Name) != ToolDone {
+			calls = append(calls, c)
+		}
+	}
+	if len(calls) == 0 {
+		return nil
+	}
+	_, _, err = r.handle(ctx, calls)
+	return err
 }
 
 // synthesize answers from the tool results gathered so far in one tool-less call. On a context overflow it
