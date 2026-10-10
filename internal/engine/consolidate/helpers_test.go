@@ -11,7 +11,6 @@ import (
 	"memd/internal/fake"
 	"memd/internal/jsonschema"
 	"memd/internal/port"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -197,6 +196,20 @@ func (e *env) tx(fn func(tx port.Tx) error) {
 	}
 }
 
+// scopesTx runs fn in a write transaction and returns its scopes, failing the test on error.
+func (e *env) scopesTx(fn func(tx port.Tx) ([]port.ScopeKey, error)) []port.ScopeKey {
+	e.t.Helper()
+	var out []port.ScopeKey
+	e.tx(func(tx port.Tx) error {
+		var err error
+		if out, err = fn(tx); err != nil {
+			return fmt.Errorf("in tx: %w", err)
+		}
+		return nil
+	})
+	return out
+}
+
 // createEach answers CONSOLIDATE with one create per fact of the batch.
 func (e *env) createEach(_ port.StructuredRequest, ids []string) (string, error) {
 	var cs []create
@@ -307,6 +320,24 @@ func (e *env) jobs(kind domain.OperationKind) []domain.Operation {
 	return ops
 }
 
+// wantPending fails the test unless the bank has n pending operations of kind.
+func (e *env) wantPending(kind domain.OperationKind, n int) {
+	e.t.Helper()
+	if got := len(e.jobs(kind)); got != n {
+		e.t.Fatalf("pending %s operations = %d, want %d", kind, got, n)
+	}
+}
+
+// run runs j and fails the test on error.
+func (e *env) run(j port.Job) ConsolidationResult {
+	e.t.Helper()
+	res, err := e.consolidator().Run(e.t.Context(), j)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return res
+}
+
 // storeCounter is the test ObservationCounter: it counts a scope's observations through the fake's search.
 type storeCounter struct{ s port.Store }
 
@@ -343,5 +374,7 @@ func hasFact(ids []string, id string) bool {
 	return false
 }
 
-// joinIDs renders a batch for failure messages.
-func joinIDs(ids []string) string { return strings.Join(ids, ",") }
+// consolidateModel binds the CONSOLIDATE slot to model.
+func consolidateModel(model string) []domain.SlotBinding {
+	return []domain.SlotBinding{{Slot: domain.ModelSlotConsolidate, Binding: domain.ModelBinding{Model: model}}}
+}

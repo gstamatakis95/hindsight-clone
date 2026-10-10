@@ -82,7 +82,7 @@ func (c *consolidator) dedup(
 		}
 		if err != nil {
 			if errStops(ctx, err) {
-				return usage, err
+				return usage, fmt.Errorf("consolidate: dedup: %w", err)
 			}
 			continue
 		}

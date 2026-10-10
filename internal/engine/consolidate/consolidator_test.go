@@ -3,6 +3,7 @@ package consolidate
 import (
 	"context"
 	"errors"
+	"maps"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -57,17 +58,9 @@ func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 	if calls := len(e.llm.callsFor(domain.ModelSlotConsolidate)); calls != 3 {
 		t.Fatalf("CONSOLIDATE calls = %d, want 3 (2 before the kill, only scope c on replay)", calls)
 	}
-	perScope := map[string]int{}
-	for _, o := range e.observations() {
-		perScope[o.Scope().String()]++
-		if !slices.Equal(o.SourceIDs, []port.UnitID{"f1"}) {
-			t.Errorf("observation %s cites %v, want [f1]", o.ID, o.SourceIDs)
-		}
-	}
 	want := map[string]int{scopeOf("a").String(): 1, scopeOf("b").String(): 1, scopeOf("c").String(): 1}
-	if len(perScope) != 3 || perScope[scopeOf("a").String()] != 1 || perScope[scopeOf("b").String()] != 1 ||
-		perScope[scopeOf("c").String()] != 1 {
-		t.Fatalf("observations per scope = %v, want %v", perScope, want)
+	if got := perScope(t, e.observations(), "f1"); !maps.Equal(got, want) {
+		t.Fatalf("observations per scope = %v, want %v", got, want)
 	}
 	u := e.unit("f1")
 	if u.ConsolidatedAt == nil || !u.ConsolidatedAt.Equal(replayAt) {
@@ -76,6 +69,19 @@ func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 	if res.Processed != 1 || res.More {
 		t.Fatalf("replay result = %+v, want Processed 1, More false", res)
 	}
+}
+
+// perScope counts observations per scope key and checks each cites exactly source.
+func perScope(t *testing.T, obs []domain.Unit, source port.UnitID) map[string]int {
+	t.Helper()
+	out := map[string]int{}
+	for _, o := range obs {
+		out[o.Scope().String()]++
+		if !slices.Equal(o.SourceIDs, []port.UnitID{source}) {
+			t.Errorf("observation %s cites %v, want [%s]", o.ID, o.SourceIDs, source)
+		}
+	}
+	return out
 }
 
 // TestRunHalvesDownToPoisonUnit: a failing batch is halved until the poison unit fails alone and is
@@ -148,27 +154,18 @@ func TestRunContinuationAtCap(t *testing.T) {
 	e.fact("f3", "Three fact", "x")
 	e.fact("f4", "Four fact", "x")
 	e.fact("f5", "Five fact", "x")
-	res, err := e.consolidator().Run(t.Context(), autoJob())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Processed != 2 || !res.More {
+	if res := e.run(autoJob()); res.Processed != 2 || !res.More {
 		t.Fatalf("first run = %+v, want Processed 2, More true", res)
 	}
 	if e.unit("f3").ConsolidatedAt != nil {
 		t.Fatal("f3 consolidated beyond the cap")
 	}
-	pending := e.jobs(domain.OperationKindConsolidate)
-	if len(pending) != 1 {
-		t.Fatalf("pending consolidate jobs = %d, want 1 continuation", len(pending))
-	}
+	e.wantPending(domain.OperationKindConsolidate, 1)
 	// A second run also stops at the cap; its continuation joins the queued one instead of piling up.
-	if res, err := e.consolidator().Run(t.Context(), autoJob()); err != nil || !res.More || res.Processed != 2 {
-		t.Fatalf("second run = %+v, %v; want Processed 2, More true", res, err)
+	if res := e.run(autoJob()); !res.More || res.Processed != 2 {
+		t.Fatalf("second run = %+v; want Processed 2, More true", res)
 	}
-	if n := len(e.jobs(domain.OperationKindConsolidate)); n != 1 {
-		t.Fatalf("pending consolidate jobs = %d, want the one continuation", n)
-	}
+	e.wantPending(domain.OperationKindConsolidate, 1)
 	jobs, err := e.store.Claim(t.Context(), "w1", []port.JobKind{domain.OperationKindConsolidate}, 10)
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("claim continuation: %d jobs, %v", len(jobs), err)
@@ -176,16 +173,10 @@ func TestRunContinuationAtCap(t *testing.T) {
 	if jobs[0].SerialKey != SerialKey || string(jobs[0].Payload) != "{}" {
 		t.Fatalf("continuation = %+v, want serial key %q and payload {}", jobs[0], SerialKey)
 	}
-	res, err = e.consolidator().Run(t.Context(), jobs[0])
-	if err != nil {
-		t.Fatal(err)
+	if res := e.run(jobs[0]); res.More || res.Processed != 1 || e.unit("f5").ConsolidatedAt == nil {
+		t.Fatalf("continuation = %+v; want f5 done and nothing more", res)
 	}
-	if res.More || res.Processed != 1 || e.unit("f5").ConsolidatedAt == nil {
-		t.Fatalf("continuation = %+v, f5 stamped %v; want everything done", res, e.unit("f5").ConsolidatedAt)
-	}
-	if n := len(e.jobs(domain.OperationKindConsolidate)); n != 0 {
-		t.Fatalf("pending consolidate jobs after the last run = %d, want 0", n)
-	}
+	e.wantPending(domain.OperationKindConsolidate, 0)
 }
 
 // TestRunStrategyOverridesBankNotRequest: the matching strategy's mission and CONSOLIDATE binding replace
@@ -193,7 +184,7 @@ func TestRunContinuationAtCap(t *testing.T) {
 func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 	cfg := domain.BankConfig{
 		ObservationsMission: "BANK-MISSION",
-		Models:              []domain.SlotBinding{{Slot: domain.ModelSlotConsolidate, Binding: domain.ModelBinding{Model: "bank-model"}}},
+		Models:              consolidateModel("bank-model"),
 		ConsolidationStrategies: []domain.ConsolidationStrategy{{
 			Name:                "team",
 			Scopes:              []domain.ScopePattern{{Tags: []string{"team"}}},
@@ -220,7 +211,7 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 	e.fact("f3", "The team ships on Friday", "team")
 	j := NewJob(bank, nil, &domain.BankConfig{
 		ObservationsMission: "REQUEST-MISSION",
-		Models:              []domain.SlotBinding{{Slot: domain.ModelSlotConsolidate, Binding: domain.ModelBinding{Model: "request-model"}}},
+		Models:              consolidateModel("request-model"),
 	})
 	j.ID = "op-manual"
 	if _, err := e.consolidator().Run(t.Context(), j); err != nil {
