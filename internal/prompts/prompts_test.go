@@ -44,6 +44,9 @@ var dataFor = map[string]func() any{
 	MentalModelStructuredDeltaUser:   func() any { return &DeltaData{} },
 	MentalModelRefreshContext:        func() any { return &RefreshContextData{} },
 	ReflectToolDirectiveRules:        func() any { return &ReflectData{} },
+	ReflectToolErrorSearchFirst:      func() any { return &ReflectData{} },
+	ReflectToolErrorUnknown:          func() any { return &ReflectData{} },
+	ReflectToolErrorDone:             func() any { return &ReflectData{} },
 	"time_parse_system":              func() any { return &map[string]any{} },
 	"time_parse_user":                func() any { return &map[string]any{} },
 }
@@ -161,11 +164,12 @@ func TestBranchVariants(t *testing.T) {
 	}
 	var variants []variant
 	reflectNames := []string{ReflectSystem, ReflectDoneRequest, ReflectFinal, ReflectFinalUser}
-	for mask := 0; mask < 16; mask++ {
+	for mask := 0; mask < 64; mask++ {
 		for _, budget := range []string{"", "low", "MID", "high"} {
 			d := &ReflectData{
-				MentalModels: mask&1 != 0, Observations: mask&2 != 0, Expand: mask&4 != 0,
-				AnswerAsDocument: mask&8 != 0, Budget: budget, MaxTokens: mask,
+				SearchMentalModels: mask&1 != 0, Observations: mask&2 != 0, Expand: mask&4 != 0,
+				AnswerAsDocument: mask&8 != 0, Recall: mask&16 != 0, ReadMentalModels: mask&32 != 0,
+				Budget: budget, MaxTokens: mask,
 				Disposition: &domain.Disposition{Literalism: mask % 6},
 				Directives:  []domain.Directive{{Rules: []string{"Be brief."}}},
 				Retrieved:   []ToolOutput{{Tool: "recall", Output: "{}"}},

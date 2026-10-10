@@ -1,0 +1,12 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/agent.py — the tool error for a hallucinated or disabled tool
+("Use only the tools provided to you"). memd change: the offered tools are listed. The engine prefixes the
+tool name it rejected.
+Data (ReflectData): .SearchMentalModels, .ReadMentalModels, .Observations, .Recall, .Expand.
+*/ -}}
+Use only the tools provided to you:
+{{- if .SearchMentalModels}} search_mental_models,{{end}}
+{{- if .ReadMentalModels}} read_mental_models,{{end}}
+{{- if .Observations}} search_observations,{{end}}
+{{- if .Recall}} recall,{{end}}
+{{- if .Expand}} expand,{{end}} done.

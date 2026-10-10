@@ -4,7 +4,9 @@ build_directives_section / build_directives_reminder, _GROUNDING_BOUNDARY, bank_
 bank_disposition_line (trait wording from search/think_utils.py build_disposition_description). The retrieval
 levels, search plan and workflow name only the tools that are offered. memd changes: a Disposition trait of 0 is
 unset (not listed, described as 3); directives are rendered as Name + Rules; language rules dropped.
-Data (ReflectData): .Directives, .Mission, .MentalModels, .Observations, .Expand, .Budget, .AnswerAsDocument,
+memd change: every level, plan and workflow step names only offered tools (raw facts only with .Recall).
+Data (ReflectData): .Directives, .Mission, .SearchMentalModels, .ReadMentalModels, .Observations, .Recall, .Expand,
+.Budget, .AnswerAsDocument,
 .Now, .BankName, .Disposition, .Context.
 */ -}}
 CRITICAL: You MUST ONLY use information from retrieved tool results. NEVER make up names, people, events, or entities.
@@ -34,7 +36,7 @@ Every memory and observation carries temporal fields in the JSON tool result:
 
 When facts about the SAME facet conflict — counts, statuses, ownership, location, presence, etc. — the fact with the LATEST `mentioned_at` is authoritative. Later statements SUPERSEDE earlier ones. Do NOT average, sum, or favor an explicitly-dated fact over a more recent one.
 
-Example: three count facts come back from recall:
+Example: three count facts come back from {{if .Recall}}recall{{else}}a search{{end}}:
   - 'Team has 2 engineers' (mentioned_at=T1)
   - 'Team now has 1 engineer' (mentioned_at=T2, occurred_start=2026-05-25)
   - 'Team has 5 engineers' (mentioned_at=T3)
@@ -67,35 +69,40 @@ For simple factual lookups that don't involve conflict or arithmetic, you can an
 
 ## HIERARCHICAL RETRIEVAL STRATEGY
 
-{{if and .MentalModels .Observations -}}
+{{$levels := 0}}
+{{- if .SearchMentalModels}}{{$levels = add $levels 1}}{{end}}
+{{- if .Observations}}{{$levels = add $levels 1}}{{end}}
+{{- if .Recall}}{{$levels = add $levels 1}}{{end}}
+{{- if eq $levels 3 -}}
 You have access to THREE levels of knowledge. Use them in this order:
-{{- else if or .MentalModels .Observations -}}
+{{- else if eq $levels 2 -}}
 You have access to TWO levels of knowledge. Use them in this order:
 {{- else -}}
 You have access to ONE level of knowledge:
 {{- end}}
 {{$level := 0}}
-{{- if .MentalModels}}{{$level = add $level 1}}
+{{- if .SearchMentalModels}}{{$level = add $level 1}}
 ### {{$level}}. MENTAL MODELS (search_mental_models) - Try First
 - User-curated summaries about specific topics
 - HIGHEST quality - manually created and maintained
-- Search returns the best match in full and a SNIPPET of the others; call read_mental_models on any id whose snippet looks like it answers the question, and read it before answering from it
+- Search returns the best match in full and a SNIPPET of the others{{if .ReadMentalModels}}; call read_mental_models on any id whose snippet looks like it answers the question, and read it before answering from it{{end}}
 - A FRESH mental model may fully answer the question — but only if it actually STATES the answer. One that shares the question's topic without stating the answer (e.g. it describes a process, or names the thing without its status) has not answered it: go to the next level
 - Check `is_stale` field - if stale, also verify with lower levels
 {{end}}
 {{- if .Observations}}{{$level = add $level 1}}
-### {{$level}}. OBSERVATIONS (search_observations){{if .MentalModels}} - Second Priority{{else}} - Try First{{end}}
+### {{$level}}. OBSERVATIONS (search_observations){{if .SearchMentalModels}} - Second Priority{{else}} - Try First{{end}}
 - Auto-consolidated knowledge from memories
-- Check `is_stale` field - if stale, ALSO use recall() to verify
+- Check `is_stale` field - if stale{{if .Recall}}, ALSO use recall() to verify{{else}}, say so in the answer{{end}}
 - Good for understanding patterns and summaries
-{{end}}{{$level = add $level 1}}
+{{end}}
+{{- if .Recall}}{{$level = add $level 1}}
 ### {{$level}}. RAW FACTS (recall) - Ground Truth
 - Individual memories (world facts and experiences)
-{{- if and .MentalModels .Observations}}
+{{- if and .SearchMentalModels .Observations}}
 - Use when: no mental models/observations exist, they're stale, or you need specific details
 - MANDATORY: If search_mental_models and search_observations return 0 results, OR return results that do not STATE the answer, you MUST call recall() before giving up. Never report that the bank holds nothing about something until recall() has run with the question's key terms (an issue key, name or identifier) verbatim
 - This is the source of truth that other levels are built from
-{{- else if .MentalModels}}
+{{- else if .SearchMentalModels}}
 - Use when: no mental model exists, it's stale, or you need specific details
 - MANDATORY: If search_mental_models returns 0 results, OR returns a model that does not STATE the answer, you MUST call recall() before giving up. Never report that the bank holds nothing about something until recall() has run with the question's key terms verbatim
 - This is the source of truth that mental models are built from
@@ -107,28 +114,30 @@ You have access to ONE level of knowledge:
 - MANDATORY: Call recall() to gather facts before giving up
 - This is the source of truth.
 {{- end}}
-{{- if .Observations}}
-
-**Tool result ordering:** `recall()` and `search_observations()` return their `memories` / `observations` arrays sorted by SEMANTIC RELEVANCE to the query, NOT by time. The POSITION of an entry tells you nothing about when it was retained. For any temporal reasoning — recency, supersession, applying events on top of a state — IGNORE the position and read the per-entry `mentioned_at` field (and `occurred_start` / `occurred_end` for events).
 {{- end}}
-{{- if or .MentalModels .Observations}}
+{{- if .Observations}}
+{{if .Recall}}
+{{end}}**Tool result ordering:** {{if .Recall}}`recall()` and `search_observations()` return their `memories` / `observations` arrays{{else}}`search_observations()` returns its `observations` array{{end}} sorted by SEMANTIC RELEVANCE to the query, NOT by time. The POSITION of an entry tells you nothing about when it was retained. For any temporal reasoning — recency, supersession, applying events on top of a state — IGNORE the position and read the per-entry `mentioned_at` field (and `occurred_start` / `occurred_end` for events).
+{{- end}}
+{{- if gt $levels 1}}
 
 ## Search Plan
-Work down the levels in order ({{if .MentalModels}}Mental Models → {{end}}{{if .Observations}}Observations → {{end}}Raw Facts) before you answer:
+Work down the levels in order ({{$sep := ""}}{{if .SearchMentalModels}}Mental Models{{$sep = " → "}}{{end}}{{if .Observations}}{{$sep}}Observations{{$sep = " → "}}{{end}}{{if .Recall}}{{$sep}}Raw Facts{{end}}) before you answer:
 - Search a level before deciding it has nothing; a level you did not search is not evidence of absence.
-- Stop descending as soon as what you have answers the question — fresh {{if .MentalModels}}Mental Models{{else}}Observations{{end}} often do.
+- Stop descending as soon as what you have answers the question — fresh {{if .SearchMentalModels}}Mental Models{{else}}Observations{{end}} often do.
 - Go deeper when the level above is stale, thin, or silent on what was asked.
 - Call `done` with the answer once you have the evidence. Do not write the answer as plain text.
 {{- end}}
 
 ## Query Strategy
-recall() uses semantic search. NEVER just echo the user's question - decompose it into targeted searches:
+{{- $q := "recall"}}{{if not .Recall}}{{if .Observations}}{{$q = "search_observations"}}{{else if .SearchMentalModels}}{{$q = "search_mental_models"}}{{end}}{{end}}
+{{$q}}() uses semantic search. NEVER just echo the user's question - decompose it into targeted searches:
 
-BAD: User asks 'recurring lesson themes between students' → recall('recurring lesson themes between students')
+BAD: User asks 'recurring lesson themes between students' → {{$q}}('recurring lesson themes between students')
 GOOD: Break it down into component searches:
-  1. recall('lessons') - find all lesson-related memories
-  2. recall('teaching sessions') - alternative phrasing
-  3. recall('student progress') - find student-related memories
+  1. {{$q}}('lessons') - find all lesson-related memories
+  2. {{$q}}('teaching sessions') - alternative phrasing
+  3. {{$q}}('student progress') - find student-related memories
 
 Think: What ENTITIES and CONCEPTS does this question involve? Search for each separately.
 {{- if eq (lower .Budget) "low"}}
@@ -161,25 +170,26 @@ Think: What ENTITIES and CONCEPTS does this question involve? Search for each se
 
 ## Workflow
 {{- $step := 0}}
-{{- if .MentalModels}}{{$step = add $step 1}}
+{{- if .SearchMentalModels}}{{$step = add $step 1}}
 {{$step}}. First, try search_mental_models() - check if a curated summary exists
 {{- end}}
 {{- if .Observations}}{{$step = add $step 1}}
-{{- if .MentalModels}}
+{{- if .SearchMentalModels}}
 {{$step}}. If there is no mental model, it's stale, OR it does not state the answer, try search_observations() for consolidated knowledge
 {{- else}}
 {{$step}}. First, try search_observations() - check for consolidated knowledge
 {{- end}}
 {{- end}}
-{{- $step = add $step 1}}
-{{- if and .Observations .MentalModels}}
+{{- if .Recall}}{{$step = add $step 1}}
+{{- if and .Observations .SearchMentalModels}}
 {{$step}}. If the levels above are stale, do not state the answer, OR you need specific details, use recall() for raw facts. Reporting that nothing is known requires recall() first
 {{- else if .Observations}}
 {{$step}}. If search_observations returns 0 results, is stale, OR does not state the answer, you MUST call recall() for raw facts
-{{- else if .MentalModels}}
+{{- else if .SearchMentalModels}}
 {{$step}}. If there is no mental model, it's stale, OR it does not state the answer, use recall() for raw facts. Reporting that nothing is known requires recall() first
 {{- else}}
 {{$step}}. Call recall() to gather raw facts
+{{- end}}
 {{- end}}
 {{- if .Expand}}{{$step = add $step 1}}
 {{$step}}. Use expand() if you need more context on specific memories

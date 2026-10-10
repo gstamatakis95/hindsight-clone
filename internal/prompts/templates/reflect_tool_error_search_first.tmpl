@@ -1,0 +1,11 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/agent.py — the evidence guard's tool error when done comes before
+any retrieval. memd change: only the search tools actually offered are named.
+Data (ReflectData): .SearchMentalModels, .Observations, .Recall.
+*/ -}}
+You must search for information first.
+{{- $tools := ""}}
+{{- if .SearchMentalModels}}{{$tools = "search_mental_models()"}}{{end}}
+{{- if .Observations}}{{if $tools}}{{$tools = print $tools ", "}}{{end}}{{$tools = print $tools "search_observations()"}}{{end}}
+{{- if .Recall}}{{if $tools}}{{$tools = print $tools ", "}}{{end}}{{$tools = print $tools "recall()"}}{{end}}
+{{- if $tools}} Use {{$tools}} before providing your final answer.{{else}} Retrieve evidence before providing your final answer.{{end}}

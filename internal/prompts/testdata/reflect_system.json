@@ -8,7 +8,9 @@
     {"Name": "Empty", "Rules": []}
   ],
   "context": "The caller is a tier-2 engineer.",
-  "mental_models": true,
+  "search_mental_models": true,
+  "read_mental_models": true,
+  "recall": true,
   "observations": true,
   "expand": true,
   "budget": "high",

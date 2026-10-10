@@ -1,0 +1,6 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/agent.py — the retry instruction after a malformed done call
+("Call done() again ... fixing: ..."). The engine prefixes what was wrong.
+Data (ReflectData): .AnswerAsDocument.
+*/ -}}
+Call done() again with {{if .AnswerAsDocument}}a 'document' object holding a 'sections' array{{else}}an 'answer' string{{end}}.

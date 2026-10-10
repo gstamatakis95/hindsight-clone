@@ -73,6 +73,16 @@ const (
 	// RefreshContextData.
 	MentalModelRefreshContext = "mm_refresh_context"
 
+	// ReflectToolErrorSearchFirst is the tool error a done call gets before any retrieval, naming the offered
+	// search tools; reads ReflectData.
+	ReflectToolErrorSearchFirst = "reflect_tool_error_search_first"
+	// ReflectToolErrorUnknown is the instruction after a call to a tool that isn't offered, listing the offered
+	// tools; reads ReflectData. The engine prefixes the rejected tool's name.
+	ReflectToolErrorUnknown = "reflect_tool_error_unknown"
+	// ReflectToolErrorDone is the retry instruction after a malformed done call; reads ReflectData. The engine
+	// prefixes what was wrong.
+	ReflectToolErrorDone = "reflect_tool_error_done"
+
 	// ReflectToolDirectiveRules is the numbered directive rule list DoneTool puts into the directive-aware
 	// done tools; reads ReflectData. Empty when no directive has rules.
 	ReflectToolDirectiveRules = "reflect_tool_directive_rules"
@@ -223,12 +233,16 @@ type ReflectData struct {
 	Directives []domain.Directive `json:"directives"`
 	// Context is additional context for the agent (e.g. a mental-model refresh's instructions).
 	Context string `json:"context"`
-	// MentalModels reports that the page tools (search_mental_models, read_mental_models) are offered.
-	MentalModels bool `json:"mental_models"`
+	// SearchMentalModels reports that search_mental_models is offered (the mental-model level).
+	SearchMentalModels bool `json:"search_mental_models"`
+	// ReadMentalModels reports that read_mental_models is offered.
+	ReadMentalModels bool `json:"read_mental_models"`
 	// Observations reports that search_observations is offered.
 	Observations bool `json:"observations"`
 	// Expand reports that expand is offered.
 	Expand bool `json:"expand"`
+	// Recall reports that recall is offered (the raw-facts level and every recall() instruction).
+	Recall bool `json:"recall"`
 	// Budget is low, mid or high; empty = no research-depth section.
 	Budget string `json:"budget"`
 	// AnswerAsDocument has done take a structured document (pair with ReflectToolDoneDocument).

@@ -1,0 +1,14 @@
+{
+  "bank_name": "Support desk",
+  "mission": "You maintain the page \"Customer escalations\".",
+  "search_mental_models": true,
+  "read_mental_models": false,
+  "observations": true,
+  "recall": false,
+  "expand": false,
+  "budget": "mid",
+  "answer_as_document": true,
+  "context": "You are writing a document called \"Customer escalations\".",
+  "now": "2026-10-10T08:15:42Z",
+  "query": "Which customers escalated this quarter?"
+}
