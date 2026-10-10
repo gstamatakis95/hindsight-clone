@@ -1,0 +1,325 @@
+package reflect
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"memd/internal/domain"
+	"memd/internal/jsonschema"
+	"memd/internal/port"
+	"memd/internal/prompts"
+	"strings"
+)
+
+// Defaults when the effective config leaves a reflect knob unset (the server defaults normally set them).
+const (
+	defaultMaxIterations   = 10
+	defaultMaxAnswerTokens = 4096
+)
+
+// ReflectorDeps are the reflector's dependencies.
+type ReflectorDeps struct { //nolint:revive // stutter: ReflectorDeps is the spec's name (NewReflector(d ReflectorDeps))
+	// Store reads the bank's name and stored directives (a short read-only transaction).
+	Store port.Store
+	// Config resolves the effective config (server < tenant < bank < request).
+	Config port.ConfigResolver
+	// Router picks the REFLECT and STRUCTURED_OUTPUT bindings.
+	Router port.ModelRouter
+	// LLM serves the tool-calling turns, the final synthesis and the structured-output pass.
+	LLM port.LLM
+	// Clock gives the current time (default query time, durations).
+	Clock port.Clock
+	// Tools are the retrieval tools (DefaultTools); done is built in.
+	Tools []Tool
+}
+
+// reflector is the Reflector.
+type reflector struct {
+	d     ReflectorDeps
+	tools map[string]Tool
+}
+
+var _ Reflector = (*reflector)(nil)
+
+// NewReflector returns the Reflector over d.
+func NewReflector(d ReflectorDeps) Reflector {
+	tools := make(map[string]Tool, len(d.Tools))
+	for _, t := range d.Tools {
+		tools[t.Name()] = t
+	}
+	return &reflector{d: d, tools: tools}
+}
+
+// Reflect implements Reflector.
+func (r *reflector) Reflect(ctx context.Context, req ReflectRequest) (ReflectResult, error) {
+	start := r.d.Clock.Now()
+	if err := validate(req); err != nil {
+		return ReflectResult{}, err
+	}
+	var overrides []domain.BankConfig
+	if req.Overrides != nil {
+		overrides = append(overrides, *req.Overrides)
+	}
+	cfg, err := r.d.Config.Effective(ctx, req.Bank, overrides...)
+	if err != nil {
+		return ReflectResult{}, err
+	}
+	bankName, stored, err := r.readBank(ctx, req.Bank)
+	if err != nil {
+		return ReflectResult{}, err
+	}
+	directives := selectDirectives(stored, req.Tags, req.ApplyAllDirectives, req.ExtraDirectives)
+	rn, err := r.newRun(req, cfg, directives, bankName)
+	if err != nil {
+		return ReflectResult{}, err
+	}
+	ans, err := rn.loop(ctx)
+	if err != nil {
+		return ReflectResult{}, err
+	}
+	res := r.result(rn, ans, directives)
+	if req.ResponseSchemaJSON != "" {
+		if err := r.structured(ctx, rn, cfg, &res); err != nil {
+			return ReflectResult{}, err
+		}
+	}
+	res.Usage = rn.st.Usage
+	res.Trace.DurationMS = r.d.Clock.Now().Sub(start).Milliseconds()
+	return res, nil
+}
+
+// validate rejects a request reflect can't run: no query, a malformed tag filter or response schema.
+func validate(req ReflectRequest) error {
+	if strings.TrimSpace(req.Query) == "" {
+		return fmt.Errorf("%w: reflect needs a query", domain.ErrInvalidArgument)
+	}
+	if err := req.Tags.Validate(); err != nil {
+		return fmt.Errorf("reflect: %w", err)
+	}
+	if req.ResponseSchemaJSON == "" {
+		return nil
+	}
+	if _, err := jsonschema.Compile(json.RawMessage(req.ResponseSchemaJSON)); err != nil {
+		return fmt.Errorf("reflect: response_schema_json: %w", err)
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(req.ResponseSchemaJSON), &obj); err != nil {
+		return fmt.Errorf("%w: response_schema_json must be a JSON object", domain.ErrInvalidArgument)
+	}
+	return nil
+}
+
+// readBank reads the bank's display name and its active directives in one short read-only transaction.
+func (r *reflector) readBank(ctx context.Context, b port.BankRef) (string, []domain.Directive, error) {
+	var name string
+	var ds []domain.Directive
+	err := r.d.Store.InTx(ctx, func(tx port.Tx) error {
+		bank, err := tx.Banks().Get(ctx, b)
+		if err != nil {
+			return err
+		}
+		name = bank.Name
+		ds, err = tx.Directives().List(ctx, b, true)
+		return err
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("reflect: read bank %s/%s: %w", b.Tenant, b.Bank, err)
+	}
+	return name, ds, nil
+}
+
+// effectiveBudget is the request budget; unspecified = low (the Reflect RPC default).
+func effectiveBudget(b domain.Budget) domain.Budget {
+	switch b {
+	case domain.BudgetMid, domain.BudgetHigh:
+		return b
+	default:
+		return domain.BudgetLow
+	}
+}
+
+// maxIterations scales ReflectConfig.MaxIterations (the BUDGET_MID value, default 10) by budget: LOW halves,
+// HIGH doubles, never below 1.
+func maxIterations(cfg domain.BankConfig, b domain.Budget) int {
+	base := defaultMaxIterations
+	if cfg.Reflect != nil && cfg.Reflect.MaxIterations != nil {
+		base = *cfg.Reflect.MaxIterations
+	}
+	switch effectiveBudget(b) {
+	case domain.BudgetHigh:
+		base *= 2
+	case domain.BudgetLow:
+		base /= 2
+	}
+	return max(1, base)
+}
+
+// newRun prepares the loop: binding, tools offered, prompt data, system and user messages.
+func (r *reflector) newRun(
+	req ReflectRequest, cfg domain.BankConfig, directives []domain.Directive, bankName string,
+) (*run, error) {
+	binding, err := r.d.Router.Resolve(cfg, domain.ModelSlotReflect)
+	if err != nil {
+		return nil, fmt.Errorf("reflect: %w", err)
+	}
+	queryTime := r.d.Clock.Now()
+	if req.QueryTime != nil {
+		queryTime = *req.QueryTime
+	}
+	tools := r.offered(cfg, req.ExcludeMentalModels)
+	data := promptData(cfg, directives, toolNames(tools), r.d.Clock.Now())
+	data.BankName, data.Context, data.Query = bankName, req.Context, req.Query
+	data.Budget, data.AnswerAsDocument = string(effectiveBudget(req.Budget)), req.AsDocument
+	data.MaxTokens = answerTokens(cfg, req.MaxTokens)
+	specs, err := toolSpecs(tools, &data)
+	if err != nil {
+		return nil, err
+	}
+	system, err := prompts.Render(prompts.ReflectSystem, &data)
+	if err != nil {
+		return nil, fmt.Errorf("reflect: %w", err)
+	}
+	rn := &run{
+		llm: r.d.LLM, clock: r.d.Clock, binding: binding, tools: tools, specs: specs, data: data,
+		maxIter: maxIterations(cfg, req.Budget), callIDs: map[string]bool{}, requireEv: true,
+		st: &AgentState{Request: req, Config: cfg, QueryTime: queryTime},
+		messages: []port.ChatMessage{
+			{Role: port.ChatRoleSystem, Content: system}, {Role: port.ChatRoleUser, Content: req.Query},
+		},
+	}
+	if cfg.Reflect != nil {
+		rn.maxTotal = cfg.Reflect.MaxTotalTokens
+		if cfg.Reflect.RequireEvidence != nil {
+			rn.requireEv = *cfg.Reflect.RequireEvidence
+		}
+	}
+	return rn, nil
+}
+
+// answerTokens is the answer's soft length target: the request's max_tokens, else max_answer_tokens.
+func answerTokens(cfg domain.BankConfig, reqMax *int) int {
+	switch {
+	case reqMax != nil && *reqMax > 0:
+		return *reqMax
+	case cfg.Reflect != nil && cfg.Reflect.MaxAnswerTokens != nil:
+		return *cfg.Reflect.MaxAnswerTokens
+	default:
+		return defaultMaxAnswerTokens
+	}
+}
+
+// offered returns the retrieval tools this reflect offers: wired, enabled by the config, and no page tools
+// when mental models are excluded.
+func (r *reflector) offered(cfg domain.BankConfig, excludePages bool) map[string]Tool {
+	enabled := toolSet(cfg, !excludePages)
+	out := map[string]Tool{}
+	for name := range enabled {
+		if t, ok := r.tools[name]; ok {
+			out[name] = t
+		}
+	}
+	return out
+}
+
+// toolNames is the name set of tools.
+func toolNames(tools map[string]Tool) map[string]bool {
+	out := make(map[string]bool, len(tools))
+	for name := range tools {
+		out[name] = true
+	}
+	return out
+}
+
+// toolSpecs declares the offered tools to the model in prompt order, then the done variant that fits:
+// the document form for AsDocument, the directive form when some directive has rules.
+func toolSpecs(tools map[string]Tool, data *prompts.ReflectData) ([]port.ToolSpec, error) {
+	decl, err := toolSchemas()
+	if err != nil {
+		return nil, err
+	}
+	var specs []port.ToolSpec
+	for _, name := range retrievalTools {
+		if t, ok := tools[name]; ok {
+			specs = append(specs, port.ToolSpec{Name: name, Description: decl[name].Description, Parameters: t.Schema()})
+		}
+	}
+	done, err := doneSpec(decl[ToolDone], data)
+	if err != nil {
+		return nil, err
+	}
+	return append(specs, done), nil
+}
+
+// doneSpec returns the done tool declaration for data.
+func doneSpec(plain port.ToolSpec, data *prompts.ReflectData) (port.ToolSpec, error) {
+	rules := hasRules(data.Directives)
+	var asset string
+	switch {
+	case data.AnswerAsDocument && rules:
+		asset = prompts.ReflectToolDoneDocumentDirectives
+	case data.AnswerAsDocument:
+		asset = prompts.ReflectToolDoneDocument
+	case rules:
+		asset = prompts.ReflectToolDoneDirectives
+	default:
+		return plain, nil
+	}
+	raw, err := prompts.DoneTool(asset, data)
+	if err != nil {
+		return port.ToolSpec{}, fmt.Errorf("reflect: %w", err)
+	}
+	var s struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return port.ToolSpec{}, fmt.Errorf("reflect: %s: %w", asset, err)
+	}
+	return port.ToolSpec{Name: s.Name, Description: s.Description, Parameters: s.Parameters}, nil
+}
+
+// result assembles the answer, its evidence and the trace (without duration and usage).
+func (r *reflector) result(rn *run, ans answer, directives []domain.Directive) ReflectResult {
+	req := rn.st.Request
+	res := ReflectResult{Text: ans.text}
+	if req.Include.Facts == nil || *req.Include.Facts {
+		if ans.viaDone {
+			res.BasedOn = citedBasedOn(rn.st, ans.cited)
+		} else {
+			res.BasedOn = allBasedOn(rn.st)
+		}
+	}
+	res.BasedOn.DirectiveIDs = directiveIDs(directives)
+	res.Trace = &ReflectTrace{
+		Iterations: rn.st.Iteration, StopReason: ans.stop, DirectiveIDs: res.BasedOn.DirectiveIDs,
+	}
+	if req.Include.ToolCalls {
+		outputs := req.Include.ToolOutputs == nil || *req.Include.ToolOutputs
+		for _, c := range rn.st.ToolCalls {
+			if !outputs {
+				c.OutputJSON = ""
+			}
+			res.Trace.ToolCalls = append(res.Trace.ToolCalls, c)
+		}
+	}
+	return res
+}
+
+// structured runs the structured-output pass. Its failure is reported in StructuredOutputError and the answer
+// is still returned; only the token budget and the caller's ctx fail the call.
+func (r *reflector) structured(ctx context.Context, rn *run, cfg domain.BankConfig, res *ReflectResult) error {
+	out, usage, err := project(ctx, r.d.LLM, r.d.Router, cfg, json.RawMessage(rn.st.Request.ResponseSchemaJSON), res.Text)
+	if uerr := addUsage(rn.st, usage, rn.maxTotal); uerr != nil {
+		return uerr
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("reflect: structured output: %w", err)
+		}
+		res.StructuredOutputError = err.Error()
+		return nil
+	}
+	res.StructuredOutputJSON = out
+	return nil
+}

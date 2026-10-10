@@ -60,6 +60,9 @@ type ReflectRequest struct { //nolint:revive // stutter: name fixed by the spec 
 	RecallInclude domain.RecallInclude
 	// AsDocument asks for a markdown document instead of a conversational answer. Internal callers only.
 	AsDocument bool
+	// Context is additional context for the agent's system prompt (e.g. the mm_refresh_context an agentic
+	// mental-model refresh renders); empty = none. Internal callers only.
+	Context string
 }
 
 // ReflectInclude mirrors memory.v1.ReflectInclude.

@@ -46,6 +46,9 @@ type ToolResult struct {
 	Answer string
 	// Cited are the ids the answer cites (done only), filtered later to what was retrieved.
 	Cited []string
+	// Error is set when the call was malformed (bad JSON, a missing argument): Output then carries
+	// {"error": Error} back to the model so it can fix the call, and the loop goes on.
+	Error string
 }
 
 // AgentState is the mutable state of one reflect loop, shared by its tools.
@@ -68,6 +71,9 @@ type AgentState struct {
 	TotalTokens int64
 	// ToolCalls are the calls made so far.
 	ToolCalls []domain.ToolCallTrace
+	// Searched reports that a retrieval tool ran successfully (even with no hits); done needs it when
+	// require_evidence is on.
+	Searched bool
 }
 
 // PageReader is what the page tools need from mental models. It uses only domain and port types so
@@ -77,4 +83,11 @@ type PageReader interface {
 	SearchPages(ctx context.Context, b port.BankRef, query string, limit int) ([]domain.PageHit, error)
 	// ReadPages returns the pages with the given ids, in order; unknown ids are skipped.
 	ReadPages(ctx context.Context, b port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error)
+}
+
+// ChunkReader reads source chunks by id for the expand tool. port.Reader has no chunk read yet (CCR WP-11-2);
+// until one is wired, expand returns units and source facts without chunks.
+type ChunkReader interface {
+	// GetChunks returns the chunks with the given ids, in order; unknown ids are skipped.
+	GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
 }
