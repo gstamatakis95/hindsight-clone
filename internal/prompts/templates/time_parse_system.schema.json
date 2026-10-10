@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "start": {
+      "type": ["string", "null"],
+      "description": "Inclusive start of the window as an ISO 8601 date-time with offset, or null when unbounded."
+    },
+    "end": {
+      "type": ["string", "null"],
+      "description": "Exclusive end of the window as an ISO 8601 date-time with offset, or null when unbounded."
+    }
+  },
+  "required": ["start", "end"],
+  "additionalProperties": false
+}

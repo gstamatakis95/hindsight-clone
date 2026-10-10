@@ -1,0 +1,188 @@
+package timex
+
+import (
+	"context"
+	"fmt"
+	"memd/internal/domain"
+	"memd/internal/port"
+	"memd/internal/prompts"
+	"strings"
+	"time"
+)
+
+// Prompt templates of the TIME_PARSE fallback; the system template also names the response schema and is
+// the request's Name.
+const (
+	timeParsePrompt     = "time_parse_system"
+	timeParseUserPrompt = "time_parse_user"
+)
+
+// normalizer is the rules-first TimeNormalizer with the TIME_PARSE LLM fallback.
+type normalizer struct {
+	llm    port.LLM
+	router port.ModelRouter
+	clock  port.Clock
+}
+
+var _ TimeNormalizer = (*normalizer)(nil)
+
+// NewNormalizer returns a TimeNormalizer that runs the deterministic rules and falls back to the
+// TIME_PARSE slot (resolved through router per call, run through llm) only when they cannot resolve a
+// cue. clock supplies the reference time when a caller passes a zero ref.
+func NewNormalizer(llm port.LLM, router port.ModelRouter, clock port.Clock) TimeNormalizer {
+	return &normalizer{llm: llm, router: router, clock: clock}
+}
+
+// Normalize implements TimeNormalizer.
+func (n *normalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact,
+	ref time.Time,
+) error {
+	if f == nil || f.OccurredStart != nil || strings.TrimSpace(f.TimeExpression) == "" {
+		return nil
+	}
+	ref = n.reference(ref)
+	w, ok := parseRules(f.TimeExpression, ref)
+	if !ok {
+		var err error
+		if w, err = n.fallback(ctx, cfg, f.TimeExpression, "expression", ref); err != nil {
+			return err
+		}
+	}
+	if w == nil {
+		return nil
+	}
+	f.OccurredStart = bound(w.Start)
+	f.OccurredEnd = bound(w.End)
+	return nil
+}
+
+// QueryWindow implements TimeNormalizer.
+func (n *normalizer) QueryWindow(ctx context.Context, cfg domain.BankConfig, query string,
+	ref time.Time,
+) (*domain.TimeWindow, error) {
+	if !hasTemporalCue(query) {
+		return nil, nil
+	}
+	ref = n.reference(ref)
+	if w, ok := parseRules(query, ref); ok {
+		return w, nil
+	}
+	return n.fallback(ctx, cfg, query, "query", ref)
+}
+
+// reference is ref, or the clock's now when ref is zero.
+func (n *normalizer) reference(ref time.Time) time.Time {
+	if ref.IsZero() {
+		return n.clock.Now()
+	}
+	return ref
+}
+
+// bound is a window bound as an optional time; a zero (unbounded) bound is nil.
+func bound(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// promptData is the data of the time_parse templates.
+type promptData struct {
+	// Reference is ref as RFC 3339 with its offset.
+	Reference string
+	// Weekday is ref's weekday name.
+	Weekday string
+	// Timezone is ref's location name.
+	Timezone string
+	// Kind is "query" (a recall query) or "expression" (an extracted time expression).
+	Kind string
+	// Text is the query or expression to resolve.
+	Text string
+}
+
+// timeParseResult is the TIME_PARSE response: RFC 3339 or YYYY-MM-DD bounds, null when unbounded.
+type timeParseResult struct {
+	Start *string `json:"start"`
+	End   *string `json:"end"`
+}
+
+// fallback asks the TIME_PARSE slot for a window. Both bounds null, an unparseable bound or an empty or
+// inverted window mean no constraint (nil window, no error); router and LLM errors are returned wrapped.
+func (n *normalizer) fallback(ctx context.Context, cfg domain.BankConfig, text, kind string,
+	ref time.Time,
+) (*domain.TimeWindow, error) {
+	binding, err := n.router.Resolve(cfg, domain.ModelSlotTimeParse)
+	if err != nil {
+		return nil, fmt.Errorf("timex: resolve time_parse binding: %w", err)
+	}
+	req, err := buildRequest(binding, text, kind, ref)
+	if err != nil {
+		return nil, err
+	}
+	var out timeParseResult
+	if _, err := n.llm.Structured(ctx, req, &out); err != nil {
+		return nil, fmt.Errorf("timex: time_parse call: %w", err)
+	}
+	return decodeWindow(out, ref), nil
+}
+
+// buildRequest renders the time_parse prompts into a structured request.
+func buildRequest(binding domain.ModelBinding, text, kind string, ref time.Time) (port.StructuredRequest, error) {
+	data := promptData{
+		Reference: ref.Format(time.RFC3339),
+		Weekday:   ref.Weekday().String(),
+		Timezone:  ref.Location().String(),
+		Kind:      kind,
+		Text:      text,
+	}
+	system, err := prompts.Render(timeParsePrompt, data)
+	if err != nil {
+		return port.StructuredRequest{}, fmt.Errorf("timex: render system prompt: %w", err)
+	}
+	user, err := prompts.Render(timeParseUserPrompt, data)
+	if err != nil {
+		return port.StructuredRequest{}, fmt.Errorf("timex: render user prompt: %w", err)
+	}
+	schema, err := prompts.Schema(timeParsePrompt)
+	if err != nil {
+		return port.StructuredRequest{}, fmt.Errorf("timex: time_parse schema: %w", err)
+	}
+	return port.StructuredRequest{
+		Slot:    domain.ModelSlotTimeParse,
+		Binding: binding,
+		Name:    timeParsePrompt,
+		System:  system,
+		User:    user,
+		Schema:  schema,
+	}, nil
+}
+
+// decodeWindow turns the model's bounds into a window, or nil when they carry no usable constraint.
+func decodeWindow(out timeParseResult, ref time.Time) *domain.TimeWindow {
+	start, okStart := parseBound(out.Start, ref.Location())
+	end, okEnd := parseBound(out.End, ref.Location())
+	if !okStart || !okEnd || (start.IsZero() && end.IsZero()) {
+		return nil
+	}
+	if !start.IsZero() && !end.IsZero() && !start.Before(end) {
+		return nil
+	}
+	return &domain.TimeWindow{Start: start, End: end}
+}
+
+// boundLayouts are the accepted bound formats; layouts without an offset are read in the ref's location.
+var boundLayouts = []string{time.RFC3339Nano, "2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02"}
+
+// parseBound parses one bound; nil or empty is unbounded (zero, ok), an unknown format is not ok.
+func parseBound(s *string, loc *time.Location) (time.Time, bool) {
+	if s == nil || strings.TrimSpace(*s) == "" {
+		return time.Time{}, true
+	}
+	v := strings.TrimSpace(*s)
+	for _, layout := range boundLayouts {
+		if t, err := time.ParseInLocation(layout, v, loc); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
