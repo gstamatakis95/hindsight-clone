@@ -17,8 +17,9 @@ either: a model returning bad JSON is not deterministic.
 - `Fail(slot, name, err)` returns any error the test chooses, so an engine can be tested against
   whatever class WP-03 settles on.
 
-If WP-03 classifies exhausted schema retries differently, align `InvalidJSON` in a follow-up; engines
-should test their handling of each class with `Fail`.
+This matches the merged WP-03 gateway (decision 301, `internal/adapter/gateway/chat.go` and
+`client.go`): invalid output after the last retry and an attempt timeout are both domain.ErrUnavailable,
+the timeout also wrapping context.DeadlineExceeded. Engines can test any other class with `Fail`.
 
 ## Alternatives
 - domain.ErrInvalidArgument: it maps to INVALID_ARGUMENT for synchronous RPCs, which blames the caller.
