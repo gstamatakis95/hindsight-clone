@@ -13,7 +13,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-03 | Gateway and S3 adapters | merged (8dd2090 + follow-up) | wp/WP-03-gateway-s3 | 20fab3d | — | — | 5 LOW accepted (see log) |
 | WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
 | WP-05 | Worker runtime | merged (08d057d) | wp/WP-05-worker-runtime | 7afa08e | — | — | H3 attempt-charge gap; LOWs in log |
-| WP-06 | Server shell | in progress | wp/WP-06-server-shell | — | — | — | — |
+| WP-06 | Server shell | merged | wp/WP-06-server-shell | 0f2815d | — | — | jsonToStruct non-object (LOW) |
 | WP-07 | Eval harness | merged (f5da652 + follow-up) | wp/WP-07-eval | 7865932 | — | WP-07-1 approved + applied | 1 LOW accepted (see log) |
 | WP-08 | Retain engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-09 | Recall engine | waiting | — | — | WP-02, WP-04 | — | — |
@@ -154,3 +154,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   Fixes, the override-validation MEDIUM and cheap LOWs sent back to the worker.
 - For the Phase 2 CCR batch: Memory.stale outside Recall needs a stale field from the curate lister.
 - 2026-10-10 WP-06 round-1 fixes in at 0f2815d (leaf-path implied masks; per-RPC forwarding test for all 48 RPCs); narrow round-2 review spawned.
+- 2026-10-10 WP-06 review round 2: MERGE (mutations now caught). Merged into main; gates pass. WP-06 done.
