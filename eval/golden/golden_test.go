@@ -43,6 +43,10 @@ func TestLoadGoldenRejectsBadFixtures(t *testing.T) {
 		"no accept":     `{"name":"x","sessions":[{"id":"s","content":"c"}],"checks":[{"id":"q","query":"q"}]}`,
 		"no sessions":   `{"name":"x","sessions":[],"checks":[{"id":"q","query":"q","accept":["a"]}]}`,
 		"trailing":      `{"name":"x",` + ok + `} {}`,
+		"dup session": `{"name":"x","sessions":[{"id":"s","content":"c"},{"id":"s","content":"d"}],` +
+			`"checks":[{"id":"q","query":"q","accept":["a"]}]}`,
+		"dup check": `{"name":"x","sessions":[{"id":"s","content":"c"}],` +
+			`"checks":[{"id":"q","query":"q","accept":["a"]},{"id":"q","query":"r","accept":["b"]}]}`,
 	}
 	for name, body := range tests {
 		t.Run(name, func(t *testing.T) {

@@ -85,15 +85,25 @@ func (fx fixture) validate() error {
 	if fx.Name == "" || len(fx.Sessions) == 0 || len(fx.Checks) == 0 {
 		return fmt.Errorf("needs a name, sessions and checks")
 	}
+	// Session ids are document ids: a repeat would silently upsert over the earlier session.
+	ids := map[string]bool{}
 	for i, s := range fx.Sessions {
 		if s.ID == "" || s.Content == "" {
 			return fmt.Errorf("sessions[%d]: needs id and content", i)
 		}
+		if ids["s/"+s.ID] {
+			return fmt.Errorf("sessions[%d]: duplicate id %q", i, s.ID)
+		}
+		ids["s/"+s.ID] = true
 	}
 	for i, c := range fx.Checks {
 		if c.ID == "" || c.Query == "" || len(c.Accept) == 0 {
 			return fmt.Errorf("checks[%d]: needs id, query and accept", i)
 		}
+		if ids["c/"+c.ID] {
+			return fmt.Errorf("checks[%d]: duplicate id %q", i, c.ID)
+		}
+		ids["c/"+c.ID] = true
 	}
 	return nil
 }

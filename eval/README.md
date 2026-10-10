@@ -24,7 +24,7 @@ its own questions as errors, and the run continues.
 | `-dataset` | `-data` | Unit = bank | Categories |
 |---|---|---|---|
 | `longmemeval` | `longmemeval_s.json` / `_m` / `_oracle` ([LongMemEval](https://github.com/xiaowu0162/LongMemEval)) | one question instance | `question_type` (abstention questions are graded with the abstention prompt) |
-| `locomo` | `locomo10.json` ([LoCoMo](https://github.com/snap-research/locomo)) | one sample | multi-hop, temporal, open-domain, single-hop (adversarial is skipped) |
+| `locomo` | `locomo10.json` ([LoCoMo](https://github.com/snap-research/locomo)) | one sample | 1-multi-hop, 2-temporal, 3-open-domain, 4-single-hop (the number-to-name mapping is unverified; adversarial is skipped) |
 | `golden` | `eval/golden` (default) | one fixture file | the check's `category`, otherwise the fixture name |
 
 Download the datasets yourself; they are not vendored. See decision 703 for how each one maps onto banks.

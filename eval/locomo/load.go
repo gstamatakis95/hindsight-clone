@@ -24,8 +24,10 @@ var sessionKey = regexp.MustCompile(`^session_(\d+)$`)
 // adversarial is the LoCoMo category with no gold answer; its questions are skipped.
 const adversarial = 5
 
-// categoryNames maps LoCoMo category numbers to report bucket names.
-var categoryNames = map[int]string{1: "multi-hop", 2: "temporal", 3: "open-domain", 4: "single-hop"}
+// categoryNames maps LoCoMo category numbers to report bucket names. The names follow the mapping most
+// published LoCoMo evals use; it is not stated in the dataset itself, so the number stays in the name
+// (decision 703).
+var categoryNames = map[int]string{1: "1-multi-hop", 2: "2-temporal", 3: "3-open-domain", 4: "4-single-hop"}
 
 // sample is one LoCoMo conversation with its questions.
 type sample struct {

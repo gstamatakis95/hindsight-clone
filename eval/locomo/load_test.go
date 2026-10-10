@@ -39,15 +39,15 @@ func TestLoadSample(t *testing.T) {
 		},
 		Questions: []harness.Question{
 			{
-				ID: "conv-1-q0", Category: "temporal", Query: "When did Caroline go to the support group?",
+				ID: "conv-1-q0", Category: "2-temporal", Query: "When did Caroline go to the support group?",
 				Answer: "7 May 2023", Kind: harness.KindTemporal, QueryTime: last,
 			},
 			{
-				ID: "conv-1-q1", Category: "multi-hop", Query: "In what year did Melanie run the race?",
+				ID: "conv-1-q1", Category: "1-multi-hop", Query: "In what year did Melanie run the race?",
 				Answer: "2023", Kind: harness.KindDefault, QueryTime: last,
 			},
 			{
-				ID: "conv-1-q3", Category: "single-hop", Query: "What did Melanie photograph?",
+				ID: "conv-1-q3", Category: "4-single-hop", Query: "What did Melanie photograph?",
 				Answer: "a sunset", Kind: harness.KindDefault, QueryTime: last,
 			},
 			{
