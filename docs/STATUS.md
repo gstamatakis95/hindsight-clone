@@ -190,3 +190,8 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-11 handed in (92941cf); reviewer spawned. CCR WP-11-1 (domain.ErrContextOverflow set by the
   gateway) and CCR WP-11-2 (Reader.GetChunks, overlapping WP-09-1) PENDING for the batch. Wiring notes for
   WP-12/14 are in docs/wp/WP-11-pr.md.
+- 2026-10-10 WP-13 handed in (8247d6a); reviewer spawned. CCR WP-13-1 (Reader: GetUnit, ListUnits,
+  ObservationHistory, BankStats, TagCounts, ListDocuments, ListScopes, MentalModelSpecs, ModelsCiting,
+  BanksToConsolidate; domain.Unit.Stale) PENDING for the batch. WP-14 wiring notes are in docs/wp/WP-13-pr.md
+  and decision 1302 (alias the server admin types). WP-10's consolidate handler must accept
+  curate.ConsolidatePayload {"scopes":[{"tags":[...]}]}. ServerDefaults should set retain.entity_match_threshold.
