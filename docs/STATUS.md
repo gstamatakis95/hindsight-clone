@@ -187,3 +187,6 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-09 handed in (c4f22a2); reviewer spawned. CCR WP-09-1 (Reader: BankTags, GetChunks,
   EntityStates, StaleScopes) PENDING, held for the Phase 2 CCR batch. WP-14: wire a tokenizer for the recall
   TokenCounter; Recall must not be called inside Store.InTx.
+- 2026-10-10 WP-11 handed in (92941cf); reviewer spawned. CCR WP-11-1 (domain.ErrContextOverflow set by the
+  gateway) and CCR WP-11-2 (Reader.GetChunks, overlapping WP-09-1) PENDING for the batch. Wiring notes for
+  WP-12/14 are in docs/wp/WP-11-pr.md.
