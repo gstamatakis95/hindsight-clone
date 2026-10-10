@@ -116,7 +116,7 @@ type EventRepo interface {
 	// splits a seq group (one transaction's events), so it ends with every event of its last seq. The
 	// next poll passes the highest returned seq (or the same afterSeq when the page is empty).
 	List(ctx context.Context, b BankRef, afterSeq int64, limit int) ([]domain.LifecycleEvent, error)
-	// Prune deletes events written before before and returns how many.
+	// Prune deletes events whose At is before before and returns how many.
 	Prune(ctx context.Context, before time.Time) (int, error)
 }
 

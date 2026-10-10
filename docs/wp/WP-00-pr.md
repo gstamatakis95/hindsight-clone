@@ -54,8 +54,9 @@ Branch `wp/WP-00-contracts`. The plan is in `docs/wp/WP-00.md`. After merge, tag
   - `scripts/schema-{dump,check}.sh`.
   - `internal/adapter/postgres/sqlc.yaml` with pgx/v5, uuid and pgvector overrides. It includes a
     placeholder `queries/ping.sql`, because sqlc refuses an empty query dir.
-- [x] **Contract test suites.** `internal/porttest` has `RunStoreSuite` (44 subtests), `RunSeqSuite`
-  (8), `RunQueueSuite` (27) and `RunBlobSuite` (7), all with real assertions.
+- [x] **Contract test suites.** `internal/porttest` has `RunStoreSuite` (60 subtests), `RunSeqSuite`
+  (8), `RunQueueSuite` (45) and `RunBlobSuite` (7), all with real assertions. None has run against an
+  implementation yet; WP-01, WP-02 and WP-03 are the first.
 - [x] **Agent docs.**
   - Root `AGENTS.md`, from the spec block plus a frozen-contracts section.
   - `CLAUDE.md -> AGENTS.md` symlink.
@@ -114,20 +115,82 @@ Unit tests shipped with the contracts, all passing under `-race`:
   - Unset enums and ordering.
   - Budgets are per-arm candidate caps.
   - Unset `MemoryState` lists both tables.
-- **CCR `docs/ccr/WP-00-1.md`:** approve `golang.org/x/text` for NFC tag normalization, which the Ports
-  block names explicitly.
+- `012-review-round-1-rulings.md`: orchestrator rulings R1-R10 from review round 1 (dedupe and
+  overrides, Upgrade merge, Reschedule, ModelBinding merge, tags vs tag_groups, event paging, worker
+  fencing, cancel holding the serial key, tombstoned banks, terminal failures), and the write-side ports
+  added because the spec requires them.
+- **CCR `docs/ccr/WP-00-1.md`: APPROVED and applied.** `golang.org/x/text` is a direct dependency, and
+  `NormalizeTag` applies NFC (`TestNormalizeTagNFC`).
+
+## Review round 1 (all fixed on this branch)
+
+**Rulings**
+- R1-R10 are implemented in the port contracts (`internal/port/jobs.go`, `repos.go`, `store.go`), the
+  proto comments, the schema and the porttest suites.
+- Each one is recorded in decision 012; decisions 004, 005, 006, 008, 009 and 011 were updated to match.
+
+**Schema** (decision 004 has the amended claim SQL)
+- New column `operations.joinable`, the non-joinable marker.
+- A `finished_at` CHECK on `operations`.
+- The active index is now `(tenant_id, bank_id, serial_key, kind)`, and its predicate covers
+  cancelled-but-unfinished rows. A running-heartbeat index was added.
+- `parked_links` gained CHECKs and an index.
+- Every FK's ON DELETE is explicit.
+
+**Ports**
+- Added `Tx.Directives()` / `DirectiveRepo`.
+- `UnitRepo`: `Update`, `SetDocumentTags`, `AppendAudit` and `RecordObservationVersion`.
+- `EntityRepo`: `PendingMaintenance` and `PruneOrphans`.
+- `LinkRepo`: `Count`, `Dirty` and `ClearDirty`.
+- `BankRepo.DeleteBatch`.
+- `Queue`: `Get`, `List`, `Cancel`, `Retry` and `Prune`.
+- `EventRepo.Prune`.
+- `port.LostJobsError`.
+- `SeqRange.UpTo` is now `*int64`, so a snapshot at seq 0 matches nothing.
+- The `Read()` doc now says the Reader is long-lived and concurrency-safe.
+
+**Domain**
+- `TagFilter.Validate`. `MatchFilter` never drops a part, and `MatchGroup` shares `SQLPredicate.Eval`'s
+  semantics.
+- `ParseScopeKey` accepts canonical keys only.
+- New `AuditEntry` and `OperationKind.HasFinalizer`.
+
+**porttest**
+- New coverage:
+  - tenant isolation;
+  - BankSeq read while a tx holds Seq, and Reader reuse across commits;
+  - Tags and SeqRange on all four arms, plus a window-spanning temporal unit;
+  - Restore reattaching entities and causal links;
+  - dedupe against parked rows, refresh joining despite overrides, the non-joinable marker, and
+    concurrent dedupe enqueuers;
+  - Upgrade merge, including the concurrent case;
+  - fencing and lost jobs, cancel holding the key, retry, prune;
+  - OPERATION_FAILED events, the refresh finalizer, and the bank-delete cleanup.
+- Claim must not surface `ErrConflict`, and vacuous checks were removed.
+
+**Tooling**
+- `make lint-proto` fails on an unresolvable `BREAKING_AGAINST` and accepts `BREAKING_AGAINST=contracts-v1`
+  (`.git#ref=`). It skips only when the ref has no protos.
+- Added a `make ruff` alias.
+- ifacedoc matches skip dirs by path suffix from any root.
+- `maintenance` no longer imports `retain`: `CauseMap` is now a type alias, and an assignability test
+  covers it.
 
 ## Known gaps
 
-- **NFC is not applied yet.** It is pending CCR WP-00-1. Tags are trimmed, lowercased, deduplicated and
-  sorted only.
-- **`port.Reader` is exactly the spec's six methods.** No port exists yet for the API-path and job
-  reads the later WPs need:
+- **Worker fencing window (R7).** Complete and Fail carry no worker or attempt token. A worker whose job
+  was reclaimed *and* re-claimed by another worker is fenced only through Heartbeat's
+  `*LostJobsError`, so a stale write inside that window is possible. Closing it would change the spec's
+  signatures.
+- **porttest is unvalidated against real implementations.** Expected counts, orders and errors are
+  first exercised by WP-01, WP-02 and WP-03. Minor points the suites leave unasserted are listed in
+  decision 009.
+- **`port.Reader` is exactly the spec's six methods.** No port exists yet for the API-path reads the
+  later WPs need:
   - document and memory listing, observation history, stats and tag counts
-  - directives, scopes and pages
+  - scope listing and page reads (directive selection can use `DirectiveRepo.List` in a tx)
   - the max seq in a model's scope
-  - operation get, list, cancel-one (PENDING or PROCESSING) and retry
-  - Expect CCRs from WP-05, WP-06, WP-09, WP-12 and WP-13 (decision 005).
+  - Expect CCRs from WP-06, WP-08, WP-10, WP-12 and WP-13 (decision 005).
 - **The engine-level types follow the spec's text** and will likely need extending inside their own
   (unfrozen) packages:
   - `recall.ParsedQuery` has no compiled tag predicate, arm floors or seq range.

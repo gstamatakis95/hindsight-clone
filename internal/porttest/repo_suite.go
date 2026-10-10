@@ -29,6 +29,7 @@ func repoCases() []storeCase {
 		{"EvidenceAddIdempotentAndCites", testEvidenceCites},
 		{"EvidenceDeleteCiting", testEvidenceDeleteCiting},
 		{"EventsAppendList", testEvents},
+		{"EventsListNeverSplitsSeqGroup", testEventsSeqGroups},
 		{"BanksGetDeleteUnknown", testBankUnknown},
 		{"BanksEnsure", testBankEnsure},
 		{"BanksCreateDuplicate", testBankCreate},
@@ -58,19 +59,30 @@ func unconsolidated(t *testing.T, s port.Store, b port.BankRef, scopes []port.Sc
 	return us
 }
 
+// upsertObservation upserts o stamped with a new transaction's Seq and records its history row with
+// RecordObservationVersion in the same transaction; it returns the seq. RecordObservationVersion has no
+// read port yet, so the history row is only checked to be accepted.
+func upsertObservation(t *testing.T, s port.Store, o *domain.Unit) int64 {
+	t.Helper()
+	inTx(t, s, func(tx port.Tx) error {
+		var err error
+		if o.Seq, err = tx.Seq(t.Context(), o.Bank); err != nil {
+			return err
+		}
+		if err := tx.Units().UpsertObservation(t.Context(), *o); err != nil {
+			return err
+		}
+		v := domain.ObservationVersion{Version: o.Version, Text: o.Text, SourceIDs: o.SourceIDs, At: day(int(o.Version))}
+		return tx.Units().RecordObservationVersion(t.Context(), o.Bank, o.ID, v)
+	})
+	return o.Seq
+}
+
 // testUpsertObservation: the first upsert inserts; the second replaces text, proof count, version and seq.
 func testUpsertObservation(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA)
 	o := observation(bankA, "Alice likes tea", "team")
-	var seq1, seq2 int64
-	inTx(t, s, func(tx port.Tx) error {
-		var err error
-		if seq1, err = tx.Seq(t.Context(), bankA); err != nil {
-			return err
-		}
-		o.Seq = seq1
-		return tx.Units().UpsertObservation(t.Context(), o)
-	})
+	seq1 := upsertObservation(t, s, &o)
 	got := getUnits(t, s, bankA, o.ID)
 	if len(got) != 1 {
 		t.Fatalf("GetUnits after insert = %d units, want 1", len(got))
@@ -78,14 +90,7 @@ func testUpsertObservation(t *testing.T, s port.Store) {
 	compareUnit(t, got[0], o)
 	o2 := o
 	o2.Text, o2.Version, o2.ProofCount, o2.Embedding = "Alice prefers green tea", 2, 3, angleVec(50)
-	inTx(t, s, func(tx port.Tx) error {
-		var err error
-		if seq2, err = tx.Seq(t.Context(), bankA); err != nil {
-			return err
-		}
-		o2.Seq = seq2
-		return tx.Units().UpsertObservation(t.Context(), o2)
-	})
+	seq2 := upsertObservation(t, s, &o2)
 	got = getUnits(t, s, bankA, o.ID)
 	if len(got) != 1 {
 		t.Fatalf("GetUnits after update = %d units, want 1", len(got))
@@ -113,7 +118,10 @@ func testUnconsolidatedOrder(t *testing.T, s port.Store) {
 		[]port.UnitID{f1.ID, f2.ID, f3.ID})
 	wantSeq(t, "Unconsolidated(limit 2)", unitIDs(unconsolidated(t, s, bankA, nil, 2)), []port.UnitID{f1.ID, f2.ID})
 	got := unconsolidated(t, s, bankA, nil, 1)
-	if len(got) == 1 && (got[0].Text != "first" || !got[0].CreatedAt.Equal(day(1))) {
+	if len(got) != 1 {
+		t.Fatalf("Unconsolidated(limit 1) = %v, want one unit", unitIDs(got))
+	}
+	if got[0].Text != "first" || !got[0].CreatedAt.Equal(day(1)) {
 		t.Errorf("Unconsolidated returned %q created %v, want the stored unit", got[0].Text, got[0].CreatedAt)
 	}
 }
@@ -198,20 +206,30 @@ func testDeleteByDocument(t *testing.T, s port.Store) {
 		[]port.UnitID{u3.ID})
 }
 
-// testArchiveRestore: an archived unit disappears from GetUnits and every search; Restore brings it back.
-func testArchiveRestore(t *testing.T, s port.Store) {
-	ensureBanks(t, s, bankA)
-	u, keep := fact(bankA, "The platypus lays eggs"), fact(bankA, "Neighbour")
-	u.Embedding, keep.Embedding = angleVec(0), angleVec(20)
-	u.Tags = []string{"zoology"}
-	insertUnits(t, s, u, keep)
-	insertLinks(t, s, link(bankA, keep.ID, u.ID, domain.LinkCausal, 0.9))
+// archive archives unit id of bank A in a transaction that takes the bank's Seq.
+func archive(t *testing.T, s port.Store, id port.UnitID) {
+	t.Helper()
 	inTx(t, s, func(tx port.Tx) error {
 		if _, err := tx.Seq(t.Context(), bankA); err != nil {
 			return err
 		}
-		return tx.Units().Archive(t.Context(), bankA, u.ID, "wrong fact")
+		return tx.Units().Archive(t.Context(), bankA, id, "wrong fact")
 	})
+}
+
+// testArchiveRestore: an archived unit disappears from GetUnits and every search; Restore brings it back
+// with its entities and causal links reattached.
+func testArchiveRestore(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	u, keep, partner := fact(bankA, "The platypus lays eggs"), fact(bankA, "Neighbour"), fact(bankA, "Eggs hatch")
+	u.Embedding, keep.Embedding = angleVec(0), angleVec(20)
+	u.Tags = []string{"zoology"}
+	insertUnits(t, s, u, keep, partner)
+	insertLinks(t, s, link(bankA, keep.ID, u.ID, domain.LinkCausal, 0.9),
+		link(bankA, u.ID, partner.ID, domain.LinkCausal, 0.8))
+	ent := upsertEntity(t, s, domain.Entity{Bank: bankA, CanonicalName: "Platypus", Kind: "animal"})
+	inTx(t, s, func(tx port.Tx) error { return tx.Entities().Attach(t.Context(), u.ID, []port.EntityID{ent}) })
+	archive(t, s, u.ID)
 	if got := getUnits(t, s, bankA, u.ID); len(got) != 0 {
 		t.Errorf("GetUnits(archived) = %v, want none", unitIDs(got))
 	}
@@ -233,6 +251,14 @@ func testArchiveRestore(t *testing.T, s port.Store) {
 	if got[0].Text != u.Text || got[0].Type != u.Type || !slices.Equal(got[0].Tags, u.Tags) {
 		t.Errorf("restored unit = %q %q %v, want %q %q %v", got[0].Text, got[0].Type, got[0].Tags,
 			u.Text, u.Type, u.Tags)
+	}
+	q := port.GraphQuery{
+		Bank: bankA, Seeds: []port.UnitID{u.ID}, MaxHops: 1, Kinds: []domain.LinkKind{domain.LinkCausal},
+		Limit: 10,
+	}
+	wantSeq(t, "ExpandGraph(causal) from the restored unit", hitIDs(expandGraph(t, s, q)), []port.UnitID{partner.ID})
+	if n := pruneOrphans(t, s, ent); n != 0 {
+		t.Errorf("PruneOrphans of the restored unit's entity deleted %d, want 0 (Restore reattaches it)", n)
 	}
 }
 
@@ -401,13 +427,9 @@ func testEntityUpsert(t *testing.T, s port.Store) {
 		t.Errorf("Upsert with id %s returned %s", id, id2)
 	}
 	cs := candidates(t, s, bankA, "Alice B. Smith", 5)
-	if len(cs) == 0 || cs[0].Entity.ID != id || cs[0].Entity.CanonicalName != "Alice B. Smith" {
-		t.Errorf("Candidates after update = %+v, want %s named Alice B. Smith first", cs, id)
-	}
-	for _, c := range cs[min(1, len(cs)):] {
-		if c.Entity.ID == id {
-			t.Errorf("Candidates lists entity %s twice: %+v", id, cs)
-		}
+	// The bank holds one entity, so exactly one candidate proves the update did not insert a second row.
+	if len(cs) != 1 || cs[0].Entity.ID != id || cs[0].Entity.CanonicalName != "Alice B. Smith" {
+		t.Errorf("Candidates after update = %+v, want only %s named Alice B. Smith", cs, id)
 	}
 	other := upsertEntity(t, s, domain.Entity{Bank: bankA, CanonicalName: "Bob Jones", Kind: "person"})
 	if other == "" || other == id {
@@ -634,7 +656,9 @@ func appendEvents(t *testing.T, s port.Store, b port.BankRef, subjects ...string
 			return err
 		}
 		for _, sub := range subjects {
-			ev := domain.LifecycleEvent{Seq: seq, Type: domain.EventTypeRetainCompleted, Bank: b, SubjectID: sub}
+			ev := domain.LifecycleEvent{
+				Seq: seq, Type: domain.EventTypeRetainCompleted, Bank: b, SubjectID: sub, At: nowMicro(),
+			}
 			if err := tx.Events().Append(t.Context(), ev); err != nil {
 				return err
 			}
@@ -682,4 +706,27 @@ func testEvents(t *testing.T, s port.Store) {
 	if evs := listEvents(t, s, bankA, s2, 10); len(evs) != 0 {
 		t.Errorf("List(after last seq) = %+v, want none", evs)
 	}
+}
+
+// wantSeqGroup fails the test unless evs are exactly the events of one transaction: subjects (any order),
+// all at seq.
+func wantSeqGroup(t *testing.T, what string, evs []domain.LifecycleEvent, seq int64, subjects ...string) {
+	t.Helper()
+	wantSet(t, what, eventSubjects(evs), subjects)
+	for _, e := range evs {
+		if e.Seq != seq {
+			t.Errorf("%s: event %q at seq %d, want %d", what, e.SubjectID, e.Seq, seq)
+		}
+	}
+}
+
+// testEventsSeqGroups: List's limit is soft and never splits one transaction's events; polling with the
+// highest returned seq reads the next group.
+func testEventsSeqGroups(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	s1 := appendEvents(t, s, bankA, "e1", "e2")
+	s2 := appendEvents(t, s, bankA, "e3", "e4")
+	wantSeqGroup(t, "List(after 0, limit 1)", listEvents(t, s, bankA, 0, 1), s1, "e1", "e2")
+	wantSeqGroup(t, "List(after the first group, limit 1)", listEvents(t, s, bankA, s1, 1), s2, "e3", "e4")
+	wantSeqGroup(t, "List(after the second group, limit 1)", listEvents(t, s, bankA, s2, 1), 0)
 }

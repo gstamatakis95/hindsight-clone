@@ -27,13 +27,15 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		{"UnitFieldRoundTrip", testUnitRoundTrip},
 		{"SearchVectorNearestFirst", testSearchVectorOrder},
 		{"SearchVectorFilters", testSearchVectorFilters},
-		{"SearchVectorTagPredicates", testSearchVectorTags},
-		{"SearchVectorSeqRange", testSearchVectorSeq},
 		{"SearchText", testSearchText},
 		{"SearchTemporal", testSearchTemporal},
 		{"ExpandGraph", testExpandGraph},
+		{"ReaderReusedAcrossCommits", testReaderReuse},
+		{"TenantIsolation", testTenantIsolation},
 	}
+	cases = append(cases, armCases()...)
 	cases = append(cases, repoCases()...)
+	cases = append(cases, curationCases()...)
 	runStoreCases(t, newStore, cases)
 }
 
@@ -73,28 +75,6 @@ func writeEverything(t *testing.T, tx port.Tx) (txFixture, error) {
 	}
 	ev := domain.LifecycleEvent{Seq: seq, Type: domain.EventTypeRetainCompleted, Bank: bankA, SubjectID: string(f.doc)}
 	return f, tx.Events().Append(ctx, ev)
-}
-
-// queuedRow reports whether a pending queue row matching j (on bank, kind and serial key) is visible to a
-// new transaction: a DedupePending Enqueue joins it and returns its id. The probe is rolled back either way.
-func queuedRow(t *testing.T, s port.Store, j port.Job) (port.OperationID, bool) {
-	t.Helper()
-	j.ID, j.Dedupe = "", port.DedupePending
-	var (
-		id     port.OperationID
-		joined bool
-	)
-	err := s.InTx(t.Context(), func(tx port.Tx) error {
-		var err error
-		if id, joined, err = tx.Queue().Enqueue(t.Context(), j); err != nil {
-			return err
-		}
-		return errRollback
-	})
-	if !errors.Is(err, errRollback) {
-		t.Fatalf("probe Enqueue: %v", err)
-	}
-	return id, joined
 }
 
 // listEvents lists bank b's events after afterSeq in a read transaction.
@@ -142,8 +122,8 @@ func testTxCommits(t *testing.T, s port.Store) {
 	if evs := listEvents(t, s, bankA, 0, 10); len(evs) != 1 || evs[0].SubjectID != string(f.doc) {
 		t.Errorf("Events().List after commit = %+v, want one event for %s", evs, f.doc)
 	}
-	if id, joined := queuedRow(t, s, f.job); !joined || id != f.job.ID {
-		t.Errorf("committed queue row: DedupePending Enqueue = (%s, joined %v), want (%s, joined)", id, joined, f.job.ID)
+	if op, err := getOp(t, s, bankA, f.job.ID); err != nil || op.Kind != f.job.Kind {
+		t.Errorf("Queue().Get after commit = %+v, %v; want the %s row", op, err, f.job.Kind)
 	}
 	if got := bankSeq(t, s, bankA); got != 1 {
 		t.Errorf("BankSeq after one committed Seq = %d, want 1", got)
@@ -162,9 +142,11 @@ func assertNothingWritten(t *testing.T, s port.Store, f txFixture, seqBefore int
 	if evs := listEvents(t, s, bankA, 0, 10); len(evs) != 0 {
 		t.Errorf("Events().List after rollback = %+v, want none", evs)
 	}
-	if _, joined := queuedRow(t, s, f.job); joined {
-		t.Errorf("rolled-back queue row visible: a DedupePending Enqueue joined it")
+	if f.job.ID == "" {
+		t.Fatalf("the rolled-back transaction never enqueued its job")
 	}
+	_, err := getOp(t, s, bankA, f.job.ID)
+	wantErrIs(t, "Queue().Get of a rolled-back row", err, domain.ErrNotFound)
 	if got := bankSeq(t, s, bankA); got != seqBefore {
 		t.Errorf("BankSeq after rollback = %d, want %d", got, seqBefore)
 	}
@@ -209,37 +191,62 @@ func testTxPanicRollback(t *testing.T, s port.Store) {
 	assertNothingWritten(t, s, f, before)
 }
 
-// testReadCommittedOnly: Read() does not block on an open transaction and does not see its writes.
+// openTxRead is what a Read() view returned while another transaction held the bank's Seq.
+type openTxRead struct {
+	units   []port.UnitID
+	bankSeq int64
+	err     error
+}
+
+// readDuringTx reads ids and bankA's BankSeq through Read() on another goroutine and waits at most
+// waitTimeout, so a Read() that blocks on the caller's open transaction fails instead of hanging.
+func readDuringTx(t *testing.T, s port.Store, ids []port.UnitID) openTxRead {
+	ch := make(chan openTxRead, 1)
+	go func() {
+		var r openTxRead
+		us, err := s.Read().GetUnits(t.Context(), bankA, ids)
+		r.units, r.err = unitIDs(us), err
+		if err == nil {
+			r.bankSeq, r.err = s.Read().BankSeq(t.Context(), bankA)
+		}
+		ch <- r
+	}()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(waitTimeout):
+		return openTxRead{err: errors.New("Read() blocked on an open transaction")}
+	}
+}
+
+// testReadCommittedOnly: while a transaction holds bank A's Seq S, Read() does not block, BankSeq returns
+// the committed S-1 and GetUnits does not see the transaction's units; after commit both are visible.
 func testReadCommittedOnly(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA)
 	committed := fact(bankA, "committed before")
 	insertUnits(t, s, committed)
 	pending := fact(bankA, "written in the open transaction")
-	var seenInside []port.UnitID
+	var (
+		held   int64
+		inside openTxRead
+	)
 	inTx(t, s, func(tx port.Tx) error {
-		if _, err := stampAndInsert(t, tx, []domain.Unit{pending}); err != nil {
+		var err error
+		if held, err = stampAndInsert(t, tx, []domain.Unit{pending}); err != nil {
 			return err
 		}
-		type result struct {
-			us  []domain.Unit
-			err error
-		}
-		ch := make(chan result, 1)
-		go func() {
-			us, err := s.Read().GetUnits(t.Context(), bankA, []port.UnitID{committed.ID, pending.ID})
-			ch <- result{us, err}
-		}()
-		select {
-		case r := <-ch:
-			seenInside = unitIDs(r.us)
-			return r.err
-		case <-time.After(waitTimeout):
-			return errors.New("Read().GetUnits blocked on an open transaction")
-		}
+		inside = readDuringTx(t, s, []port.UnitID{committed.ID, pending.ID})
+		return inside.err
 	})
-	wantSeq(t, "Read() during open tx", seenInside, []port.UnitID{committed.ID})
+	wantSeq(t, "Read().GetUnits during open tx", inside.units, []port.UnitID{committed.ID})
+	if inside.bankSeq != held-1 {
+		t.Errorf("Read().BankSeq while a tx holds Seq %d = %d, want the committed %d", held, inside.bankSeq, held-1)
+	}
 	wantSeq(t, "Read() after commit", unitIDs(getUnits(t, s, bankA, committed.ID, pending.ID)),
 		[]port.UnitID{committed.ID, pending.ID})
+	if got := bankSeq(t, s, bankA); got != held {
+		t.Errorf("BankSeq after commit = %d, want %d", got, held)
+	}
 }
 
 // testBankSeqUnknown: BankSeq of an unknown bank is ErrNotFound; a new bank starts at 0.
@@ -375,9 +382,6 @@ func testUnitRoundTrip(t *testing.T, s port.Store) {
 	}
 	compareUnit(t, got[0], dated)
 	compareUnit(t, got[1], timeless)
-	if got[0].Embedding != nil && len(got[0].Embedding) != domain.EmbeddingDim {
-		t.Errorf("embedding length = %d, want %d", len(got[0].Embedding), domain.EmbeddingDim)
-	}
 }
 
 // ---------- SearchVector ----------
@@ -448,24 +452,7 @@ func testSearchVectorFilters(t *testing.T, s port.Store) {
 	wantSeq(t, "SearchVector bank B", hitIDs(searchVector(t, s, q)), []port.UnitID{f.otherBank.ID})
 }
 
-// testSearchVectorSeq: SeqRange (After, UpTo] bounds the hits.
-func testSearchVectorSeq(t *testing.T, s port.Store) {
-	f := newVectorFixture(t, s)
-	cases := []struct {
-		r    port.SeqRange
-		want []port.UnitID
-	}{
-		{port.SeqRange{After: f.a0.Seq, UpTo: f.a60.Seq}, []port.UnitID{f.a30.ID, f.a60.ID}},
-		{port.SeqRange{After: f.a30.Seq}, []port.UnitID{f.a60.ID, f.a120.ID}},
-		{port.SeqRange{UpTo: f.a30.Seq}, []port.UnitID{f.a0.ID, f.a30.ID}},
-	}
-	for _, c := range cases {
-		hs := searchVector(t, s, port.VectorQuery{Bank: bankA, Embedding: angleVec(0), Seq: c.r, Limit: 10})
-		wantSeq(t, fmt.Sprintf("SearchVector Seq=%+v", c.r), hitIDs(hs), c.want)
-	}
-}
-
-// namedPredicate is one tag filter of testSearchVectorTags.
+// namedPredicate is one tag filter of the arm tag tests.
 type namedPredicate struct {
 	name string
 	p    *port.SQLPredicate
@@ -505,29 +492,6 @@ func tagPredicates() []namedPredicate {
 // notOf wraps p in a not node.
 func notOf(p port.SQLPredicate) port.SQLPredicate {
 	return port.SQLPredicate{Op: port.PredicateNot, Args: []port.SQLPredicate{p}}
-}
-
-// testSearchVectorTags: every tag predicate selects exactly the units (*SQLPredicate).Eval accepts.
-func testSearchVectorTags(t *testing.T, s port.Store) {
-	ensureBanks(t, s, bankA)
-	tagSets := [][]string{{}, {"alpha"}, {"beta"}, {"alpha", "beta"}, {"gamma"}}
-	us := make([]domain.Unit, len(tagSets))
-	for i, tags := range tagSets {
-		us[i] = fact(bankA, fmt.Sprintf("tagged %v", tags))
-		us[i].Tags = domain.NormalizeTags(tags)
-		us[i].Embedding = angleVec(float64(10 * i))
-	}
-	insertUnits(t, s, us...)
-	for _, c := range tagPredicates() {
-		var want []port.UnitID
-		for _, u := range us {
-			if c.p.Eval(u.Tags) {
-				want = append(want, u.ID)
-			}
-		}
-		hs := searchVector(t, s, port.VectorQuery{Bank: bankA, Embedding: angleVec(0), Tags: c.p, Limit: 10})
-		wantSeq(t, "SearchVector Tags="+c.name, hitIDs(hs), want)
-	}
 }
 
 // ---------- SearchText, SearchTemporal, ExpandGraph ----------
@@ -581,31 +545,41 @@ func dated(b port.BankRef, text string, start, end time.Time) domain.Unit {
 	return u
 }
 
-// testSearchTemporal: units overlapping the window are hits; units outside it, timeless units and other
-// banks' units are not.
+// testSearchTemporal: units overlapping the window (inside it, starting before it, or spanning all of it)
+// are hits; units outside it, timeless units and other banks' units are not.
 func testSearchTemporal(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA, bankB)
 	winStart, winEnd := day(60), day(90)
 	inside := dated(bankA, "inside", day(70), day(71))
 	spanning := dated(bankA, "starts before, ends inside", day(50), day(65))
+	covering := dated(bankA, "starts before, ends after", day(50), day(100))
 	before := dated(bankA, "before", day(10), day(11))
 	after := dated(bankA, "after", day(200), day(201))
 	timeless := fact(bankA, "timeless")
 	timeless.Timeless = true
-	insertUnits(t, s, inside, spanning, before, after, timeless)
+	insertUnits(t, s, inside, spanning, covering, before, after, timeless)
 	other := dated(bankB, "other bank inside", day(70), day(71))
 	insertUnits(t, s, other)
 
 	q := port.TemporalQuery{Bank: bankA, Window: domain.TimeWindow{Start: winStart, End: winEnd}, Limit: 10}
+	wantSet(t, "SearchTemporal window hits", hitIDs(searchTemporal(t, s, q)),
+		[]port.UnitID{inside.ID, spanning.ID, covering.ID})
+	q.Limit = 1
+	if hs := searchTemporal(t, s, q); len(hs) != 1 {
+		t.Errorf("SearchTemporal Limit 1 = %v, want one hit", hitIDs(hs))
+	}
+	q = port.TemporalQuery{Bank: bankB, Window: domain.TimeWindow{Start: winStart, End: winEnd}, Limit: 10}
+	wantSeq(t, "SearchTemporal bank B", hitIDs(searchTemporal(t, s, q)), []port.UnitID{other.ID})
+}
+
+// searchTemporal runs SearchTemporal through Read() and fails the test on error.
+func searchTemporal(t *testing.T, s port.Store, q port.TemporalQuery) []port.Hit {
+	t.Helper()
 	hs, err := s.Read().SearchTemporal(t.Context(), q)
 	if err != nil {
 		t.Fatalf("SearchTemporal: %v", err)
 	}
-	wantSet(t, "SearchTemporal window hits", hitIDs(hs), []port.UnitID{inside.ID, spanning.ID})
-	q.Limit = 1
-	if hs, err := s.Read().SearchTemporal(t.Context(), q); err != nil || len(hs) != 1 {
-		t.Errorf("SearchTemporal Limit 1 = %v, %v; want one hit", hitIDs(hs), err)
-	}
+	return hs
 }
 
 // expandGraph runs ExpandGraph through Read() and fails the test on error.

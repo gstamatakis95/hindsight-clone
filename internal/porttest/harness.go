@@ -209,6 +209,42 @@ func bankSeq(t *testing.T, s port.Store, b port.BankRef) int64 {
 	return seq
 }
 
+// getOp reads one operation through a new transaction's Queue and returns Get's error unchanged.
+func getOp(t *testing.T, s port.Store, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+	t.Helper()
+	var op domain.Operation
+	err := s.InTx(t.Context(), func(tx port.Tx) error {
+		var err error
+		op, err = tx.Queue().Get(t.Context(), b, id)
+		return err
+	})
+	return op, err
+}
+
+// listOps reads the first page (up to 100) of bank b's operations matching f, failing the test on error.
+func listOps(t *testing.T, s port.Store, b port.BankRef, f port.OperationFilter) []domain.Operation {
+	t.Helper()
+	if f.PageSize == 0 {
+		f.PageSize = 100
+	}
+	var ops []domain.Operation
+	inTx(t, s, func(tx port.Tx) error {
+		var err error
+		ops, _, err = tx.Queue().List(t.Context(), b, f)
+		return err
+	})
+	return ops
+}
+
+// opIDs returns the ids of ops in order.
+func opIDs(ops []domain.Operation) []port.OperationID {
+	out := make([]port.OperationID, len(ops))
+	for i, op := range ops {
+		out[i] = op.ID
+	}
+	return out
+}
+
 // ---------- comparison helpers ----------
 
 // unitIDs returns the ids of us in order.

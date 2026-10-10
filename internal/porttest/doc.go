@@ -15,7 +15,8 @@
 //   - RunStoreSuite: Store, Tx and Reader (commit, rollback, read isolation, all four recall arms, GetUnits)
 //     and every repository a Tx exposes except the Queue.
 //   - RunSeqSuite: Tx.Seq and Reader.BankSeq, the per-bank change sequence (including two concurrent writers).
-//   - RunQueueSuite: Queue (through Tx.Queue) and Claimer.
+//   - RunQueueSuite: Queue (through Tx.Queue) and Claimer, including operation control (Get, List, Cancel,
+//     Retry, Prune) and fencing of stale or cancelled workers.
 //   - RunBlobSuite: Blob.
 //
 // Factory contract:
@@ -28,8 +29,9 @@
 //     never share a database at the same time; fixed bank names are safe for the same reason.
 //   - QueueFactory returns a Store and a Claimer over the same database: jobs enqueued through
 //     Store.InTx(tx.Queue()) become claimable when the transaction commits.
-//   - Stores must serve at least two concurrent transactions (the Seq and concurrent-claim tests), and Read()
-//     must not block on an open InTx: the read-isolation test reads while a write transaction is open.
+//   - Stores must serve at least two concurrent transactions (the Seq, concurrent-claim, concurrent-enqueue and
+//     concurrent-upgrade tests), and Read() must not block on an open InTx: the read-isolation test reads
+//     GetUnits and BankSeq while a transaction holding the bank's Seq is open.
 //   - InTx returns the callback's error so that errors.Is still matches it (wrapping is fine); domain errors
 //     from repositories (ErrNotFound, ErrAlreadyExists, ErrBankDeleting, ErrFailedPrecondition) must
 //     survive the same way. A panicking callback rolls back; InTx may re-panic or return an error.

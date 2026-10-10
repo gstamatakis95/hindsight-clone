@@ -120,7 +120,8 @@ type Queue interface {
 	Enqueue(ctx context.Context, j Job) (id OperationID, joined bool, err error)
 	// Upgrade merges a joiner's request into a PENDING job under the row lock. payload is a JSON object
 	// shallow-merged into the row's payload: a key present in payload replaces the row's value, except a
-	// boolean, which is OR-ed (a true flag such as force_full is never cleared); absent keys are kept. o
+	// boolean, which is OR-ed (a true flag such as force_full is never cleared); absent keys are kept (a
+	// nil payload keeps the whole payload). o
 	// non-nil replaces the overrides; nil keeps them. A row that is not PENDING returns
 	// domain.ErrFailedPrecondition; an unknown id returns domain.ErrNotFound.
 	Upgrade(ctx context.Context, id OperationID, payload json.RawMessage, o *domain.BankConfig) error
@@ -137,10 +138,12 @@ type Queue interface {
 	// Cancel cancels a PENDING or PROCESSING operation and returns it. A pending row is finished at once.
 	// A processing row becomes CANCELLED but keeps holding its serial key until its handler's terminal
 	// Complete or Fail (or ReclaimStale, if the worker died) finishes it; committed work stays. Other
-	// statuses return domain.ErrFailedPrecondition.
+	// statuses return domain.ErrFailedPrecondition; an unknown id returns domain.ErrNotFound.
 	Cancel(ctx context.Context, b BankRef, id OperationID) (domain.Operation, error)
 	// Retry resets a FAILED or finished CANCELLED operation to PENDING with run_at = now and returns it
-	// (attempt reset to 0, error and finished_at cleared). Other statuses return domain.ErrFailedPrecondition.
+	// (attempt reset to 0, error and finished_at cleared). Other statuses, including a cancelled row whose
+	// handler has not finished, return domain.ErrFailedPrecondition; an unknown id returns
+	// domain.ErrNotFound.
 	Retry(ctx context.Context, b BankRef, id OperationID) (domain.Operation, error)
 	// Prune deletes terminal, finished operations whose finished_at is before before and returns how many.
 	// Pending and processing operations are never pruned.
@@ -178,7 +181,8 @@ type Claimer interface {
 	Complete(ctx context.Context, id OperationID, result json.RawMessage, usage []Usage) error
 	// Fail records cause on the job (fenced). retryAt != nil returns it to PENDING with run_at = *retryAt
 	// and attempt+1; nil = terminal FAILED, which also appends an OPERATION_FAILED lifecycle event under a
-	// fresh bank change seq (skipped when the bank is tombstoned or gone).
+	// fresh bank change seq (skipped when the bank is tombstoned or gone). On a row cancelled while
+	// processing it only finishes the row (no event) and returns domain.ErrCancelled.
 	Fail(ctx context.Context, id OperationID, cause error, retryAt *time.Time) error
 	// ReclaimStale handles PROCESSING jobs whose heartbeat is older than ttl. Below their kind's max
 	// attempts (domain.OperationKind.MaxAttempts; 0 = unbounded) they return to PENDING with attempt+1 and

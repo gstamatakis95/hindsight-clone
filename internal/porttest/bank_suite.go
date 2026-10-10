@@ -127,6 +127,10 @@ func testBankCreate(t *testing.T, s port.Store) {
 	inTx(t, s, func(tx port.Tx) error {
 		return tx.Banks().Create(t.Context(), domain.Bank{Ref: bankOtherTenant, Name: "Other tenant"})
 	})
+	if a, o := mustBank(t, s, bankA).Name, mustBank(t, s, bankOtherTenant).Name; a != "Research" || o != "Other tenant" {
+		t.Errorf("bank names after creating the same id under another tenant = %q, %q; want Research, Other tenant",
+			a, o)
+	}
 }
 
 // testBankSetConfig: SetConfig round-trips a rich config and replaces (does not merge) the previous one.
