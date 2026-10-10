@@ -22,7 +22,7 @@ var _ recall.Fuser = &Fuser{}
 //
 //		// make and configure a mocked recall.Fuser
 //		mockedFuser := &Fuser{
-//			FuseFunc: func(lists map[string][]recall.Candidate, k int) []recall.Candidate {
+//			FuseFunc: func(lists map[string][]recall.Candidate, k int, boosts map[string]float64) []recall.Candidate {
 //				panic("mock out the Fuse method")
 //			},
 //		}
@@ -33,7 +33,7 @@ var _ recall.Fuser = &Fuser{}
 //	}
 type Fuser struct {
 	// FuseFunc mocks the Fuse method.
-	FuseFunc func(lists map[string][]recall.Candidate, k int) []recall.Candidate
+	FuseFunc func(lists map[string][]recall.Candidate, k int, boosts map[string]float64) []recall.Candidate
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -43,27 +43,31 @@ type Fuser struct {
 			Lists map[string][]recall.Candidate
 			// K is the k argument value.
 			K int
+			// Boosts is the boosts argument value.
+			Boosts map[string]float64
 		}
 	}
 	lockFuse sync.RWMutex
 }
 
 // Fuse calls FuseFunc.
-func (mock *Fuser) Fuse(lists map[string][]recall.Candidate, k int) []recall.Candidate {
+func (mock *Fuser) Fuse(lists map[string][]recall.Candidate, k int, boosts map[string]float64) []recall.Candidate {
 	if mock.FuseFunc == nil {
 		panic("Fuser.FuseFunc: method is nil but Fuser.Fuse was just called")
 	}
 	callInfo := struct {
-		Lists map[string][]recall.Candidate
-		K     int
+		Lists  map[string][]recall.Candidate
+		K      int
+		Boosts map[string]float64
 	}{
-		Lists: lists,
-		K:     k,
+		Lists:  lists,
+		K:      k,
+		Boosts: boosts,
 	}
 	mock.lockFuse.Lock()
 	mock.calls.Fuse = append(mock.calls.Fuse, callInfo)
 	mock.lockFuse.Unlock()
-	return mock.FuseFunc(lists, k)
+	return mock.FuseFunc(lists, k, boosts)
 }
 
 // FuseCalls gets all the calls that were made to Fuse.
@@ -71,12 +75,14 @@ func (mock *Fuser) Fuse(lists map[string][]recall.Candidate, k int) []recall.Can
 //
 //	len(mockedFuser.FuseCalls())
 func (mock *Fuser) FuseCalls() []struct {
-	Lists map[string][]recall.Candidate
-	K     int
+	Lists  map[string][]recall.Candidate
+	K      int
+	Boosts map[string]float64
 } {
 	var calls []struct {
-		Lists map[string][]recall.Candidate
-		K     int
+		Lists  map[string][]recall.Candidate
+		K      int
+		Boosts map[string]float64
 	}
 	mock.lockFuse.RLock()
 	calls = mock.calls.Fuse
@@ -287,6 +293,418 @@ func (mock *Includer) EnrichCalls() []struct {
 	mock.lockEnrich.RLock()
 	calls = mock.calls.Enrich
 	mock.lockEnrich.RUnlock()
+	return calls
+}
+
+// Ensure that TagVocabulary does implement recall.TagVocabulary.
+// If this is not the case, regenerate this file with mockery.
+var _ recall.TagVocabulary = &TagVocabulary{}
+
+// TagVocabulary is a mock implementation of recall.TagVocabulary.
+//
+//	func TestSomethingThatUsesTagVocabulary(t *testing.T) {
+//
+//		// make and configure a mocked recall.TagVocabulary
+//		mockedTagVocabulary := &TagVocabulary{
+//			BankTagsFunc: func(ctx context.Context, b port.BankRef) ([]string, error) {
+//				panic("mock out the BankTags method")
+//			},
+//		}
+//
+//		// use mockedTagVocabulary in code that requires recall.TagVocabulary
+//		// and then make assertions.
+//
+//	}
+type TagVocabulary struct {
+	// BankTagsFunc mocks the BankTags method.
+	BankTagsFunc func(ctx context.Context, b port.BankRef) ([]string, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// BankTags holds details about calls to the BankTags method.
+		BankTags []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+	}
+	lockBankTags sync.RWMutex
+}
+
+// BankTags calls BankTagsFunc.
+func (mock *TagVocabulary) BankTags(ctx context.Context, b port.BankRef) ([]string, error) {
+	if mock.BankTagsFunc == nil {
+		panic("TagVocabulary.BankTagsFunc: method is nil but TagVocabulary.BankTags was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockBankTags.Lock()
+	mock.calls.BankTags = append(mock.calls.BankTags, callInfo)
+	mock.lockBankTags.Unlock()
+	return mock.BankTagsFunc(ctx, b)
+}
+
+// BankTagsCalls gets all the calls that were made to BankTags.
+// Check the length with:
+//
+//	len(mockedTagVocabulary.BankTagsCalls())
+func (mock *TagVocabulary) BankTagsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockBankTags.RLock()
+	calls = mock.calls.BankTags
+	mock.lockBankTags.RUnlock()
+	return calls
+}
+
+// Ensure that ChunkReader does implement recall.ChunkReader.
+// If this is not the case, regenerate this file with mockery.
+var _ recall.ChunkReader = &ChunkReader{}
+
+// ChunkReader is a mock implementation of recall.ChunkReader.
+//
+//	func TestSomethingThatUsesChunkReader(t *testing.T) {
+//
+//		// make and configure a mocked recall.ChunkReader
+//		mockedChunkReader := &ChunkReader{
+//			GetChunksFunc: func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+//				panic("mock out the GetChunks method")
+//			},
+//		}
+//
+//		// use mockedChunkReader in code that requires recall.ChunkReader
+//		// and then make assertions.
+//
+//	}
+type ChunkReader struct {
+	// GetChunksFunc mocks the GetChunks method.
+	GetChunksFunc func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// GetChunks holds details about calls to the GetChunks method.
+		GetChunks []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.ChunkID
+		}
+	}
+	lockGetChunks sync.RWMutex
+}
+
+// GetChunks calls GetChunksFunc.
+func (mock *ChunkReader) GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+	if mock.GetChunksFunc == nil {
+		panic("ChunkReader.GetChunksFunc: method is nil but ChunkReader.GetChunks was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockGetChunks.Lock()
+	mock.calls.GetChunks = append(mock.calls.GetChunks, callInfo)
+	mock.lockGetChunks.Unlock()
+	return mock.GetChunksFunc(ctx, b, ids)
+}
+
+// GetChunksCalls gets all the calls that were made to GetChunks.
+// Check the length with:
+//
+//	len(mockedChunkReader.GetChunksCalls())
+func (mock *ChunkReader) GetChunksCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.ChunkID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}
+	mock.lockGetChunks.RLock()
+	calls = mock.calls.GetChunks
+	mock.lockGetChunks.RUnlock()
+	return calls
+}
+
+// Ensure that EntityStateReader does implement recall.EntityStateReader.
+// If this is not the case, regenerate this file with mockery.
+var _ recall.EntityStateReader = &EntityStateReader{}
+
+// EntityStateReader is a mock implementation of recall.EntityStateReader.
+//
+//	func TestSomethingThatUsesEntityStateReader(t *testing.T) {
+//
+//		// make and configure a mocked recall.EntityStateReader
+//		mockedEntityStateReader := &EntityStateReader{
+//			EntityStatesFunc: func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+//				panic("mock out the EntityStates method")
+//			},
+//		}
+//
+//		// use mockedEntityStateReader in code that requires recall.EntityStateReader
+//		// and then make assertions.
+//
+//	}
+type EntityStateReader struct {
+	// EntityStatesFunc mocks the EntityStates method.
+	EntityStatesFunc func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// EntityStates holds details about calls to the EntityStates method.
+		EntityStates []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Units is the units argument value.
+			Units []port.UnitID
+		}
+	}
+	lockEntityStates sync.RWMutex
+}
+
+// EntityStates calls EntityStatesFunc.
+func (mock *EntityStateReader) EntityStates(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+	if mock.EntityStatesFunc == nil {
+		panic("EntityStateReader.EntityStatesFunc: method is nil but EntityStateReader.EntityStates was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Units: units,
+	}
+	mock.lockEntityStates.Lock()
+	mock.calls.EntityStates = append(mock.calls.EntityStates, callInfo)
+	mock.lockEntityStates.Unlock()
+	return mock.EntityStatesFunc(ctx, b, units)
+}
+
+// EntityStatesCalls gets all the calls that were made to EntityStates.
+// Check the length with:
+//
+//	len(mockedEntityStateReader.EntityStatesCalls())
+func (mock *EntityStateReader) EntityStatesCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Units []port.UnitID
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}
+	mock.lockEntityStates.RLock()
+	calls = mock.calls.EntityStates
+	mock.lockEntityStates.RUnlock()
+	return calls
+}
+
+// Ensure that Lookups does implement recall.Lookups.
+// If this is not the case, regenerate this file with mockery.
+var _ recall.Lookups = &Lookups{}
+
+// Lookups is a mock implementation of recall.Lookups.
+//
+//	func TestSomethingThatUsesLookups(t *testing.T) {
+//
+//		// make and configure a mocked recall.Lookups
+//		mockedLookups := &Lookups{
+//			BankTagsFunc: func(ctx context.Context, b port.BankRef) ([]string, error) {
+//				panic("mock out the BankTags method")
+//			},
+//			EntityStatesFunc: func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+//				panic("mock out the EntityStates method")
+//			},
+//			GetChunksFunc: func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+//				panic("mock out the GetChunks method")
+//			},
+//		}
+//
+//		// use mockedLookups in code that requires recall.Lookups
+//		// and then make assertions.
+//
+//	}
+type Lookups struct {
+	// BankTagsFunc mocks the BankTags method.
+	BankTagsFunc func(ctx context.Context, b port.BankRef) ([]string, error)
+
+	// EntityStatesFunc mocks the EntityStates method.
+	EntityStatesFunc func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error)
+
+	// GetChunksFunc mocks the GetChunks method.
+	GetChunksFunc func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// BankTags holds details about calls to the BankTags method.
+		BankTags []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+		// EntityStates holds details about calls to the EntityStates method.
+		EntityStates []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Units is the units argument value.
+			Units []port.UnitID
+		}
+		// GetChunks holds details about calls to the GetChunks method.
+		GetChunks []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.ChunkID
+		}
+	}
+	lockBankTags     sync.RWMutex
+	lockEntityStates sync.RWMutex
+	lockGetChunks    sync.RWMutex
+}
+
+// BankTags calls BankTagsFunc.
+func (mock *Lookups) BankTags(ctx context.Context, b port.BankRef) ([]string, error) {
+	if mock.BankTagsFunc == nil {
+		panic("Lookups.BankTagsFunc: method is nil but Lookups.BankTags was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockBankTags.Lock()
+	mock.calls.BankTags = append(mock.calls.BankTags, callInfo)
+	mock.lockBankTags.Unlock()
+	return mock.BankTagsFunc(ctx, b)
+}
+
+// BankTagsCalls gets all the calls that were made to BankTags.
+// Check the length with:
+//
+//	len(mockedLookups.BankTagsCalls())
+func (mock *Lookups) BankTagsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockBankTags.RLock()
+	calls = mock.calls.BankTags
+	mock.lockBankTags.RUnlock()
+	return calls
+}
+
+// EntityStates calls EntityStatesFunc.
+func (mock *Lookups) EntityStates(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+	if mock.EntityStatesFunc == nil {
+		panic("Lookups.EntityStatesFunc: method is nil but Lookups.EntityStates was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Units: units,
+	}
+	mock.lockEntityStates.Lock()
+	mock.calls.EntityStates = append(mock.calls.EntityStates, callInfo)
+	mock.lockEntityStates.Unlock()
+	return mock.EntityStatesFunc(ctx, b, units)
+}
+
+// EntityStatesCalls gets all the calls that were made to EntityStates.
+// Check the length with:
+//
+//	len(mockedLookups.EntityStatesCalls())
+func (mock *Lookups) EntityStatesCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Units []port.UnitID
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}
+	mock.lockEntityStates.RLock()
+	calls = mock.calls.EntityStates
+	mock.lockEntityStates.RUnlock()
+	return calls
+}
+
+// GetChunks calls GetChunksFunc.
+func (mock *Lookups) GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+	if mock.GetChunksFunc == nil {
+		panic("Lookups.GetChunksFunc: method is nil but Lookups.GetChunks was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockGetChunks.Lock()
+	mock.calls.GetChunks = append(mock.calls.GetChunks, callInfo)
+	mock.lockGetChunks.Unlock()
+	return mock.GetChunksFunc(ctx, b, ids)
+}
+
+// GetChunksCalls gets all the calls that were made to GetChunks.
+// Check the length with:
+//
+//	len(mockedLookups.GetChunksCalls())
+func (mock *Lookups) GetChunksCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.ChunkID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}
+	mock.lockGetChunks.RLock()
+	calls = mock.calls.GetChunks
+	mock.lockGetChunks.RUnlock()
 	return calls
 }
 
@@ -578,6 +996,168 @@ func (mock *Recaller) RecallCalls() []struct {
 	return calls
 }
 
+// Ensure that Scorer does implement recall.Scorer.
+// If this is not the case, regenerate this file with mockery.
+var _ recall.Scorer = &Scorer{}
+
+// Scorer is a mock implementation of recall.Scorer.
+//
+//	func TestSomethingThatUsesScorer(t *testing.T) {
+//
+//		// make and configure a mocked recall.Scorer
+//		mockedScorer := &Scorer{
+//			ScoreFunc: func(ctx context.Context, q *recall.ParsedQuery, cs []recall.Candidate) ([]recall.Candidate, error) {
+//				panic("mock out the Score method")
+//			},
+//		}
+//
+//		// use mockedScorer in code that requires recall.Scorer
+//		// and then make assertions.
+//
+//	}
+type Scorer struct {
+	// ScoreFunc mocks the Score method.
+	ScoreFunc func(ctx context.Context, q *recall.ParsedQuery, cs []recall.Candidate) ([]recall.Candidate, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Score holds details about calls to the Score method.
+		Score []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q *recall.ParsedQuery
+			// Cs is the cs argument value.
+			Cs []recall.Candidate
+		}
+	}
+	lockScore sync.RWMutex
+}
+
+// Score calls ScoreFunc.
+func (mock *Scorer) Score(ctx context.Context, q *recall.ParsedQuery, cs []recall.Candidate) ([]recall.Candidate, error) {
+	if mock.ScoreFunc == nil {
+		panic("Scorer.ScoreFunc: method is nil but Scorer.Score was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   *recall.ParsedQuery
+		Cs  []recall.Candidate
+	}{
+		Ctx: ctx,
+		Q:   q,
+		Cs:  cs,
+	}
+	mock.lockScore.Lock()
+	mock.calls.Score = append(mock.calls.Score, callInfo)
+	mock.lockScore.Unlock()
+	return mock.ScoreFunc(ctx, q, cs)
+}
+
+// ScoreCalls gets all the calls that were made to Score.
+// Check the length with:
+//
+//	len(mockedScorer.ScoreCalls())
+func (mock *Scorer) ScoreCalls() []struct {
+	Ctx context.Context
+	Q   *recall.ParsedQuery
+	Cs  []recall.Candidate
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   *recall.ParsedQuery
+		Cs  []recall.Candidate
+	}
+	mock.lockScore.RLock()
+	calls = mock.calls.Score
+	mock.lockScore.RUnlock()
+	return calls
+}
+
+// Ensure that TagFilterCompiler does implement recall.TagFilterCompiler.
+// If this is not the case, regenerate this file with mockery.
+var _ recall.TagFilterCompiler = &TagFilterCompiler{}
+
+// TagFilterCompiler is a mock implementation of recall.TagFilterCompiler.
+//
+//	func TestSomethingThatUsesTagFilterCompiler(t *testing.T) {
+//
+//		// make and configure a mocked recall.TagFilterCompiler
+//		mockedTagFilterCompiler := &TagFilterCompiler{
+//			CompileFunc: func(ctx context.Context, b port.BankRef, f domain.TagFilter, minSimilarity float64) (port.SQLPredicate, error) {
+//				panic("mock out the Compile method")
+//			},
+//		}
+//
+//		// use mockedTagFilterCompiler in code that requires recall.TagFilterCompiler
+//		// and then make assertions.
+//
+//	}
+type TagFilterCompiler struct {
+	// CompileFunc mocks the Compile method.
+	CompileFunc func(ctx context.Context, b port.BankRef, f domain.TagFilter, minSimilarity float64) (port.SQLPredicate, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Compile holds details about calls to the Compile method.
+		Compile []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// F is the f argument value.
+			F domain.TagFilter
+			// MinSimilarity is the minSimilarity argument value.
+			MinSimilarity float64
+		}
+	}
+	lockCompile sync.RWMutex
+}
+
+// Compile calls CompileFunc.
+func (mock *TagFilterCompiler) Compile(ctx context.Context, b port.BankRef, f domain.TagFilter, minSimilarity float64) (port.SQLPredicate, error) {
+	if mock.CompileFunc == nil {
+		panic("TagFilterCompiler.CompileFunc: method is nil but TagFilterCompiler.Compile was just called")
+	}
+	callInfo := struct {
+		Ctx           context.Context
+		B             port.BankRef
+		F             domain.TagFilter
+		MinSimilarity float64
+	}{
+		Ctx:           ctx,
+		B:             b,
+		F:             f,
+		MinSimilarity: minSimilarity,
+	}
+	mock.lockCompile.Lock()
+	mock.calls.Compile = append(mock.calls.Compile, callInfo)
+	mock.lockCompile.Unlock()
+	return mock.CompileFunc(ctx, b, f, minSimilarity)
+}
+
+// CompileCalls gets all the calls that were made to Compile.
+// Check the length with:
+//
+//	len(mockedTagFilterCompiler.CompileCalls())
+func (mock *TagFilterCompiler) CompileCalls() []struct {
+	Ctx           context.Context
+	B             port.BankRef
+	F             domain.TagFilter
+	MinSimilarity float64
+} {
+	var calls []struct {
+		Ctx           context.Context
+		B             port.BankRef
+		F             domain.TagFilter
+		MinSimilarity float64
+	}
+	mock.lockCompile.RLock()
+	calls = mock.calls.Compile
+	mock.lockCompile.RUnlock()
+	return calls
+}
+
 // Ensure that Retriever does implement recall.Retriever.
 // If this is not the case, regenerate this file with mockery.
 var _ recall.Retriever = &Retriever{}
@@ -684,161 +1264,5 @@ func (mock *Retriever) RetrieveCalls() []struct {
 	mock.lockRetrieve.RLock()
 	calls = mock.calls.Retrieve
 	mock.lockRetrieve.RUnlock()
-	return calls
-}
-
-// Ensure that Scorer does implement recall.Scorer.
-// If this is not the case, regenerate this file with mockery.
-var _ recall.Scorer = &Scorer{}
-
-// Scorer is a mock implementation of recall.Scorer.
-//
-//	func TestSomethingThatUsesScorer(t *testing.T) {
-//
-//		// make and configure a mocked recall.Scorer
-//		mockedScorer := &Scorer{
-//			ScoreFunc: func(ctx context.Context, q *recall.ParsedQuery, cs []recall.Candidate) ([]recall.Candidate, error) {
-//				panic("mock out the Score method")
-//			},
-//		}
-//
-//		// use mockedScorer in code that requires recall.Scorer
-//		// and then make assertions.
-//
-//	}
-type Scorer struct {
-	// ScoreFunc mocks the Score method.
-	ScoreFunc func(ctx context.Context, q *recall.ParsedQuery, cs []recall.Candidate) ([]recall.Candidate, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// Score holds details about calls to the Score method.
-		Score []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Q is the q argument value.
-			Q *recall.ParsedQuery
-			// Cs is the cs argument value.
-			Cs []recall.Candidate
-		}
-	}
-	lockScore sync.RWMutex
-}
-
-// Score calls ScoreFunc.
-func (mock *Scorer) Score(ctx context.Context, q *recall.ParsedQuery, cs []recall.Candidate) ([]recall.Candidate, error) {
-	if mock.ScoreFunc == nil {
-		panic("Scorer.ScoreFunc: method is nil but Scorer.Score was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		Q   *recall.ParsedQuery
-		Cs  []recall.Candidate
-	}{
-		Ctx: ctx,
-		Q:   q,
-		Cs:  cs,
-	}
-	mock.lockScore.Lock()
-	mock.calls.Score = append(mock.calls.Score, callInfo)
-	mock.lockScore.Unlock()
-	return mock.ScoreFunc(ctx, q, cs)
-}
-
-// ScoreCalls gets all the calls that were made to Score.
-// Check the length with:
-//
-//	len(mockedScorer.ScoreCalls())
-func (mock *Scorer) ScoreCalls() []struct {
-	Ctx context.Context
-	Q   *recall.ParsedQuery
-	Cs  []recall.Candidate
-} {
-	var calls []struct {
-		Ctx context.Context
-		Q   *recall.ParsedQuery
-		Cs  []recall.Candidate
-	}
-	mock.lockScore.RLock()
-	calls = mock.calls.Score
-	mock.lockScore.RUnlock()
-	return calls
-}
-
-// Ensure that TagFilterCompiler does implement recall.TagFilterCompiler.
-// If this is not the case, regenerate this file with mockery.
-var _ recall.TagFilterCompiler = &TagFilterCompiler{}
-
-// TagFilterCompiler is a mock implementation of recall.TagFilterCompiler.
-//
-//	func TestSomethingThatUsesTagFilterCompiler(t *testing.T) {
-//
-//		// make and configure a mocked recall.TagFilterCompiler
-//		mockedTagFilterCompiler := &TagFilterCompiler{
-//			CompileFunc: func(ctx context.Context, b port.BankRef, f domain.TagFilter) (port.SQLPredicate, error) {
-//				panic("mock out the Compile method")
-//			},
-//		}
-//
-//		// use mockedTagFilterCompiler in code that requires recall.TagFilterCompiler
-//		// and then make assertions.
-//
-//	}
-type TagFilterCompiler struct {
-	// CompileFunc mocks the Compile method.
-	CompileFunc func(ctx context.Context, b port.BankRef, f domain.TagFilter) (port.SQLPredicate, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// Compile holds details about calls to the Compile method.
-		Compile []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// B is the b argument value.
-			B port.BankRef
-			// F is the f argument value.
-			F domain.TagFilter
-		}
-	}
-	lockCompile sync.RWMutex
-}
-
-// Compile calls CompileFunc.
-func (mock *TagFilterCompiler) Compile(ctx context.Context, b port.BankRef, f domain.TagFilter) (port.SQLPredicate, error) {
-	if mock.CompileFunc == nil {
-		panic("TagFilterCompiler.CompileFunc: method is nil but TagFilterCompiler.Compile was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		B   port.BankRef
-		F   domain.TagFilter
-	}{
-		Ctx: ctx,
-		B:   b,
-		F:   f,
-	}
-	mock.lockCompile.Lock()
-	mock.calls.Compile = append(mock.calls.Compile, callInfo)
-	mock.lockCompile.Unlock()
-	return mock.CompileFunc(ctx, b, f)
-}
-
-// CompileCalls gets all the calls that were made to Compile.
-// Check the length with:
-//
-//	len(mockedTagFilterCompiler.CompileCalls())
-func (mock *TagFilterCompiler) CompileCalls() []struct {
-	Ctx context.Context
-	B   port.BankRef
-	F   domain.TagFilter
-} {
-	var calls []struct {
-		Ctx context.Context
-		B   port.BankRef
-		F   domain.TagFilter
-	}
-	mock.lockCompile.RLock()
-	calls = mock.calls.Compile
-	mock.lockCompile.RUnlock()
 	return calls
 }

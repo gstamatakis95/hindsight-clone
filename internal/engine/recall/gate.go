@@ -6,6 +6,38 @@ import "memd/internal/domain"
 type ScoreGate interface {
 	// ArmFloor returns the retrieval floor of arm (semantic or keyword) and whether one is set.
 	ArmFloor(arm string, m domain.MinScores) (float64, bool)
-	// Keep reports whether c passes the result floors (reranker, final).
+	// Keep reports whether c passes the result floors: reranker (only for a candidate the cross-encoder
+	// scored; Hindsight's rule for unscored candidates does not apply when rerank is off) and final.
 	Keep(c Candidate, m domain.MinScores) bool
+}
+
+// gate is the ScoreGate.
+type gate struct{}
+
+var _ ScoreGate = gate{}
+
+// NewScoreGate returns the ScoreGate.
+func NewScoreGate() ScoreGate { return gate{} }
+
+// ArmFloor implements ScoreGate.
+func (gate) ArmFloor(arm string, m domain.MinScores) (float64, bool) {
+	var p *float64
+	switch arm {
+	case ArmSemantic:
+		p = m.Semantic
+	case ArmKeyword:
+		p = m.Keyword
+	}
+	if p == nil {
+		return 0, false
+	}
+	return *p, true
+}
+
+// Keep implements ScoreGate.
+func (gate) Keep(c Candidate, m domain.MinScores) bool {
+	if m.Reranker != nil && c.Reranker != nil && *c.Reranker < *m.Reranker {
+		return false
+	}
+	return m.Final == nil || c.Final >= *m.Final
 }
