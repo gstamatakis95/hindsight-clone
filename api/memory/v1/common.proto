@@ -1,0 +1,343 @@
+// Shared types for memd.
+//
+// This file holds the enums and messages used by more than one service: fact types, budgets, tag
+// matching, refresh modes, memory state, tag filters and observation scopes, the Memory and Chunk read
+// models, score breakdowns, directives, per-slot usage and the recall / reflect traces. It sits just
+// above models.proto in the import graph so that config.proto and every service file can import it
+// without cycles (see docs/decisions/002-proto-file-split.md).
+syntax = "proto3";
+
+package memory.v1;
+
+import "google/protobuf/timestamp.proto";
+import "memory/v1/models.proto";
+
+option go_package = "memd/gen/memory/v1;memoryv1";
+
+// ======================= shared enums =======================
+
+// FactType classifies a memory unit.
+enum FactType {
+  // Not set; never stored. In UpdateMemory it leaves the fact type unchanged.
+  FACT_TYPE_UNSPECIFIED = 0;
+  // A fact about the world, extracted at retain.
+  FACT_TYPE_WORLD = 1;
+  // Something the agent or user experienced, extracted at retain.
+  FACT_TYPE_EXPERIENCE = 2;
+  // A derived observation written by consolidation from raw facts; never curated directly.
+  FACT_TYPE_OBSERVATION = 3;
+}
+
+// Budget picks a size class for recall and reflect work. It maps to a token budget through
+// RecallConfig (budget_low / budget_mid / budget_high), to retriever caps of 100 / 300 / 1000
+// candidates, and scales reflect iterations (LOW halves, HIGH doubles the MID value).
+enum Budget {
+  // Not set; the RPC's documented default applies.
+  BUDGET_UNSPECIFIED = 0;
+  // Smallest budget.
+  BUDGET_LOW = 1;
+  // Medium budget.
+  BUDGET_MID = 2;
+  // Largest budget.
+  BUDGET_HIGH = 3;
+}
+
+// TagsMatch decides how a tag list filters memories. The STRICT variants exclude untagged memories; the
+// plain variants also accept untagged (global) ones.
+enum TagsMatch {
+  // Not set; the field's documented default applies.
+  TAGS_MATCH_UNSPECIFIED = 0;
+  // At least one of the tags, or untagged.
+  TAGS_MATCH_ANY = 1;
+  // Every one of the tags, or untagged.
+  TAGS_MATCH_ALL = 2;
+  // Exactly this tag set, no more and no fewer.
+  TAGS_MATCH_EXACT = 3;
+  // At least one of the tags; untagged memories are excluded.
+  TAGS_MATCH_ANY_STRICT = 4;
+  // Every one of the tags; untagged memories are excluded.
+  TAGS_MATCH_ALL_STRICT = 5;
+}
+
+// RefreshMode decides whether a mental-model refresh rewrites the page or edits it.
+enum RefreshMode {
+  // Not set; inherit (RefreshTrigger.mode falls back to MentalModelConfig.default_mode).
+  REFRESH_MODE_UNSPECIFIED = 0;
+  // Rewrite the whole document from everything in scope; prunes source_ids.
+  REFRESH_MODE_FULL = 1;
+  // Apply edit ops for what changed in scope since last_seq_seen; falls back to full when there is no
+  // baseline content or the source query changed.
+  REFRESH_MODE_DELTA = 2;
+}
+
+// RefreshStrategy picks how a mental-model refresh drafts content. Settable per bank, per model or per
+// refresh call.
+enum RefreshStrategy {
+  // Not set; inherit, ending at REFRESH_STRATEGY_AGENTIC.
+  REFRESH_STRATEGY_UNSPECIFIED = 0;
+  // The reflect loop with tools, answering as a document (Hindsight's behaviour, the default). Uses the
+  // REFLECT slot.
+  REFRESH_STRATEGY_AGENTIC = 1;
+  // One recall over the model's scope, observations first, then one SYNTHESIZE call (full) or one
+  // MENTAL_MODEL_DELTA call (delta); roughly 5-20x cheaper.
+  REFRESH_STRATEGY_SINGLE_SHOT = 2;
+}
+
+// MemoryState says whether a unit is live or archived by curation.
+enum MemoryState {
+  // Not set. In ListMemories it applies no state filter; in UpdateMemory it leaves the state unchanged.
+  MEMORY_STATE_UNSPECIFIED = 0;
+  // Live: visible to recall and consolidation.
+  MEMORY_STATE_VALID = 1;
+  // Archived in memory_units_archive; invisible to recall and consolidation, restorable.
+  MEMORY_STATE_INVALIDATED = 2;
+}
+
+// ======================= tag filters & scopes =======================
+
+// TagSet is an unordered set of tags, used as an observation scope or a document's tag set.
+message TagSet {
+  // The tags; order is not significant. Empty = the shared (untagged) scope.
+  repeated string tags = 1;
+}
+
+// ObservationScopes decides which tag scopes a unit consolidates under.
+message ObservationScopes {
+  // Mode is how a unit's tags expand into observation scopes.
+  enum Mode {
+    // Not set; inherit the bank's default_observation_scopes.
+    MODE_UNSPECIFIED = 0;
+    // One scope: the unit's full tag set.
+    MODE_COMBINED = 1;
+    // The shared (untagged) scope only.
+    MODE_SHARED = 2;
+    // One scope per individual tag.
+    MODE_PER_TAG = 3;
+    // One scope per non-empty combination of the unit's tags, capped by max_combinations.
+    MODE_ALL_COMBINATIONS = 4;
+    // Exactly the scopes listed in custom.
+    MODE_CUSTOM = 5;
+  }
+  // Expansion mode.
+  Mode mode = 1;
+  // Explicit scopes; MODE_CUSTOM only.
+  repeated TagSet custom = 2;
+  // Cap on MODE_ALL_COMBINATIONS fan-out, default 15. Checked synchronously at Retain: exceeding it
+  // fails the RPC with INVALID_ARGUMENT before anything is stored.
+  optional int32 max_combinations = 3;
+}
+
+// TagGroup is one node of a boolean tag-filter tree; a list of groups is AND-ed. Groups override flat
+// tags + tags_match wherever both could apply.
+message TagGroup {
+  // The node: a leaf test or a boolean combination of child groups.
+  oneof node {
+    // A single tag test.
+    TagLeaf leaf = 1;
+    // Matches when every child group matches.
+    TagGroupList all_of = 2;
+    // Matches when at least one child group matches.
+    TagGroupList any_of = 3;
+    // Matches when the child group does not match.
+    TagGroup none_of = 4;
+  }
+}
+
+// TagGroupList is the child list of an all_of / any_of node.
+message TagGroupList {
+  // Child groups.
+  repeated TagGroup groups = 1;
+}
+
+// TagLeaf tests a memory's tags against a tag list.
+message TagLeaf {
+  // Resolve is how the leaf's tags map to the bank's stored tags.
+  enum Resolve {
+    // Not set; same as RESOLVE_EXACT_NAMES.
+    RESOLVE_UNSPECIFIED = 0;
+    // Tags are used verbatim.
+    RESOLVE_EXACT_NAMES = 1;
+    // Each tag resolves against the bank's tags by trigram similarity (RecallConfig.fuzzy_tag_min_similarity)
+    // before the filter compiles.
+    RESOLVE_FUZZY = 2;
+  }
+  // Tags to test.
+  repeated string tags = 1;
+  // How the tags must match; default TAGS_MATCH_ANY_STRICT.
+  TagsMatch match = 2;
+  // How tags resolve to stored tags.
+  Resolve resolve = 3;
+}
+
+// ======================= memories, scores, directives =======================
+
+// MinScores sets score floors for recall. Arm floors (semantic, keyword) apply inside retrieval; result
+// floors (reranker, final) apply after scoring. Unset = no floor.
+message MinScores {
+  // Minimum cosine similarity for the semantic arm.
+  optional double semantic = 1;
+  // Minimum BM25 score for the keyword arm.
+  optional double keyword = 2;
+  // Minimum cross-encoder score after rerank.
+  optional double reranker = 3;
+  // Minimum final score after boosts.
+  optional double final = 4;
+}
+
+// Scores is the score breakdown behind a recalled memory.
+message Scores {
+  // Final score after rerank and recency / temporal / proof boosts; results are ordered by it.
+  double final = 1;
+  // Cross-encoder score; unset when rerank did not run.
+  optional double reranker = 2;
+  // Cosine similarity from the semantic arm; unset when the arm did not return the memory.
+  optional double semantic = 3;
+  // BM25 score from the keyword arm; unset when the arm did not return the memory.
+  optional double keyword = 4;
+}
+
+// Memory is the read model of one memory unit: a raw fact or an observation.
+message Memory {
+  // Unit id.
+  string id = 1;
+  // World, experience or observation.
+  FactType type = 2;
+  // The fact or observation text.
+  string text = 3;
+  // Context given at retain (or by curation).
+  string context = 4;
+  // Metadata copied from the retained item.
+  map<string, string> metadata = 5;
+  // Tags of the unit.
+  repeated string tags = 6;
+  // Canonical names of the entities linked to the unit.
+  repeated string entities = 7;
+  // Start of when the fact happened; unset for timeless facts.
+  google.protobuf.Timestamp occurred_start = 8;
+  // End of when the fact happened; unset for timeless or instantaneous facts.
+  google.protobuf.Timestamp occurred_end = 9;
+  // When the fact was mentioned (the retained item's timestamp).
+  google.protobuf.Timestamp mentioned_at = 10;
+  // Document the unit was extracted from; empty for observations.
+  string document_id = 11;
+  // Chunk the unit was extracted from; empty for observations.
+  string chunk_id = 12;
+  // Number of source facts supporting an observation; feeds the proof boost.
+  int32 proof_count = 13;
+  // Raw fact ids an observation was derived from; empty for raw facts.
+  repeated string source_fact_ids = 14;
+  // Score breakdown; set only in recall results.
+  Scores scores = 15;
+  // Live or invalidated.
+  MemoryState state = 16;
+  // Time of the last curation edit; unset if never edited.
+  google.protobuf.Timestamp edited_at = 17;
+  // True for an observation whose scope has unconsolidated facts, so it may be out of date.
+  bool stale = 18;
+}
+
+// Chunk is a slice of a retained document that units were extracted from.
+message Chunk {
+  // Chunk id.
+  string id = 1;
+  // Chunk text, possibly cut to the request's chunk token budget.
+  string text = 2;
+  // Zero-based position of the chunk within its document.
+  int32 chunk_index = 3;
+  // True when text was cut to fit the budget.
+  bool truncated = 4;
+}
+
+// Directive is a standing instruction injected into reflect prompts. Active directives whose tags match
+// the request apply; untagged directives are global.
+message Directive {
+  // Directive id; empty on UpsertDirective = create.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // Rules, rendered into the reflect system prompt in order.
+  repeated string rules = 3;
+  // Tags the directive applies to; empty = every request.
+  repeated string tags = 4;
+  // Inactive directives are stored but never applied.
+  bool active = 5;
+}
+
+// SlotUsage is token usage for one (slot, model) pair, recorded on every LLM call.
+message SlotUsage {
+  // Slot the calls were made for.
+  ModelSlot slot = 1;
+  // Gateway model that served them.
+  string model = 2;
+  // Prompt tokens.
+  int64 input_tokens = 3;
+  // Completion tokens.
+  int64 output_tokens = 4;
+}
+
+// ======================= traces =======================
+
+// ArmTrace describes one recall retriever's contribution.
+message ArmTrace {
+  // Arm name: semantic, keyword, graph or temporal.
+  string arm = 1;
+  // Candidates the arm returned.
+  int32 candidates = 2;
+  // Wall time of the arm's query in milliseconds.
+  int64 duration_ms = 3;
+  // Ids of the arm's top candidates, best first.
+  repeated string top_ids = 4;
+}
+
+// RecallTrace explains a recall: per-arm results, fusion, rerank and packing. Returned when
+// RecallRequest.trace is set.
+message RecallTrace {
+  // One entry per arm: semantic, keyword, graph, temporal.
+  repeated ArmTrace arms = 1;
+  // Candidates after RRF fusion.
+  int32 fused = 2;
+  // Candidates sent to the cross-encoder.
+  int32 reranked = 3;
+  // Results packed into the response.
+  int32 packed = 4;
+  // Token budget the packer worked with.
+  int32 token_budget = 5;
+  // Tokens the packed results use.
+  int32 tokens_used = 6;
+  // Start of the time window TIME_PARSE resolved, if anything.
+  google.protobuf.Timestamp time_window_start = 7;
+  // End of the time window TIME_PARSE resolved, if anything.
+  google.protobuf.Timestamp time_window_end = 8;
+  // Total recall wall time in milliseconds.
+  int64 duration_ms = 9;
+}
+
+// ToolCallTrace records one tool call of a reflect loop or an agentic refresh.
+message ToolCallTrace {
+  // Reflect-loop iteration the call happened in.
+  int32 iteration = 1;
+  // Tool name: recall, search_observations, search_mental_models, read_mental_models, expand or done.
+  string tool = 2;
+  // Arguments the model passed, as JSON.
+  string arguments_json = 3;
+  // Tool output as JSON; empty unless tool outputs were requested.
+  string output_json = 4;
+  // Error returned to the model for a malformed call; empty on success.
+  string error = 5;
+  // Wall time of the call in milliseconds.
+  int64 duration_ms = 6;
+}
+
+// ReflectTrace explains a reflect call. Returned when ReflectInclude.tool_calls is set.
+message ReflectTrace {
+  // Tool calls in order.
+  repeated ToolCallTrace tool_calls = 1;
+  // Loop iterations used.
+  int32 iterations = 2;
+  // Why the loop stopped: answered, max_iterations or context_full.
+  string stop_reason = 3;
+  // Directives applied to the prompt.
+  repeated string directive_ids = 4;
+  // Total reflect wall time in milliseconds.
+  int64 duration_ms = 5;
+}

@@ -1,0 +1,252 @@
+// The data plane of memd: Retain, Recall and Reflect.
+//
+// Retain is synchronous by default, returning once units are committed; run_async=true makes it return
+// operation ids instead. Recall and Reflect are synchronous. Every request takes a full BankConfig as
+// overrides, merged as server < tenant < bank < request (< item, for retain); fields the RPC cannot use
+// are rejected with INVALID_ARGUMENT.
+syntax = "proto3";
+
+package memory.v1;
+
+import "google/protobuf/timestamp.proto";
+import "memory/v1/common.proto";
+import "memory/v1/config.proto";
+
+option go_package = "memd/gen/memory/v1;memoryv1";
+
+// MemoryService stores content as memories and answers questions from them.
+service MemoryService {
+  // Retain stores content and extracts memory units from it. Synchronous by default (returns after units
+  // commit); run_async=true enqueues retain_document jobs and returns their ids. A write to an unknown
+  // bank creates it with tenant defaults.
+  rpc Retain(RetainRequest) returns (RetainResponse);
+  // Recall retrieves memories with four arms (semantic, keyword, graph, temporal), RRF fusion, rerank,
+  // boosts and token packing. Unknown bank = NOT_FOUND.
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  // Reflect answers a query with an agentic tool loop over mental models, observations and raw facts.
+  // Strict: a failing retrieval dependency fails the call with UNAVAILABLE; exceeding max_total_tokens
+  // fails it with RESOURCE_EXHAUSTED. Unknown bank = NOT_FOUND.
+  rpc Reflect(ReflectRequest) returns (ReflectResponse);
+}
+
+// ======================= retain =======================
+
+// EntityHint names an entity the extractor should link, in addition to the ones it finds.
+message EntityHint {
+  // Entity name as it appears in the content.
+  string text = 1;
+  // Free-form entity type, for example person or project.
+  string type = 2;
+}
+
+// RetainItem is one document to retain.
+message RetainItem {
+  // Content to extract memories from; the original text is kept in object storage.
+  string content = 1;
+  // Context for the extractor, for example who is speaking or where the content came from.
+  string context = 2;
+  // When the content was produced; omitted = now. Anchors relative dates.
+  google.protobuf.Timestamp timestamp = 3;
+  // Content that has no time; wins over timestamp.
+  bool timeless = 4;
+  // Upsert key: an existing document with this id is replaced. Generated when empty.
+  string document_id = 5;
+  // Tags of the document's units, added to the request's document_tags.
+  repeated string tags = 6;
+  // Observation scopes for this item; unset = BankConfig.default_observation_scopes.
+  ObservationScopes observation_scopes = 7;
+  // Metadata copied onto every unit of the document.
+  map<string, string> metadata = 8;
+  // Entities the extractor should link.
+  repeated EntityHint entities = 9;
+  // false = take entity names literally instead of resolving them to existing entities; unset = true.
+  optional bool resolve_entities = 10;
+  // Item-level overrides, the most specific level. Stored on the document and part of its no-op hash.
+  BankConfig overrides = 11;
+  // Re-extract even when the content hash and overrides hash are unchanged.
+  bool force_reextract = 12;
+}
+
+// RetainRequest retains a batch of documents into one bank.
+message RetainRequest {
+  // Target bank; created with tenant defaults if unknown.
+  string bank_id = 1;
+  // Documents to retain.
+  repeated RetainItem items = 2;
+  // Tags added to every item's units.
+  repeated string document_tags = 3;
+  // Request-level overrides (extraction mode and prompt, retain mission, labels, retain tuning, EXTRACT
+  // and TIME_PARSE models). Stored on each document; never inherited by automatic consolidation.
+  BankConfig overrides = 4;
+  // Do not enqueue consolidation after this retain, so a manual Consolidate can run with its own settings.
+  bool skip_consolidation = 5;
+  // false (default) = return after units commit; true = enqueue jobs and return operation ids.
+  bool run_async = 6;
+}
+
+// RetainedDocument reports the outcome for one retained document.
+message RetainedDocument {
+  // Document id (given or generated).
+  string document_id = 1;
+  // Units created; 0 when unchanged or async.
+  int32 units_created = 2;
+  // Same content and overrides hash as the last completed retain: nothing was re-extracted.
+  bool unchanged = 3;
+  // retain_document operation id; set when run_async.
+  string operation_id = 4;
+}
+
+// RetainResponse reports per-document outcomes.
+message RetainResponse {
+  // One entry per item. Sync: fully filled; async: document and operation ids only.
+  repeated RetainedDocument documents = 1;
+  // retain_batch parent operation; set when there was more than one document.
+  string parent_operation_id = 2;
+}
+
+// ======================= recall =======================
+
+// RecallInclude asks Recall to attach extra material, each within its own token budget.
+message RecallInclude {
+  // Attach the chunks results were extracted from.
+  optional bool chunks = 1;
+  // Token budget for attached chunks.
+  optional int32 chunks_max_tokens = 2;
+  // Attach the source facts of returned observations.
+  optional bool source_facts = 3;
+  // Token budget for attached source facts.
+  optional int32 source_facts_max_tokens = 4;
+  // Attach entity state for entities in the results.
+  optional bool entities = 5;
+}
+
+// RecallRequest retrieves memories for a query.
+message RecallRequest {
+  // Bank to search; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Query text, at most 500 tokens.
+  string query = 2;
+  // Fact types to return; empty = all.
+  repeated FactType types = 3;
+  // Flat tag filter; mutually exclusive with tag_groups.
+  repeated string tags = 4;
+  // How tags must match.
+  TagsMatch tags_match = 5;
+  // Boolean tag filter, all groups AND-ed; mutually exclusive with tags.
+  repeated TagGroup tag_groups = 6;
+  // Size class: retriever caps (100 / 300 / 1000) and the token budget when max_tokens is unset.
+  Budget budget = 7;
+  // Token budget for packed results; 0 = derived from budget.
+  int32 max_tokens = 8;
+  // Reference time for relative expressions and recency; unset = now.
+  google.protobuf.Timestamp query_time = 9;
+  // Explicit time window start; when set, the query is not parsed for a window.
+  google.protobuf.Timestamp time_window_start = 10;
+  // Explicit time window end.
+  google.protobuf.Timestamp time_window_end = 11;
+  // Prefer observations: drop raw facts covered by a returned observation and backfill the budget.
+  bool prefer_observations = 12;
+  // Score floors.
+  MinScores min_scores = 13;
+  // Extra material to attach.
+  RecallInclude include = 14;
+  // Return a RecallTrace.
+  bool trace = 15;
+  // Request-only overrides: every RecallConfig field and the TIME_PARSE / RERANK models.
+  BankConfig overrides = 16;
+}
+
+// EntityState summarizes an entity mentioned in recall results.
+message EntityState {
+  // Entity id.
+  string entity_id = 1;
+  // Resolved canonical name.
+  string canonical_name = 2;
+  // Observations about the entity.
+  repeated string observation_ids = 3;
+}
+
+// RecallResponse carries ranked memories and any requested attachments.
+message RecallResponse {
+  // Memories, best first, packed to the token budget.
+  repeated Memory results = 1;
+  // Source facts of returned observations by id; set when include.source_facts.
+  map<string, Memory> source_facts = 2;
+  // True when source facts were cut to their token budget.
+  bool source_facts_truncated = 3;
+  // Chunks by id; set when include.chunks.
+  map<string, Chunk> chunks = 4;
+  // Entity state by entity id; set when include.entities.
+  map<string, EntityState> entities = 5;
+  // Pipeline trace; set when trace was requested.
+  RecallTrace trace = 6;
+}
+
+// ======================= reflect =======================
+
+// ReflectInclude picks what Reflect returns beside the answer.
+message ReflectInclude {
+  // Return based_on (the memories, models and directives used), default true.
+  optional bool facts = 1;
+  // Return the trace with tool calls.
+  bool tool_calls = 2;
+  // Include tool outputs in the trace, default true when tool_calls.
+  optional bool tool_outputs = 3;
+}
+
+// ReflectRequest asks the reflect agent a question.
+message ReflectRequest {
+  // Bank to reason over; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // The question to answer in natural language.
+  string query = 2;
+  // Flat tag filter for retrieval and directive selection; mutually exclusive with tag_groups.
+  repeated string tags = 3;
+  // How tags must match.
+  TagsMatch tags_match = 4;
+  // Boolean tag filter for retrieval, all groups AND-ed.
+  repeated TagGroup tag_groups = 5;
+  // Size class scaling iterations and recall budgets, default BUDGET_LOW.
+  Budget budget = 6;
+  // Token cap on the final answer; overrides ReflectConfig.max_answer_tokens.
+  optional int32 max_tokens = 7;
+  // JSON Schema for a structured second pass (STRUCTURED_OUTPUT slot); empty = prose only.
+  string response_schema_json = 8;
+  // Apply every active directive, not only those matching the request tags.
+  bool apply_all_directives = 9;
+  // Directives added for this call only; stored directives can never be removed by a request.
+  repeated Directive extra_directives = 10;
+  // What to return beside the answer.
+  ReflectInclude include = 11;
+  // Reference time for relative expressions; unset = now.
+  google.protobuf.Timestamp query_time = 12;
+  // Request-only overrides: missions, disposition, ReflectConfig, nested RecallConfig and the REFLECT,
+  // STRUCTURED_OUTPUT and RERANK models.
+  BankConfig overrides = 13;
+}
+
+// ReflectResponse carries the answer and its provenance.
+message ReflectResponse {
+  // The answer in prose; never empty on success.
+  string text = 1;
+  // Structured output matching response_schema_json; empty when not requested or when projection failed.
+  string structured_output_json = 2;
+  // Why the structured pass failed; empty on success.
+  string structured_output_error = 3;
+  // Evidence the answer used; set unless include.facts is false.
+  BasedOn based_on = 4;
+  // Loop trace; set when include.tool_calls.
+  ReflectTrace trace = 5;
+  // Token usage per slot and model.
+  repeated SlotUsage usage = 6;
+}
+
+// BasedOn lists what a reflect answer cites; citations the agent never retrieved are dropped.
+message BasedOn {
+  // Memories cited.
+  repeated Memory memories = 1;
+  // Mental models cited.
+  repeated string mental_model_ids = 2;
+  // Directives applied.
+  repeated string directive_ids = 3;
+}

@@ -1,0 +1,141 @@
+// Documents for memd.
+//
+// A document is one retained item: its original text lives in object storage and its units in Postgres.
+// Documents are upserted by Retain (keyed by document_id), retagged by UpdateDocument and re-extracted by
+// ReprocessDocument. There is no single-document delete; DeleteBank removes everything.
+syntax = "proto3";
+
+package memory.v1;
+
+import "google/protobuf/timestamp.proto";
+import "memory/v1/common.proto";
+import "memory/v1/config.proto";
+import "memory/v1/operation.proto";
+
+option go_package = "memd/gen/memory/v1;memoryv1";
+
+// DocumentService lists, reads, retags and reprocesses retained documents.
+service DocumentService {
+  // ListDocuments pages through the bank's documents with filters.
+  rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
+  // GetDocument returns one document, optionally with its original text from the blob store.
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+  // UpdateDocument replaces the document's tag set. A set-equal update is a no-op; a real change clears
+  // the document's observations and enqueues a retag_document job that re-consolidates under the new tags.
+  rpc UpdateDocument(UpdateDocumentRequest) returns (UpdateDocumentResponse);
+  // ReprocessDocument re-extracts the document from its original text, replacing its units and resetting
+  // their curation. Replays the stored overrides unless new ones are given.
+  rpc ReprocessDocument(ReprocessDocumentRequest) returns (ReprocessDocumentResponse);
+}
+
+// DocTimeField picks the document timestamp a ListDocuments time range applies to.
+enum DocTimeField {
+  // Not set; same as DOC_TIME_FIELD_CREATED_AT.
+  DOC_TIME_FIELD_UNSPECIFIED = 0;
+  // When the document was first retained.
+  DOC_TIME_FIELD_CREATED_AT = 1;
+  // When the document was last upserted, retagged or reprocessed.
+  DOC_TIME_FIELD_UPDATED_AT = 2;
+}
+
+// Document is the read model of one retained document.
+message Document {
+  // Document id (the upsert key).
+  string id = 1;
+  // Hash of the original content; with the overrides hash, decides whether a retain is a no-op.
+  string content_hash = 2;
+  // Document tags, applied to its units.
+  repeated string tags = 3;
+  // Live units extracted from the document.
+  int64 memory_unit_count = 4;
+  // Live unit counts keyed by fact type name.
+  map<string, int64> units_by_fact_type = 5;
+  // Retain overrides stored with the document; ReprocessDocument replays them.
+  BankConfig stored_overrides = 6;
+  // When the document was first retained.
+  google.protobuf.Timestamp created_at = 7;
+  // When the document last changed.
+  google.protobuf.Timestamp updated_at = 8;
+  // Original text read from the blob store; GetDocument with include_text only.
+  string original_text = 9;
+  // When the last retain completed; unset while a retain is in flight or after it failed.
+  google.protobuf.Timestamp extracted_at = 10;
+}
+
+// ListDocumentsRequest filters and pages the bank's documents.
+message ListDocumentsRequest {
+  // Bank to list; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Case-insensitive document id substring; empty = no filter.
+  string q = 2;
+  // Tag filter.
+  repeated string tags = 3;
+  // How tags must match, default TAGS_MATCH_ANY_STRICT.
+  TagsMatch tags_match = 4;
+  // Inclusive start of the time range on time_field.
+  google.protobuf.Timestamp start = 5;
+  // Exclusive end of the time range on time_field.
+  google.protobuf.Timestamp end = 6;
+  // Timestamp the range applies to.
+  DocTimeField time_field = 7;
+  // Maximum documents per page; 0 = server default.
+  int32 page_size = 8;
+  // Token from a previous response; empty = first page.
+  string page_token = 9;
+}
+
+// ListDocumentsResponse is one page of documents.
+message ListDocumentsResponse {
+  // Documents on this page, without original text.
+  repeated Document documents = 1;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
+}
+
+// GetDocumentRequest names one document.
+message GetDocumentRequest {
+  // Bank owning the document; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Document id.
+  string document_id = 2;
+  // Read and return the original text from the blob store.
+  bool include_text = 3;
+}
+
+// GetDocumentResponse carries the document.
+message GetDocumentResponse {
+  // The document; original_text is filled only when include_text was set.
+  Document document = 1;
+}
+
+// UpdateDocumentRequest replaces a document's tag set.
+message UpdateDocumentRequest {
+  // Bank owning the document.
+  string bank_id = 1;
+  // Document id.
+  string document_id = 2;
+  // The new tag set; replaces the old one entirely.
+  TagSet tags = 3;
+}
+
+// UpdateDocumentResponse carries the retag job.
+message UpdateDocumentResponse {
+  // The retag_document operation; unset when the update was a no-op.
+  Operation operation = 1;
+}
+
+// ReprocessDocumentRequest re-extracts a document.
+message ReprocessDocumentRequest {
+  // Bank owning the document.
+  string bank_id = 1;
+  // Document id.
+  string document_id = 2;
+  // New retain overrides; replace the stored ones. Unset = replay the stored overrides.
+  BankConfig overrides = 3;
+}
+
+// ReprocessDocumentResponse carries the reprocess job.
+message ReprocessDocumentResponse {
+  // The retain_document operation.
+  Operation operation = 1;
+}

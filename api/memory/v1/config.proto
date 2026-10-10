@@ -1,0 +1,275 @@
+// Configuration for memd.
+//
+// BankConfig is the one config shape used at every level: server < tenant < bank < strategy < request
+// (< item, for retain). Scalars: a set value replaces an unset one. models: merged per slot. Other
+// lists: a set list replaces the inherited one (no append). Patch RPCs take a FieldMask, which is also
+// how a list is cleared. Every request that does work takes a full BankConfig as overrides; fields the
+// RPC cannot use are rejected with INVALID_ARGUMENT, never silently ignored.
+syntax = "proto3";
+
+package memory.v1;
+
+import "memory/v1/common.proto";
+import "memory/v1/models.proto";
+
+option go_package = "memd/gen/memory/v1;memoryv1";
+
+// ExtractionMode picks how retain turns content into facts.
+enum ExtractionMode {
+  // Not set; inherit, ending at the server default.
+  EXTRACTION_MODE_UNSPECIFIED = 0;
+  // Short, deduplicated facts.
+  EXTRACTION_MODE_CONCISE = 1;
+  // Detailed facts keeping more of the source's wording and context.
+  EXTRACTION_MODE_VERBOSE = 2;
+  // Facts that quote the source verbatim.
+  EXTRACTION_MODE_VERBATIM = 3;
+  // No LLM call: chunks are stored as units as they are.
+  EXTRACTION_MODE_CHUNKS = 4;
+  // Extraction driven by BankConfig.custom_extraction_prompt.
+  EXTRACTION_MODE_CUSTOM = 5;
+}
+
+// BudgetFunction picks how a recall Budget becomes a token budget.
+enum BudgetFunction {
+  // Not set; inherit, ending at the server default.
+  BUDGET_FUNCTION_UNSPECIFIED = 0;
+  // Use budget_low / budget_mid / budget_high as fixed token counts.
+  BUDGET_FUNCTION_FIXED = 1;
+  // Scale the budget to the query, clamped to [budget_min, budget_max].
+  BUDGET_FUNCTION_ADAPTIVE = 2;
+}
+
+// BankConfig is the full set of behaviour knobs, identical at every config level. Unset fields inherit
+// from the next less specific level.
+message BankConfig {
+  // Mission injected into retain extraction prompts.
+  string retain_mission = 1;
+  // Mission injected into consolidation prompts; a matching strategy's mission wins.
+  string observations_mission = 2;
+  // Mission injected into the reflect system prompt.
+  string reflect_mission = 3;
+  // Reflect disposition traits.
+  Disposition disposition = 4;
+  // How retain extracts facts.
+  ExtractionMode extraction_mode = 5;
+  // Extraction prompt used with EXTRACTION_MODE_CUSTOM.
+  string custom_extraction_prompt = 6;
+  // Typed entity labels extracted at retain as key:value label entities.
+  repeated EntityLabel entity_labels = 7;
+  // Enqueue consolidation automatically after retain; unset = inherited.
+  optional bool auto_consolidation = 8;
+  // Cosine similarity at or above which observations in one scope get a DEDUP_CHECK, default 0.97.
+  optional double dedup_threshold = 9;
+  // Cap on observations per scope.
+  optional int32 max_observations_per_scope = 10;
+  // Token budget for source facts shown to one consolidation call.
+  optional int32 consolidation_source_facts_max_tokens = 11;
+  // Per-scope consolidation strategies; the first whose patterns match a scope wins.
+  repeated ConsolidationStrategy consolidation_strategies = 12;
+  // Recall tuning, also used by reflect, consolidation and single-shot refresh.
+  RecallConfig recall = 13;
+  // Model bindings, merged per slot across levels. MODEL_SLOT_EMBED is rejected.
+  repeated SlotBinding models = 14;
+  // Retain chunking, entity resolution and linking tuning.
+  RetainTuning retain = 15;
+  // Reflect loop tuning.
+  ReflectConfig reflect = 16;
+  // Bank-level mental-model defaults.
+  MentalModelConfig mental_models = 17;
+  // Observation scopes used when a retained item does not set its own.
+  ObservationScopes default_observation_scopes = 18;
+  // false = no consolidation at all; unset = inherited.
+  optional bool enable_observations = 19;
+  // Facts per consolidation LLM call, default 8. A failing batch is halved and retried.
+  optional int32 consolidation_llm_batch_size = 20;
+  // Token budget for the source facts shown per existing observation, default 256.
+  optional int32 consolidation_source_facts_max_tokens_per_observation = 21;
+  // false = only label entities are created (no free-form entities); unset = inherited.
+  optional bool entities_allow_free_form = 22;
+  // Units one consolidation run takes before the job re-enqueues itself, default 100.
+  optional int32 consolidation_max_units_per_run = 23;
+}
+
+// Disposition sets reflect personality traits, each on a 1-5 scale, default 3. Rendered into the reflect
+// system prompt as instructions.
+message Disposition {
+  // How strongly to doubt weakly supported claims, 1-5.
+  int32 skepticism = 1;
+  // How literally to read the question and the evidence, 1-5.
+  int32 literalism = 2;
+  // How much weight to give feelings and the user's perspective, 1-5.
+  int32 empathy = 3;
+}
+
+// EntityLabel defines a typed label that retain extracts and resolves to exact-match label entities.
+message EntityLabel {
+  // Type is the shape of a label's value.
+  enum Type {
+    // Not set; same as TYPE_VALUE.
+    TYPE_UNSPECIFIED = 0;
+    // One value from the closed list in values.
+    TYPE_VALUE = 1;
+    // Several values from the closed list in values.
+    TYPE_MULTI_VALUES = 2;
+    // One free-text value.
+    TYPE_TEXT = 3;
+    // Several free-text values.
+    TYPE_MULTI_TEXT = 4;
+    // A nested object whose fields are labels themselves.
+    TYPE_MAP = 5;
+  }
+  // Label key, used as the key of key:value label entities.
+  string key = 1;
+  // What the label means; shown to the extraction model.
+  string description = 2;
+  // Value shape, default TYPE_VALUE.
+  Type type = 3;
+  // Allowed values; TYPE_VALUE and TYPE_MULTI_VALUES only.
+  repeated LabelValue values = 4;
+  // Sub-labels by field name; TYPE_MAP only. Stored as key:field:value.
+  map<string, EntityLabel> fields = 5;
+  // Whether a fact may omit the label, default true.
+  optional bool optional = 6;
+  // Also copy extracted values into the unit's tags.
+  bool write_to_tags = 7;
+}
+
+// LabelValue is one allowed value of a closed-list label.
+message LabelValue {
+  // The value as stored.
+  string value = 1;
+  // What the value means; shown to the extraction model.
+  string description = 2;
+}
+
+// ScopePattern matches observation scopes by tag.
+message ScopePattern {
+  // Tags to test against the scope's tag set.
+  repeated string tags = 1;
+  // How the tags must match.
+  TagsMatch tags_match = 2;
+}
+
+// ConsolidationStrategy overrides consolidation settings for the scopes it matches. Its settings sit
+// between bank and request in the config hierarchy, and it is the only source of CONSOLIDATE /
+// DEDUP_CHECK overrides for automatic consolidation.
+message ConsolidationStrategy {
+  // Strategy name, unique within the bank.
+  string name = 1;
+  // Scope patterns; the strategy applies to a scope matching any of them.
+  repeated ScopePattern scopes = 2;
+  // Observations mission for matched scopes; empty = the bank's.
+  string observations_mission = 3;
+  // Cap on observations per matched scope.
+  optional int32 max_observations_per_scope = 4;
+  // Token budget for source facts per consolidation call.
+  optional int32 source_facts_max_tokens = 5;
+  // Token budget for the source facts shown per existing observation.
+  optional int32 source_facts_max_tokens_per_observation = 6;
+  // Model bindings for matched scopes, merged per slot over the bank's.
+  repeated SlotBinding models = 7;
+}
+
+// RetainTuning tunes chunking, entity resolution and link building at retain.
+message RetainTuning {
+  // Maximum tokens per chunk.
+  optional int32 chunk_max_tokens = 1;
+  // Tokens shared by consecutive chunks.
+  optional int32 chunk_overlap_tokens = 2;
+  // Minimum resolver score (name similarity + co-occurrence + temporal proximity) to reuse an entity.
+  optional double entity_match_threshold = 3;
+  // Window in hours within which units get temporal links.
+  optional int32 temporal_link_window_hours = 4;
+  // Nearest neighbours considered for semantic links; also the semantic link cap per unit.
+  optional int32 semantic_link_k = 5;
+  // Minimum cosine similarity for a semantic link.
+  optional double semantic_link_min_similarity = 6;
+  // Ask extraction for causal links between facts of the same batch.
+  optional bool extract_causal_links = 7;
+  // Keep a JSONL line or chat turn whole in one chunk up to this many tokens.
+  optional int32 structured_chunk_max_tokens = 8;
+  // Temporal link cap per unit, default 20.
+  optional int32 temporal_link_cap = 9;
+}
+
+// RecallConfig tunes the recall pipeline: four arms, RRF fusion, rerank, boosts and packing.
+message RecallConfig {
+  // How a Budget becomes a token budget.
+  BudgetFunction budget_function = 1;
+  // Tokens for BUDGET_LOW.
+  optional int32 budget_low = 2;
+  // Tokens for BUDGET_MID.
+  optional int32 budget_mid = 3;
+  // Tokens for BUDGET_HIGH.
+  optional int32 budget_high = 4;
+  // RRF weight per arm name (semantic, keyword, graph, temporal); missing = 1.
+  map<string, double> strategy_boosts = 5;
+  // Arms to run; empty = all four.
+  repeated string enabled_strategies = 6;
+  // Candidates sent to the cross-encoder, default 300.
+  optional int32 reranker_max_candidates = 7;
+  // Whether to run the cross-encoder.
+  optional bool rerank = 8;
+  // RRF constant k, default 60.
+  optional int32 rrf_k = 9;
+  // Weight of the recency boost.
+  optional double recency_alpha = 10;
+  // Weight of the boost for matching the query's time window.
+  optional double temporal_alpha = 11;
+  // Weight of the proof-count boost for observations.
+  optional double proof_alpha = 12;
+  // Age in days over which the recency boost decays.
+  optional int32 recency_horizon_days = 13;
+  // Hops the graph arm follows over links, 1-2.
+  optional int32 graph_max_hops = 14;
+  // Buckets the temporal arm spreads its window over.
+  optional int32 temporal_buckets = 15;
+  // Trigram similarity a fuzzy tag-leaf tag needs to match a stored tag.
+  optional double fuzzy_tag_min_similarity = 16;
+  // Lower clamp for BUDGET_FUNCTION_ADAPTIVE, default 20 tokens.
+  optional int32 budget_min = 17;
+  // Upper clamp for BUDGET_FUNCTION_ADAPTIVE, default 2000 tokens.
+  optional int32 budget_max = 18;
+}
+
+// ReflectConfig tunes the reflect loop.
+message ReflectConfig {
+  // Loop iterations at BUDGET_MID, default 10; BUDGET_LOW halves it, BUDGET_HIGH doubles it.
+  optional int32 max_iterations = 1;
+  // Tools the agent may call; empty = all.
+  repeated string enabled_tools = 2;
+  // Require at least one retrieval before the agent may answer.
+  optional bool require_evidence = 3;
+  // Budget for the recall tool.
+  Budget recall_budget = 4;
+  // Token cap on one recall tool result.
+  optional int32 recall_max_tokens = 5;
+  // Token cap on one search_observations tool result, default 5000.
+  optional int32 search_observations_max_tokens = 6;
+  // Include entity state in search_observations results, default true.
+  optional bool search_observations_include_entities = 7;
+  // Token cap on the final answer only, default 4096.
+  optional int32 max_answer_tokens = 8;
+  // Token budget for the whole call; exceeding it fails the call with RESOURCE_EXHAUSTED.
+  optional int64 max_total_tokens = 9;
+}
+
+// MentalModelConfig holds bank-level mental-model defaults; a model's RefreshTrigger wins over them.
+message MentalModelConfig {
+  // Refresh mode when a trigger does not set one.
+  RefreshMode default_mode = 1;
+  // Largest share of the page a delta refresh may change before it falls back to a full refresh.
+  optional double max_delta_ratio = 2;
+  // Delay before a triggered refresh runs, so a burst of consolidations joins one refresh, default 30.
+  optional int32 refresh_debounce_seconds = 3;
+  // Token cap on a model's content; MentalModelSpec.max_tokens wins.
+  optional int32 max_content_tokens = 4;
+  // Minimum seconds between triggered refreshes of one model, default 0 = no floor. Manual refreshes
+  // ignore it.
+  optional int32 min_refresh_interval_seconds = 5;
+  // History entries kept per kind (versions, failures), default 50.
+  optional int32 history_max_entries = 6;
+  // Refresh strategy when neither the trigger nor the call sets one, default REFRESH_STRATEGY_AGENTIC.
+  RefreshStrategy default_strategy = 7;
+}

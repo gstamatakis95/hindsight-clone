@@ -1,0 +1,402 @@
+// Banks for memd.
+//
+// A bank is an isolated memory store within a tenant; every store call takes (tenant, bank). A write to
+// an unknown bank creates it with tenant defaults, and every read of an unknown bank returns NOT_FOUND.
+// This file holds BankService: bank lifecycle, config (resolved and own overrides), stats, tag listing,
+// prompt preview, templates and directives.
+syntax = "proto3";
+
+package memory.v1;
+
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/timestamp.proto";
+import "memory/v1/common.proto";
+import "memory/v1/config.proto";
+import "memory/v1/mental_model.proto";
+import "memory/v1/operation.proto";
+
+option go_package = "memd/gen/memory/v1;memoryv1";
+
+// BankService manages banks, their config, directives and templates.
+service BankService {
+  // CreateBank creates a bank with optional config overrides.
+  rpc CreateBank(CreateBankRequest) returns (CreateBankResponse);
+  // GetBank returns a bank and its own config overrides.
+  rpc GetBank(GetBankRequest) returns (GetBankResponse);
+  // GetBankConfig returns the resolved config (server < tenant < bank) and the bank's own overrides.
+  rpc GetBankConfig(GetBankConfigRequest) returns (GetBankConfigResponse);
+  // UpdateBankConfig patches the bank's own overrides with a FieldMask.
+  rpc UpdateBankConfig(UpdateBankConfigRequest) returns (UpdateBankConfigResponse);
+  // ResetBankConfig removes the bank's own overrides at the given paths, so they inherit again.
+  rpc ResetBankConfig(ResetBankConfigRequest) returns (ResetBankConfigResponse);
+  // GetBankStats returns counts from indexed COUNT queries; poll pending_operations_by_kind as an eval
+  // barrier.
+  rpc GetBankStats(GetBankStatsRequest) returns (GetBankStatsResponse);
+  // ListTags pages through the bank's tags with usage counts.
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+  // PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
+  rpc PreviewPrompt(PreviewPromptRequest) returns (PreviewPromptResponse);
+  // DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one
+  // transaction. The only bulk hard delete: afterwards writes fail FAILED_PRECONDITION and reads NOT_FOUND
+  // until the bank is gone.
+  rpc DeleteBank(DeleteBankRequest) returns (DeleteBankResponse);
+  // ExportBankTemplate exports the bank's config, directives and mental-model specs.
+  rpc ExportBankTemplate(ExportBankTemplateRequest) returns (ExportBankTemplateResponse);
+  // CreateBankFromTemplate creates a bank from a template and enqueues builds of its mental models.
+  rpc CreateBankFromTemplate(CreateBankFromTemplateRequest) returns (CreateBankFromTemplateResponse);
+  // UpsertDirective creates (empty id) or replaces a directive.
+  rpc UpsertDirective(UpsertDirectiveRequest) returns (UpsertDirectiveResponse);
+  // ListDirectives lists the bank's directives, optionally by tag and active state.
+  rpc ListDirectives(ListDirectivesRequest) returns (ListDirectivesResponse);
+  // DeleteDirective deletes one directive.
+  rpc DeleteDirective(DeleteDirectiveRequest) returns (DeleteDirectiveResponse);
+}
+
+// ======================= banks & config =======================
+
+// Bank is a memory bank.
+message Bank {
+  // Bank id, unique within the tenant.
+  string id = 1;
+  // Display name.
+  string name = 2;
+  // The bank's own config overrides (not the resolved config).
+  BankConfig config = 3;
+  // When the bank was created.
+  google.protobuf.Timestamp created_at = 4;
+  // Tombstoned by DeleteBank; writes fail FAILED_PRECONDITION.
+  bool deleting = 5;
+}
+
+// CreateBankRequest creates a bank.
+message CreateBankRequest {
+  // Bank id, unique within the tenant.
+  string bank_id = 1;
+  // Display name.
+  string name = 2;
+  // Initial config overrides; unset fields inherit tenant and server defaults.
+  BankConfig config = 3;
+}
+
+// CreateBankResponse carries the new bank.
+message CreateBankResponse {
+  // The newly created bank, with its own config overrides.
+  Bank bank = 1;
+}
+
+// GetBankRequest names one bank.
+message GetBankRequest {
+  // Bank id; unknown = NOT_FOUND.
+  string bank_id = 1;
+}
+
+// GetBankResponse carries the bank.
+message GetBankResponse {
+  // The bank, with its own config overrides (not the resolved config).
+  Bank bank = 1;
+}
+
+// GetBankConfigRequest names one bank.
+message GetBankConfigRequest {
+  // Bank id; unknown = NOT_FOUND.
+  string bank_id = 1;
+}
+
+// GetBankConfigResponse carries the resolved config and the bank's own overrides.
+message GetBankConfigResponse {
+  // Effective config: server < tenant < bank, merged.
+  BankConfig resolved = 1;
+  // Only what the bank itself sets.
+  BankConfig overrides = 2;
+}
+
+// UpdateBankConfigRequest patches the bank's own overrides.
+message UpdateBankConfigRequest {
+  // Bank id.
+  string bank_id = 1;
+  // New values for the fields named in update_mask.
+  BankConfig config = 2;
+  // BankConfig paths to replace; a path set to an empty value clears it (this is how a list is cleared).
+  google.protobuf.FieldMask update_mask = 3;
+}
+
+// UpdateBankConfigResponse carries the bank after the patch.
+message UpdateBankConfigResponse {
+  // The bank with its updated overrides.
+  Bank bank = 1;
+}
+
+// ResetBankConfigRequest removes some or all of the bank's own overrides.
+message ResetBankConfigRequest {
+  // Bank id.
+  string bank_id = 1;
+  // BankConfig paths to reset; empty = reset everything.
+  repeated string paths = 2;
+}
+
+// ResetBankConfigResponse carries the bank after the reset.
+message ResetBankConfigResponse {
+  // The bank with its remaining overrides.
+  Bank bank = 1;
+}
+
+// DeleteBankRequest names the bank to delete.
+message DeleteBankRequest {
+  // Bank id.
+  string bank_id = 1;
+}
+
+// DeleteBankResponse carries the delete job.
+message DeleteBankResponse {
+  // The delete_bank operation.
+  Operation operation = 1;
+}
+
+// ======================= templates =======================
+
+// BankTemplate is a portable bank definition: config, directives and mental-model specs (no memories).
+message BankTemplate {
+  // Config overrides of the bank.
+  BankConfig config = 1;
+  // Directives of the bank.
+  repeated Directive directives = 2;
+  // Mental-model specs; content is rebuilt, not copied.
+  repeated MentalModelSpec mental_models = 3;
+}
+
+// ExportBankTemplateRequest names the bank to export.
+message ExportBankTemplateRequest {
+  // Bank id; unknown = NOT_FOUND.
+  string bank_id = 1;
+}
+
+// ExportBankTemplateResponse carries the template.
+message ExportBankTemplateResponse {
+  // Config overrides, directives and mental-model specs of the bank.
+  BankTemplate template = 1;
+}
+
+// CreateBankFromTemplateRequest creates a bank from a template.
+message CreateBankFromTemplateRequest {
+  // New bank id.
+  string bank_id = 1;
+  // Display name.
+  string name = 2;
+  // Template to apply.
+  BankTemplate template = 3;
+}
+
+// CreateBankFromTemplateResponse carries the new bank and its model builds.
+message CreateBankFromTemplateResponse {
+  // The newly created bank, with the template config as its own overrides.
+  Bank bank = 1;
+  // One refresh_mental_model operation per template model.
+  repeated Operation mental_model_builds = 2;
+}
+
+// ======================= stats & tags =======================
+
+// GetBankStatsRequest names one bank.
+message GetBankStatsRequest {
+  // Bank id; unknown = NOT_FOUND.
+  string bank_id = 1;
+}
+
+// GetBankStatsResponse carries the stats.
+message GetBankStatsResponse {
+  // Counts and change counter of the bank.
+  BankStats stats = 1;
+}
+
+// BankStats summarizes a bank, read with indexed COUNT queries (no counter tables).
+message BankStats {
+  // Live units keyed by fact type name.
+  map<string, int64> units_by_fact_type = 1;
+  // Units archived by invalidation (count).
+  int64 invalidated_units = 2;
+  // Documents retained in the bank (count).
+  int64 documents = 3;
+  // Entities (free-form and label) in the bank (count).
+  int64 entities = 4;
+  // Mental models in the bank (count).
+  int64 mental_models = 5;
+  // Pending and processing operations keyed by kind. Eval barrier: poll until empty.
+  map<string, int64> pending_operations_by_kind = 6;
+  // Live units not yet consolidated (count).
+  int64 unconsolidated_units = 7;
+  // Time of the last write to memory content.
+  google.protobuf.Timestamp last_memory_write_at = 8;
+  // The bank's commit-ordered change counter.
+  int64 change_seq = 9;
+}
+
+// TagSource picks which objects ListTags counts tags on.
+enum TagSource {
+  // Not set; same as TAG_SOURCE_MEMORIES.
+  TAG_SOURCE_UNSPECIFIED = 0;
+  // Tags of memory units.
+  TAG_SOURCE_MEMORIES = 1;
+  // Tags of mental models.
+  TAG_SOURCE_MENTAL_MODELS = 2;
+  // Tags of documents.
+  TAG_SOURCE_DOCUMENTS = 3;
+}
+
+// ListTagsRequest pages the bank's tags.
+message ListTagsRequest {
+  // Bank id; unknown = NOT_FOUND.
+  string bank_id = 1;
+  // Which objects to count tags on.
+  TagSource source = 2;
+  // Only tags starting with this; empty = all.
+  string prefix = 3;
+  // Maximum tags per page; 0 = server default.
+  int32 page_size = 4;
+  // Token from a previous response; empty = first page.
+  string page_token = 5;
+}
+
+// TagCount is one tag with its usage count.
+message TagCount {
+  // The tag string as stored.
+  string tag = 1;
+  // Objects of the requested source carrying it.
+  int64 count = 2;
+}
+
+// ListTagsResponse is one page of tags.
+message ListTagsResponse {
+  // Tags on this page.
+  repeated TagCount tags = 1;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
+}
+
+// ======================= prompt preview =======================
+
+// PromptOperation picks which operation's prompt to preview.
+enum PromptOperation {
+  // Not set; rejected with INVALID_ARGUMENT.
+  PROMPT_OPERATION_UNSPECIFIED = 0;
+  // Retain extraction.
+  PROMPT_OPERATION_RETAIN = 1;
+  // Consolidation decisions.
+  PROMPT_OPERATION_CONSOLIDATION = 2;
+  // Reflect system prompt.
+  PROMPT_OPERATION_REFLECT = 3;
+  // Delta mental-model refresh.
+  PROMPT_OPERATION_MENTAL_MODEL_DELTA = 4;
+  // Single-shot full mental-model synthesis.
+  PROMPT_OPERATION_SYNTHESIZE = 5;
+}
+
+// PromptRole is the chat role of a rendered message.
+enum PromptRole {
+  // Not set; never returned.
+  PROMPT_ROLE_UNSPECIFIED = 0;
+  // System message.
+  PROMPT_ROLE_SYSTEM = 1;
+  // User message.
+  PROMPT_ROLE_USER = 2;
+}
+
+// PromptSource says where a prompt block's text comes from.
+enum PromptSource {
+  // Not set; never returned.
+  PROMPT_SOURCE_UNSPECIFIED = 0;
+  // Built-in template text.
+  PROMPT_SOURCE_BUILTIN = 1;
+  // Text from the effective BankConfig (a mission, disposition, custom prompt, ...).
+  PROMPT_SOURCE_CONFIG = 2;
+}
+
+// PreviewPromptRequest asks for a prompt rendering.
+message PreviewPromptRequest {
+  // Bank whose effective config is used.
+  string bank_id = 1;
+  // Operation to render.
+  PromptOperation operation = 2;
+  // Request-level overrides to render with, as a real request would.
+  BankConfig overrides = 3;
+}
+
+// PreviewPromptResponse carries the rendering.
+message PreviewPromptResponse {
+  // The rendered messages and response schema.
+  PromptPreview preview = 1;
+}
+
+// PromptBlock is one block of a rendered message, attributed to its source.
+message PromptBlock {
+  // Rendered text; empty when the block is inactive.
+  string text = 1;
+  // Built-in or config text.
+  PromptSource source = 2;
+  // BankConfig field behind the block, if any.
+  string field = 3;
+  // Prompt section the block belongs to, for example disposition or directives.
+  string section = 4;
+  // Whether the block is rendered with the current config.
+  bool active = 5;
+}
+
+// PromptMessage is one rendered chat message.
+message PromptMessage {
+  // Chat role.
+  PromptRole role = 1;
+  // Blocks in order; their texts concatenate into the message.
+  repeated PromptBlock blocks = 2;
+}
+
+// PromptPreview is the full rendering for one operation.
+message PromptPreview {
+  // Messages in send order.
+  repeated PromptMessage messages = 1;
+  // JSON Schema the response must match, if the operation uses one.
+  string response_schema_json = 2;
+  // Why nothing would be sent (for example extraction mode chunks needs no LLM); empty otherwise.
+  string skipped_reason = 3;
+}
+
+// ======================= directives =======================
+
+// UpsertDirectiveRequest creates or replaces a directive.
+message UpsertDirectiveRequest {
+  // Bank owning the directive.
+  string bank_id = 1;
+  // The directive; empty id = create.
+  Directive directive = 2;
+}
+
+// UpsertDirectiveResponse carries the stored directive.
+message UpsertDirectiveResponse {
+  // The directive, with its id set.
+  Directive directive = 1;
+}
+
+// ListDirectivesRequest filters the bank's directives.
+message ListDirectivesRequest {
+  // Bank id; unknown = NOT_FOUND.
+  string bank_id = 1;
+  // Only directives applying to these tags; empty = all.
+  repeated string tags = 2;
+  // Only active directives.
+  bool active_only = 3;
+}
+
+// ListDirectivesResponse lists directives.
+message ListDirectivesResponse {
+  // Matching directives.
+  repeated Directive directives = 1;
+}
+
+// DeleteDirectiveRequest names the directive to delete.
+message DeleteDirectiveRequest {
+  // Bank owning the directive.
+  string bank_id = 1;
+  // Directive id.
+  string directive_id = 2;
+}
+
+// DeleteDirectiveResponse is empty on success.
+message DeleteDirectiveResponse {}

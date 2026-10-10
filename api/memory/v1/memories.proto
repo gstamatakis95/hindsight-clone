@@ -1,0 +1,168 @@
+// Memory units and curation for memd.
+//
+// Curation fixes or retires one raw fact without a hard delete; observations are never curated
+// directly, they re-derive from their sources. Everything that would leave recall inconsistent happens
+// in the RPC's own transaction; only re-embedding and re-linking wait for a rederive_memory job.
+// Invalidated units move to an archive table, so recall and consolidation never see them.
+syntax = "proto3";
+
+package memory.v1;
+
+import "google/protobuf/timestamp.proto";
+import "memory/v1/common.proto";
+import "memory/v1/config.proto";
+
+option go_package = "memd/gen/memory/v1;memoryv1";
+
+// MemoryUnitService lists, reads and curates individual memory units.
+service MemoryUnitService {
+  // ListMemories lists live and archived units with filters and keyset pagination. Returns no total.
+  rpc ListMemories(ListMemoriesRequest) returns (ListMemoriesResponse);
+  // GetMemory returns one unit, live or invalidated.
+  rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse);
+  // GetObservationHistory returns every version of an observation, oldest first.
+  rpc GetObservationHistory(GetObservationHistoryRequest) returns (GetObservationHistoryResponse);
+  // UpdateMemory edits, invalidates or restores a raw fact; observations are rejected. Edit and restore
+  // enqueue a rederive_memory job; invalidate needs none.
+  rpc UpdateMemory(UpdateMemoryRequest) returns (UpdateMemoryResponse);
+}
+
+// TimeField picks the unit timestamp a ListMemories time range applies to.
+enum TimeField {
+  // Not set; same as TIME_FIELD_CREATED_AT.
+  TIME_FIELD_UNSPECIFIED = 0;
+  // When the unit was written.
+  TIME_FIELD_CREATED_AT = 1;
+  // When the unit last changed.
+  TIME_FIELD_UPDATED_AT = 2;
+  // When the fact was mentioned.
+  TIME_FIELD_MENTIONED_AT = 3;
+  // When the fact started happening.
+  TIME_FIELD_OCCURRED_START = 4;
+  // When the fact stopped happening.
+  TIME_FIELD_OCCURRED_END = 5;
+}
+
+// ListMemoriesRequest filters and pages the bank's units.
+message ListMemoriesRequest {
+  // Bank to list; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Fact types; empty = all.
+  repeated FactType types = 2;
+  // Text substring filter; empty = none.
+  string q = 3;
+  // Only units of this document.
+  string document_id = 4;
+  // Only live units linked to this entity.
+  string entity_id = 5;
+  // Live or invalidated units; unspecified = no state filter.
+  MemoryState state = 6;
+  // Inclusive start of the time range on time_field.
+  google.protobuf.Timestamp start = 7;
+  // Exclusive end of the time range on time_field.
+  google.protobuf.Timestamp end = 8;
+  // Timestamp the range applies to.
+  TimeField time_field = 9;
+  // Tag filter.
+  repeated string tags = 10;
+  // How tags must match.
+  TagsMatch tags_match = 11;
+  // Maximum units per page; 0 = server default.
+  int32 page_size = 12;
+  // Token from a previous response; empty = first page.
+  string page_token = 13;
+}
+
+// ListMemoriesResponse is one page of units.
+message ListMemoriesResponse {
+  // Units on this page.
+  repeated Memory items = 1;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
+}
+
+// GetMemoryRequest names one unit.
+message GetMemoryRequest {
+  // Bank owning the unit; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Unit id.
+  string memory_id = 2;
+}
+
+// GetMemoryResponse carries the unit.
+message GetMemoryResponse {
+  // The unit, live or invalidated.
+  Memory memory = 1;
+}
+
+// GetObservationHistoryRequest names one observation.
+message GetObservationHistoryRequest {
+  // Bank owning the observation; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Observation id.
+  string observation_id = 2;
+}
+
+// ObservationVersion is one row of observation_versions, written on every create and update.
+message ObservationVersion {
+  // Version number, increasing per observation.
+  int64 version = 1;
+  // Observation text at this version.
+  string text = 2;
+  // Source fact ids at this version.
+  repeated string source_ids = 3;
+  // When the version was written.
+  google.protobuf.Timestamp at = 4;
+}
+
+// GetObservationHistoryResponse lists an observation's versions.
+message GetObservationHistoryResponse {
+  // Versions, oldest first.
+  repeated ObservationVersion versions = 1;
+}
+
+// EntityList wraps a list of entity names so that unset can differ from empty.
+message EntityList {
+  // Entity names; empty = remove all entities.
+  repeated string names = 1;
+}
+
+// UpdateMemoryRequest edits, invalidates or restores one raw fact. Unset fields are left unchanged.
+// Edits commit with an audit row, clear the embedding until rederive, and delete citing observations.
+message UpdateMemoryRequest {
+  // Bank owning the unit.
+  string bank_id = 1;
+  // Unit id; must be a raw fact, not an observation.
+  string memory_id = 2;
+  // New fact text.
+  optional string text = 3;
+  // New context.
+  optional string context = 4;
+  // New occurred start.
+  optional google.protobuf.Timestamp occurred_start = 5;
+  // New occurred end.
+  optional google.protobuf.Timestamp occurred_end = 6;
+  // Clear occurred_start and occurred_end (makes the fact timeless).
+  bool clear_occurred = 7;
+  // New fact type (world or experience); unspecified = unchanged.
+  FactType fact_type = 8;
+  // Replacement entity names; unset = unchanged.
+  EntityList entities = 9;
+  // false = take the new entity names literally when re-deriving; unset = resolve.
+  optional bool resolve_entities = 10;
+  // VALID restores an invalidated unit; INVALIDATED archives a live one; unspecified = edit only.
+  MemoryState state = 11;
+  // Why the change was made; stored on the audit row.
+  string reason = 12;
+  // Overrides for re-deriving (entity resolution, EXTRACT / TIME_PARSE models); kept on the rederive
+  // operation.
+  BankConfig overrides = 13;
+}
+
+// UpdateMemoryResponse carries the curated unit.
+message UpdateMemoryResponse {
+  // The unit after the change.
+  Memory memory = 1;
+  // rederive_memory operation id; empty for invalidate.
+  string operation_id = 2;
+}
