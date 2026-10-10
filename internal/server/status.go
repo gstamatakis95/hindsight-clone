@@ -3,11 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"memd/internal/domain"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"memd/internal/domain"
 )
 
 // errorCodes maps each domain error class to its gRPC code, checked in order with errors.Is. Wrapping
@@ -40,8 +39,8 @@ func toStatus(err error) error {
 	}
 	for _, m := range errorCodes {
 		if errors.Is(err, m.err) {
-			return status.Error(m.code, err.Error())
+			return status.Errorf(m.code, "%s", err.Error())
 		}
 	}
-	return status.Error(codes.Internal, err.Error())
+	return status.Errorf(codes.Internal, "%s", err.Error())
 }

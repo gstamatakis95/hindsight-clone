@@ -112,7 +112,7 @@ func FuzzRoundTrip(f *testing.F) {
 // valueFields are message fields whose domain counterpart is a value, not a pointer: unset converts back
 // as an empty message, wherever the field appears.
 var valueFields = map[protoreflect.FullName]bool{
-	"memory.v1.SlotBinding.binding":   true,
+	"memory.v1.SlotBinding.binding":     true,
 	"memory.v1.MentalModelSpec.trigger": true,
 }
 

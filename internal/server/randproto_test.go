@@ -2,6 +2,7 @@ package server
 
 import (
 	"math/rand/v2"
+	"memd/internal/domain"
 	"strings"
 	"time"
 
@@ -9,8 +10,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-
-	"memd/internal/domain"
 )
 
 // maxDepth bounds message nesting in generated values (TagGroup.none_of and EntityLabel.fields recurse).
@@ -48,7 +47,7 @@ type gen struct {
 
 // newGen returns a generator seeded with seed.
 func newGen(seed uint64) *gen {
-	return &gen{r: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))}
+	return &gen{r: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))} //nolint:gosec // deterministic test data
 }
 
 // message returns a new random message of m's type.

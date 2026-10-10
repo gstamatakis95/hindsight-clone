@@ -86,8 +86,8 @@ func configValueToProto(c domain.BankConfig) *pb.BankConfig {
 		EnableObservations:                optCopy(c.EnableObservations),
 		ConsolidationLlmBatchSize:         optInt32(c.ConsolidationLLMBatchSize),
 		ConsolidationSourceFactsMaxTokensPerObservation: optInt32(c.ConsolidationSourceTokensPerObs),
-		EntitiesAllowFreeForm:       optCopy(c.EntitiesAllowFreeForm),
-		ConsolidationMaxUnitsPerRun: optInt32(c.ConsolidationMaxUnitsPerRun),
+		EntitiesAllowFreeForm:                           optCopy(c.EntitiesAllowFreeForm),
+		ConsolidationMaxUnitsPerRun:                     optInt32(c.ConsolidationMaxUnitsPerRun),
 	}
 }
 

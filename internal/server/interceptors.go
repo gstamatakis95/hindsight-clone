@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"memd/internal/domain"
+	"memd/internal/port"
 	"strings"
 	"time"
 
@@ -10,9 +12,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	"memd/internal/domain"
-	"memd/internal/port"
 )
 
 // TenantHeader is the metadata key that carries the tenant id. Auth is out of scope: the tenant is never

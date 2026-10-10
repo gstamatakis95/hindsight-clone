@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"time"
-
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
 	"memd/internal/engine/consolidate"
@@ -11,10 +9,12 @@ import (
 	"memd/internal/engine/docs"
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/recall"
-	reflecteng "memd/internal/engine/reflect"
 	"memd/internal/engine/retain"
 	"memd/internal/port"
 	"memd/internal/worker"
+	"time"
+
+	reflecteng "memd/internal/engine/reflect"
 )
 
 // Deps holds everything the handlers call. cmd/memd/wire.go fills it; a nil dependency makes its RPCs

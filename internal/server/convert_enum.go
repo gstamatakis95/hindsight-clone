@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"memd/internal/domain"
 	"strings"
 	"time"
 
@@ -11,8 +12,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-
-	"memd/internal/domain"
 )
 
 // Conversion conventions (decision 603):
