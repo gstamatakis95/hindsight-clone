@@ -34,7 +34,7 @@ Branch `wp/WP-00-contracts`. The plan is in `docs/wp/WP-00.md`. After merge, tag
 - [x] **Engine interfaces.** Each Engines-block interface lives in a type-only file in its own package:
   timex, retain, recall, consolidate, reflect, mentalmodel, bank, curate, docs, maintenance, and worker
   (Checkpoint, OperationControl). Consumer-declared copies (Recaller, Reflector, Invalidator, Linker)
-  are checked assignable.
+  were checked assignable once during development; no test for this is committed.
 - [x] **Migrations and SQL.**
   - Alembic `0001`–`0009`, raw SQL via `op.execute`, each with a reversing `downgrade()`.
     `memory_units.embedding vector(768)`; `banks.change_seq` / `deleting_at`; `seq` on units,
