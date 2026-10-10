@@ -1,0 +1,6 @@
+{
+  "directives": [
+    {"Name": "Tone", "Rules": ["Answer in a formal tone.", "Never use emojis."]},
+    {"Name": "", "Rules": ["Cite \"sources\" when <unsure>."]}
+  ]
+}

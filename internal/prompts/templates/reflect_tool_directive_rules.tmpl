@@ -1,0 +1,12 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/tools_schema.py — _build_done_tool_with_directives (rules_list)
+and prompts.py _extract_directive_rules ("**name**: content"). The numbered directive list that DoneTool puts
+in place of {directive_rules} in the directive-aware done tools' answer and directive_compliance descriptions.
+memd changes: a directive has several rules, each numbered on its own line with the directive's name.
+Empty when no directive has rules (the engine then offers the plain done tool).
+Data (ReflectData): .Directives.
+*/ -}}
+{{- $n := 0}}
+{{- range .Directives}}{{$name := .Name}}{{range .Rules}}
+{{- if $n}}{{"\n"}}{{end}}{{$n = add $n 1}}  {{$n}}. {{with $name}}**{{.}}**: {{end}}{{.}}
+{{- end}}{{end -}}

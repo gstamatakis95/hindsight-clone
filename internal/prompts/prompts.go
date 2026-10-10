@@ -43,13 +43,18 @@ var funcs = template.FuncMap{
 	"upper": strings.ToUpper,
 	"trim":  strings.TrimSpace,
 	"add":   func(a, b int) int { return a + b },
-	"json": func(v any) (string, error) {
-		b, err := json.Marshal(v)
-		if err != nil {
-			return "", fmt.Errorf("prompts: json: %w", err)
-		}
-		return string(b), nil
-	},
+	"json":  toJSON,
+}
+
+// toJSON is the json helper: compact JSON without HTML escaping, so <, > and & reach the model as written.
+func toJSON(v any) (string, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return "", fmt.Errorf("prompts: json: %w", err)
+	}
+	return strings.TrimSuffix(buf.String(), "\n"), nil
 }
 
 // load parses every template once; a template that fails to parse fails every Render.
@@ -107,9 +112,12 @@ func Render(name string, data any) (string, error) {
 	return buf.String(), nil
 }
 
-// Version is the content hash of template name (first 16 hex digits of the SHA-256 of its file bytes,
-// plus its response schema when it has one). It is recorded on every LLM call so traces and scripted
-// fakes can tell prompt revisions apart. An unknown name returns "".
+// Version is the content hash of template name: the first 16 hex digits of the SHA-256 of its file
+// bytes, then its response schema when it has one, then every tool file of its operation
+// (templates/<op>_tool*.json and <op>_tool*.tmpl in name order, where <op> is the name up to the first
+// underscore, e.g. reflect_tools.json for reflect_system), since tool descriptions are prompt text too.
+// It is recorded on every LLM call so traces and scripted fakes can tell prompt revisions apart. An
+// unknown name returns "".
 func Version(name string) string {
 	raw, err := templatesFS.ReadFile(path.Join(dir, name+tmplExt))
 	if err != nil {
@@ -120,7 +128,29 @@ func Version(name string) string {
 	if schema, err := templatesFS.ReadFile(path.Join(dir, name+schemaExt)); err == nil {
 		h.Write(schema)
 	}
+	for _, file := range toolFiles(name) {
+		if b, err := templatesFS.ReadFile(file); err == nil {
+			h.Write(b)
+		}
+	}
 	return hex.EncodeToString(h.Sum(nil))[:versionLen]
+}
+
+// toolFiles lists the tool declarations and tool templates of name's operation, sorted.
+func toolFiles(name string) []string {
+	op, _, _ := strings.Cut(name, "_")
+	matches, err := fs.Glob(templatesFS, path.Join(dir, op+"_tool*"))
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, m := range matches {
+		if strings.HasSuffix(m, jsonExt) || strings.HasSuffix(m, tmplExt) {
+			files = append(files, m)
+		}
+	}
+	sort.Strings(files)
+	return files
 }
 
 // Schema returns the JSON Schema in templates/<name>.schema.json, the response format of a structured
@@ -133,6 +163,35 @@ func Schema(name string) (json.RawMessage, error) {
 // prompt text). A missing asset is domain.ErrInvalidArgument.
 func JSON(name string) (json.RawMessage, error) {
 	return readJSON(name + jsonExt)
+}
+
+// directiveRulesSlot is where a directive-aware done tool's descriptions take the numbered rule list.
+const directiveRulesSlot = "{directive_rules}"
+
+// DoneTool returns the done-tool asset name (one of the ReflectToolDone* names) ready to send: like
+// Hindsight's _build_done_tool_with_directives, the directive variants get the active directive rules
+// (ReflectToolDirectiveRules rendered with data) numbered into their answer and directive_compliance
+// descriptions. Assets without that slot are returned as JSON(name) returns them. Pick a directive
+// variant only when some directive has rules (the predicate reflect_system's DIRECTIVES block uses);
+// otherwise the list is empty.
+func DoneTool(name string, data *ReflectData) (json.RawMessage, error) {
+	raw, err := JSON(name)
+	if err != nil || !bytes.Contains(raw, []byte(directiveRulesSlot)) {
+		return raw, err
+	}
+	rules, err := Render(ReflectToolDirectiveRules, data)
+	if err != nil {
+		return nil, err
+	}
+	quoted, err := toJSON(rules)
+	if err != nil {
+		return nil, err
+	}
+	out := bytes.ReplaceAll(raw, []byte(directiveRulesSlot), []byte(quoted[1:len(quoted)-1]))
+	if !json.Valid(out) {
+		return nil, fmt.Errorf("prompts: done tool %s is not valid JSON after inserting the rules", name)
+	}
+	return json.RawMessage(out), nil
 }
 
 func readJSON(file string) (json.RawMessage, error) {

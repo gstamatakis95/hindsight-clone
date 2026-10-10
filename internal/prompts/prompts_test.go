@@ -2,6 +2,8 @@ package prompts
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,12 +43,16 @@ var dataFor = map[string]func() any{
 	MentalModelStructuredDeltaSystem: func() any { return &DeltaData{} },
 	MentalModelStructuredDeltaUser:   func() any { return &DeltaData{} },
 	MentalModelRefreshContext:        func() any { return &RefreshContextData{} },
+	ReflectToolDirectiveRules:        func() any { return &ReflectData{} },
 	"time_parse_system":              func() any { return &map[string]any{} },
 	"time_parse_user":                func() any { return &map[string]any{} },
 }
 
 // optionalTemplates may be registered before their template exists (owned by another work package).
 var optionalTemplates = map[string]bool{"time_parse_system": true, "time_parse_user": true}
+
+// emptyWhenZero are fragments that render nothing for zero data (the engine does not use them then).
+var emptyWhenZero = map[string]bool{ReflectToolDirectiveRules: true}
 
 // decodeFixture decodes testdata/<name>.json into the data type registered for name.
 func decodeFixture(name string) (any, error) {
@@ -133,7 +139,7 @@ func TestEveryTemplateRendersWithZeroData(t *testing.T) {
 			continue // reported by TestRegistryMatchesTemplates
 		}
 		data := newData()
-		if _, isMap := data.(*map[string]any); isMap {
+		if _, isMap := data.(*map[string]any); isMap || emptyWhenZero[name] {
 			continue
 		}
 		t.Run(name, func(t *testing.T) {
@@ -173,8 +179,11 @@ func TestBranchVariants(t *testing.T) {
 	for _, name := range []string{ExtractConcise, ExtractVerbose, ExtractVerbatim, ExtractCustom} {
 		variants = append(variants,
 			variant{name, &ExtractData{CausalLinks: false, Labels: labels}},
-			variant{name, &ExtractData{CausalLinks: true, FreeFormEntities: true, Labels: labels}})
+			variant{name, &ExtractData{CausalLinks: true, FreeFormEntities: true, Labels: labels, OptionalDimensions: true}})
 	}
+	variants = append(variants,
+		variant{ExtractUser, &ExtractData{AgentName: "Atlas"}},
+		variant{ExtractUser, &ExtractData{AgentName: "Atlas", Context: "support transcript"}})
 	for _, c := range []*ConsolidateCapacity{{Max: 3, Remaining: 0}, {Max: 3, Remaining: 1}, {Max: 9, Remaining: 9}} {
 		variants = append(variants, variant{ConsolidateUser, &ConsolidateData{Capacity: c, Facts: []SourceFact{{}}}})
 	}
@@ -345,5 +354,258 @@ func TestNoticePresent(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "MIT") && !strings.Contains(string(raw), "Permission is hereby granted") {
 		t.Fatal("NOTICE lacks the MIT license text")
+	}
+}
+
+// extractSystems are the extraction system templates, one per mode.
+var extractSystems = []string{ExtractConcise, ExtractVerbose, ExtractVerbatim, ExtractCustom}
+
+// mustRender renders name with data or fails the test.
+func mustRender(t *testing.T, name string, data any) string {
+	t.Helper()
+	out, err := Render(name, data)
+	if err != nil {
+		t.Fatalf("Render %s: %v", name, err)
+	}
+	return out
+}
+
+// TestExtractFactTypeMatchesHindsight checks every extraction schema offers Hindsight's fact_type labels
+// (the retain engine maps "assistant" to experience) and the prompts never ask for "experience".
+func TestExtractFactTypeMatchesHindsight(t *testing.T) {
+	for _, name := range extractSystems {
+		raw, err := Schema(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var schema struct {
+			Properties struct {
+				Facts struct {
+					Items struct {
+						Properties struct {
+							FactType struct {
+								Enum []string `json:"enum"`
+							} `json:"fact_type"`
+						} `json:"properties"`
+					} `json:"items"`
+				} `json:"facts"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatal(err)
+		}
+		if got := schema.Properties.Facts.Items.Properties.FactType.Enum; strings.Join(got, ",") != "world,assistant" {
+			t.Errorf("%s fact_type enum = %v, want [world assistant]", name, got)
+		}
+		out := mustRender(t, name, &ExtractData{})
+		if strings.Contains(out, `"experience"`) || strings.Contains(out, "**experience**") {
+			t.Errorf("%s still labels fact_type experience", name)
+		}
+	}
+}
+
+// TestConsolidateSourceMemoriesHaveNoIDs checks the rendered CONSOLIDATE input shows the ids the model may
+// copy (new facts, existing observations) and none for an observation's source memories.
+func TestConsolidateSourceMemoriesHaveNoIDs(t *testing.T) {
+	data, err := decodeFixture(ConsolidateUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := mustRender(t, ConsolidateUser, data)
+	ids := []string{
+		"[c3d4e5f6-a7b8-9012-cdef-123456789012]",
+		"[d4e5f6a7-b8c9-0123-defa-234567890123]",
+		`"id":"22222222-2222-2222-2222-222222222222"`,
+	}
+	for _, id := range ids {
+		if !strings.Contains(out, id) {
+			t.Errorf("output lacks %s", id)
+		}
+	}
+	const memory = `"source_memories":[{"text":"User walks Rex every morning."`
+	if strings.Count(out, `"id"`) != 1 || !strings.Contains(out, memory) {
+		t.Errorf("source memories must carry no id:\n%s", out)
+	}
+}
+
+// TestExtractOptionalDimensions checks Hindsight's optional-dimensions switch: off (the default) asks for
+// "N/A" and has no OPTIONAL FIELDS section; on asks for null and adds it.
+func TestExtractOptionalDimensions(t *testing.T) {
+	for _, name := range extractSystems {
+		off := mustRender(t, name, &ExtractData{})
+		if strings.Contains(off, "OPTIONAL FIELDS") {
+			t.Errorf("%s: OPTIONAL FIELDS rendered with the flag off", name)
+		}
+		on := mustRender(t, name, &ExtractData{OptionalDimensions: true})
+		if !strings.Contains(on, "OPTIONAL FIELDS") || strings.Count(on, `"N/A"`) != 1 {
+			t.Errorf("%s: flag on must add OPTIONAL FIELDS and mention \"N/A\" only there", name)
+		}
+		if name != ExtractVerbose && (!strings.Contains(off, `"where": Location if relevant. "N/A" if none.`) ||
+			!strings.Contains(on, `"where": Location if relevant. null if none.`)) {
+			t.Errorf("%s: the where placeholder does not follow the flag", name)
+		}
+		checkNullableDimensions(t, name)
+	}
+}
+
+// checkNullableDimensions checks the static schema of name accepts null for every dimension it has, which
+// the flag-on prompt relies on.
+func checkNullableDimensions(t *testing.T, name string) {
+	t.Helper()
+	raw, err := Schema(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties struct {
+			Facts struct {
+				Items struct {
+					Properties map[string]struct {
+						Type any `json:"type"`
+					} `json:"properties"`
+				} `json:"items"`
+			} `json:"facts"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	props := schema.Properties.Facts.Items.Properties
+	for _, dim := range []string{"when", "where", "who", "why"} {
+		p, ok := props[dim]
+		if !ok && name == ExtractVerbatim && dim == "why" {
+			continue
+		}
+		if got := fmt.Sprint(p.Type); got != "[string null]" {
+			t.Errorf("%s %s type = %s, want [string null]", name, dim, got)
+		}
+	}
+}
+
+// TestExtractNarrator checks Hindsight's narrator rule: absent without an agent name, and its Context
+// clause only when a context is given.
+func TestExtractNarrator(t *testing.T) {
+	const clause = "BUT the Context above takes precedence"
+	if out := mustRender(t, ExtractUser, &ExtractData{}); strings.Contains(out, "Narrator:") {
+		t.Errorf("narrator rendered without an agent name:\n%s", out)
+	}
+	out := mustRender(t, ExtractUser, &ExtractData{AgentName: "Atlas"})
+	if !strings.Contains(out, `Narrator: Atlas (the AI agent whose memory this is). By default, first-person `+
+		`statements like "I did X" are Atlas's own actions → classify as "assistant".`) || strings.Contains(out, clause) {
+		t.Errorf("narrator without context:\n%s", out)
+	}
+	out = mustRender(t, ExtractUser, &ExtractData{AgentName: "Atlas", Context: "a support call"})
+	if !strings.Contains(out, clause) {
+		t.Errorf("narrator with context lacks the precedence clause:\n%s", out)
+	}
+}
+
+// TestExtractCausalSectionGated checks the CAUSAL section renders only with causal links on, and never in
+// verbatim mode.
+func TestExtractCausalSectionGated(t *testing.T) {
+	for _, name := range extractSystems {
+		off := mustRender(t, name, &ExtractData{})
+		on := mustRender(t, name, &ExtractData{CausalLinks: true})
+		if strings.Contains(off, "CAUSAL RELATIONSHIPS") || strings.Contains(off, "caused_by") {
+			t.Errorf("%s: causal section rendered with causal links off", name)
+		}
+		if want := name != ExtractVerbatim; strings.Contains(on, "CAUSAL RELATIONSHIPS") != want {
+			t.Errorf("%s: causal section with causal links on = %v, want %v", name, !want, want)
+		}
+	}
+}
+
+// doneToolProps decodes the parameter descriptions of a done tool.
+func doneToolProps(t *testing.T, raw json.RawMessage) map[string]string {
+	t.Helper()
+	var tool struct {
+		Parameters struct {
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
+		} `json:"parameters"`
+	}
+	if err := json.Unmarshal(raw, &tool); err != nil {
+		t.Fatalf("%v\n%s", err, raw)
+	}
+	props := map[string]string{}
+	for k, v := range tool.Parameters.Properties {
+		props[k] = v.Description
+	}
+	return props
+}
+
+// TestDoneToolDirectiveRules checks DoneTool numbers the directive rules into the directive variants'
+// answer and directive_compliance descriptions, as Hindsight's _build_done_tool_with_directives does, and
+// leaves the other done tools as they are.
+func TestDoneToolDirectiveRules(t *testing.T) {
+	data, err := decodeFixture(ReflectToolDirectiveRules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rd, ok := data.(*ReflectData)
+	if !ok {
+		t.Fatalf("fixture decoded to %T", data)
+	}
+	const rules = "  1. **Tone**: Answer in a formal tone.\n" +
+		"  2. **Tone**: Never use emojis.\n" +
+		"  3. Cite \"sources\" when <unsure>."
+	if got := mustRender(t, ReflectToolDirectiveRules, rd); got != rules {
+		t.Fatalf("rules = %q", got)
+	}
+	for _, name := range []string{ReflectToolDoneDirectives, ReflectToolDoneDocumentDirectives} {
+		raw, err := DoneTool(name, rd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(directiveRulesSlot)) {
+			t.Errorf("%s keeps the rules slot", name)
+		}
+		props := doneToolProps(t, raw)
+		if !strings.Contains(props["directive_compliance"], "follows it:\n"+rules+"\n\nFormat:") {
+			t.Errorf("%s directive_compliance = %q", name, props["directive_compliance"])
+		}
+		if a, ok := props["answer"]; ok && !strings.HasSuffix(a, "MUST comply with ALL directives:\n"+rules) {
+			t.Errorf("%s answer = %q", name, a)
+		}
+	}
+	plain, err := DoneTool(ReflectToolDoneDocument, rd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := JSON(ReflectToolDoneDocument); !bytes.Equal(plain, want) {
+		t.Error("DoneTool changed a done tool without directive slots")
+	}
+}
+
+// TestJSONHelperKeepsHTML checks the json template helper does not escape <, > and &.
+func TestJSONHelperKeepsHTML(t *testing.T) {
+	got, err := toJSON("<a&b>")
+	if err != nil || got != `"<a&b>"` {
+		t.Fatalf("json = %q, %v", got, err)
+	}
+}
+
+// TestVersionCoversToolAssets checks Version of a reflect template also hashes the reflect tool files, and
+// that a template without tool files hashes just its template and schema.
+func TestVersionCoversToolAssets(t *testing.T) {
+	base := func(name string) string {
+		h := sha256.New()
+		for _, file := range []string{name + tmplExt, name + schemaExt} {
+			if b, err := templatesFS.ReadFile(path.Join(dir, file)); err == nil {
+				h.Write(b)
+			}
+		}
+		return hex.EncodeToString(h.Sum(nil))[:versionLen]
+	}
+	files := toolFiles(ReflectSystem)
+	if len(files) < 5 || !sort.StringsAreSorted(files) {
+		t.Fatalf("reflect tool files = %v", files)
+	}
+	if Version(ReflectSystem) == base(ReflectSystem) {
+		t.Error("Version(reflect_system) ignores the reflect tool assets")
+	}
+	if Version(DedupSystem) != base(DedupSystem) {
+		t.Error("Version(dedup_system) changed without tool assets")
 	}
 }

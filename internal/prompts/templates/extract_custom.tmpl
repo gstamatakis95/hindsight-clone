@@ -1,13 +1,20 @@
 {{- /*
 Source: Hindsight hindsight_api/engine/retain/fact_extraction.py — CUSTOM_FACT_EXTRACTION_PROMPT
 (_BASE_FACT_EXTRACTION_PROMPT with the bank's custom instructions as the guidelines block and no examples),
-CAUSAL_RELATIONSHIPS_SECTION, OPTIONAL_DIMENSIONS_SECTION and _build_labels_prompt_section. memd changes:
-fact_type is world|experience, entities are {name, kind}, labels are {key, value} pairs, time_expression
-added, causal links are caused_by indexes; language rules and attachments dropped. Hindsight falls back to
-the concise prompt when no custom instructions are set; the engine does that by picking extract_concise.
-Response schema: extract_custom.schema.json.
-Data (ExtractData): .CustomPrompt, .CausalLinks, .FreeFormEntities, .Labels.
+CAUSAL_RELATIONSHIPS_SECTION, OPTIONAL_DIMENSIONS_SECTION and _build_labels_prompt_section.
+memd changes: fact_type is world|assistant as in Hindsight (the retain engine maps "assistant" to
+experience), entities are {name, kind}, labels are {key, value} pairs, time_expression added, causal links
+are caused_by indexes; language rules and attachments dropped.
+Gates (as in Hindsight's _build_extraction_prompt_and_schema): the CAUSAL section renders only with
+.CausalLinks (the schema keeps caused_by; the engine ignores it when causal links are off).
+.OptionalDimensions (Hindsight's retain_optional_fact_dimensions, default off) swaps the "N/A" placeholder
+for null and adds the OPTIONAL FIELDS section; the schema types when/where/who/why as string-or-null in both
+modes so it can stay static.
+Hindsight falls back to the concise prompt when no custom instructions are set; the engine does that by
+picking extract_concise. Response schema: extract_custom.schema.json.
+Data (ExtractData): .CustomPrompt, .CausalLinks, .OptionalDimensions, .FreeFormEntities, .Labels.
 */ -}}
+{{- $na := `"N/A"`}}{{if .OptionalDimensions}}{{$na = "null"}}{{end -}}
 Extract SIGNIFICANT facts from text. Be SELECTIVE - only extract facts worth remembering long-term.
 
 ══════════════════════════════════════════════════════════════════════════
@@ -21,10 +28,10 @@ FACT FORMAT - BE CONCISE
 ══════════════════════════════════════════════════════════════════════════
 
 1. "what": Core fact - concise but complete (1-2 sentences max)
-2. "when": Temporal info if mentioned. null if none. Use day name when known.
-3. "where": Location if relevant. null if none.
-4. "who": People involved with relationships. null if just general info.
-5. "why": Context/significance ONLY if important. null if obvious.
+2. "when": Temporal info if mentioned. {{$na}} if none. Use day name when known.
+3. "where": Location if relevant. {{$na}} if none.
+4. "who": People involved with relationships. {{$na}} if just general info.
+5. "why": Context/significance ONLY if important. {{$na}} if obvious.
 
 CONCISENESS: Capture the essence, not every word. One good sentence beats three mediocre ones.
 
@@ -46,7 +53,7 @@ fact_kind:
 
 fact_type:
 - "world": Objective/external facts, including the user's preferences, rules, corrections, constraints, plans, traits, or context. These stay "world" even when the user states them during an assistant interaction (e.g., "User prefers browser_navigate over web_search", "User corrected the project deadline").
-- "experience": Actions, experiences, or observations the assistant/agent actually performed (e.g., "I changed X", "I discovered Y", "I debugged Z"). Use this for the assistant/agent doing, trying, learning, deciding, recommending, or responding — not merely for user facts mentioned in conversation.
+- "assistant": Actions, experiences, or observations the assistant/agent actually performed (e.g., "I changed X", "I discovered Y", "I debugged Z"). Use this for the assistant/agent doing, trying, learning, deciding, recommending, or responding — not merely for user facts mentioned in conversation.
 
 ══════════════════════════════════════════════════════════════════════════
 TEMPORAL HANDLING
@@ -83,11 +90,12 @@ Always include "user" when fact is about the user.
 {{- template "labels" .}}
 
 {{- define "causal"}}
+{{- if .CausalLinks}}
 
 ══════════════════════════════════════════════════════════════════════════
 CAUSAL RELATIONSHIPS
 ══════════════════════════════════════════════════════════════════════════
-{{if .CausalLinks}}
+
 Link facts with caused_by (max 2 per fact): the 0-based indexes of EARLIER facts in your "facts" array
 that caused this fact. Every index must be less than this fact's own index.
 
@@ -95,12 +103,11 @@ Example: "Lost job → couldn't pay rent → moved apartment"
 - Fact 0: Lost job, caused_by: []
 - Fact 1: Couldn't pay rent, caused_by: [0]
 - Fact 2: Moved apartment, caused_by: [1]
-{{- else}}
-Causal links are disabled for this bank: always return "caused_by" as [].
 {{- end}}
 {{- end}}
 
 {{- define "optional"}}
+{{- if .OptionalDimensions}}
 
 ══════════════════════════════════════════════════════════════════════════
 OPTIONAL FIELDS
@@ -109,6 +116,7 @@ OPTIONAL FIELDS
 "when", "where", "who" and "why" may be null. Write null — not "N/A" — when the
 text states no value for the fact you are writing, and never carry over a value
 the text states about a different subject.
+{{- end}}
 {{- end}}
 
 {{- define "labels"}}

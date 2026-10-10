@@ -2,11 +2,16 @@
 Source: Hindsight hindsight_api/engine/retain/fact_extraction.py — VERBATIM_FACT_EXTRACTION_PROMPT
 (_BASE_FACT_EXTRACTION_PROMPT + _VERBATIM_GUIDELINES), the VerbatimExtractedFact field descriptions,
 OPTIONAL_DIMENSIONS_SECTION and _build_labels_prompt_section. The chunk text is stored as the fact text in
-code; the model returns metadata only, so the "what"/"why" dimensions and causal links are omitted. memd
-changes: fact_type is world|experience, entities are {name, kind}, labels are {key, value} pairs,
-time_expression added; language rules dropped. Response schema: extract_verbatim.schema.json.
-Data (ExtractData): .FreeFormEntities, .Labels (.CausalLinks is ignored: verbatim has no causal links).
+code; the model returns metadata only, so the "what"/"why" dimensions and causal links are omitted (as in
+Hindsight, .CausalLinks is ignored). memd changes: fact_type is world|assistant as in Hindsight (the retain
+engine maps "assistant" to experience), entities are {name, kind}, labels are {key, value} pairs,
+time_expression added; language rules dropped. .OptionalDimensions (Hindsight's
+retain_optional_fact_dimensions, default off) swaps the "N/A" placeholder for null and adds the OPTIONAL
+FIELDS section; the schema types when/where/who as string-or-null in both modes so it can stay static.
+Response schema: extract_verbatim.schema.json.
+Data (ExtractData): .OptionalDimensions, .FreeFormEntities, .Labels.
 */ -}}
+{{- $na := `"N/A"`}}{{if .OptionalDimensions}}{{$na = "null"}}{{end -}}
 Extract metadata from text. The text itself is stored exactly as written.
 
 ══════════════════════════════════════════════════════════════════════════
@@ -21,15 +26,15 @@ RULES:
 - Extract all entities (people, places, organizations, objects, concepts).
 - Extract temporal information (occurred_start, occurred_end, fact_kind, when, time_expression).
 - Extract location (where) and people (who).
-- fact_type: use "world" for user preferences, rules, corrections, constraints, traits, and other objective facts, even when stated during an assistant interaction. Use "experience" only for actions or experiences the assistant/agent actually performed.
+- fact_type: use "world" for user preferences, rules, corrections, constraints, traits, and other objective facts, even when stated during an assistant interaction. Use "assistant" only for actions or experiences the assistant/agent actually performed.
 
 ══════════════════════════════════════════════════════════════════════════
 FIELDS
 ══════════════════════════════════════════════════════════════════════════
 
-1. "when": When it happened. null if unknown. Use day name when known.
-2. "where": Location if relevant. null if none.
-3. "who": People involved with relationships. null if general.
+1. "when": When it happened. {{$na}} if unknown. Use day name when known.
+2. "where": Location if relevant. {{$na}} if none.
+3. "who": People involved with relationships. {{$na}} if general.
 
 ══════════════════════════════════════════════════════════════════════════
 COREFERENCE RESOLUTION
@@ -49,7 +54,7 @@ fact_kind:
 
 fact_type:
 - "world": Objective/external facts, including the user's preferences, rules, corrections, constraints, plans, traits, or context.
-- "experience": First-person actions, experiences, or observations the assistant/agent actually performed.
+- "assistant": First-person actions, experiences, or observations the assistant/agent actually performed.
 
 ══════════════════════════════════════════════════════════════════════════
 TEMPORAL HANDLING
@@ -78,6 +83,7 @@ Use an empty array [] only when the text truly names nothing.
 
 Include: people names, organizations, places, key objects, abstract concepts (career, friendship, etc.)
 Always include "user" when the text is about the user.
+{{- if .OptionalDimensions}}
 
 ══════════════════════════════════════════════════════════════════════════
 OPTIONAL FIELDS
@@ -85,36 +91,8 @@ OPTIONAL FIELDS
 
 "when", "where" and "who" may be null. Write null — not "N/A" — when the text
 states no value, and never carry over a value the text states about a different subject.
+{{- end}}
 {{- template "labels" .}}
-
-{{- define "causal"}}
-
-══════════════════════════════════════════════════════════════════════════
-CAUSAL RELATIONSHIPS
-══════════════════════════════════════════════════════════════════════════
-{{if .CausalLinks}}
-Link facts with caused_by (max 2 per fact): the 0-based indexes of EARLIER facts in your "facts" array
-that caused this fact. Every index must be less than this fact's own index.
-
-Example: "Lost job → couldn't pay rent → moved apartment"
-- Fact 0: Lost job, caused_by: []
-- Fact 1: Couldn't pay rent, caused_by: [0]
-- Fact 2: Moved apartment, caused_by: [1]
-{{- else}}
-Causal links are disabled for this bank: always return "caused_by" as [].
-{{- end}}
-{{- end}}
-
-{{- define "optional"}}
-
-══════════════════════════════════════════════════════════════════════════
-OPTIONAL FIELDS
-══════════════════════════════════════════════════════════════════════════
-
-"when", "where", "who" and "why" may be null. Write null — not "N/A" — when the
-text states no value for the fact you are writing, and never carry over a value
-the text states about a different subject.
-{{- end}}
 
 {{- define "labels"}}
 {{- if .Labels}}

@@ -6,7 +6,7 @@
     "properties": {
       "answer": {
         "type": "string",
-        "description": "Your response as well-formatted markdown. Use headers, lists, bold/italic, and code blocks for clarity. NEVER include memory IDs, UUIDs, or 'Memory references' in this text - put IDs only in memory_ids array. MANDATORY: Your answer MUST comply with ALL directives listed in the DIRECTIVES section of the system prompt."
+        "description": "Your response as well-formatted markdown. Use headers, lists, bold/italic, and code blocks for clarity. NEVER include memory IDs, UUIDs, or 'Memory references' in this text - put IDs only in memory_ids array. MANDATORY: Your answer MUST comply with ALL directives:\n{directive_rules}"
       },
       "memory_ids": {
         "type": "array",
@@ -25,7 +25,7 @@
       },
       "directive_compliance": {
         "type": "string",
-        "description": "REQUIRED: Confirm your answer complies with ALL directives in the DIRECTIVES section of the system prompt. List each directive and how your answer follows it. Format: 'Directive 1: [how answer complies]. Directive 2: [how answer complies]...'"
+        "description": "REQUIRED: Confirm your answer complies with ALL directives. List each directive and how your answer follows it:\n{directive_rules}\n\nFormat: 'Directive 1: [how answer complies]. Directive 2: [how answer complies]...'"
       }
     },
     "required": ["answer", "directive_compliance"]

@@ -14,14 +14,14 @@
           "entities", "labels"
         ],
         "properties": {
-          "when": {"type": ["string", "null"], "description": "When it happened. null if unknown."},
-          "where": {"type": ["string", "null"], "description": "Location if relevant. null if none."},
-          "who": {"type": ["string", "null"], "description": "People involved with relationships. null if general."},
+          "when": {"type": ["string", "null"], "description": "When it happened. 'N/A' if unknown."},
+          "where": {"type": ["string", "null"], "description": "Location if relevant. 'N/A' if none."},
+          "who": {"type": ["string", "null"], "description": "People involved with relationships. 'N/A' if general."},
           "fact_kind": {"type": "string", "enum": ["event", "conversation"], "description": "'event' or 'conversation'"},
           "fact_type": {
             "type": "string",
-            "enum": ["world", "experience"],
-            "description": "'world' = objective/external facts. 'experience' = first-person actions, experiences, or observations by the speaker."
+            "enum": ["world", "assistant"],
+            "description": "'world' = objective/external facts. 'assistant' = first-person actions, experiences, or observations by the speaker."
           },
           "occurred_start": {"type": ["string", "null"], "description": "ISO 8601 timestamp for events; null otherwise"},
           "occurred_end": {"type": ["string", "null"], "description": "ISO 8601 timestamp for event end; null otherwise"},

@@ -20,8 +20,8 @@ const (
 	// ExtractCustom is the custom-mode extraction system prompt, built around
 	// BankConfig.CustomExtractionPrompt; reads ExtractData.
 	ExtractCustom = "extract_custom"
-	// ExtractUser is the extraction user message for every mode (mission, date, context, hints, chunk);
-	// reads ExtractData.
+	// ExtractUser is the extraction user message for every mode (mission, date, context, narrator, hints,
+	// chunk); reads ExtractData.
 	ExtractUser = "extract_user"
 
 	// ConsolidateSystem is the CONSOLIDATE system prompt (create / update decisions); reads ConsolidateData.
@@ -72,21 +72,26 @@ const (
 	// MentalModelRefreshContext is the reflect context an agentic mental-model refresh passes; reads
 	// RefreshContextData.
 	MentalModelRefreshContext = "mm_refresh_context"
+
+	// ReflectToolDirectiveRules is the numbered directive rule list DoneTool puts into the directive-aware
+	// done tools; reads ReflectData. Empty when no directive has rules.
+	ReflectToolDirectiveRules = "reflect_tool_directive_rules"
 )
 
-// JSON asset names, read with JSON(name).
+// JSON asset names, read with JSON(name); the done variants are read with DoneTool(name, data).
 const (
 	// ReflectTools is the reflect tool list: an array of {"name","description","parameters"} for
 	// search_mental_models, read_mental_models, search_observations, recall, expand and done.
 	ReflectTools = "reflect_tools"
 	// ReflectToolDoneDirectives is the done tool ({"name","description","parameters"}) that replaces
-	// the plain done when directives apply; it adds a required directive_compliance argument.
+	// the plain done when directives apply; it adds a required directive_compliance argument. Its
+	// descriptions hold a {directive_rules} slot, so read it with DoneTool, which fills in the rules.
 	ReflectToolDoneDirectives = "reflect_tool_done_directives"
 	// ReflectToolDoneDocument is the done tool that replaces the plain done when the answer is stored
 	// as a document (agentic mental-model refresh); it takes a structured "document" instead of "answer".
 	ReflectToolDoneDocument = "reflect_tool_done_document"
 	// ReflectToolDoneDocumentDirectives is the document-mode done tool for when directives apply: a
-	// structured "document" plus the required directive_compliance argument.
+	// structured "document" plus the required directive_compliance argument. Read it with DoneTool.
 	ReflectToolDoneDocumentDirectives = "reflect_tool_done_document_directives"
 )
 
@@ -94,8 +99,17 @@ const (
 type ExtractData struct {
 	// CustomPrompt is BankConfig.CustomExtractionPrompt, the guidelines block of ExtractCustom.
 	CustomPrompt string `json:"custom_prompt"`
-	// CausalLinks is RetainTuning.ExtractCausalLinks; true adds the causal-relations section.
+	// CausalLinks is RetainTuning.ExtractCausalLinks; true adds the causal-relations section. When false
+	// the section is omitted (as in Hindsight) and the engine ignores the schema's caused_by.
 	CausalLinks bool `json:"causal_links"`
+	// OptionalDimensions is Hindsight's retain_optional_fact_dimensions (default off; memd has no knob yet).
+	// False asks for "N/A" in empty when/where/who/why; true asks for null and adds the OPTIONAL FIELDS
+	// section. The schemas type those fields as string-or-null either way, so only the prompt changes;
+	// the engine treats "N/A" and null alike.
+	OptionalDimensions bool `json:"optional_dimensions"`
+	// AgentName is the narrator, the AI agent whose memory this is; non-empty adds Hindsight's narrator
+	// rule (first-person statements are the agent's own, fact_type "assistant") to ExtractUser.
+	AgentName string `json:"agent_name"`
 	// FreeFormEntities is BankConfig.EntitiesAllowFreeForm resolved (nil = true); false with labels set
 	// is labels-only mode. It only matters when Labels is non-empty.
 	FreeFormEntities bool `json:"free_form_entities"`
@@ -135,8 +149,8 @@ type ConsolidateCapacity struct {
 	Remaining int `json:"remaining"`
 }
 
-// SourceFact is one fact or observation shown to a prompt. Its JSON form is what consolidation shows
-// the model inside an observation's source_memories.
+// SourceFact is one fact or observation shown to a prompt with its id (consolidation's new facts,
+// synthesize and the deltas).
 type SourceFact struct {
 	// ID is the unit id the model copies into its response.
 	ID string `json:"id"`
@@ -169,7 +183,23 @@ type ConsolidateObservation struct {
 	// MentionedAt is the latest mention across its sources; nil = unknown.
 	MentionedAt *time.Time `json:"mentioned_at,omitempty"`
 	// SourceMemories are some of its source facts (bounded by the per-observation token cap).
-	SourceMemories []SourceFact `json:"source_memories,omitempty"`
+	SourceMemories []SourceMemory `json:"source_memories,omitempty"`
+}
+
+// SourceMemory is one source fact of an existing observation as CONSOLIDATE shows it (rendered as JSON).
+// Like Hindsight's _build_observations_for_llm it carries no id: source_fact_ids may only name the new
+// facts of the batch, so the model is never shown an id it must not copy.
+type SourceMemory struct {
+	// Text is the unit text.
+	Text string `json:"text"`
+	// Context is the retain item's context, if any.
+	Context string `json:"context,omitempty"`
+	// OccurredStart is when the event started; nil = unknown.
+	OccurredStart *time.Time `json:"occurred_start,omitempty"`
+	// OccurredEnd is when the event ended; nil = unknown.
+	OccurredEnd *time.Time `json:"occurred_end,omitempty"`
+	// MentionedAt is when the source stated the fact; nil = unknown.
+	MentionedAt *time.Time `json:"mentioned_at,omitempty"`
 }
 
 // DedupData is read by DedupSystem and DedupUser.
@@ -180,7 +210,8 @@ type DedupData struct {
 	Existing string `json:"existing"`
 }
 
-// ReflectData is read by ReflectSystem, ReflectDoneRequest, ReflectFinal and ReflectFinalUser.
+// ReflectData is read by ReflectSystem, ReflectDoneRequest, ReflectFinal, ReflectFinalUser and
+// ReflectToolDirectiveRules.
 type ReflectData struct {
 	// BankName is the bank's display name; empty = not shown.
 	BankName string `json:"bank_name"`

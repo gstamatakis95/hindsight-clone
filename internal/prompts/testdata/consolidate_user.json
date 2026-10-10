@@ -19,7 +19,6 @@
       "mentioned_at": "2024-11-02T10:00:00Z",
       "source_memories": [
         {
-          "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
           "text": "User walks Rex every morning.",
           "context": "morning chat",
           "mentioned_at": "2024-11-02T10:00:00Z"

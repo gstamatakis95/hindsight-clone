@@ -1,8 +1,10 @@
 {{- /*
 Source: Hindsight hindsight_api/engine/retain/fact_extraction.py — _build_user_message and
 _retain_mission_preamble (the retain mission rides in the user message so the system prompt stays
-bank-agnostic). memd changes: caller entity hints added; chunk numbering, narrator and attachments dropped.
-Data (ExtractData): .Mission, .MentionedAt, .Context, .Metadata, .Hints, .Text.
+bank-agnostic). The narrator rule (Hindsight's narrator_section) is rendered here, after Context, because its
+"Context above takes precedence" clause refers to that line. memd changes: caller entity hints added; chunk
+numbering and attachments dropped.
+Data (ExtractData): .Mission, .MentionedAt, .Context, .Metadata, .AgentName, .Hints, .Text.
 */ -}}
 {{- with .Mission -}}
 ══════════════════════════════════════════════════════════════════════════
@@ -21,6 +23,10 @@ Metadata:
 {{- range $k, $v := .Metadata}}
   {{$k}}: {{$v}}
 {{- end}}
+{{- end}}
+{{- with .AgentName}}
+Narrator: {{.}} (the AI agent whose memory this is). By default, first-person statements like "I did X" are {{.}}'s own actions → classify as "assistant".
+{{- if $.Context}} BUT the Context above takes precedence: if it identifies a different first-person speaker (e.g. a user or customer in a transcript), attribute those statements to that speaker and classify them as "world", not "assistant".{{end}}
 {{- end}}
 {{- if .Hints}}
 Known entities (when the text refers to one of these, name it exactly as written here):

@@ -65,7 +65,7 @@
       },
       "directive_compliance": {
         "type": "string",
-        "description": "REQUIRED: Confirm your answer complies with ALL directives in the DIRECTIVES section of the system prompt. List each directive and how your answer follows it. Format: 'Directive 1: [how answer complies]. Directive 2: [how answer complies]...'"
+        "description": "REQUIRED: Confirm your answer complies with ALL directives. List each directive and how your answer follows it:\n{directive_rules}\n\nFormat: 'Directive 1: [how answer complies]. Directive 2: [how answer complies]...'"
       }
     },
     "required": [

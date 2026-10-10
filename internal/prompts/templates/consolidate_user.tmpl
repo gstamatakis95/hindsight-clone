@@ -2,6 +2,8 @@
 Source: Hindsight hindsight_api/engine/consolidation/prompts.py — build_consolidation_input (_DEFAULT_MISSION,
 build_mission_section, _SPLIT_INPUT_SECTION) and the capacity note and fact lines of
 consolidator.py:_consolidate_batch_with_llm. memd has no DELETE, so a full scope may only UPDATE.
+Only new facts show their [id] (what source_fact_ids copies) and observations their id (observation_id);
+source_memories carry no id, as in Hindsight's _build_observations_for_llm.
 Data (ConsolidateData): .Mission, .Capacity (.Max, .Remaining), .Facts, .Observations (rendered as JSON).
 */ -}}
 ## MISSION
