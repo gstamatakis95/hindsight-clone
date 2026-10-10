@@ -12,7 +12,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-02 | Fakes | in progress | wp/WP-02-fakes | — | — | — | — |
 | WP-03 | Gateway and S3 adapters | in progress | wp/WP-03-gateway-s3 | — | — | — | — |
 | WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
-| WP-05 | Worker runtime | ready | — | — | — | — | — |
+| WP-05 | Worker runtime | in progress | wp/WP-05-worker-runtime | — | — | — | — |
 | WP-06 | Server shell | in progress | wp/WP-06-server-shell | — | — | — | — |
 | WP-07 | Eval harness | in progress | wp/WP-07-eval | — | — | — | — |
 | WP-08 | Retain engine | waiting | — | — | WP-02, WP-04 | — | — |
@@ -78,3 +78,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 user said continue: Phase 1 started. WP-01, 02, 03, 04, 06, 07 workers launched in parallel worktrees.
   Decision-note number ranges per WP: WP-0N uses N00-N99. WP-05 launch blocked by the auto-mode permission
   classifier; awaiting the user.
+- 2026-10-10 WP-05 launch retried at the user's request; worker running.
