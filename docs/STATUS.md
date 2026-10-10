@@ -113,3 +113,13 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   reflect.enabled_tools, observation_scopes.custom). Without it an explicit clear was lost when saved to jsonb
   and the tenant value came back (data loss). Checked: [] survives the round trip; nil stays nil.
 - 2026-10-10 note for WP-08/09: timex.TimeNormalizer methods take the resolved BankConfig (decision 400).
+- 2026-10-10 WP-06 handed in (1d86a70); reviewer spawned. Ruling: the .mockery.yaml line for internal/server is
+  accepted (not frozen).
+- Carried forward (WP-06): 29 RPCs sit behind 7 server-declared interfaces with no implementation yet
+  (TenantAdmin, BankAdmin, DirectiveAdmin, DocumentAdmin, ObservationAdmin, MentalModelAdmin, OperationReader).
+  Plan: implement them in WP-13 (tenant/bank/directive/document/observation admin), WP-12 (MentalModelAdmin)
+  and WP-14 (OperationReader, wiring). ListDocuments, ListScopes, ListMentalModels and DeleteFolder need
+  port.Reader methods, so expect one batched CCR at the start of Phase 2. Override validation must accept the
+  RPC names the server passes (Retain, Recall, Reflect, UpdateMemory, Consolidate, ReprocessDocument,
+  PreviewPrompt, CreateMentalModel, RefreshMentalModel); check this against WP-04 at WP-14.
+  CreateBankFromTemplate drops `name`: WP-13 to extend TemplateCodec.Create.
