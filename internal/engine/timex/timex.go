@@ -2,7 +2,6 @@ package timex
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,9 +35,9 @@ func NewNormalizer(llm port.LLM, router port.ModelRouter, clock port.Clock) Time
 	return &normalizer{llm: llm, router: router, clock: clock}
 }
 
-// Normalize implements TimeNormalizer. A fallback failure that retrying cannot fix (an invalid argument
-// such as an unbound TIME_PARSE slot, or an undecodable answer) is logged and leaves the fact's dates
-// unset; any other failure, cancellation included, is returned so the job retries.
+// Normalize implements TimeNormalizer. A retain never fails on dates (as in Hindsight): any fallback
+// failure (unbound slot, gateway unavailable, persistently invalid output, ...) is logged and leaves the
+// fact's dates unset. Only the caller's own cancellation or deadline is returned.
 func (n *normalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact,
 	ref time.Time,
 ) error {
@@ -50,10 +49,10 @@ func (n *normalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *do
 	if !ok {
 		var err error
 		if w, err = n.fallback(ctx, cfg, f.TimeExpression, "expression", ref); err != nil {
-			if ctx.Err() != nil || !permanent(err) {
+			if callerDone(ctx, err) {
 				return err
 			}
-			slog.Default().WarnContext(ctx, "timex: time_parse failed permanently; fact keeps no dates",
+			slog.Default().WarnContext(ctx, "timex: time_parse failed; fact keeps no dates",
 				"expression", f.TimeExpression, "error", err)
 			return nil
 		}
@@ -82,19 +81,18 @@ func (n *normalizer) QueryWindow(ctx context.Context, cfg domain.BankConfig, que
 	if err == nil {
 		return w, nil
 	}
-	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+	if callerDone(ctx, err) {
 		return nil, err
 	}
 	slog.Default().WarnContext(ctx, "timex: time_parse failed; query gets no time constraint", "error", err)
 	return nil, nil
 }
 
-// permanent reports whether a fallback error cannot be fixed by retrying: an invalid argument (an unbound
-// TIME_PARSE slot, a malformed request) or a model answer that does not decode.
-func permanent(err error) bool {
-	var syntaxErr *json.SyntaxError
-	var typeErr *json.UnmarshalTypeError
-	return errors.Is(err, domain.ErrInvalidArgument) || errors.As(err, &syntaxErr) || errors.As(err, &typeErr)
+// callerDone reports whether a fallback error is the caller's own cancellation or deadline, the only
+// error timex passes on. A gateway's per-call timeout (ErrUnavailable wrapping DeadlineExceeded under a
+// live ctx) is not.
+func callerDone(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled)
 }
 
 // reference is ref, or the clock's now when ref is zero.
