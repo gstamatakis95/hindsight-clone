@@ -166,7 +166,9 @@ func (s *bankServer) ListTags(ctx context.Context, req *pb.ListTagsRequest) (*pb
 }
 
 // PreviewPrompt renders the messages an operation would send, with request overrides on top.
-func (s *bankServer) PreviewPrompt(ctx context.Context, req *pb.PreviewPromptRequest) (*pb.PreviewPromptResponse, error) {
+func (s *bankServer) PreviewPrompt(
+	ctx context.Context, req *pb.PreviewPromptRequest,
+) (*pb.PreviewPromptResponse, error) {
 	if s.d.Previewer == nil {
 		return nil, notWired("Deps.Previewer")
 	}

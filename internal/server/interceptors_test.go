@@ -25,13 +25,19 @@ func TestTenantInterceptor(t *testing.T) {
 		{"ok", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, "acme"), codes.OK, "acme"},
 		{"missing", "/memory.v1.MemoryService/Recall", nil, codes.InvalidArgument, ""},
 		{"empty", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, ""), codes.InvalidArgument, ""},
-		{"repeated", "/memory.v1.MemoryService/Recall",
-			metadata.Pairs(TenantHeader, "a", TenantHeader, "b"), codes.InvalidArgument, ""},
+		{
+			"repeated", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, "a", TenantHeader, "b"), codes.InvalidArgument, "",
+		},
 		{"slash", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, "a/b"), codes.InvalidArgument, ""},
-		{"control char", "/memory.v1.MemoryService/Recall",
-			metadata.Pairs(TenantHeader, "a\nb"), codes.InvalidArgument, ""},
-		{"too long", "/memory.v1.MemoryService/Recall",
-			metadata.Pairs(TenantHeader, strings.Repeat("x", 257)), codes.InvalidArgument, ""},
+		{
+			"control char", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, "a\nb"), codes.InvalidArgument, "",
+		},
+		{
+			"too long", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, strings.Repeat("x", 257)), codes.InvalidArgument, "",
+		},
 		{"health needs none", "/grpc.health.v1.Health/Check", nil, codes.OK, ""},
 	}
 	for _, tt := range tests {

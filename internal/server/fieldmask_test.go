@@ -2,14 +2,13 @@ package server
 
 import (
 	"errors"
+	"memd/internal/domain"
 	"reflect"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
-
-	"memd/internal/domain"
 
 	pb "memd/gen/memory/v1"
 )
@@ -42,24 +41,40 @@ func TestFieldMaskConfigPatch(t *testing.T) {
 		mask  *fieldmaskpb.FieldMask
 		want  func(c *domain.BankConfig)
 	}{
-		{"replace scalar", &pb.BankConfig{RetainMission: "new"}, mask("retain_mission"),
-			func(c *domain.BankConfig) { c.RetainMission = "new" }},
-		{"unset value clears", &pb.BankConfig{}, mask("dedup_threshold"),
-			func(c *domain.BankConfig) { c.DedupThreshold = nil }},
-		{"nested leaf only", &pb.BankConfig{Recall: &pb.RecallConfig{RrfK: ptr(int32(10))}}, mask("recall.rrf_k"),
-			func(c *domain.BankConfig) { c.Recall = &domain.RecallConfig{RRFK: ptr(10), RecencyAlpha: ptr(0.2)} }},
-		{"whole message", &pb.BankConfig{Recall: &pb.RecallConfig{RrfK: ptr(int32(10))}}, mask("recall"),
-			func(c *domain.BankConfig) { c.Recall = &domain.RecallConfig{RRFK: ptr(10)} }},
-		{"empty list is an explicit clear", &pb.BankConfig{}, mask("models"),
-			func(c *domain.BankConfig) { c.Models = []domain.SlotBinding{} }},
-		{"empty nested list is an explicit clear", &pb.BankConfig{}, mask("recall.enabled_strategies"),
+		{
+			"replace scalar", &pb.BankConfig{RetainMission: "new"}, mask("retain_mission"),
+			func(c *domain.BankConfig) { c.RetainMission = "new" },
+		},
+		{
+			"unset value clears", &pb.BankConfig{}, mask("dedup_threshold"),
+			func(c *domain.BankConfig) { c.DedupThreshold = nil },
+		},
+		{
+			"nested leaf only", &pb.BankConfig{Recall: &pb.RecallConfig{RrfK: ptr(int32(10))}}, mask("recall.rrf_k"),
+			func(c *domain.BankConfig) { c.Recall = &domain.RecallConfig{RRFK: ptr(10), RecencyAlpha: ptr(0.2)} },
+		},
+		{
+			"whole message", &pb.BankConfig{Recall: &pb.RecallConfig{RrfK: ptr(int32(10))}}, mask("recall"),
+			func(c *domain.BankConfig) { c.Recall = &domain.RecallConfig{RRFK: ptr(10)} },
+		},
+		{
+			"empty list is an explicit clear", &pb.BankConfig{}, mask("models"),
+			func(c *domain.BankConfig) { c.Models = []domain.SlotBinding{} },
+		},
+		{
+			"empty nested list is an explicit clear", &pb.BankConfig{}, mask("recall.enabled_strategies"),
 			func(c *domain.BankConfig) {
 				c.Recall = &domain.RecallConfig{RRFK: ptr(60), RecencyAlpha: ptr(0.2), EnabledStrategies: []string{}}
-			}},
-		{"no mask = populated fields", &pb.BankConfig{ReflectMission: "r"}, nil,
-			func(c *domain.BankConfig) { c.ReflectMission = "r" }},
-		{"unmasked fields ignored", &pb.BankConfig{RetainMission: "x", ReflectMission: "r"}, mask("reflect_mission"),
-			func(c *domain.BankConfig) { c.ReflectMission = "r" }},
+			},
+		},
+		{
+			"no mask = populated fields", &pb.BankConfig{ReflectMission: "r"}, nil,
+			func(c *domain.BankConfig) { c.ReflectMission = "r" },
+		},
+		{
+			"unmasked fields ignored", &pb.BankConfig{RetainMission: "x", ReflectMission: "r"}, mask("reflect_mission"),
+			func(c *domain.BankConfig) { c.ReflectMission = "r" },
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -135,7 +150,9 @@ func TestFieldMaskSpecPatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cur := domain.MentalModelSpec{ID: "m", Name: "old", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{KeepTrace: true}}
+	cur := domain.MentalModelSpec{
+		ID: "m", Name: "old", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{KeepTrace: true},
+	}
 	got, err := patch(cur)
 	if err != nil {
 		t.Fatal(err)

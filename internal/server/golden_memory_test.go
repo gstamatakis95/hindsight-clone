@@ -1,6 +1,11 @@
 package server
 
 import (
+	"memd/internal/domain"
+	"memd/internal/engine/curate"
+	"memd/internal/engine/recall"
+	"memd/internal/engine/retain"
+	"memd/internal/port"
 	"reflect"
 	"testing"
 	"time"
@@ -8,12 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"memd/internal/domain"
-	"memd/internal/engine/curate"
-	"memd/internal/engine/recall"
 	reflecteng "memd/internal/engine/reflect"
-	"memd/internal/engine/retain"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -157,7 +157,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		ResponseSchemaJson: `{"type":"object"}`,
 		ApplyAllDirectives: true,
 		ExtraDirectives: []*pb.Directive{{
-			Id: "dir-1", Name: "dir-name", Rules: "be brief", Tags: []string{"dir-tag"}, Active: true,
+			Id: "dir-1", Name: "dir-name", Rules: []string{"be brief"}, Tags: []string{"dir-tag"}, Active: true,
 		}},
 		Include:   &pb.ReflectInclude{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
 		QueryTime: timestamppb.New(goldenTime(5)),
@@ -177,7 +177,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		ResponseSchemaJSON: `{"type":"object"}`,
 		ApplyAllDirectives: true,
 		ExtraDirectives: []domain.Directive{{
-			ID: "dir-1", Name: "dir-name", Rules: "be brief", Tags: []string{"dir-tag"}, Active: true,
+			ID: "dir-1", Name: "dir-name", Rules: []string{"be brief"}, Tags: []string{"dir-tag"}, Active: true,
 		}},
 		Include:   reflecteng.ReflectInclude{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
 		QueryTime: ptr(goldenTime(5)),

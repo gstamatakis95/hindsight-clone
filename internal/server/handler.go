@@ -1,10 +1,10 @@
 package server
 
 import (
+	"memd/internal/domain"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"memd/internal/domain"
 )
 
 // notWired is the error of an RPC whose dependency cmd/memd/wire.go left nil.

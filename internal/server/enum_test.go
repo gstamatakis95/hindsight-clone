@@ -3,12 +3,11 @@ package server
 import (
 	"errors"
 	"fmt"
+	"memd/internal/domain"
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
-
-	"memd/internal/domain"
 
 	pb "memd/gen/memory/v1"
 )
@@ -34,7 +33,7 @@ func pair[E protoEnum, T ~string](e E, want T) enumCase {
 		check: func() error {
 			var d decoder
 			if got := fromEnum[T](&d, e); got != want || d.err != nil {
-				return fmt.Errorf("fromEnum = %q (%v), want %q", got, d.err, want)
+				return fmt.Errorf("fromEnum = %q (%w), want %q", got, d.err, want)
 			}
 			if got := toEnum[E](want); got != e {
 				return fmt.Errorf("toEnum(%q) = %v, want %v", want, got, e)

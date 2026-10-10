@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/domain"
+	"memd/internal/port"
 	"testing"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-
-	"memd/internal/domain"
-	"memd/internal/port"
 )
 
 // TestToStatus checks the error mapping table, wrapped errors and the two wrapping sentinels.
@@ -35,8 +34,10 @@ func TestToStatus(t *testing.T) {
 		{"lost jobs", &port.LostJobsError{IDs: []port.OperationID{"x"}}, codes.Aborted},
 		{"context cancelled", wrap(context.Canceled), codes.Canceled},
 		{"deadline", wrap(context.DeadlineExceeded), codes.DeadlineExceeded},
-		{"deadline wins over unavailable", fmt.Errorf("%w: %w", domain.ErrUnavailable, context.DeadlineExceeded),
-			codes.DeadlineExceeded},
+		{
+			"deadline wins over unavailable", fmt.Errorf("%w: %w", domain.ErrUnavailable, context.DeadlineExceeded),
+			codes.DeadlineExceeded,
+		},
 		{"unclassified", errors.New("boom"), codes.Internal},
 		{"status passes through", status.Error(codes.PermissionDenied, "no"), codes.PermissionDenied},
 	}
