@@ -107,3 +107,11 @@ go.work.sum
 !/.idea/
 
 !/hindsight-clone.iml
+
+# Local IDE and tooling
+.idea/
+*.iml
+.venv/
+
+# Hindsight reference source, cloned read-only for porting (not vendored)
+third_party/hindsight/
