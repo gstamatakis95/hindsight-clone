@@ -45,3 +45,13 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   processing jobs keep their serial key until the handler stops; Enqueue on a deleting bank fails except
   delete_bank. Findings and rulings sent back to the WP-00 worker. LOW findings: worker fixes the cheap ones,
   leftovers to be listed here after round 2.
+- 2026-10-10 WP-00 review round 2 on 2c8bb22: all round-1 HIGHs verified fixed; BLOCK on 4 new HIGHs (finalizer
+  loop, finalizer swallowing a manual refresh, deletes on a live bank, last_seq stalling filtered pollers).
+- 2026-10-10 ruling R10': drop the finalizer; runner owns the attempt cap; a refresh at max attempts is FAILED;
+  pause/REFRESH_FAILED via an idempotent RunMaintenance reconcile. R8': cancel of a processing job sets a
+  cancel-requested flag (status stays processing) instead of a new status.
+- 2026-10-10 user guidance: solid early iteration that doesn't lose data and works as advertised; no
+  overengineering. Review bar = data loss, double runs, or advertised behaviour broken. Round 3 trimmed to those.
+- Deferred to WP-01/WP-02 acceptance: porttest coverage gaps from review round 2 (tenant isolation on new write
+  ports, R8 edge cases, tombstoned-bank Fail, Enqueue/Upgrade race). Ruling: internal/porttest is not a frozen
+  path; WP-01 may add tests there in new files.
