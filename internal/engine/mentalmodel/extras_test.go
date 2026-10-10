@@ -3,11 +3,10 @@ package mentalmodel
 import (
 	"context"
 	"encoding/json"
-	"testing"
-
 	"memd/internal/domain"
 	"memd/internal/engine/reflect"
 	"memd/internal/port"
+	"testing"
 )
 
 // stubProjector returns a fixed projection and records the document it saw.
