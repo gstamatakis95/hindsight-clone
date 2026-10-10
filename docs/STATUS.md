@@ -7,7 +7,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 
 | WP | Title | State | Branch | PR | Blockers | Open CCRs | LOW findings |
 |----|-------|-------|--------|----|----------|-----------|--------------|
-| WP-00 | Contracts and scaffold | in progress | wp/WP-00-contracts | — | — | — | — |
+| WP-00 | Contracts and scaffold | in review | wp/WP-00-contracts | 17fe418 | — | WP-00-1 (approved, pending apply) | — |
 | WP-01 | Postgres adapter | waiting | — | — | WP-00 | — | — |
 | WP-02 | Fakes | waiting | — | — | WP-00 | — | — |
 | WP-03 | Gateway and S3 adapters | waiting | — | — | WP-00 | — | — |
@@ -33,3 +33,6 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 ## Log
 
 - 2026-10-10 setup: moved spec into `docs/`, untracked IDE files, created this file.
+- 2026-10-10 WP-00 handed in on wp/WP-00-contracts @ 17fe418; worker reports all Accept checks pass. Reviewer spawned.
+- 2026-10-10 ruling CCR WP-00-1 APPROVED: add golang.org/x/text for NFC tag normalization (spec requires NFC;
+  stdlib lacks it). Applied on the WP-00 branch before merge, since contracts aren't frozen until merge.
