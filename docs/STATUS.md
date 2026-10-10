@@ -199,3 +199,83 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   reviewers. Pending CCRs for the batch: WP-09-1, WP-11-1, WP-11-2, WP-13-1. Next: collect the reviews,
   fix/merge, rule on the CCR batch, assign WP-15 (implement the approved port methods in fake + Postgres +
   porttest), then WP-14.
+- 2026-10-10 RESUMED after the second usage-limit pause: WP-08, WP-10, WP-12 workers and the WP-09, WP-11, WP-13 reviewers resumed with their context.
+- 2026-10-10 WP-10 handed in (8a22c21; PR doc staged, unsigned because 1Password signing is failing); reviewer
+  spawned. CCR WP-10-1 (Reader.CountObservations/ListScopes/ListMentalModels, EvidenceRepo.CitingScopes/
+  DeleteScopes, UnitRepo.DocumentUnits) PENDING, overlapping WP-13-1. Notes: WP-14 must not re-enqueue on More
+  (Run enqueues its own continuation); WP-08 stores the item's observation_scopes in
+  Document.Overrides.DefaultObservationScopes; WP-12 accepts refresh payload {"model_id":...}.
+- 2026-10-10 WP-11 review: BLOCK on 2 HIGH (the first turns use tool_choice auto, so a prose reply fails as
+  UNAVAILABLE; ReflectRequest.Types is not honoured by the tools). Decision 1100 overruled: InvalidArgument,
+  FailedPrecondition and NotFound pass through. Carry to WP-12: agentic refresh sets budget MID, AsDocument,
+  Types, ExcludeMentalModels and Seq.
+- 2026-10-10 BLOCKER: git commit signing via 1Password fails ("failed to fill whole buffer"); the user was asked
+  to unlock 1Password. Orchestrator and worker commits are blocked until then.
+- 2026-10-10 WP-08 and WP-12 handed in (work staged, unsigned); reviewers spawned. A CCR batch consolidation
+  helper is merging WP-08-1/2, WP-09-1, WP-10-1, WP-11-1/2, WP-12-1 and WP-13-1 into one port diff plus a WP-15
+  card. Signing note: all existing commits carry signatures; the "N" in %G? only reflects the missing
+  gpg.ssh.allowedSignersFile.
+- 2026-10-10 WP-09 review: BLOCK on 3 HIGH (temporal boost uses the wrong proximity signal, so it demotes
+  in-window hits; no default 0.3 semantic floor; the graph arm follows temporal links). Rulings: CCR WP-09-2
+  APPROVED (TemporalQuery gains Embedding + MinSimilarity; added to the batch); the empty tag leaf keeps
+  domain.MatchGroup semantics (documented deviation); with rerank off, passthrough is sorted by unboosted RRF;
+  no stage-2 boost; prefer_observations uses Hindsight's window rule.
+- 2026-10-10 WP-13 review: BLOCK on 3 HIGH (a running job can write into a recreated bank after delete;
+  ClearMemoryObservations leaves the memory stamped, losing observations; rederive drops entity edits on a text
+  race). Plus a WP-10 HIGH, forwarded to the WP-10 reviewer: consolidation stamps over a concurrent retag/edit
+  reset. Rulings: graph_maintenance enqueued from every unit-removal path; DeletePrefix re-checks per page;
+  re-issuing DeleteBank resumes a half-deleted bank; WP-14 makes delete_bank retry uncapped; edit/restore keep
+  the stamp until rederive writes the embedding.
+- 2026-10-10 WP-11 round-1 fixes staged (unsigned) on 92941cf; narrow round-2 review. Ruling: WP-11's internal/prompts additions (reflect_tool_error_* templates) are accepted.
+- 2026-10-10 WP-11 review round 2: MERGE (pending commit signing). Small follow-up requested meanwhile: guard reflect_system recall text on .Recall; fail fast with no search tools; split the MentalModels flag.
+- 2026-10-10 WP-10 review: BLOCK on 5 HIGH (a poison unit blocks later scopes / the job never terminates;
+  concurrent edits and retags overwritten; removed content resurrected; refresh triggers lost on a partial
+  run). Rulings: a health probe decides poison vs outage; decide-time Seq/Tags checked at apply; skip whole
+  actions on gone evidence (never trim); refreshes enqueued per apply tx; ClearScopes doesn't enqueue (WP-13
+  owns it). For WP-15: DeleteCiting must lock observations FOR UPDATE before reading co-sources. For WP-14: the
+  consolidate handler must not re-enqueue on More.
+- 2026-10-10 WP-08 review: BLOCK on 5 HIGH (a decision-801 resume can lose facts permanently; a sync retain
+  interleaves with document jobs; linking starves units in dense clusters; Jane merges into John without
+  Hindsight's trigram/token gates; per-item observation_scopes dropped). Rulings: a run-ownership re-check after
+  tx.Seq in every batch/complete tx; cap links on the new unit only; port Hindsight's merge gates; CCR WP-08-2
+  REJECTED (fold the item's scopes into the document overrides' DefaultObservationScopes instead).
+- 2026-10-10 WP-09 round-1 fixes staged (unsigned) on c4f22a2; narrow round-2 review spawned. The temporal-relevance call site waits on CCR WP-09-2 (in the batch).
+- 2026-10-10 CCR BATCH RULED (docs/ccr/phase2-batch.md): 20 approved, 5 merged, 1 rejected (WP-08-2 ScopesFor).
+  Ruling 1a = A: new nullable column documents.observation_scopes (migration 0010). This supersedes the earlier
+  WP-08 H5 ruling (folding into overrides is lost on reprocess); WP-08 and WP-10 were told. DeleteScopes split
+  (empty = nothing; DeleteAllObservations separate). WP-15 (port extension) LAUNCHED: it applies the port/domain
+  diff itself together with fake + Postgres + porttest + mocks + migration in one merge (exception to the
+  orchestrator-applies-CCR rule, so main never breaks), plus ErrContextOverflow classification and DeleteCiting
+  FOR UPDATE.
+- 2026-10-10 WP-09 review round 2: MERGE (pending commit signing). LOW: fix the stale prefer_observations bullet in the PR doc.
+- 2026-10-10 WP-11 round-2 follow-up staged (recall text guarded, no-search fail-fast, split page-tool flags).
+  WP-11 approved; merge waits on signing. Note: other ReflectData users must set the per-tool flags.
+- 2026-10-10 WP-13 round-1 fixes staged on 8247d6a; narrow round-2 review spawned. CCR WP-13-2 (Blob.List,
+  paged) APPROVED and added to WP-15.
+- 2026-10-10 WP-12 review: BLOCK on 4 HIGH (fuzzy leaves compiled exact, so a model never builds; the delta
+  pre-check skips untagged in-scope units past the watermark; a scope edit during a build isn't a conflict;
+  model-row read-modify-write isn't serialized, so reconcile can revert a new version). Ruling: tx.Seq first in
+  every model-row tx; a full run with nothing in scope follows SPEC 2002 literally (keep content and sources).
+- 2026-10-10 WP-08 round-1 fixes staged on e63d423 (run ownership decision 807, linker caps, resolver gates, item scopes via a stubbed writer); narrow round-2 review spawned.
+- 2026-10-10 WP-10 round-1 fixes staged on 8a22c21 (health probe, decide-time seq/tag checks, no resurrection, per-tx refresh triggers); narrow round-2 review asked to verify the Seq-before-reread ordering.
+- 2026-10-10 WP-08 review round 2: MERGE (pending signing). Follow-up: kind gate only on fuzzy matches; docSuperseded compares tags.
+- 2026-10-10 WP-10 review round 2: BLOCK on 3 HIGH (apply re-reads before tx.Seq; the probe uses the run-level
+  binding; a probe success after a recovering outage parks a whole batch). Rulings: Seq first; a binding-scoped
+  probe; retry each deferred unit alone before parking; a circuit breaker after 2 all-failed trees.
+- 2026-10-10 WP-13 review round 2: BLOCK on 1 HIGH (a backoff-reordered rederive re-applies stale payload
+  entities). Ruling: entity edits commit in the RPC's own tx; the rederive payload carries no names.
+- Added to WP-15: unconsolidated reads skip NULL-embedding units; FailedRefreshes ignores CANCELLED ops.
+- Carried to WP-14: the graph_maintenance handler re-checks Dirty/PendingMaintenance after Complete; a tick
+  reconcile re-enqueues rederive for live facts with a NULL embedding.
+- 2026-10-10 WP-08 follow-up staged (kind gate only on fuzzy matches; docSuperseded compares tags). WP-08 ready to merge once signing works.
+- 2026-10-10 WP-10 round-2 fixes staged (Seq first in apply; scope-binding probe; retry alone before parking; park re-check; circuit breaker). Short round-3 check spawned.
+- 2026-10-10 WP-12 round-1 fixes staged (fuzzy scope, untagged pre-check, scope-edit conflict, Seq-first model-row txs, cron, delta retry, fences, ...). Ruling: a run inside the interval floor re-parks to the floor end instead of being dropped; the other design choices are accepted.
+- 2026-10-10 WP-10 review round 3: MERGE (pending signing). Full Postgres suite ran (98 s). LOW accepted: back-to-back lone-poison scopes can trip the breaker once per occurrence but converge.
+- 2026-10-10 WP-13 review round 3: MERGE (pending signing). Carried to WP-14: wire Resolver and Config into the
+  curator (otherwise restores fail); the graph_maintenance post-Complete re-check; the NULL-embedding rederive
+  reconcile. LOW accepted: a non-literal re-resolve of snapshot names on restore.
+- 2026-10-10 WP-12 review round 2: MERGE (pending signing). Follow-up: keep the partial draft when the retry is empty or rejected; floor tolerance; fresh runs write nothing; decision 1203 cost note. ALL SIX ENGINES APPROVED.
+- 2026-10-10 WP-12 follow-up staged (partial draft kept, floor skew tolerance, fresh runs write nothing). WP-12 ready to merge once signing works.
+- 2026-10-10 WP-15 handed in (61 files staged, unsigned; patch backup at scratchpad/wp15-foundation.patch);
+  reviewer spawned. Follow-ups: ListScopes pagers pass "0" after a page ending at the shared scope; WP-11 uses
+  errors.Is(err, ErrContextOverflow); WP-14 passes the blob store as DeleterConfig.Blobs.

@@ -1,0 +1,396 @@
+# CCR batch: Phase 2 port extension (WP-08-1, 08-2, 09-1, 09-2, 10-1, 11-1, 11-2, 12-1, 13-1)
+
+SPEC line numbers refer to docs/SPEC.md at main (af35d7a).
+
+## 0. Conventions this batch pins (they apply to every new method)
+
+- **Two error regimes.**
+  - **Id-keyed lookups** skip unknown ids and do not check the bank. They return empty and never ErrNotFound, like the existing `GetUnits`. These are GetChunks, EntityStates, StaleScopes, CountObservations, NewestSeqInScope, ModelsCiting, CitingScopes and IDsByDocument.
+  - **Listings and stats** return `domain.ErrNotFound` for an unknown or tombstoned bank (SPEC 1979). These are GetUnit, ListUnits, ObservationHistory, BankStats, TagCounts, ListDocuments, ListScopes and ListMentalModels.
+  - CronModels, FailedRefreshes and BanksToConsolidate are cross-bank. They skip tombstoned banks.
+- **One staleness predicate.** "Unconsolidated in scope" means a live fact with `consolidated_at IS NULL AND consolidation_failed_at IS NULL AND tags @> scope.tags`. This is the existing `UnitRepo.Unconsolidated` predicate. StaleScopes, `Unit.Stale` and `ScopeInfo.UnconsolidatedUnits` all use it.
+  - Known over-report: the shared scope (no tags) reads stale while the bank has any unconsolidated fact. This is accepted as the simplest reading of SPEC 536.
+- **Keyset paging lives in engines.** Port listings take `after` (exclusive) and `limit`, and the engines build their own opaque tokens (decision 1300). The exception is ListMentalModels, which keeps WP-12's `ModelQuery` page token: the token is the last listed id and the adapter treats it as exclusive.
+  - Text keysets order in byte order. Postgres uses `COLLATE "C"` so that it matches the fake and Go's `<`.
+- **`Tx` embeds `Reader`.** Every new Reader method must exist on both Postgres `*reader` and `*tx` (reader.go, store.go) and on both fake `reader` and `*tx` (fake/store.go). No other implementers exist in the seven trees; test wrappers only embed `port.Reader` or `port.Tx`.
+
+## 1. Requests and rulings
+
+| # | Method / field | WPs | Final signature | SPEC lines | Ruling |
+|---|---|---|---|---|---|
+| 1 | `Reader.GetChunks` | 09, 11 | `GetChunks(ctx, b BankRef, ids []ChunkID) ([]domain.Chunk, error)` | 492-493, 544 (include.chunks); 1421 (expand tool); 1137 | **APPROVE** (identical in both CCRs) |
+| 2 | `Reader.EntityStates` | 09 | `EntityStates(ctx, b, units []UnitID) ([]domain.EntityState, error)` | 492, 539, 545 | **APPROVE**. ObservationIDs are pinned (see §2), because consolidation never attaches entities to observations. |
+| 3 | `Reader.StaleScopes` | 09 | `StaleScopes(ctx, b, scopes []ScopeKey) ([]ScopeKey, error)` | 536 (Memory.stale) | **APPROVE** |
+| 4 | `Reader.BankTags` | 09 | (none) | 447 (RESOLVE_FUZZY) | **MERGE-WITH #5**. WP-09 calls `TagCounts(b, memories, "", "", 0)` and re-sorts by count desc, then by tag. |
+| 5 | `Reader.TagCounts` | 13 (+09) | `TagCounts(ctx, b, source domain.TagSource, prefix, after string, limit int) ([]domain.TagCount, error)` | 144, 402-404, 1985 | **APPROVE**, with `limit <= 0` meaning all (added so that #4 fits) |
+| 6 | `Reader.CountObservations` | 10 | `CountObservations(ctx, s ScopeKey) (int, error)` | 63, 254, 290 (max_observations_per_scope) | **APPROVE** |
+| 7 | `Reader.ListScopes` | 10, 13 | `ListScopes(ctx, b, after string, limit int) ([]domain.ScopeInfo, error)` | 163, 693-695, 700-702 (Preview `complete`) | **MERGE**. The shape is WP-13's keyset. The population is WP-10's: `observation_scopes` rows. WP-13's "or an unconsolidated unit" isn't enumerable in SQL without engine scope expansion. |
+| 8 | `Reader.ListMentalModels` | 10, 12, 13 | `ListMentalModels(ctx, q ModelQuery) ([]domain.MentalModel, string, error)` | 173, 180-181, 710, 756, 1921 | **MERGE**. Uses WP-12's `ModelQuery` (PageSize 0 = all) and adds WP-13's tombstone rule. |
+| 9 | `Reader.MentalModelSpecs` | 13 | (none) | 147, 380 | **MERGE-WITH #8**. Export maps `.Spec`, as WP-13's own CCR offers. |
+| 10 | `Reader.NewestSeqInScope` + `port.ScopeQuery` | 12 | `NewestSeqInScope(ctx, q ScopeQuery) (int64, error)` | 1998, 2002 | **APPROVE** |
+| 11 | `Reader.CronModels` + `port.CronModel` | 12 | `CronModels(ctx) ([]CronModel, error)` | 1953; worker.CronRefresher | **APPROVE** (cross-bank, maintenance only) |
+| 12 | `Reader.FailedRefreshes` + `port.FailedRefresh` | 12 | `FailedRefreshes(ctx) ([]FailedRefresh, error)` | 2003; decision 012 R10' | **APPROVE**. `Queue.List` is per bank and has no "latest terminal" view, so this is not a duplicate. |
+| 13 | `Reader.GetUnit` | 13 | `GetUnit(ctx, b, id UnitID) (domain.Unit, error)` | 127, 1964, 1969 | **APPROVE** |
+| 14 | `Reader.ListUnits` + `UnitQuery`/`UnitCursor` | 13 | `ListUnits(ctx, q UnitQuery) ([]domain.Unit, error)` | 126, 616-631, 1969, 1985 | **APPROVE** |
+| 15 | `Reader.ObservationHistory` | 13 | `ObservationHistory(ctx, b, id UnitID) ([]domain.ObservationVersion, error)` | 128, 1971 | **APPROVE** |
+| 16 | `Reader.BankStats` | 13 | `BankStats(ctx, b) (domain.BankStats, error)` | 143, 1985 | **APPROVE** |
+| 17 | `Reader.ListDocuments` + `DocumentQuery`/`DocumentCursor` | 13 | `ListDocuments(ctx, q DocumentQuery) ([]domain.Document, error)` | 155, 670 | **APPROVE** |
+| 18 | `Reader.ModelsCiting` | 13 | `ModelsCiting(ctx, b, ids []UnitID) ([]MentalModelID, error)` | 1964 (invalidate refreshes models whose source_ids include the unit) | **APPROVE**. It is id-keyed, so an unknown bank returns empty, not NotFound (WP-13 doc tweak). |
+| 19 | `Reader.BanksToConsolidate` | 13 | `BanksToConsolidate(ctx) ([]BankRef, error)` | 1953; worker.ConsolidationCandidates (already declares this exact signature) | **APPROVE** |
+| 20 | `UnitRepo.IDsByDocument` | 08, 10 (`DocumentUnits`), 13 (reprocess) | `IDsByDocument(ctx, b, doc DocumentID) ([]UnitID, error)` | 1981, 1982, 1488 | **MERGE** of WP-08-1 and WP-10's `DocumentUnits`. WP-08-1's name is kept because WP-10 wraps it anyway. |
+| 21 | `EvidenceRepo.CitingScopes` | 10 | `CitingScopes(ctx, b, ids []UnitID) ([]ScopeKey, error)` | 1486, 1488 (Invalidator returns scopes) | **APPROVE** |
+| 22 | `EvidenceRepo.DeleteScopes` + `EvidenceRepo.DeleteAllObservations` | 10, 13 | `DeleteScopes(ctx, b, scopes []ScopeKey) (deleted, reset []UnitID, err error)`; `DeleteAllObservations(ctx, b) (deleted, reset []UnitID, err error)` | 696-697 ("empty = all"), 1487 | **APPROVE, split**. At the port, empty `scopes` deletes **nothing**, and "all" is the explicit second method. Reason: a computed, empty scope list must never wipe a bank. The RPC-level "empty = all" is mapped by the engine. This also serves WP-13's `ObservationClearer.ClearScopes`. |
+| 23 | `domain.Unit.Stale` | 13 (+09) | `Stale bool`, **computed at read time, no column** | 536 | **APPROVE**. Only GetUnit and ListUnits fill it. GetUnits does not, which keeps hot paths cheap; recall uses #3. |
+| 24 | `domain.Document.ObservationScopes` + migration 0010 | 08 | `ObservationScopes *ObservationScopes` | 463, 900, 904, 1981 | **ORCHESTRATOR RULING**. Recommended: **APPROVE** (see §1a). |
+| 25 | `DocumentRepo.ScopesFor` (batch) | 08-2 item 5 | (none) | (none) | **REJECT**. It is speculative: WP-10 already caches `Documents().Get` per run (run.go `unitMode`). |
+| 26 | `domain.ErrContextOverflow` | 11 | `fmt.Errorf("%w: context window exceeded", ErrUnavailable)` | 1990 | **APPROVE**. It is additive: existing `errors.Is(ErrUnavailable)` callers are unchanged. |
+| 27 | `TemporalQuery.Embedding`, `.MinSimilarity` | 09 (CCR WP-09-2) | the fields in §2 | 2023 (temporal arm), 1141; Hindsight pg/recall.py:309-317 | **APPROVED** by the coordinator. Its semantics are pinned here. |
+
+Totals: 20 APPROVE (#1-3, 5, 6, 10-19, 21-23, 26, 27); 5 MERGE (#7, #8, #20 unify overlapping requests; #4 folds into #5 and #9 into #8); 1 REJECT (#25); 1 RULING (#24).
+
+### 1a. Ruling needed: where a retain item's `observation_scopes` lives (#24)
+
+There are two options.
+
+- **(A) Column (recommended).** Add `documents.observation_scopes jsonb NULL` and `Document.ObservationScopes`. `DocumentRepo.Upsert` writes it and `Get` reads it.
+  - Consolidation precedence becomes: doc.ObservationScopes > doc.Overrides.DefaultObservationScopes > the run's default > combined.
+  - This survives `ReprocessDocument` with new overrides. SPEC 904 says reprocess "replaces the document's stored overrides", and `observation_scopes` is an item field, not an override.
+- **(B) Fold into overrides, per WP-10 decision 1003.** WP-08 sets `merged.DefaultObservationScopes = item.ObservationScopes` before `OverridesHash`.
+  - No migration is needed.
+  - However, a reprocess that passes new overrides silently drops the item's scopes.
+  - WP-08 does not do this today. The ingestor carries the scopes only in the job payload, so per-item scopes are currently ignored by consolidation either way.
+
+Pick (A) unless a migration is unwelcome. Both options need a WP-08 edit (§4).
+
+## 2. Consolidated diff
+
+### internal/port/store.go (Reader, appended after `BankSeq`)
+```go
+	// GetChunks returns b's chunks with the given ids, in the order of ids; unknown ids and chunks of
+	// another bank are skipped, not an error.
+	GetChunks(ctx context.Context, b BankRef, ids []ChunkID) ([]domain.Chunk, error)
+	// EntityStates returns every entity of b attached to any of units, ordered by entity id. Each one's
+	// ObservationIDs are b's live observations attached to it or citing a live fact attached to it, sorted.
+	// Unknown units are skipped.
+	EntityStates(ctx context.Context, b BankRef, units []UnitID) ([]domain.EntityState, error)
+	// StaleScopes returns, in input order, those of scopes (all of bank b) holding a live fact with
+	// consolidated_at and consolidation_failed_at unset whose tags contain every tag of the scope (the
+	// Unconsolidated predicate; the shared scope matches any such fact). It backs Memory.stale.
+	StaleScopes(ctx context.Context, b BankRef, scopes []ScopeKey) ([]ScopeKey, error)
+	// TagCounts returns up to limit (<= 0 = all) tags of b's source with how many items carry each, ordered
+	// by tag in byte order, keeping tags that start with prefix and sort strictly after after ("" = from
+	// the start). Source unspecified = memories (live units). Unknown or tombstoned bank: domain.ErrNotFound.
+	TagCounts(
+		ctx context.Context, b BankRef, source domain.TagSource, prefix, after string, limit int,
+	) ([]domain.TagCount, error)
+	// CountObservations returns how many live observations scope s holds (exactly its tag set, matched by
+	// scope_key); 0 for an unknown scope or bank.
+	CountObservations(ctx context.Context, s ScopeKey) (int, error)
+	// ListScopes returns up to limit (> 0) of b's observation scopes (its observation_scopes rows: every
+	// scope that has held an observation) ordered by ScopeKey.String() in byte order, starting strictly
+	// after after ("" = from the start). Observations counts the scope's live observations and
+	// UnconsolidatedUnits the facts StaleScopes would match. Unknown or tombstoned bank: domain.ErrNotFound.
+	ListScopes(ctx context.Context, b BankRef, after string, limit int) ([]domain.ScopeInfo, error)
+	// ListMentalModels returns one page of q.Bank's models matching q, ordered by id and with content, and
+	// the next page token ("" = last page). Unknown or tombstoned bank: domain.ErrNotFound.
+	ListMentalModels(ctx context.Context, q ModelQuery) ([]domain.MentalModel, string, error)
+	// NewestSeqInScope returns the highest seq of a live unit (fact or observation) matching q, or 0 when
+	// none matches.
+	NewestSeqInScope(ctx context.Context, q ScopeQuery) (int64, error)
+	// CronModels returns every model with refresh_cron set on a bank that is not tombstoned (cross-bank;
+	// maintenance only).
+	CronModels(ctx context.Context) ([]CronModel, error)
+	// FailedRefreshes returns, per existing model on a bank that is not tombstoned, its latest terminal
+	// refresh_mental_model operation when that operation is FAILED (cross-bank; maintenance only).
+	FailedRefreshes(ctx context.Context) ([]FailedRefresh, error)
+	// GetUnit returns one unit of b, live (State valid) or archived (State invalidated), with Entities,
+	// SourceIDs and, for observations, Stale filled; an archived unit's Entities are its snapshot names.
+	// Unknown unit, or unknown or tombstoned bank: domain.ErrNotFound.
+	GetUnit(ctx context.Context, b BankRef, id UnitID) (domain.Unit, error)
+	// ListUnits returns up to q.Limit units matching q, newest first (created_at, then id, both descending),
+	// strictly after q.After, filled like GetUnit. Unknown or tombstoned bank: domain.ErrNotFound.
+	ListUnits(ctx context.Context, q UnitQuery) ([]domain.Unit, error)
+	// ObservationHistory returns the observation_versions rows of observation id, newest first. Unknown id,
+	// or unknown or tombstoned bank: domain.ErrNotFound.
+	ObservationHistory(ctx context.Context, b BankRef, id UnitID) ([]domain.ObservationVersion, error)
+	// BankStats returns b's counts from indexed COUNT queries. Unknown or tombstoned bank: domain.ErrNotFound.
+	BankStats(ctx context.Context, b BankRef) (domain.BankStats, error)
+	// ListDocuments returns up to q.Limit documents matching q, newest first (created_at, then id, both
+	// descending), strictly after q.After, with UnitCount and UnitsByFactType filled. Unknown or tombstoned
+	// bank: domain.ErrNotFound.
+	ListDocuments(ctx context.Context, q DocumentQuery) ([]domain.Document, error)
+	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids, ordered by id.
+	ModelsCiting(ctx context.Context, b BankRef, ids []UnitID) ([]MentalModelID, error)
+	// BanksToConsolidate returns every bank that is not tombstoned and has a live fact with consolidated_at
+	// and consolidation_failed_at unset (cross-bank; maintenance only).
+	BanksToConsolidate(ctx context.Context) ([]BankRef, error)
+```
+
+### internal/port/repos.go
+```go
+// UnitRepo, after SetDocumentTags:
+	// IDsByDocument returns the ids of doc's live units, sorted; an unknown document has none. It writes
+	// nothing, so callers can run EvidenceRepo.DeleteCiting before DeleteByDocument.
+	IDsByDocument(ctx context.Context, b BankRef, doc DocumentID) ([]UnitID, error)
+
+// EvidenceRepo, after DeleteCiting:
+	// CitingScopes returns the distinct scopes of b's live observations that cite any of ids, ordered by
+	// ScopeKey.String().
+	CitingScopes(ctx context.Context, b BankRef, ids []UnitID) ([]ScopeKey, error)
+	// DeleteScopes deletes every live observation of b whose scope is one of scopes (none when scopes is
+	// empty), resets their remaining live sources exactly as DeleteCiting does, and returns the deleted
+	// observations and the reset sources, both sorted. observation_scopes rows are kept, so a cleared scope
+	// still lists with 0 observations. The caller calls Tx.Seq.
+	DeleteScopes(ctx context.Context, b BankRef, scopes []ScopeKey) (deleted, reset []UnitID, err error)
+	// DeleteAllObservations is DeleteScopes over every scope of b (ClearObservations with no scopes).
+	DeleteAllObservations(ctx context.Context, b BankRef) (deleted, reset []UnitID, err error)
+```
+
+### internal/port/queries.go (add `"time"` to the imports)
+```go
+// TemporalQuery, after Tags:
+	// Embedding is the query vector for the relevance filter; empty = no filter.
+	Embedding []float32
+	// MinSimilarity keeps only units whose cosine similarity to Embedding is >= it (Hindsight's in-window
+	// pool). The filter is on only when Embedding is set and MinSimilarity > 0; while on, units with no
+	// embedding (edited, awaiting rederive) are excluded.
+	MinSimilarity float64
+
+// ScopeQuery selects the live units (facts and observations) of one bank in a mental model's scope.
+type ScopeQuery struct {
+	// Bank is the bank searched.
+	Bank BankRef
+	// Types limits fact types; empty = all.
+	Types []domain.FactType
+	// Tags filters by tags; nil = no filter.
+	Tags *SQLPredicate
+	// Seq bounds the units' seq.
+	Seq SeqRange
+}
+
+// ModelQuery selects mental models of one bank for listing.
+type ModelQuery struct {
+	// Bank is the bank listed.
+	Bank BankRef
+	// FolderPrefix keeps models whose folder_path equals it or lies under it ("a" matches "a" and "a/b",
+	// not "ab"); empty = all.
+	FolderPrefix string
+	// Tags filters by model tags with domain.MatchTags semantics; empty = no filter.
+	Tags []string
+	// TagsMatch is how Tags compare.
+	TagsMatch domain.TagsMatch
+	// RefreshAfterConsolidation keeps only models whose trigger sets refresh_after_consolidation.
+	RefreshAfterConsolidation bool
+	// PageSize caps the page; 0 = all.
+	PageSize int
+	// PageToken is the next page token of the previous page (the last listed id); empty = first page.
+	PageToken string
+}
+
+// CronModel is a model with a refresh_cron schedule, as the cron sweep sees it.
+type CronModel struct {
+	// Model is the model.
+	Model domain.MentalModel
+	// LastRefreshEnqueuedAt is the created_at of the model's newest refresh_mental_model operation (any
+	// status); zero when it has none.
+	LastRefreshEnqueuedAt time.Time
+}
+
+// FailedRefresh is a model whose latest terminal refresh_mental_model operation is FAILED.
+type FailedRefresh struct {
+	// Bank owns the model.
+	Bank BankRef
+	// ModelID is the model.
+	ModelID MentalModelID
+	// OperationID is the failed operation.
+	OperationID OperationID
+	// FailedAt is the operation's finished_at.
+	FailedAt time.Time
+	// Error is the operation's recorded error.
+	Error string
+}
+```
+`UnitQuery`, `UnitCursor`, `DocumentQuery` and `DocumentCursor` move here **verbatim**, with their doc comments and JSON tags, from the WP-13 worktree. The sources are `internal/engine/curate/lister.go` and `internal/engine/docs/documents.go`, and `port.X` becomes `X`. They are already lint-clean.
+
+### internal/domain/unit.go
+```go
+// Unit, after EditedAt:
+	// Stale is set on an observation by Reader.GetUnit and Reader.ListUnits when a live fact in its scope
+	// waits for consolidation; it is computed at read time (never stored) and always false elsewhere.
+	Stale bool
+
+// Document, after BlobKey (only if ruling 1a = A):
+	// ObservationScopes is the retain item's observation_scopes, kept across reprocess; nil = none (the
+	// stored overrides' or the bank's default applies).
+	ObservationScopes *ObservationScopes
+```
+
+### internal/domain/errors.go
+```go
+	// ErrContextOverflow: the prompt did not fit the model's context window. Wraps ErrUnavailable; reflect
+	// synthesises from what it has instead of failing.
+	ErrContextOverflow = fmt.Errorf("%w: context window exceeded", ErrUnavailable)
+```
+
+### migrations/versions/0010_document_scopes.py (only if ruling 1a = A)
+```python
+"""Documents keep the retain item's observation_scopes (CCR WP-08-2).
+
+Revision ID: 0010
+Revises: 0009
+Create Date: 2026-10-10
+"""
+
+from alembic import op
+
+revision = "0010"
+down_revision = "0009"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    """Add documents.observation_scopes (NULL = the item set none)."""
+    op.execute("ALTER TABLE documents ADD COLUMN observation_scopes jsonb")
+
+
+def downgrade() -> None:
+    """Drop documents.observation_scopes."""
+    op.execute("ALTER TABLE documents DROP COLUMN observation_scopes")
+```
+After that, run `make migrate` to refresh `schema/schema.sql`. No other migration is needed. `Unit.Stale` is computed, and `observation_scopes`, `observation_versions` and `memory_units.scope_key` already exist.
+
+Also update these comments: the `DocumentRepo.Upsert` doc ("inserts or replaces the document's tags, overrides, observation scopes and blob key"). The CCR files themselves land as docs/ccr/WP-08-1 … WP-13-1, plus WP-09-2.
+
+## 3. Card
+
+### WP-15 · Port extension (CCR batch)
+
+- **Phase:** 2.5. It runs before WP-14 and before any engine follow-up in §4.
+- **Landing rule:** WP-15 applies the approved §2 diff itself and merges it as **one change**, together with the adapter, fake, porttest, mocks and (if 1a = A) migration 0010 plus the schema dump. Landing the port diff alone would break `var _ port.Reader` in postgres and fake and leave the mocks stale, so main would not build. Engine worktrees rebase only after this merge.
+- **Owns:**
+  - New files under `internal/adapter/postgres/**` (queries/*.sql, the generated db/, reads_*.go) and edits to its `reader.go`, `store.go`, `units.go`, `evidence.go` and `documents.go`.
+  - `internal/fake/**`.
+  - The approved diff in `internal/port/{store,repos,queries}.go`, `internal/domain/{unit,errors}.go` and `docs/ccr/WP-15-1.md`, which records this batch.
+  - New files under `internal/porttest/**` (`reads_suite.go`, `maintenance_suite.go`, `observation_admin_suite.go`).
+  - `internal/mocks/**` (regenerated).
+  - `internal/adapter/gateway/client.go` `classify`, for ErrContextOverflow.
+  - If ruling 1a = A: `migrations/versions/0010_document_scopes.py` and `schema/schema.sql`.
+- **Depends on:** the orchestrator's approval of this batch (it is a CCR touching frozen paths), WP-01, WP-02 and WP-03.
+- **Read:**
+  - This file (§0 conventions, §2 doc comments).
+  - SPEC: Ports; Curation; Behavioural rules (bank lifecycle, observations, mental models); Jobs (maintenance tick); gRPC ScopeInfo, Memory.stale, ListTags, ListMemories, ListDocuments.
+  - Decisions 012, 1003 and 1300.
+
+**Build**
+- Each new Reader method on Postgres `reader` and `tx`, written as sqlc queries:
+  - Use `COLLATE "C"` for the text keysets.
+  - The folder prefix is `folder_path = $p OR folder_path LIKE $p || '/%'` with `%`, `_` and `\` escaped.
+  - StaleScopes, ListScopes and BanksToConsolidate share one rendering of the §0 predicate over the partial unconsolidated index.
+  - NewestSeqInScope reuses `predicate.go`.
+  - TagCounts and BankStats use indexed COUNTs.
+  - ListUnits takes a UNION ALL over `memory_units` and `memory_units_archive`.
+  - For FailedRefreshes, use `DISTINCT ON (tenant_id, bank_id, serial_key)` over terminal `refresh_mental_model` rows, ordered by `finished_at DESC`.
+- `UnitRepo.IDsByDocument`, `EvidenceRepo.CitingScopes`, `EvidenceRepo.DeleteScopes` (by `scope_key`, mirroring DeleteCiting's reset) and `EvidenceRepo.DeleteAllObservations`.
+- `SearchTemporal` honours `Embedding` and `MinSimilarity` in Postgres and the fake.
+- The same methods on the fake's `reader`, `*tx`, `unitRepo` and `evidenceRepo`, with real semantics over its state.
+- If 1a = A: migration 0010, `DocumentRepo.Upsert` and `Get` round-trip `ObservationScopes` (adapter and fake), then `make migrate`.
+- Gateway `classify`: a non-retryable 400 or 413 whose body matches the overflow markers wraps `domain.ErrContextOverflow`. The markers are `context_length_exceeded`, `maximum context length`, `prompt is too long` and `input is too long`.
+
+**Accept.** Every case runs in porttest against both the fake (`internal/fake/store_test.go`) and Postgres (`contract_test.go`).
+- **Tenant isolation, for every new method:** the same bank id under two tenants never leaks rows, counts, scopes, tags or models. The cross-bank reads return both tenants' banks, each with its own BankRef.
+- **Error regimes (§0):** each listing or stats method on an unknown bank and on a tombstoned bank returns ErrNotFound. Each id-keyed lookup returns empty with no error.
+- **GetChunks:** input order is kept; unknown and other-bank ids are skipped.
+- **EntityStates:**
+  - Entities are ordered by id.
+  - An observation citing an attached fact is listed.
+  - An archived observation is not listed.
+- **StaleScopes:**
+  - A tagged scope with an unconsolidated superset-tagged fact is stale.
+  - Marking the fact consolidated or failed clears it.
+  - The shared scope is stale while any fact is pending.
+- **TagCounts:**
+  - All three sources are counted.
+  - prefix, after and limit apply, and limit 0 means all.
+  - Byte order holds for `"B" < "a"` and multibyte tags.
+- **CountObservations:** an exact tag-set match is counted; a superset scope is not.
+- **ListScopes:**
+  - Keyset paging returns every row once.
+  - Counts are correct.
+  - A scope cleared by DeleteScopes still lists, with 0 observations.
+- **ListMentalModels:**
+  - The folder-prefix boundary holds ("a" vs "ab" vs "a/b").
+  - The tags filter and the RefreshAfterConsolidation filter apply.
+  - Paging works, and PageSize 0 returns all.
+- **NewestSeqInScope:** both seq bounds apply, plus the types and predicate filters; it returns 0 when nothing matches.
+- **CronModels:**
+  - It is newest-operation based.
+  - A tombstoned bank is skipped.
+  - A model with no operations has a zero time.
+- **FailedRefreshes:**
+  - A failed op followed by a newer pending op is still reported.
+  - A failed op followed by a newer completed op is not.
+  - A deleted model and a tombstoned bank are skipped.
+- **GetUnit and ListUnits:**
+  - Archived units carry snapshot entity names after a prune.
+  - State filters apply, both tables interleave in one order, and EntityID matches live units only.
+  - A null timestamp never matches a bound.
+  - Stale is filled on observations; GetUnits leaves it false.
+- **ObservationHistory:** newest first.
+- **BankStats:** every field matches seeded data.
+- **ListDocuments:** paging, filters, UnitCount and UnitsByFactType.
+- **ModelsCiting:** order and dedupe.
+- **BanksToConsolidate:**
+  - A bank whose pending facts are all consolidated or parked is excluded.
+  - A tombstoned bank is excluded.
+- **IDsByDocument:**
+  - It writes nothing: tags, seq and consolidated_at are unchanged.
+  - Archived units are excluded.
+- **CitingScopes:** distinct and ordered.
+- **DeleteScopes / DeleteAllObservations:**
+  - Only the named scopes are deleted.
+  - An empty or nil scopes argument deletes nothing and resets nothing.
+  - DeleteAllObservations deletes every observation of the bank and none of another bank's (same id, other tenant).
+  - The reset sources are returned.
+- **Temporal relevance filter:**
+  - An in-window but irrelevant unit (cosine < MinSimilarity) is excluded.
+  - An in-window relevant unit is kept.
+  - A unit with a nil embedding is excluded while the filter is on.
+  - MinSimilarity 0, or an empty Embedding, disables the filter.
+- **If 1a = A:** `Document.ObservationScopes` round-trips, and nil stays nil.
+- **Gateway:** an overflow 400 is `errors.Is` both ErrContextOverflow and ErrUnavailable; another 400 is only ErrUnavailable.
+- **Final check:** `make gen && make lint && make test` pass with no diff in gen/, schema/ or internal/mocks/.
+
+## 4. Engine follow-ups once the batch and WP-15 land
+
+- **WP-08:**
+  - In `retainer_write.go` `replace`, swap `SetDocumentTags` for `tx.Units().IDsByDocument`. Mark decision 802 superseded.
+  - If 1a = A: set `Document.ObservationScopes = it.ObservationScopes` on Upsert in `ingestor.go` `write`.
+  - Make a scope-only change not a silent no-op by mixing the scopes into the no-op hash. Do it the same way in both places that compute the hash: `ingestor.go:211` (from the item) and `retainer.go:173` (recomputed from `j.Overrides`; it must read the scopes from the payload). Mix them in only when they are non-nil, so the hashes of existing documents don't change. If the two sites diverge, retain is never a no-op and resume misfires.
+  - If 1a = B: fold the scopes into `merged.DefaultObservationScopes` before both hash sites.
+- **WP-09:**
+  - Change `TagVocabulary` to call `TagCounts(b, domain.TagSourceMemories, "", "", 0)` and sort by count desc, then tag. `Lookups` is then satisfied by `port.Reader`, so the stub is test-only.
+  - Fill `Memory.Stale` from `StaleScopes` over the returned observations' scopes.
+  - Set `TemporalQuery.Embedding` and `MinSimilarity` in `arms.go` (WP-09-2).
+- **WP-10:**
+  - Delete `ObservationClearer`. The Invalidator already holds `tx`, so it calls `tx.Evidence().CitingScopes` and `tx.Units().IDsByDocument` directly.
+  - In `Invalidator.ClearScopes` (`invalidate.go:62`), empty scopes now map explicitly to `tx.Evidence().DeleteAllObservations` and a non-empty list to `DeleteScopes`. Add a test proving that an empty list derived from data never reaches the all path.
+  - Replace `ObservationCounter` with `port.Reader`. Call `tx.CountObservations` inside the run's tx if the cap must see the run's own uncommitted observations; otherwise use `Read()`.
+  - `ScopeLister` becomes `Read().ListScopes(b, "", limit+1)`, with complete = `len <= limit` and `TagSet` mapped to `NewScopeKey`.
+  - `ModelLister` becomes `ListMentalModels(ModelQuery{Bank: b, RefreshAfterConsolidation: true})`.
+  - If 1a = A: `unitMode` reads `doc.ObservationScopes` first. Update decision 1003.
+- **WP-11:**
+  - `isContextOverflow` becomes `errors.Is(err, domain.ErrContextOverflow)`; drop the text match.
+  - `ChunkReader` is satisfied by `port.Reader`.
+- **WP-12:**
+  - In `reads.go`, alias the types: `ScopeQuery`, `ModelQuery`, `CronModel` and `FailedRefresh` become `= port.X`.
+  - Rename `ScopeReader.NewestSeq` to `NewestSeqInScope` and `ModelLister.ListModels` to `ListMentalModels`, then update the callers and test stubs. The CCR's "two-line change" undercounts this.
+- **WP-13:**
+  - Alias `UnitQuery`, `UnitCursor`, `DocumentQuery` and `DocumentCursor` to the port types.
+  - Delete `ModelSpecReader`; export lists with `ListMentalModels(ModelQuery{Bank: b})` and maps `.Spec`.
+  - `ObservationClearer.ClearScopes` stays on the consolidate Invalidator, which owns the empty-means-all mapping. The ClearObservations `deleted` count is `len(deleted)`, not a ListScopes count.
+  - Reprocess may use `IDsByDocument`.
+  - Update the `ScopeSource` doc to the observation_scopes population and the `CitingModels` doc to "unknown bank = empty".
+- **WP-14:**
+  - Pass `store.Read()` as recall `Lookups`, the reflect `ChunkReader`, the WP-12 `ScopeReader`, `ModelLister`, `CronSource` and `FailureSource`, the WP-13 sources, and `worker.ConsolidationCandidates`.
+  - Nothing else needs glue.
