@@ -10,7 +10,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-00 | Contracts and scaffold | merged (0374c87, tag contracts-v1) | wp/WP-00-contracts | f5ab75f | — | WP-00-1 approved + applied | see carried-forward |
 | WP-01 | Postgres adapter | in progress | wp/WP-01-postgres | — | — | — | — |
 | WP-02 | Fakes | in progress | wp/WP-02-fakes | — | — | — | — |
-| WP-03 | Gateway and S3 adapters | merged (8dd2090) | wp/WP-03-gateway-s3 | e304714 | — | — | chat.go usage-sum fix + config defaults (follow-up); 6 LOW in review |
+| WP-03 | Gateway and S3 adapters | merged (8dd2090 + follow-up) | wp/WP-03-gateway-s3 | 20fab3d | — | — | 5 LOW accepted (see log) |
 | WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
 | WP-05 | Worker runtime | in progress | wp/WP-05-worker-runtime | — | — | — | — |
 | WP-06 | Server shell | in progress | wp/WP-06-server-shell | — | — | — | — |
@@ -94,3 +94,5 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-07 review: MERGE (0 CRITICAL/HIGH, 4 MEDIUM, 4 LOW). Merged into main as f5da652; gates pass.
   The MEDIUMs went back to the worker as a follow-up, together with reading RetainResponse.usage. Accepted LOW:
   Background sums all bank ops (a rerun needs a fresh -bank-prefix).
+- 2026-10-10 WP-03 follow-up 20fab3d (usage sum on no-choices, positive defaults, single Extra copy) checked by
+  the orchestrator and merged; lint and gateway tests pass. WP-03 done.
