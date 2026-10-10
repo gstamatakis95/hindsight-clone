@@ -247,6 +247,84 @@ func (mock *RefreshQueuer) QueueRefreshCalls() []struct {
 	return calls
 }
 
+// Ensure that UnitGetter does implement curate.UnitGetter.
+// If this is not the case, regenerate this file with mockery.
+var _ curate.UnitGetter = &UnitGetter{}
+
+// UnitGetter is a mock implementation of curate.UnitGetter.
+//
+//	func TestSomethingThatUsesUnitGetter(t *testing.T) {
+//
+//		// make and configure a mocked curate.UnitGetter
+//		mockedUnitGetter := &UnitGetter{
+//			GetUnitFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+//				panic("mock out the GetUnit method")
+//			},
+//		}
+//
+//		// use mockedUnitGetter in code that requires curate.UnitGetter
+//		// and then make assertions.
+//
+//	}
+type UnitGetter struct {
+	// GetUnitFunc mocks the GetUnit method.
+	GetUnitFunc func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// GetUnit holds details about calls to the GetUnit method.
+		GetUnit []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.UnitID
+		}
+	}
+	lockGetUnit sync.RWMutex
+}
+
+// GetUnit calls GetUnitFunc.
+func (mock *UnitGetter) GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+	if mock.GetUnitFunc == nil {
+		panic("UnitGetter.GetUnitFunc: method is nil but UnitGetter.GetUnit was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockGetUnit.Lock()
+	mock.calls.GetUnit = append(mock.calls.GetUnit, callInfo)
+	mock.lockGetUnit.Unlock()
+	return mock.GetUnitFunc(ctx, b, id)
+}
+
+// GetUnitCalls gets all the calls that were made to GetUnit.
+// Check the length with:
+//
+//	len(mockedUnitGetter.GetUnitCalls())
+func (mock *UnitGetter) GetUnitCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}
+	mock.lockGetUnit.RLock()
+	calls = mock.calls.GetUnit
+	mock.lockGetUnit.RUnlock()
+	return calls
+}
+
 // Ensure that MemoryLister does implement curate.MemoryLister.
 // If this is not the case, regenerate this file with mockery.
 var _ curate.MemoryLister = &MemoryLister{}
