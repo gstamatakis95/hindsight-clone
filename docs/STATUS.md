@@ -165,3 +165,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 user checkpoint: Phase 2 (WP-08..13) awaits the user's go-ahead.
 - 2026-10-10 WP-04 follow-up fb9fa38 checked by the orchestrator and merged; gates pass. WP-04 done. Note for WP-08:
   get the extraction schema from prompts.ExtractSchema(name, data.OptionalDimensions), not Schema.
+- 2026-10-10 WP-01 handed in (dbbd51b); reviewer spawned. Worker notes: the fake should also run RunStoreGapsSuite/RunQueueGapsSuite (2 lines in internal/fake); delete the porttest_test.go placeholders after merge.
