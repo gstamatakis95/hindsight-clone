@@ -2,6 +2,7 @@ package bank
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 )
@@ -48,4 +49,45 @@ type TagPage struct {
 	Tags []domain.TagCount
 	// NextPageToken continues the listing; empty = last page.
 	NextPageToken string
+}
+
+// statsReader implements StatsReader over a StatsSource.
+type statsReader struct{ src StatsSource }
+
+var _ StatsReader = (*statsReader)(nil)
+
+// NewStatsReader returns the StatsReader over src (port.Reader once CCR WP-13-1 lands).
+func NewStatsReader(src StatsSource) StatsReader { return &statsReader{src: src} }
+
+// Stats returns the source's counts.
+func (r *statsReader) Stats(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+	st, err := r.src.BankStats(ctx, b)
+	if err != nil {
+		return domain.BankStats{}, fmt.Errorf("bank stats: %w", err)
+	}
+	return st, nil
+}
+
+// Tags returns one page of tag counts. The prefix is normalized like a tag (NFC, lowercase, trimmed), since
+// stored tags are; the page token carries the last tag of the previous page.
+func (r *statsReader) Tags(ctx context.Context, req ListTagsRequest) (TagPage, error) {
+	var tok tagToken
+	if err := decodeToken(req.PageToken, &tok); err != nil {
+		return TagPage{}, err
+	}
+	source := req.Source
+	if source == domain.TagSourceUnspecified {
+		source = domain.TagSourceMemories
+	}
+	size := pageSize(req.PageSize)
+	tags, err := r.src.TagCounts(ctx, req.Bank, source, domain.NormalizeTag(req.Prefix), tok.After, size+1)
+	if err != nil {
+		return TagPage{}, fmt.Errorf("list tags: %w", err)
+	}
+	page := TagPage{Tags: tags}
+	if len(tags) > size {
+		page.Tags = tags[:size]
+		page.NextPageToken = encodeToken(tagToken{After: tags[size-1].Tag})
+	}
+	return page, nil
 }

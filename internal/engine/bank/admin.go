@@ -21,7 +21,7 @@ type TenantAdmin interface {
 }
 
 // BankAdmin creates and reads banks and patches their own overrides.
-type BankAdmin interface {
+type BankAdmin interface { //nolint:revive // stutter: mirrors server.BankAdmin, which it must satisfy
 	// CreateBank inserts bank (Ref, Name, Config) and returns it as stored; an existing id is
 	// domain.ErrAlreadyExists.
 	CreateBank(ctx context.Context, bank domain.Bank) (domain.Bank, error)

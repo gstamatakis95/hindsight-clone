@@ -1,0 +1,131 @@
+package bank
+
+import (
+	"errors"
+	"memd/internal/domain"
+	"memd/internal/port"
+	"slices"
+	"testing"
+)
+
+// seedTemplateSource creates src with a config and two directives.
+func seedTemplateSource(t *testing.T, e env, src port.BankRef) {
+	t.Helper()
+	cfg := domain.BankConfig{RetainMission: "remember tea", ReflectMission: "be brief"}
+	e.tx(t, func(tx port.Tx) error {
+		if err := tx.Banks().Create(e.ctx, domain.Bank{Ref: src, Name: "Source", Config: cfg}); err != nil {
+			return err
+		}
+		for _, d := range []domain.Directive{
+			{Bank: src, Name: "global", Rules: []string{"be polite"}, Active: true},
+			{Bank: src, Name: "team", Rules: []string{"cite"}, Tags: []string{"team"}, Active: false},
+		} {
+			if _, err := tx.Directives().Upsert(e.ctx, d); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// checkExport checks an export carries config, directives without identity and the model specs.
+func checkExport(t *testing.T, tmpl domain.BankTemplate) {
+	t.Helper()
+	if tmpl.Config.RetainMission != "remember tea" || len(tmpl.Directives) != 2 || len(tmpl.MentalModels) != 2 {
+		t.Fatalf("export = %+v", tmpl)
+	}
+	for _, d := range tmpl.Directives {
+		if d.ID != "" || d.Bank != (port.BankRef{}) {
+			t.Errorf("exported directive keeps its identity: %+v", d)
+		}
+	}
+}
+
+// checkBuilds checks one pending refresh_mental_model build per model in bank b.
+func checkBuilds(t *testing.T, ops []domain.Operation, b port.BankRef, n int) {
+	t.Helper()
+	if len(ops) != n {
+		t.Fatalf("builds = %d, want %d", len(ops), n)
+	}
+	for _, op := range ops {
+		if op.Kind != domain.OperationKindRefreshMentalModel || op.Status != domain.OperationStatusPending ||
+			op.Bank != b {
+			t.Errorf("build op = %+v", op)
+		}
+	}
+}
+
+func TestTemplateRoundTrip(t *testing.T) {
+	e := newEnv(t)
+	src := port.BankRef{Tenant: "t", Bank: "src"}
+	dst := port.BankRef{Tenant: "t", Bank: "dst"}
+	seedTemplateSource(t, e, src)
+	specs := specStub{src: {
+		{ID: "people", Name: "People", SourceQuery: "who is who?", Tags: []string{"Team"}},
+		{ID: "tea", Name: "Tea", SourceQuery: "what tea?"},
+	}}
+	codec := NewTemplateCodec(e.store, specs, refreshStub{})
+
+	tmpl, err := codec.Export(e.ctx, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkExport(t, tmpl)
+
+	bank, ops, err := codec.CreateNamed(e.ctx, dst, "Copy", tmpl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bank.Name != "Copy" || bank.Config.ReflectMission != "be brief" {
+		t.Errorf("created bank = %+v", bank)
+	}
+	checkBuilds(t, ops, dst, 2)
+	assertTemplateCopied(t, e, src, dst)
+
+	if _, err := codec.Create(e.ctx, dst, tmpl); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Errorf("create over an existing bank: %v, want AlreadyExists", err)
+	}
+}
+
+// assertTemplateCopied checks dst got src's directives with new ids and the models with normalized tags.
+func assertTemplateCopied(t *testing.T, e env, src, dst port.BankRef) {
+	t.Helper()
+	admin := NewDirectiveAdmin(e.store)
+	from, _ := admin.ListDirectives(e.ctx, src, nil, false)
+	to, err := admin.ListDirectives(e.ctx, dst, nil, false)
+	if err != nil || !slices.Equal(names(from), names(to)) {
+		t.Fatalf("copied directives = %v (%v), want %v", names(to), err, names(from))
+	}
+	for _, d := range to {
+		if slices.ContainsFunc(from, func(x domain.Directive) bool { return x.ID == d.ID }) {
+			t.Errorf("directive id %s reused", d.ID)
+		}
+	}
+	e.tx(t, func(tx port.Tx) error {
+		m, err := tx.MentalModels().Get(e.ctx, dst, "people")
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(m.Spec.Tags, []string{"team"}) {
+			t.Errorf("model tags = %v, want normalized [team]", m.Spec.Tags)
+		}
+		return nil
+	})
+}
+
+func TestTemplateCreateRollsBackOnBadSpec(t *testing.T) {
+	e := newEnv(t)
+	b := port.BankRef{Tenant: "t", Bank: "b"}
+	codec := NewTemplateCodec(e.store, specStub{}, refreshStub{})
+	_, _, err := codec.CreateNamed(e.ctx, b, "x", domain.BankTemplate{MentalModels: []domain.MentalModelSpec{{}}})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("spec without id: %v", err)
+	}
+	dup := domain.BankTemplate{MentalModels: []domain.MentalModelSpec{{ID: "a"}, {ID: "a"}}}
+	if _, _, err := codec.CreateNamed(e.ctx, b, "x", dup); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("duplicate model ids: %v", err)
+	}
+	if _, err := NewBankAdmin(e.store).GetBank(e.ctx, b); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("a failed create left the bank behind: %v", err)
+	}
+}
