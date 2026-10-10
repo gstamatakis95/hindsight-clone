@@ -104,5 +104,9 @@ func (s *memoryServer) Reflect(ctx context.Context, req *pb.ReflectRequest) (*pb
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return reflectResultToProto(out), nil
+	resp := reflectResultToProto(out)
+	if resp.BasedOn == nil && (in.Include.Facts == nil || *in.Include.Facts) {
+		resp.BasedOn = &pb.BasedOn{} // facts were asked for: an answer citing nothing still has based_on
+	}
+	return resp, nil
 }

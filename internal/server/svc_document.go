@@ -84,7 +84,11 @@ func (s *documentServer) UpdateDocument(
 		// The new set replaces the old one entirely, so it must be given; an empty set clears the tags.
 		return nil, toStatus(fmt.Errorf("%w: tags is required", domain.ErrInvalidArgument))
 	}
-	id, err := s.d.Retagger.Retag(ctx, b, port.DocumentID(req.GetDocumentId()), req.GetTags().GetTags())
+	tags := req.GetTags().GetTags()
+	if tags == nil {
+		tags = []string{} // a set but empty TagSet clears the document's tags
+	}
+	id, err := s.d.Retagger.Retag(ctx, b, port.DocumentID(req.GetDocumentId()), tags)
 	if err != nil {
 		return nil, toStatus(err)
 	}

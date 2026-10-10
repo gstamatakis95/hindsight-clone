@@ -19,3 +19,19 @@ func (d Deps) validate(rpc string, o *domain.BankConfig) error {
 	}
 	return d.ValidateOverrides(rpc, *o)
 }
+
+// validatedSpec wraps patch so the patched spec's overrides pass the same check as CreateMentalModel. It
+// stays pure: the implementation runs it inside its transaction.
+func (d Deps) validatedSpec(patch SpecPatch) SpecPatch {
+	return func(cur domain.MentalModelSpec) (domain.MentalModelSpec, error) {
+		out, err := patch(cur)
+		if err != nil {
+			return domain.MentalModelSpec{}, err
+		}
+		if err := d.validate("CreateMentalModel", out.Overrides); err != nil {
+			return domain.MentalModelSpec{}, err
+		}
+		return out, nil
+	}
+}
+

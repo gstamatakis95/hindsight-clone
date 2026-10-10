@@ -128,7 +128,7 @@ func (s *mentalModelServer) UpdateMentalModel(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	m, err := s.d.MentalModels.UpdateMentalModel(ctx, b, id, patch)
+	m, err := s.d.MentalModels.UpdateMentalModel(ctx, b, id, s.d.validatedSpec(patch))
 	if err != nil {
 		return nil, toStatus(err)
 	}

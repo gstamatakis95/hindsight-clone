@@ -12,6 +12,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // TenantHeader is the metadata key that carries the tenant id. Auth is out of scope: the tenant is never
@@ -104,6 +106,32 @@ func bankRef(ctx context.Context, bankID string) (port.BankRef, error) {
 func requireID(field, v string) error {
 	if v == "" {
 		return fmt.Errorf("%w: %s is required", domain.ErrInvalidArgument, field)
+	}
+	return nil
+}
+
+// pagingInterceptor rejects a request whose page_size or limit is negative (INVALID_ARGUMENT); 0 keeps
+// meaning "the server default".
+func pagingInterceptor() grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
+	) (any, error) {
+		if m, ok := req.(proto.Message); ok {
+			if err := checkPaging(m.ProtoReflect()); err != nil {
+				return nil, toStatus(err)
+			}
+		}
+		return handler(ctx, req)
+	}
+}
+
+// checkPaging returns ErrInvalidArgument when m's page_size or limit field is negative.
+func checkPaging(m protoreflect.Message) error {
+	for _, name := range []protoreflect.Name{"page_size", "limit"} {
+		fd := m.Descriptor().Fields().ByName(name)
+		if fd != nil && fd.Kind() == protoreflect.Int32Kind && m.Get(fd).Int() < 0 {
+			return fmt.Errorf("%w: %s must not be negative", domain.ErrInvalidArgument, name)
+		}
 	}
 	return nil
 }

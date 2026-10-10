@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 
@@ -243,6 +244,11 @@ func (s *bankServer) CreateBankFromTemplate(
 	if err != nil {
 		return nil, toStatus(err)
 	}
+	for i := range t.MentalModels {
+		if err := s.d.validate("CreateMentalModel", t.MentalModels[i].Overrides); err != nil {
+			return nil, toStatus(err)
+		}
+	}
 	// Known gap: TemplateCodec.Create takes no name, so req.name is not stored, and it returns only the
 	// bank, so mental_model_builds stays empty although Create enqueues a first build of every model.
 	out, err := s.d.Templates.Create(ctx, b, t)
@@ -262,6 +268,9 @@ func (s *bankServer) UpsertDirective(
 	b, err := bankRef(ctx, req.GetBankId())
 	if err != nil {
 		return nil, toStatus(err)
+	}
+	if req.GetDirective() == nil {
+		return nil, toStatus(fmt.Errorf("%w: directive is required", domain.ErrInvalidArgument))
 	}
 	in := upsertDirectiveFromProto(req)
 	in.Bank = b

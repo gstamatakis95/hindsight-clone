@@ -19,8 +19,13 @@ doesn't say what an absent mask means.
 - **What a masked path does.** It takes the request's value:
   - an unset value clears the field, so it inherits again;
   - a list or map with no elements becomes a non-nil empty one, an explicit clear.
-- **Absent or empty mask.** It means every top-level field the request populates (AIP-134 style). Such a
-  request can't clear anything.
+- **Absent or empty mask.** It means every populated **leaf** path of the request (AIP-134 style),
+  never a whole top-level message.
+  - The leaf walk recurses into set singular messages and stops at lists, maps, Structs and scalars.
+  - A set but empty nested message yields no path.
+  - So `{recall: {rerank: false}}` sets only `recall.rerank`, and stored `recall.budget_low` and
+    `recall.rrf_k` survive. A trigger patch on a mental model likewise keeps the trigger's other fields.
+  - Such a request can't clear anything; a clear needs an explicit mask.
 - **ResetBankConfig.** `paths` reset the named fields to unset; no paths resets the whole bank override
   to the zero config.
 - **Purity.** Patches are pure functions (`ConfigPatch`, `SpecPatch`). Pointer structs along a path are

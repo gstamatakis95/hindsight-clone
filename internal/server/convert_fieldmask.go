@@ -18,17 +18,16 @@ import (
 // stored value that has no proto twin (a non-nil empty list = an explicit clear) survives patches of other
 // fields. A masked path replaces the target with the request's value; an unset value clears it, and a
 // masked list or map with no elements becomes a non-nil empty one (an explicit clear). An absent or empty
-// mask means every top-level field the request populates.
+// mask means every populated leaf of the request: set singular messages are recursed into (a set but empty
+// one yields no path), and lists, maps and Structs are leaves, so a sibling the request leaves unset is
+// never touched.
 
 // maskPaths validates mask against msg's type and returns its normalized paths; an empty mask yields
-// msg's populated top-level fields. Paths in immutable are rejected.
+// msg's populated leaf paths. Paths in immutable are rejected.
 func maskPaths(msg proto.Message, mask *fieldmaskpb.FieldMask, immutable ...string) ([]string, error) {
 	if len(mask.GetPaths()) == 0 {
 		var paths []string
-		msg.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
-			paths = append(paths, string(fd.Name()))
-			return true
-		})
+		populatedLeaves(msg.ProtoReflect(), "", &paths)
 		return dropImmutable(paths, immutable), nil
 	}
 	m := &fieldmaskpb.FieldMask{Paths: append([]string(nil), mask.GetPaths()...)}
@@ -45,6 +44,20 @@ func maskPaths(msg proto.Message, mask *fieldmaskpb.FieldMask, immutable ...stri
 		}
 	}
 	return m.GetPaths(), nil
+}
+
+// populatedLeaves appends the paths of m's populated leaves: it recurses into set singular messages and
+// stops at lists, maps, Structs and scalars.
+func populatedLeaves(m protoreflect.Message, prefix string, out *[]string) {
+	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		path := prefix + string(fd.Name())
+		if fd.Message() != nil && !fd.IsList() && !fd.IsMap() && fd.Message().FullName() != "google.protobuf.Struct" {
+			populatedLeaves(v.Message(), path+".", out)
+		} else {
+			*out = append(*out, path)
+		}
+		return true
+	})
 }
 
 // dropImmutable removes immutable top-level paths from an implicit (populated-fields) mask.

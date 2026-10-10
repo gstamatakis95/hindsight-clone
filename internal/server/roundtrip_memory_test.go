@@ -4,7 +4,8 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// stripScores clears what a plain domain.Unit cannot carry: scores and the stale flag are recall-only.
+// stripScores clears what a plain domain.Unit cannot carry: scores and the stale flag. Stale is not recall-only
+// on the wire, but domain.Unit has no field for it yet (known gap, Phase 2 CCR batch).
 func stripScores(ms ...*pb.Memory) {
 	for _, m := range ms {
 		m.Scores = nil

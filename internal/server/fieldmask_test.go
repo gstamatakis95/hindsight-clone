@@ -165,6 +165,46 @@ func TestFieldMaskSpecPatch(t *testing.T) {
 	}
 }
 
+// TestFieldMaskImpliedLeaves checks a request with no mask patches only its populated leaves: sibling
+// fields of a set nested message survive, and a set but empty nested message changes nothing.
+func TestFieldMaskImpliedLeaves(t *testing.T) {
+	patch, err := configPatch(&pb.BankConfig{Recall: &pb.RecallConfig{Rerank: ptr(false)}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := patch(domain.BankConfig{Recall: &domain.RecallConfig{BudgetLow: ptr(50), RRFK: ptr(10)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := domain.BankConfig{Recall: &domain.RecallConfig{BudgetLow: ptr(50), RRFK: ptr(10), Rerank: ptr(false)}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %+v\nwant %+v", got.Recall, want.Recall)
+	}
+	empty, err := configPatch(&pb.BankConfig{Recall: &pb.RecallConfig{}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := empty(baseConfig()); !reflect.DeepEqual(got, baseConfig()) {
+		t.Fatalf("empty nested message changed the config: %+v", got)
+	}
+	spec, err := specPatch(&pb.MentalModelSpec{Trigger: &pb.RefreshTrigger{RefreshCron: "0 * * * *"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur := domain.MentalModelSpec{ID: "m", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{
+		TagsMatch: domain.TagsMatchAll, FactTypes: []domain.FactType{domain.FactTypeWorld},
+	}}
+	gotSpec, err := spec(cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSpec := cur
+	wantSpec.Trigger.RefreshCron = "0 * * * *"
+	if !reflect.DeepEqual(gotSpec, wantSpec) {
+		t.Fatalf("got  %+v\nwant %+v", gotSpec, wantSpec)
+	}
+}
+
 // TestFieldMaskPathsResolve checks every maskable proto path of BankConfig and MentalModelSpec (through
 // singular message fields) resolves to a domain field by JSON name, so no valid mask can fail at apply.
 func TestFieldMaskPathsResolve(t *testing.T) {
