@@ -80,4 +80,6 @@ CCRs: none. No porttest assertion contradicted the spec.
 - `parked_links` is unused in v1 (archive snapshots are JSON); DeleteBatch still clears it.
 - Enqueues of several dedupe keys in one tx are not globally sorted (separate calls); a deadlock surfaces as
   `ErrConflict` for the caller to retry (decision 110).
+- One `make test` run failed every postgres test at once (container start, most likely contention with other
+  testcontainers); the rerun passed and `pgtest.Main` now retries a failed start once.
 - `TestAcceptSmallBankVector` takes ~70 s (it builds a 50k x 768 HNSW index); `-short` skips it.
