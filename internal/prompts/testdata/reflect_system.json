@@ -1,0 +1,21 @@
+{
+  "bank_name": "Support desk",
+  "mission": "You help support engineers understand customer history.",
+  "disposition": {"skepticism": 5, "empathy": 2},
+  "directives": [
+    {"Name": "Tone", "Rules": ["Be concise.", "Never speculate about refunds."]},
+    {"Name": "", "Rules": ["Always answer in English."]},
+    {"Name": "Empty", "Rules": []}
+  ],
+  "context": "The caller is a tier-2 engineer.",
+  "mental_models": true,
+  "observations": true,
+  "expand": true,
+  "budget": "high",
+  "answer_as_document": false,
+  "now": "2026-10-10T08:15:42Z",
+  "query": "What did Acme complain about last month?",
+  "retrieved": [],
+  "omitted": false,
+  "max_tokens": 0
+}

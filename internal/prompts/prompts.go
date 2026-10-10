@@ -8,13 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"memd/internal/domain"
 	"path"
 	"sort"
 	"strings"
 	"sync"
 	"text/template"
-
-	"memd/internal/domain"
 )
 
 // templatesFS holds every prompt template (<name>.tmpl), response schema (<name>.schema.json) and JSON

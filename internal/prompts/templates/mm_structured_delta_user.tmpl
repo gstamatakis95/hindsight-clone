@@ -1,0 +1,69 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/prompts.py — build_structured_delta_prompt (topic, document JSON,
+supporting facts, output and document budgets, truncation note, task footer). The refresh's own synthesis is
+deliberately not shown (Hindsight #5272). memd additions: observations are listed before facts with their dates,
+and .Rejected adds the one retry the spec allows, listing the ops that could not be applied.
+Data (DeltaData): .SourceQuery, .Document, .Observations, .Facts, .DocumentTokens, .DocumentBudget,
+.MaxOutputTokens, .Truncated, .Rejected.
+*/ -}}
+## Topic
+{{.SourceQuery}}
+
+## CURRENT DOCUMENT (apply ops to this; copy section and block ids from it verbatim)
+```json
+{{json .Document}}
+```
+
+## SUPPORTING FACTS (new since last refresh — integrate these)
+{{- range .Observations}}
+- [observation:{{.ID}}] {{.Text}}{{template "dates" .}}
+{{- end}}
+{{- range .Facts}}
+- [{{with .Type}}{{.}}:{{end}}{{.ID}}] {{.Text}}{{template "dates" .}}
+{{- end}}
+{{- if and (not .Observations) (not .Facts)}}
+(no supporting facts retrieved)
+{{- end}}
+{{- if gt .DocumentBudget 0}}
+{{- if ge .DocumentTokens .DocumentBudget}}
+
+## Document budget (EXCEEDED)
+The document is ~{{.DocumentTokens}} tokens against a budget of {{.DocumentBudget}}. As well as integrating the new facts, make room: remove or merge blocks that are superseded, duplicated, or no longer help answer the TOPIC, using remove_block, replace_block or replace_section_blocks. Reclaim space from stale content — never by dropping the facts you are integrating, and never by summarising a section that is still current into a sentence.
+{{- else if ge (add .DocumentTokens (add .DocumentTokens (add .DocumentTokens (add .DocumentTokens .DocumentTokens)))) (add .DocumentBudget (add .DocumentBudget (add .DocumentBudget .DocumentBudget)))}}
+
+## Document budget
+The document is ~{{.DocumentTokens}} tokens against a budget of {{.DocumentBudget}}. It is close to the limit, so prefer replacing stale blocks over appending new ones where the new facts update something the document already covers.
+{{- end}}
+{{- end}}
+{{- if gt .MaxOutputTokens 0}}
+
+## Output budget
+Your JSON response must fit within ~{{.MaxOutputTokens}} tokens. If you would need more than this to express every change, emit the highest-leverage edits first and drop the rest — a truncated response parses as nothing and loses every change, while a short one keeps the ones you sent.
+{{- end}}
+{{- if .Truncated}}
+
+*Note: Document or facts were truncated to fit the model context window. Prefer minimal, high-leverage operations.*
+{{- end}}
+{{- if .Rejected}}
+
+## Previous attempt rejected
+None of the operations in your previous response could be applied:
+{{- range .Rejected}}
+- {{.Op}} — {{.Reason}}
+{{- end}}
+Every `section_id`, `block_id` and `after_block_id` must be an `id` printed in CURRENT DOCUMENT above, copied exactly. Output the complete operation list again.
+{{- end}}
+
+## Task
+Output a JSON object matching the operations schema. Integrate the new supporting facts into CURRENT DOCUMENT. Add, update, or remove content as needed. Preserve unchanged sections and blocks by not mentioning them.
+Facts arrive out of date order. Before changing what the document says is current (an owner, version, status or count), put the dated events from the document and the new facts on one timeline: the latest-dated event is the current state, wherever it came from. A new fact dated earlier than the document's current state only adds history.
+
+{{- define "dates"}}
+{{- if or .OccurredStart .MentionedAt}} (
+{{- with .OccurredStart}}{{$start := .Format "2006-01-02"}}occurred: {{$start}}
+{{- with $.OccurredEnd}}{{$end := .Format "2006-01-02"}}{{if ne $start $end}} to {{$end}}{{end}}{{end}}
+{{- end}}
+{{- if and .OccurredStart .MentionedAt}}; {{end}}
+{{- with .MentionedAt}}mentioned_at: {{.Format "2006-01-02"}}{{end}})
+{{- end}}
+{{- end}}

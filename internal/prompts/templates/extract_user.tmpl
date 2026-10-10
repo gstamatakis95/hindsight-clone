@@ -1,0 +1,33 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/retain/fact_extraction.py — _build_user_message and
+_retain_mission_preamble (the retain mission rides in the user message so the system prompt stays
+bank-agnostic). memd changes: caller entity hints added; chunk numbering, narrator and attachments dropped.
+Data (ExtractData): .Mission, .MentionedAt, .Context, .Metadata, .Hints, .Text.
+*/ -}}
+{{- with .Mission -}}
+══════════════════════════════════════════════════════════════════════════
+FOCUS — What to retain for this bank (takes priority over the general guidelines)
+══════════════════════════════════════════════════════════════════════════
+
+{{.}}
+
+{{end -}}
+Extract facts from the following chunk.
+
+Event Date: {{with .MentionedAt}}{{.Format "Monday, January 2, 2006"}} ({{.Format "2006-01-02T15:04:05Z07:00"}}){{else}}Unknown{{end}}
+Context: {{with .Context}}{{.}}{{else}}none{{end}}
+{{- if .Metadata}}
+Metadata:
+{{- range $k, $v := .Metadata}}
+  {{$k}}: {{$v}}
+{{- end}}
+{{- end}}
+{{- if .Hints}}
+Known entities (when the text refers to one of these, name it exactly as written here):
+{{- range .Hints}}
+  - {{.Text}}{{with .Type}} ({{.}}){{end}}
+{{- end}}
+{{- end}}
+
+Content:
+{{.Text}}

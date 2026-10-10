@@ -1,0 +1,12 @@
+{
+  "custom_prompt": "Only extract facts about the customer's orders, returns and complaints.",
+  "causal_links": false,
+  "free_form_entities": false,
+  "labels": [
+    {
+      "key": "channel",
+      "description": "Where the customer reached us",
+      "values": [{"value": "email"}, {"value": "phone", "description": "a call to support"}]
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "mission": "You help support engineers understand customer history.",
+  "directives": [{"Name": "Tone", "Rules": ["Be concise."]}],
+  "now": "2026-10-10T08:15:42Z"
+}

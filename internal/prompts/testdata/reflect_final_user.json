@@ -1,0 +1,13 @@
+{
+  "bank_name": "Support desk",
+  "mission": "You help support engineers understand customer history.",
+  "disposition": {"skepticism": 4, "literalism": 3},
+  "context": "The caller is a tier-2 engineer.",
+  "query": "What did Acme complain about last month?",
+  "retrieved": [
+    {"tool": "search_observations", "output": "{\"observations\":[{\"id\":\"o1\",\"text\":\"Acme reported slow exports.\"}]}"},
+    {"tool": "recall", "output": "{\"memories\":[]}"}
+  ],
+  "omitted": true,
+  "max_tokens": 600
+}

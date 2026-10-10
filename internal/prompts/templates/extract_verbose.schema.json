@@ -1,0 +1,94 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["facts"],
+  "properties": {
+    "facts": {
+      "type": "array",
+      "description": "List of extracted factual statements",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "what", "when", "where", "who", "why", "fact_kind", "fact_type", "occurred_start", "occurred_end",
+          "time_expression", "entities", "labels", "caused_by"
+        ],
+        "properties": {
+          "what": {
+            "type": "string",
+            "description": "WHAT happened - COMPLETE, DETAILED description with ALL specifics. NEVER summarize or omit details. Include: exact actions, objects, quantities, specifics. BE VERBOSE - capture every detail that was mentioned. Example: 'Emily got married to Sarah at a rooftop garden ceremony with 50 guests attending and a live jazz band playing' NOT: 'A wedding happened' or 'Emily got married'"
+          },
+          "when": {
+            "type": ["string", "null"],
+            "description": "WHEN it happened - ALWAYS include temporal information if mentioned. Include: specific dates, times, durations, relative time references. Examples: 'on June 15th, 2024 at 3pm', 'last weekend', 'for the past 3 years', 'every morning at 6am'. Write null ONLY if absolutely no temporal context exists. Prefer converting to absolute dates when possible."
+          },
+          "where": {
+            "type": ["string", "null"],
+            "description": "WHERE it happened or is about - SPECIFIC locations, places, areas, regions if applicable. Include: cities, neighborhoods, venues, buildings, countries, specific addresses when mentioned. Examples: 'downtown San Francisco at a rooftop garden venue', 'at the user's home in Brooklyn', 'online via Zoom', 'Paris, France'. Write null ONLY if absolutely no location context exists or if the fact is completely location-agnostic."
+          },
+          "who": {
+            "type": ["string", "null"],
+            "description": "WHO is involved - ALL people/entities with FULL context and relationships. Include: names, roles, relationships to user, background details. Resolve coreferences (if 'my roommate' is later named 'Emily', write 'Emily, the user's college roommate'). BE DETAILED about relationships and roles. Example: 'Emily (user's college roommate from Stanford, now works at Google), Sarah (Emily's partner of 5 years, software engineer)' NOT: 'my friend' or 'Emily and Sarah'"
+          },
+          "why": {
+            "type": ["string", "null"],
+            "description": "WHY it matters - ALL emotional, contextual, and motivational details. Include EVERYTHING: feelings, preferences, motivations, observations, context, background, significance. BE VERBOSE - capture all the nuance and meaning. FOR EXPERIENCE FACTS: MUST include what the user asked/requested that led to this interaction! Example (world): 'The user felt thrilled and inspired, has always dreamed of an outdoor ceremony, mentioned wanting a similar garden venue, was particularly moved by the intimate atmosphere and personal vows' Example (experience): 'User asked how to fix slow API performance with 1000+ concurrent users, expected 70-80% reduction in database load' NOT: 'User liked it' or 'To help user'"
+          },
+          "fact_kind": {
+            "type": "string",
+            "enum": ["event", "conversation"],
+            "description": "'event' = specific datable occurrence (set occurred dates), 'conversation' = general info (no occurred dates)"
+          },
+          "fact_type": {
+            "type": "string",
+            "enum": ["world", "experience"],
+            "description": "'world' = objective/external facts about the user, other people, events, general knowledge, preferences, rules, corrections, or constraints. 'experience' = actions, experiences, or observations the assistant/agent actually performed (e.g., 'I changed X', 'I discovered Y')."
+          },
+          "occurred_start": {
+            "type": ["string", "null"],
+            "description": "WHEN the event happened (ISO 8601 timestamp). Only for fact_kind='event'. null for conversations."
+          },
+          "occurred_end": {
+            "type": ["string", "null"],
+            "description": "WHEN the event ended (ISO 8601 timestamp). Only for fact_kind='event'. null for conversations."
+          },
+          "time_expression": {
+            "type": ["string", "null"],
+            "description": "The temporal phrase exactly as the text wrote it (e.g. 'last spring'); null if none"
+          },
+          "entities": {
+            "type": "array",
+            "description": "Named entities, objects, AND abstract concepts from the fact. Include: people names, organizations, places, significant objects (e.g., 'coffee maker', 'car'), AND abstract concepts/themes (e.g., 'friendship', 'career growth', 'loss', 'celebration'). Extract anything that could help link related facts together.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "kind"],
+              "properties": {
+                "name": {"type": "string", "description": "The entity as the text names it"},
+                "kind": {"type": ["string", "null"], "description": "One lowercase word: person, organization, place, ...; null if unclear"}
+              }
+            }
+          },
+          "labels": {
+            "type": "array",
+            "description": "Classification labels as key/value pairs; [] when no label applies or none are configured",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "value"],
+              "properties": {
+                "key": {"type": "string", "description": "Label key, or 'group:field' for a structured entity field"},
+                "value": {"type": "string", "description": "Label value"}
+              }
+            }
+          },
+          "caused_by": {
+            "type": "array",
+            "description": "Causal links to PREVIOUS facts only: 0-based indexes, each MUST be less than this fact's position. Example: fact #3 can only reference facts 0, 1, or 2. Max 2 per fact; [] if none.",
+            "items": {"type": "integer"}
+          }
+        }
+      }
+    }
+  }
+}

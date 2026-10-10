@@ -1,0 +1,30 @@
+{
+  "causal_links": true,
+  "free_form_entities": true,
+  "labels": [
+    {
+      "key": "sentiment",
+      "description": "Overall tone of the fact",
+      "type": "value",
+      "values": [{"value": "positive", "description": "happy or approving"}, {"value": "negative"}]
+    },
+    {
+      "key": "topics",
+      "description": "Topics covered",
+      "type": "multi_values",
+      "values": [{"value": "work"}, {"value": "family"}]
+    },
+    {"key": "project", "description": "Project name", "type": "text"},
+    {"key": "tools", "type": "multi_text"},
+    {
+      "key": "person",
+      "description": "People with their role",
+      "type": "map",
+      "fields": {
+        "role": {"key": "role", "type": "value", "values": [{"value": "engineer"}, {"value": "manager"}]},
+        "team": {"key": "team", "description": "Team name", "type": "text"},
+        "contact": {"key": "contact", "type": "map", "fields": {"email": {"key": "email", "type": "text"}}}
+      }
+    }
+  ]
+}

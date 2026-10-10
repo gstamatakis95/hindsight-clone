@@ -1,0 +1,21 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/prompts.py — build_done_request_prompt (with _FINAL_INSTRUCTIONS
+and _length_directive): the closing user turn of the tool loop when it must answer now. Language rules dropped.
+Data (ReflectData): .Query, .MaxTokens.
+*/ -}}
+## Answer now
+Stop retrieving. Call the `done` tool with your final answer, built from the tool results above.
+This is the ANSWER, not a summary of it: carry over every relevant fact, date and number from the tool results, at the same depth you would write for a reader who cannot see them.
+
+## Question
+{{.Query}}
+
+## Instructions
+Provide a thoughtful answer by synthesizing and reasoning from the retrieved data above. You can make reasonable inferences from the memories, but don't completely fabricate information. If the exact answer isn't stated, use what IS stated to give the best possible answer, within the inference rules in the system prompt.
+
+IMPORTANT: Output ONLY the final answer. Do NOT include meta-commentary like "I'll search..." or "Let me analyze...". Do NOT explain your reasoning process. Just provide the direct synthesized answer.
+{{- if gt .MaxTokens 0}}
+
+## Length
+Aim for a complete, self-contained answer of approximately {{.MaxTokens}} tokens. Finishing cleanly matters more than length: end on a complete sentence and NEVER stop mid-word, mid-list, or mid-code-fence. If you near the budget, wrap up gracefully rather than cutting off.
+{{- end}}

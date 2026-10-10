@@ -1,0 +1,8 @@
+{
+  "document": "## Complaints\n\nAcme reported slow exports in September 2026.",
+  "fields": [
+    {"name": "customer", "type": "string", "required": true, "description": "Customer name"},
+    {"name": "issues", "type": "array", "required": false, "description": "Issues reported"}
+  ],
+  "schema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"customer\": {\"type\": \"string\"},\n    \"issues\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}\n  },\n  \"required\": [\"customer\"]\n}"
+}

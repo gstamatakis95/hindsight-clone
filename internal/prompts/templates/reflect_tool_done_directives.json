@@ -1,0 +1,33 @@
+{
+  "name": "done",
+  "description": "Signal completion with your final answer. IMPORTANT: You must confirm directive compliance before submitting. Your answer will be REJECTED if it violates any directive. You have NOT gathered enough while the levels you searched do not STATE the answer: a result that only shares the question's topic is not an answer, so search the next level (search_observations, then recall) instead of answering around it. Never call done to report that nothing is known unless recall has already run on the question's key terms.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "answer": {
+        "type": "string",
+        "description": "Your response as well-formatted markdown. Use headers, lists, bold/italic, and code blocks for clarity. NEVER include memory IDs, UUIDs, or 'Memory references' in this text - put IDs only in memory_ids array. MANDATORY: Your answer MUST comply with ALL directives listed in the DIRECTIVES section of the system prompt."
+      },
+      "memory_ids": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Array of memory IDs that support your answer (put IDs here, NOT in answer text)"
+      },
+      "mental_model_ids": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Array of mental model IDs that support your answer"
+      },
+      "observation_ids": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Array of observation IDs that support your answer"
+      },
+      "directive_compliance": {
+        "type": "string",
+        "description": "REQUIRED: Confirm your answer complies with ALL directives in the DIRECTIVES section of the system prompt. List each directive and how your answer follows it. Format: 'Directive 1: [how answer complies]. Directive 2: [how answer complies]...'"
+      }
+    },
+    "required": ["answer", "directive_compliance"]
+  }
+}

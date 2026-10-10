@@ -1,0 +1,5 @@
+{
+  "mission": "You maintain the support team's customer handbook.",
+  "directives": [{"Name": "Style", "Rules": ["Use tables for timelines."]}],
+  "now": "2026-10-10T08:15:42Z"
+}

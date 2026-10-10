@@ -1,0 +1,11 @@
+{
+  "name": "Acme account",
+  "source_query": "What is the state of the Acme account?",
+  "current_markdown": "## Plan\n\nAcme is on the Enterprise plan since March 2026.",
+  "candidate": "## Issues\n\nAcme reported slow exports in September 2026.",
+  "observations": [{"id": "o-2", "text": "Acme reported slow exports.", "mentioned_at": "2026-09-12T10:00:00Z"}],
+  "facts": [{"id": "f-3", "type": "world", "text": "Acme renewed for two years.", "occurred_start": "2026-10-01T00:00:00Z"}],
+  "document_tokens": 950,
+  "document_budget": 900,
+  "truncated": true
+}

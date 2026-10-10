@@ -1,0 +1,69 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["facts"],
+  "properties": {
+    "facts": {
+      "type": "array",
+      "description": "List of extracted factual statements",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "what", "when", "where", "who", "why", "fact_kind", "fact_type", "occurred_start", "occurred_end",
+          "time_expression", "entities", "labels", "caused_by"
+        ],
+        "properties": {
+          "what": {"type": "string", "description": "Core fact - concise but complete (1-2 sentences)"},
+          "when": {"type": ["string", "null"], "description": "When it happened. null if unknown."},
+          "where": {"type": ["string", "null"], "description": "Location if relevant. null if none."},
+          "who": {"type": ["string", "null"], "description": "People involved with relationships. null if general."},
+          "why": {"type": ["string", "null"], "description": "Context/significance if important. null if obvious."},
+          "fact_kind": {"type": "string", "enum": ["event", "conversation"], "description": "'event' or 'conversation'"},
+          "fact_type": {
+            "type": "string",
+            "enum": ["world", "experience"],
+            "description": "'world' = objective/external facts, including user preferences, rules, corrections, and constraints even when stated during a conversation. 'experience' = actions, experiences, or observations the assistant/agent actually performed."
+          },
+          "occurred_start": {"type": ["string", "null"], "description": "ISO 8601 timestamp for events; null otherwise"},
+          "occurred_end": {"type": ["string", "null"], "description": "ISO 8601 timestamp for event end; null otherwise"},
+          "time_expression": {
+            "type": ["string", "null"],
+            "description": "The temporal phrase exactly as the text wrote it (e.g. 'last spring'); null if none"
+          },
+          "entities": {
+            "type": "array",
+            "description": "People, places, organizations, objects and concepts the fact names",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "kind"],
+              "properties": {
+                "name": {"type": "string", "description": "The entity as the text names it"},
+                "kind": {"type": ["string", "null"], "description": "One lowercase word: person, organization, place, ...; null if unclear"}
+              }
+            }
+          },
+          "labels": {
+            "type": "array",
+            "description": "Classification labels as key/value pairs; [] when no label applies or none are configured",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "value"],
+              "properties": {
+                "key": {"type": "string", "description": "Label key, or 'group:field' for a structured entity field"},
+                "value": {"type": "string", "description": "Label value"}
+              }
+            }
+          },
+          "caused_by": {
+            "type": "array",
+            "description": "0-based indexes of EARLIER facts in this array that caused this fact (max 2); [] if none",
+            "items": {"type": "integer"}
+          }
+        }
+      }
+    }
+  }
+}

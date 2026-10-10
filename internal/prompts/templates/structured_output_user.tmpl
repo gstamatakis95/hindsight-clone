@@ -1,0 +1,32 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/agent.py — _generate_structured_output (structured_prompt).
+Data (StructuredOutputData): .Document, .Fields (.Name, .Type, .Required, .Description), .Schema.
+*/ -}}
+Your task is to extract specific information from the answer below and format it as JSON.
+
+ANSWER TO EXTRACT FROM:
+"""
+{{.Document}}
+"""
+{{- if .Fields}}
+
+REQUIRED OUTPUT FORMAT - Extract the following fields from the answer above:
+{{- range .Fields}}
+- {{.Name}} ({{with .Type}}{{.}}{{else}}string{{end}}){{if .Required}} (REQUIRED){{else}} (optional){{end}}: {{.Description}}
+{{- end}}
+{{- end}}
+
+JSON Schema:
+```json
+{{.Schema}}
+```
+
+INSTRUCTIONS:
+1. Read the answer carefully and identify the information that matches each field
+2. Extract the ACTUAL content from the answer - do NOT leave fields empty if information is present
+3. For string fields: use the exact text or a clear summary from the answer
+4. For array fields: return a JSON array (e.g., ["item1", "item2"]), NOT a string
+5. For required fields: you MUST provide a value extracted from the answer
+6. Return ONLY the JSON object, no explanation
+
+OUTPUT:

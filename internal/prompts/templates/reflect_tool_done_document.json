@@ -1,0 +1,55 @@
+{
+  "name": "done",
+  "description": "Signal completion with your final answer, as a structured document. Use this when you have gathered enough information to answer the question. You have NOT gathered enough while the levels you searched do not STATE the answer: a result that only shares the question's topic is not an answer, so search the next level (search_observations, then recall) instead of answering around it. Never call done to report that nothing is known unless recall has already run on the question's key terms.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "document": {
+        "type": "object",
+        "description": "Your response as a structured document. The markdown the user reads is rendered from this — do NOT write a markdown document yourself.",
+        "properties": {
+          "sections": {
+            "type": "array",
+            "description": "The document's sections, in order.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "heading": {
+                  "type": "string",
+                  "description": "Heading text WITHOUT any leading '#'. Empty string for an opening section that should render with no heading."
+                },
+                "level": {
+                  "type": "integer",
+                  "description": "Heading level, 1-6. Use 2 unless the document needs deeper nesting."
+                },
+                "blocks": {
+                  "type": "array",
+                  "description": "The section's content, one entry per block: a single paragraph, a single list, a single table, or a single fenced code block. Never put two paragraphs in one entry, and never put a heading in one — headings are the 'heading' field. Within an entry, write the content as you would in a document: '- one\n- two' for a list, '| a | b |\n| --- | --- |\n| 1 | 2 |' for a table.",
+                  "items": {"type": "string"}
+                }
+              },
+              "required": ["heading", "level", "blocks"]
+            }
+          }
+        },
+        "required": ["sections"]
+      },
+      "memory_ids": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Array of memory IDs that support your answer"
+      },
+      "mental_model_ids": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Array of mental model IDs that support your answer"
+      },
+      "observation_ids": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Array of observation IDs that support your answer"
+      }
+    },
+    "required": ["document"]
+  }
+}
