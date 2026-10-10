@@ -1,4 +1,4 @@
-package gateway
+package jsonschema
 
 import (
 	"bytes"
@@ -13,17 +13,17 @@ import (
 	"unicode/utf8"
 )
 
-// schema is a parsed JSON Schema. It checks the subset of keywords structured output uses: type (a name or a
+// Schema is a parsed JSON Schema. It checks the subset of keywords structured output uses: type (a name or a
 // list), enum, const, properties, required, additionalProperties, items, minItems, maxItems, minLength,
 // maxLength, minimum, maximum, anyOf, oneOf, allOf and local $ref ("#/$defs/...", "#/definitions/...").
 // Other keywords are ignored.
-type schema struct {
+type Schema struct {
 	// root is the whole schema document, the base of $ref pointers.
 	root any
 }
 
-// compileSchema parses raw; an empty or malformed schema is domain.ErrInvalidArgument.
-func compileSchema(raw json.RawMessage) (*schema, error) {
+// Compile parses raw; an empty or malformed schema is domain.ErrInvalidArgument.
+func Compile(raw json.RawMessage) (*Schema, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, fmt.Errorf("%w: structured call has no JSON schema", domain.ErrInvalidArgument)
 	}
@@ -31,7 +31,7 @@ func compileSchema(raw json.RawMessage) (*schema, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: JSON schema: %w", domain.ErrInvalidArgument, err)
 	}
-	return &schema{root: root}, nil
+	return &Schema{root: root}, nil
 }
 
 // decodeJSON decodes exactly one JSON value, keeping numbers as json.Number.
@@ -48,9 +48,9 @@ func decodeJSON(raw []byte) (any, error) {
 	return v, nil
 }
 
-// validate checks that doc is one JSON value matching the schema. The error names the first mismatch by
+// Validate checks that doc is one JSON value matching the schema. The error names the first mismatch by
 // its JSON path, e.g. "$.facts[2].text: missing required property".
-func (s *schema) validate(doc []byte) error {
+func (s *Schema) Validate(doc []byte) error {
 	v, err := decodeJSON(doc)
 	if err != nil {
 		return fmt.Errorf("response is not valid JSON: %w", err)
@@ -65,7 +65,7 @@ func (s *schema) validate(doc []byte) error {
 const maxRefDepth = 64
 
 // keywordCheck checks one group of keywords of node against v at path.
-type keywordCheck func(s *schema, node map[string]any, v any, path string, depth int) error
+type keywordCheck func(s *Schema, node map[string]any, v any, path string, depth int) error
 
 // keywordChecks lists the checks run in order for every schema node. It is a function rather than a variable
 // because the checks recurse into check, which would make a package-level variable an initialization cycle.
@@ -76,7 +76,7 @@ func keywordChecks() []keywordCheck {
 }
 
 // check validates v against the schema node at path. Boolean schemas accept (true) or reject (false) all.
-func (s *schema) check(node, v any, path string, depth int) error {
+func (s *Schema) check(node, v any, path string, depth int) error {
 	if depth > maxRefDepth {
 		return fmt.Errorf("%s: schema nests too deeply", path)
 	}
@@ -99,7 +99,7 @@ func (s *schema) check(node, v any, path string, depth int) error {
 }
 
 // checkRef validates v against the schema a local $ref points to.
-func checkRef(s *schema, node map[string]any, v any, path string, depth int) error {
+func checkRef(s *Schema, node map[string]any, v any, path string, depth int) error {
 	ref, ok := node["$ref"].(string)
 	if !ok {
 		return nil
@@ -112,7 +112,7 @@ func checkRef(s *schema, node map[string]any, v any, path string, depth int) err
 }
 
 // resolve follows a local JSON pointer ("#", "#/$defs/x", ...) from the schema root.
-func (s *schema) resolve(ref string) (any, error) {
+func (s *Schema) resolve(ref string) (any, error) {
 	ptr, ok := strings.CutPrefix(ref, "#")
 	if !ok {
 		return nil, fmt.Errorf("unsupported $ref %q (only local refs)", ref)
@@ -135,7 +135,7 @@ func (s *schema) resolve(ref string) (any, error) {
 }
 
 // checkType validates the type keyword, a type name or a list of them.
-func checkType(_ *schema, node map[string]any, v any, path string, _ int) error {
+func checkType(_ *Schema, node map[string]any, v any, path string, _ int) error {
 	var names []string
 	switch t := node["type"].(type) {
 	case string:
@@ -205,7 +205,7 @@ func number(v any) (float64, bool) {
 }
 
 // checkEnum validates the enum keyword.
-func checkEnum(_ *schema, node map[string]any, v any, path string, _ int) error {
+func checkEnum(_ *Schema, node map[string]any, v any, path string, _ int) error {
 	values, ok := node["enum"].([]any)
 	if !ok {
 		return nil
@@ -219,7 +219,7 @@ func checkEnum(_ *schema, node map[string]any, v any, path string, _ int) error 
 }
 
 // checkConst validates the const keyword.
-func checkConst(_ *schema, node map[string]any, v any, path string, _ int) error {
+func checkConst(_ *Schema, node map[string]any, v any, path string, _ int) error {
 	want, ok := node["const"]
 	if !ok || jsonEqual(want, v) {
 		return nil
@@ -262,7 +262,7 @@ func jsonEqual(a, b any) bool {
 }
 
 // checkObject validates required, properties and additionalProperties on an object value.
-func checkObject(s *schema, node map[string]any, v any, path string, depth int) error {
+func checkObject(s *Schema, node map[string]any, v any, path string, depth int) error {
 	obj, ok := v.(map[string]any)
 	if !ok {
 		return nil
@@ -295,7 +295,7 @@ func checkObject(s *schema, node map[string]any, v any, path string, depth int) 
 }
 
 // checkArray validates items, minItems and maxItems on an array value.
-func checkArray(s *schema, node map[string]any, v any, path string, depth int) error {
+func checkArray(s *Schema, node map[string]any, v any, path string, depth int) error {
 	arr, ok := v.([]any)
 	if !ok {
 		return nil
@@ -322,7 +322,7 @@ func checkArray(s *schema, node map[string]any, v any, path string, depth int) e
 }
 
 // checkString validates minLength and maxLength (in characters) on a string value.
-func checkString(_ *schema, node map[string]any, v any, path string, _ int) error {
+func checkString(_ *Schema, node map[string]any, v any, path string, _ int) error {
 	str, ok := v.(string)
 	if !ok {
 		return nil
@@ -338,7 +338,7 @@ func checkString(_ *schema, node map[string]any, v any, path string, _ int) erro
 }
 
 // checkNumber validates minimum and maximum on a number value.
-func checkNumber(_ *schema, node map[string]any, v any, path string, _ int) error {
+func checkNumber(_ *Schema, node map[string]any, v any, path string, _ int) error {
 	f, ok := number(v)
 	if !ok {
 		return nil
@@ -353,7 +353,7 @@ func checkNumber(_ *schema, node map[string]any, v any, path string, _ int) erro
 }
 
 // checkCombinators validates allOf (every branch), anyOf (at least one) and oneOf (exactly one).
-func checkCombinators(s *schema, node map[string]any, v any, path string, depth int) error {
+func checkCombinators(s *Schema, node map[string]any, v any, path string, depth int) error {
 	if all, ok := node["allOf"].([]any); ok {
 		for _, sub := range all {
 			if err := s.check(sub, v, path, depth+1); err != nil {
@@ -373,7 +373,7 @@ func checkCombinators(s *schema, node map[string]any, v any, path string, depth 
 }
 
 // matches counts the schemas in subs that v matches.
-func (s *schema) matches(subs []any, v any, path string, depth int) int {
+func (s *Schema) matches(subs []any, v any, path string, depth int) int {
 	n := 0
 	for _, sub := range subs {
 		if s.check(sub, v, path, depth+1) == nil {

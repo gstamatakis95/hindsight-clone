@@ -2,6 +2,7 @@ package fake_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -23,12 +24,16 @@ func ExampleLLM() {
 	var out struct {
 		Facts []string `json:"facts"`
 	}
-	req := port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "extract_facts"}
+	// Scripted output is validated against req.Schema, as the gateway does.
+	schema := json.RawMessage(`{"type":"object","required":["facts"],` +
+		`"properties":{"facts":{"type":"array","items":{"type":"string"}}}}`)
+	req := port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "extract_facts", Schema: schema}
 	for range 3 {
 		_, err := l.Structured(ctx, req, &out)
 		fmt.Println(out.Facts, err)
 	}
-	_, err := l.Structured(ctx, port.StructuredRequest{Slot: domain.ModelSlotConsolidate, Name: "decide"}, &out)
+	decide := port.StructuredRequest{Slot: domain.ModelSlotConsolidate, Name: "decide", Schema: schema}
+	_, err := l.Structured(ctx, decide, &out)
 	fmt.Println(errors.Is(err, context.DeadlineExceeded), errors.Is(err, domain.ErrUnavailable))
 	fmt.Println(len(l.CallsFor(domain.ModelSlotExtract, "extract_facts")))
 	// Output:

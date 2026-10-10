@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jsonschema"
 	"memd/internal/port"
 	"slices"
 	"sync"
@@ -157,15 +158,22 @@ func (l *LLM) CallsFor(slot port.ModelSlot, name string) []LLMCall {
 	return out
 }
 
-// Structured serves the next scripted reply of (req.Slot, req.Name) and decodes its JSON into out (a nil
-// out only checks that the body is valid JSON).
+// Structured behaves like the gateway: req.Schema must be a JSON Schema (an empty or malformed one is
+// domain.ErrInvalidArgument, and the call is neither recorded nor served). It then serves the next scripted
+// reply of (req.Slot, req.Name), validates its JSON against req.Schema and decodes it into out (a nil out
+// skips decoding). Output that is not JSON, doesn't match the schema or doesn't decode into out is
+// domain.ErrUnavailable, as the gateway reports output still invalid after its retries.
 func (l *LLM) Structured(ctx context.Context, req port.StructuredRequest, out any) (port.Usage, error) {
+	sch, err := jsonschema.Compile(req.Schema)
+	if err != nil {
+		return port.Usage{}, fmt.Errorf("fake llm %s/%s: %w", req.Slot, req.Name, err)
+	}
 	cp := copyStructuredRequest(req)
 	r, err := l.serve(ctx, LLMCall{Slot: req.Slot, Name: req.Name, Structured: &cp})
 	if err != nil {
 		return port.Usage{}, err
 	}
-	if err := decodeReply(r.JSON, out); err != nil {
+	if err := decodeReply(sch, r.JSON, out); err != nil {
 		return port.Usage{}, fmt.Errorf("%w: fake llm %s/%s: invalid structured output %q: %w",
 			domain.ErrUnavailable, req.Slot, req.Name, r.JSON, err)
 	}
@@ -220,12 +228,12 @@ func (l *LLM) serve(ctx context.Context, c LLMCall) (Reply, error) {
 	return r, nil
 }
 
-// decodeReply unmarshals body into out, or only validates it when out is nil.
-func decodeReply(body string, out any) error {
+// decodeReply validates body against sch and decodes it into out (nil out = validate only).
+func decodeReply(sch *jsonschema.Schema, body string, out any) error {
+	if err := sch.Validate([]byte(body)); err != nil {
+		return fmt.Errorf("fake llm: %w", err)
+	}
 	if out == nil {
-		if !json.Valid([]byte(body)) {
-			return errors.New("not valid JSON")
-		}
 		return nil
 	}
 	if err := json.Unmarshal([]byte(body), out); err != nil {

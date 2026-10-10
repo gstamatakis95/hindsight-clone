@@ -12,6 +12,9 @@ import (
 	"testing"
 )
 
+// nSchema is the JSON Schema of llmAnswer.
+var nSchema = json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"n":{"type":"integer"}}}`)
+
 // llmAnswer is the decoded shape of the scripted Structured bodies in these tests.
 type llmAnswer struct {
 	N int `json:"n"`
@@ -21,7 +24,7 @@ type llmAnswer struct {
 func structuredN(t *testing.T, l *fake.LLM, slot port.ModelSlot, name string) (int, error) {
 	t.Helper()
 	var out llmAnswer
-	if _, err := l.Structured(t.Context(), port.StructuredRequest{Slot: slot, Name: name}, &out); err != nil {
+	if _, err := l.Structured(t.Context(), port.StructuredRequest{Schema: nSchema, Slot: slot, Name: name}, &out); err != nil {
 		return 0, fmt.Errorf("structured %s/%s: %w", slot, name, err)
 	}
 	return out.N, nil
@@ -105,7 +108,7 @@ func TestLLMErrors(t *testing.T) {
 			l := fake.NewLLM()
 			c.script(l)
 			var out llmAnswer
-			u, err := l.Structured(t.Context(), port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "p"}, &out)
+			u, err := l.Structured(t.Context(), port.StructuredRequest{Schema: nSchema, Slot: domain.ModelSlotExtract, Name: "p"}, &out)
 			for _, w := range c.want {
 				if !errors.Is(err, w) {
 					t.Errorf("error = %v, want errors.Is %v", err, w)
@@ -122,7 +125,7 @@ func TestLLMInvalidJSONIncludesBody(t *testing.T) {
 	l := fake.NewLLM()
 	l.RespondJSON(domain.ModelSlotExtract, "p", `{"n": oops}`)
 	var out llmAnswer
-	_, err := l.Structured(t.Context(), port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "p"}, &out)
+	_, err := l.Structured(t.Context(), port.StructuredRequest{Schema: nSchema, Slot: domain.ModelSlotExtract, Name: "p"}, &out)
 	if !errors.Is(err, domain.ErrUnavailable) || !strings.Contains(err.Error(), "oops") {
 		t.Errorf("error = %v, want ErrUnavailable quoting the body", err)
 	}
@@ -171,7 +174,7 @@ func TestLLMUsageDefaults(t *testing.T) {
 	}
 	for _, c := range cases {
 		var out map[string]any
-		req := port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: c.name, Binding: b}
+		req := port.StructuredRequest{Schema: nSchema, Slot: domain.ModelSlotExtract, Name: c.name, Binding: b}
 		u, err := l.Structured(t.Context(), req, &out)
 		if err != nil || u != c.want {
 			t.Errorf("%s: usage %+v, %v; want %+v", c.name, u, err, c.want)
@@ -195,7 +198,7 @@ func TestLLMCallsRecorded(t *testing.T) {
 	_, _ = structuredN(t, l, domain.ModelSlotExtract, "unscripted")
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := l.Structured(ctx, port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "x"}, &out)
+	_, err := l.Structured(ctx, port.StructuredRequest{Schema: nSchema, Slot: domain.ModelSlotExtract, Name: "x"}, &out)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled Structured error = %v, want context.Canceled", err)
 	}
@@ -235,10 +238,33 @@ func TestLLMCancelledDoesNotConsume(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	var out llmAnswer
-	if _, err := l.Structured(ctx, port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "x"}, &out); err == nil {
+	if _, err := l.Structured(ctx, port.StructuredRequest{Schema: nSchema, Slot: domain.ModelSlotExtract, Name: "x"}, &out); err == nil {
 		t.Fatal("cancelled call succeeded")
 	}
 	if got, err := structuredN(t, l, domain.ModelSlotExtract, "x"); err != nil || got != 1 {
 		t.Errorf("first live call = %d, %v; want 1", got, err)
+	}
+}
+
+// TestLLMStructuredValidatesSchema: like the gateway, Structured rejects a missing or malformed schema with
+// ErrInvalidArgument (without consuming a reply) and reports scripted output that doesn't match the schema
+// as ErrUnavailable.
+func TestLLMStructuredValidatesSchema(t *testing.T) {
+	l := fake.NewLLM()
+	l.Script(domain.ModelSlotExtract, "p", fake.Reply{JSON: `{"n":"one"}`}, fake.Reply{JSON: `{"n":1}`})
+	var out llmAnswer
+	for _, bad := range []json.RawMessage{nil, json.RawMessage(`{"type":`)} {
+		req := port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "p", Schema: bad}
+		if _, err := l.Structured(t.Context(), req, &out); !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("Structured(schema %q) = %v, want ErrInvalidArgument", bad, err)
+		}
+	}
+	req := port.StructuredRequest{Slot: domain.ModelSlotExtract, Name: "p", Schema: nSchema}
+	_, err := l.Structured(t.Context(), req, &out)
+	if !errors.Is(err, domain.ErrUnavailable) || !strings.Contains(err.Error(), "want type integer") {
+		t.Errorf("Structured(output not matching the schema) = %v, want ErrUnavailable naming the mismatch", err)
+	}
+	if _, err := l.Structured(t.Context(), req, &out); err != nil || out.N != 1 {
+		t.Errorf("Structured(matching output) = %d, %v; want 1", out.N, err)
 	}
 }
