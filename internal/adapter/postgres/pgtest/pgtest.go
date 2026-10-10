@@ -49,7 +49,11 @@ func Main(m *testing.M) int {
 		skipReason = fmt.Sprintf("pgtest: docker unavailable: %v", err)
 		return m.Run()
 	}
-	shared, sharedErr = Start(ctx)
+	// One retry: a start can time out when many test binaries start containers at once.
+	if shared, sharedErr = Start(ctx); sharedErr != nil {
+		fmt.Fprintln(os.Stderr, "pgtest: start failed, retrying once:", sharedErr)
+		shared, sharedErr = Start(ctx)
+	}
 	code := m.Run()
 	if shared != nil {
 		if err := shared.Close(ctx); err != nil {
