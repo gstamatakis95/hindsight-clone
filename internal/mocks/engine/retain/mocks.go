@@ -6,11 +6,11 @@ package mockretain
 
 import (
 	"context"
-	"encoding/json"
 	"memd/internal/domain"
 	"memd/internal/engine/retain"
 	"memd/internal/port"
 	"sync"
+	"time"
 )
 
 // Ensure that TokenCounter does implement retain.TokenCounter.
@@ -79,6 +79,240 @@ func (mock *TokenCounter) CountCalls() []struct {
 	return calls
 }
 
+// Ensure that DateNormalizer does implement retain.DateNormalizer.
+// If this is not the case, regenerate this file with mockery.
+var _ retain.DateNormalizer = &DateNormalizer{}
+
+// DateNormalizer is a mock implementation of retain.DateNormalizer.
+//
+//	func TestSomethingThatUsesDateNormalizer(t *testing.T) {
+//
+//		// make and configure a mocked retain.DateNormalizer
+//		mockedDateNormalizer := &DateNormalizer{
+//			NormalizeFunc: func(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact, ref time.Time) error {
+//				panic("mock out the Normalize method")
+//			},
+//		}
+//
+//		// use mockedDateNormalizer in code that requires retain.DateNormalizer
+//		// and then make assertions.
+//
+//	}
+type DateNormalizer struct {
+	// NormalizeFunc mocks the Normalize method.
+	NormalizeFunc func(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact, ref time.Time) error
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Normalize holds details about calls to the Normalize method.
+		Normalize []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Cfg is the cfg argument value.
+			Cfg domain.BankConfig
+			// F is the f argument value.
+			F *domain.ExtractedFact
+			// Ref is the ref argument value.
+			Ref time.Time
+		}
+	}
+	lockNormalize sync.RWMutex
+}
+
+// Normalize calls NormalizeFunc.
+func (mock *DateNormalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact, ref time.Time) error {
+	if mock.NormalizeFunc == nil {
+		panic("DateNormalizer.NormalizeFunc: method is nil but DateNormalizer.Normalize was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Cfg domain.BankConfig
+		F   *domain.ExtractedFact
+		Ref time.Time
+	}{
+		Ctx: ctx,
+		Cfg: cfg,
+		F:   f,
+		Ref: ref,
+	}
+	mock.lockNormalize.Lock()
+	mock.calls.Normalize = append(mock.calls.Normalize, callInfo)
+	mock.lockNormalize.Unlock()
+	return mock.NormalizeFunc(ctx, cfg, f, ref)
+}
+
+// NormalizeCalls gets all the calls that were made to Normalize.
+// Check the length with:
+//
+//	len(mockedDateNormalizer.NormalizeCalls())
+func (mock *DateNormalizer) NormalizeCalls() []struct {
+	Ctx context.Context
+	Cfg domain.BankConfig
+	F   *domain.ExtractedFact
+	Ref time.Time
+} {
+	var calls []struct {
+		Ctx context.Context
+		Cfg domain.BankConfig
+		F   *domain.ExtractedFact
+		Ref time.Time
+	}
+	mock.lockNormalize.RLock()
+	calls = mock.calls.Normalize
+	mock.lockNormalize.RUnlock()
+	return calls
+}
+
+// Ensure that ScopeExpander does implement retain.ScopeExpander.
+// If this is not the case, regenerate this file with mockery.
+var _ retain.ScopeExpander = &ScopeExpander{}
+
+// ScopeExpander is a mock implementation of retain.ScopeExpander.
+//
+//	func TestSomethingThatUsesScopeExpander(t *testing.T) {
+//
+//		// make and configure a mocked retain.ScopeExpander
+//		mockedScopeExpander := &ScopeExpander{
+//			ExpandFunc: func(b port.BankRef, tags []string, s domain.ObservationScopes) ([]port.ScopeKey, error) {
+//				panic("mock out the Expand method")
+//			},
+//		}
+//
+//		// use mockedScopeExpander in code that requires retain.ScopeExpander
+//		// and then make assertions.
+//
+//	}
+type ScopeExpander struct {
+	// ExpandFunc mocks the Expand method.
+	ExpandFunc func(b port.BankRef, tags []string, s domain.ObservationScopes) ([]port.ScopeKey, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Expand holds details about calls to the Expand method.
+		Expand []struct {
+			// B is the b argument value.
+			B port.BankRef
+			// Tags is the tags argument value.
+			Tags []string
+			// S is the s argument value.
+			S domain.ObservationScopes
+		}
+	}
+	lockExpand sync.RWMutex
+}
+
+// Expand calls ExpandFunc.
+func (mock *ScopeExpander) Expand(b port.BankRef, tags []string, s domain.ObservationScopes) ([]port.ScopeKey, error) {
+	if mock.ExpandFunc == nil {
+		panic("ScopeExpander.ExpandFunc: method is nil but ScopeExpander.Expand was just called")
+	}
+	callInfo := struct {
+		B    port.BankRef
+		Tags []string
+		S    domain.ObservationScopes
+	}{
+		B:    b,
+		Tags: tags,
+		S:    s,
+	}
+	mock.lockExpand.Lock()
+	mock.calls.Expand = append(mock.calls.Expand, callInfo)
+	mock.lockExpand.Unlock()
+	return mock.ExpandFunc(b, tags, s)
+}
+
+// ExpandCalls gets all the calls that were made to Expand.
+// Check the length with:
+//
+//	len(mockedScopeExpander.ExpandCalls())
+func (mock *ScopeExpander) ExpandCalls() []struct {
+	B    port.BankRef
+	Tags []string
+	S    domain.ObservationScopes
+} {
+	var calls []struct {
+		B    port.BankRef
+		Tags []string
+		S    domain.ObservationScopes
+	}
+	mock.lockExpand.RLock()
+	calls = mock.calls.Expand
+	mock.lockExpand.RUnlock()
+	return calls
+}
+
+// Ensure that Checkpoint does implement retain.Checkpoint.
+// If this is not the case, regenerate this file with mockery.
+var _ retain.Checkpoint = &Checkpoint{}
+
+// Checkpoint is a mock implementation of retain.Checkpoint.
+//
+//	func TestSomethingThatUsesCheckpoint(t *testing.T) {
+//
+//		// make and configure a mocked retain.Checkpoint
+//		mockedCheckpoint := &Checkpoint{
+//			ReportFunc: func(ctx context.Context, p domain.Progress) error {
+//				panic("mock out the Report method")
+//			},
+//		}
+//
+//		// use mockedCheckpoint in code that requires retain.Checkpoint
+//		// and then make assertions.
+//
+//	}
+type Checkpoint struct {
+	// ReportFunc mocks the Report method.
+	ReportFunc func(ctx context.Context, p domain.Progress) error
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Report holds details about calls to the Report method.
+		Report []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// P is the p argument value.
+			P domain.Progress
+		}
+	}
+	lockReport sync.RWMutex
+}
+
+// Report calls ReportFunc.
+func (mock *Checkpoint) Report(ctx context.Context, p domain.Progress) error {
+	if mock.ReportFunc == nil {
+		panic("Checkpoint.ReportFunc: method is nil but Checkpoint.Report was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		P   domain.Progress
+	}{
+		Ctx: ctx,
+		P:   p,
+	}
+	mock.lockReport.Lock()
+	mock.calls.Report = append(mock.calls.Report, callInfo)
+	mock.lockReport.Unlock()
+	return mock.ReportFunc(ctx, p)
+}
+
+// ReportCalls gets all the calls that were made to Report.
+// Check the length with:
+//
+//	len(mockedCheckpoint.ReportCalls())
+func (mock *Checkpoint) ReportCalls() []struct {
+	Ctx context.Context
+	P   domain.Progress
+} {
+	var calls []struct {
+		Ctx context.Context
+		P   domain.Progress
+	}
+	mock.lockReport.RLock()
+	calls = mock.calls.Report
+	mock.lockReport.RUnlock()
+	return calls
+}
+
 // Ensure that Extractor does implement retain.Extractor.
 // If this is not the case, regenerate this file with mockery.
 var _ retain.Extractor = &Extractor{}
@@ -89,7 +323,7 @@ var _ retain.Extractor = &Extractor{}
 //
 //		// make and configure a mocked retain.Extractor
 //		mockedExtractor := &Extractor{
-//			ExtractFunc: func(ctx context.Context, in retain.ExtractInput) ([]retain.ExtractedFact, error) {
+//			ExtractFunc: func(ctx context.Context, in retain.ExtractInput) ([]retain.ExtractedFact, []domain.Usage, error) {
 //				panic("mock out the Extract method")
 //			},
 //		}
@@ -100,7 +334,7 @@ var _ retain.Extractor = &Extractor{}
 //	}
 type Extractor struct {
 	// ExtractFunc mocks the Extract method.
-	ExtractFunc func(ctx context.Context, in retain.ExtractInput) ([]retain.ExtractedFact, error)
+	ExtractFunc func(ctx context.Context, in retain.ExtractInput) ([]retain.ExtractedFact, []domain.Usage, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -116,7 +350,7 @@ type Extractor struct {
 }
 
 // Extract calls ExtractFunc.
-func (mock *Extractor) Extract(ctx context.Context, in retain.ExtractInput) ([]retain.ExtractedFact, error) {
+func (mock *Extractor) Extract(ctx context.Context, in retain.ExtractInput) ([]retain.ExtractedFact, []domain.Usage, error) {
 	if mock.ExtractFunc == nil {
 		panic("Extractor.ExtractFunc: method is nil but Extractor.Extract was just called")
 	}
@@ -233,7 +467,7 @@ var _ retain.LabelResolver = &LabelResolver{}
 //
 //		// make and configure a mocked retain.LabelResolver
 //		mockedLabelResolver := &LabelResolver{
-//			ResolveFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, labels []domain.Label) ([]port.EntityID, []string, error) {
+//			ResolveFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, defs []domain.EntityLabel, labels []domain.Label) ([]port.EntityID, []string, error) {
 //				panic("mock out the Resolve method")
 //			},
 //		}
@@ -244,7 +478,7 @@ var _ retain.LabelResolver = &LabelResolver{}
 //	}
 type LabelResolver struct {
 	// ResolveFunc mocks the Resolve method.
-	ResolveFunc func(ctx context.Context, tx port.Tx, b port.BankRef, labels []domain.Label) ([]port.EntityID, []string, error)
+	ResolveFunc func(ctx context.Context, tx port.Tx, b port.BankRef, defs []domain.EntityLabel, labels []domain.Label) ([]port.EntityID, []string, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -256,6 +490,8 @@ type LabelResolver struct {
 			Tx port.Tx
 			// B is the b argument value.
 			B port.BankRef
+			// Defs is the defs argument value.
+			Defs []domain.EntityLabel
 			// Labels is the labels argument value.
 			Labels []domain.Label
 		}
@@ -264,7 +500,7 @@ type LabelResolver struct {
 }
 
 // Resolve calls ResolveFunc.
-func (mock *LabelResolver) Resolve(ctx context.Context, tx port.Tx, b port.BankRef, labels []domain.Label) ([]port.EntityID, []string, error) {
+func (mock *LabelResolver) Resolve(ctx context.Context, tx port.Tx, b port.BankRef, defs []domain.EntityLabel, labels []domain.Label) ([]port.EntityID, []string, error) {
 	if mock.ResolveFunc == nil {
 		panic("LabelResolver.ResolveFunc: method is nil but LabelResolver.Resolve was just called")
 	}
@@ -272,17 +508,19 @@ func (mock *LabelResolver) Resolve(ctx context.Context, tx port.Tx, b port.BankR
 		Ctx    context.Context
 		Tx     port.Tx
 		B      port.BankRef
+		Defs   []domain.EntityLabel
 		Labels []domain.Label
 	}{
 		Ctx:    ctx,
 		Tx:     tx,
 		B:      b,
+		Defs:   defs,
 		Labels: labels,
 	}
 	mock.lockResolve.Lock()
 	mock.calls.Resolve = append(mock.calls.Resolve, callInfo)
 	mock.lockResolve.Unlock()
-	return mock.ResolveFunc(ctx, tx, b, labels)
+	return mock.ResolveFunc(ctx, tx, b, defs, labels)
 }
 
 // ResolveCalls gets all the calls that were made to Resolve.
@@ -293,12 +531,14 @@ func (mock *LabelResolver) ResolveCalls() []struct {
 	Ctx    context.Context
 	Tx     port.Tx
 	B      port.BankRef
+	Defs   []domain.EntityLabel
 	Labels []domain.Label
 } {
 	var calls []struct {
 		Ctx    context.Context
 		Tx     port.Tx
 		B      port.BankRef
+		Defs   []domain.EntityLabel
 		Labels []domain.Label
 	}
 	mock.lockResolve.RLock()
@@ -320,6 +560,9 @@ var _ retain.Linker = &Linker{}
 //			LinkFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap) error {
 //				panic("mock out the Link method")
 //			},
+//			LinkWithFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap, cfg domain.BankConfig) error {
+//				panic("mock out the LinkWith method")
+//			},
 //		}
 //
 //		// use mockedLinker in code that requires retain.Linker
@@ -329,6 +572,9 @@ var _ retain.Linker = &Linker{}
 type Linker struct {
 	// LinkFunc mocks the Link method.
 	LinkFunc func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap) error
+
+	// LinkWithFunc mocks the LinkWith method.
+	LinkWithFunc func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap, cfg domain.BankConfig) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -345,8 +591,24 @@ type Linker struct {
 			// Causes is the causes argument value.
 			Causes retain.CauseMap
 		}
+		// LinkWith holds details about calls to the LinkWith method.
+		LinkWith []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// Units is the units argument value.
+			Units []domain.Unit
+			// Causes is the causes argument value.
+			Causes retain.CauseMap
+			// Cfg is the cfg argument value.
+			Cfg domain.BankConfig
+		}
 	}
-	lockLink sync.RWMutex
+	lockLink     sync.RWMutex
+	lockLinkWith sync.RWMutex
 }
 
 // Link calls LinkFunc.
@@ -397,6 +659,58 @@ func (mock *Linker) LinkCalls() []struct {
 	return calls
 }
 
+// LinkWith calls LinkWithFunc.
+func (mock *Linker) LinkWith(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap, cfg domain.BankConfig) error {
+	if mock.LinkWithFunc == nil {
+		panic("Linker.LinkWithFunc: method is nil but Linker.LinkWith was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Tx     port.Tx
+		B      port.BankRef
+		Units  []domain.Unit
+		Causes retain.CauseMap
+		Cfg    domain.BankConfig
+	}{
+		Ctx:    ctx,
+		Tx:     tx,
+		B:      b,
+		Units:  units,
+		Causes: causes,
+		Cfg:    cfg,
+	}
+	mock.lockLinkWith.Lock()
+	mock.calls.LinkWith = append(mock.calls.LinkWith, callInfo)
+	mock.lockLinkWith.Unlock()
+	return mock.LinkWithFunc(ctx, tx, b, units, causes, cfg)
+}
+
+// LinkWithCalls gets all the calls that were made to LinkWith.
+// Check the length with:
+//
+//	len(mockedLinker.LinkWithCalls())
+func (mock *Linker) LinkWithCalls() []struct {
+	Ctx    context.Context
+	Tx     port.Tx
+	B      port.BankRef
+	Units  []domain.Unit
+	Causes retain.CauseMap
+	Cfg    domain.BankConfig
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Tx     port.Tx
+		B      port.BankRef
+		Units  []domain.Unit
+		Causes retain.CauseMap
+		Cfg    domain.BankConfig
+	}
+	mock.lockLinkWith.RLock()
+	calls = mock.calls.LinkWith
+	mock.lockLinkWith.RUnlock()
+	return calls
+}
+
 // Ensure that ExtractionStrategy does implement retain.ExtractionStrategy.
 // If this is not the case, regenerate this file with mockery.
 var _ retain.ExtractionStrategy = &ExtractionStrategy{}
@@ -407,13 +721,16 @@ var _ retain.ExtractionStrategy = &ExtractionStrategy{}
 //
 //		// make and configure a mocked retain.ExtractionStrategy
 //		mockedExtractionStrategy := &ExtractionStrategy{
+//			KeepsChunkTextFunc: func() bool {
+//				panic("mock out the KeepsChunkText method")
+//			},
 //			ModeFunc: func() domain.ExtractionMode {
 //				panic("mock out the Mode method")
 //			},
 //			NeedsLLMFunc: func() bool {
 //				panic("mock out the NeedsLLM method")
 //			},
-//			PromptFunc: func(cfg domain.BankConfig, in retain.ExtractInput) (string, string, json.RawMessage) {
+//			PromptFunc: func(cfg domain.BankConfig, in retain.ExtractInput) (retain.ExtractPrompt, error) {
 //				panic("mock out the Prompt method")
 //			},
 //		}
@@ -423,6 +740,9 @@ var _ retain.ExtractionStrategy = &ExtractionStrategy{}
 //
 //	}
 type ExtractionStrategy struct {
+	// KeepsChunkTextFunc mocks the KeepsChunkText method.
+	KeepsChunkTextFunc func() bool
+
 	// ModeFunc mocks the Mode method.
 	ModeFunc func() domain.ExtractionMode
 
@@ -430,10 +750,13 @@ type ExtractionStrategy struct {
 	NeedsLLMFunc func() bool
 
 	// PromptFunc mocks the Prompt method.
-	PromptFunc func(cfg domain.BankConfig, in retain.ExtractInput) (string, string, json.RawMessage)
+	PromptFunc func(cfg domain.BankConfig, in retain.ExtractInput) (retain.ExtractPrompt, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// KeepsChunkText holds details about calls to the KeepsChunkText method.
+		KeepsChunkText []struct {
+		}
 		// Mode holds details about calls to the Mode method.
 		Mode []struct {
 		}
@@ -448,9 +771,37 @@ type ExtractionStrategy struct {
 			In retain.ExtractInput
 		}
 	}
-	lockMode     sync.RWMutex
-	lockNeedsLLM sync.RWMutex
-	lockPrompt   sync.RWMutex
+	lockKeepsChunkText sync.RWMutex
+	lockMode           sync.RWMutex
+	lockNeedsLLM       sync.RWMutex
+	lockPrompt         sync.RWMutex
+}
+
+// KeepsChunkText calls KeepsChunkTextFunc.
+func (mock *ExtractionStrategy) KeepsChunkText() bool {
+	if mock.KeepsChunkTextFunc == nil {
+		panic("ExtractionStrategy.KeepsChunkTextFunc: method is nil but ExtractionStrategy.KeepsChunkText was just called")
+	}
+	callInfo := struct {
+	}{}
+	mock.lockKeepsChunkText.Lock()
+	mock.calls.KeepsChunkText = append(mock.calls.KeepsChunkText, callInfo)
+	mock.lockKeepsChunkText.Unlock()
+	return mock.KeepsChunkTextFunc()
+}
+
+// KeepsChunkTextCalls gets all the calls that were made to KeepsChunkText.
+// Check the length with:
+//
+//	len(mockedExtractionStrategy.KeepsChunkTextCalls())
+func (mock *ExtractionStrategy) KeepsChunkTextCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockKeepsChunkText.RLock()
+	calls = mock.calls.KeepsChunkText
+	mock.lockKeepsChunkText.RUnlock()
+	return calls
 }
 
 // Mode calls ModeFunc.
@@ -508,7 +859,7 @@ func (mock *ExtractionStrategy) NeedsLLMCalls() []struct {
 }
 
 // Prompt calls PromptFunc.
-func (mock *ExtractionStrategy) Prompt(cfg domain.BankConfig, in retain.ExtractInput) (string, string, json.RawMessage) {
+func (mock *ExtractionStrategy) Prompt(cfg domain.BankConfig, in retain.ExtractInput) (retain.ExtractPrompt, error) {
 	if mock.PromptFunc == nil {
 		panic("ExtractionStrategy.PromptFunc: method is nil but ExtractionStrategy.Prompt was just called")
 	}

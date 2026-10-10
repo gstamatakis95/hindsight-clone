@@ -2,16 +2,23 @@ package retain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"slices"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Ingestor is the api-side half of Retain.
 type Ingestor interface {
 	// Ingest validates (scope fan-out, overrides), stores blobs, then runs inline or enqueues. An
 	// ALL_COMBINATIONS fan-out over max_combinations fails with domain.ErrTooManyScopes before anything
-	// is stored.
+	// is stored. An item whose content and overrides hash match its document's last completed retain is a
+	// no-op (Unchanged) unless ForceReextract is set: nothing is written for it and no model is called.
 	Ingest(ctx context.Context, req IngestRequest) (IngestResult, error)
 }
 
@@ -63,8 +70,11 @@ type IngestItem struct {
 type IngestResult struct {
 	// Documents has one entry per item, in item order: sync = filled; async = operation ids only.
 	Documents []RetainedDocument
-	// ParentOperationID is the retain_batch parent, set when there is more than one document.
+	// ParentOperationID is the retain_batch parent, set when an async retain enqueues more than one document.
 	ParentOperationID port.OperationID
+	// Usage is the per-slot token usage of a sync retain's model calls (RetainResponse.usage); empty for
+	// async (each job records its own).
+	Usage []domain.Usage
 }
 
 // RetainedDocument mirrors memory.v1.RetainedDocument: the outcome for one item.
@@ -77,4 +87,330 @@ type RetainedDocument struct {
 	Unchanged bool
 	// OperationID is the retain_document operation (async), or empty for an inline run.
 	OperationID port.OperationID
+}
+
+// IngestorDeps are the Ingestor's dependencies.
+type IngestorDeps struct {
+	// Store opens the transactions.
+	Store port.Store
+	// Blob stores the original text.
+	Blob port.Blob
+	// Config resolves the bank's effective config.
+	Config port.ConfigResolver
+	// Retainer runs a sync retain inline.
+	Retainer Retainer
+	// Merge merges config levels (config.Merge): the request and item overrides stored on the document and
+	// job. Needed only when both carry overrides.
+	Merge ConfigMerger
+	// Scopes expands scope fan-out (consolidate.ScopeExpander); nil = only the ALL_COMBINATIONS cap is checked.
+	Scopes ScopeExpander
+	// Clock is "now" for items without a timestamp.
+	Clock port.Clock
+	// NewID generates document ids; nil = uuid.NewString.
+	NewID func() string
+}
+
+// ingestor is the Ingestor.
+type ingestor struct {
+	d IngestorDeps
+}
+
+var _ Ingestor = (*ingestor)(nil)
+
+// NewIngestor returns the Ingestor.
+func NewIngestor(d IngestorDeps) Ingestor {
+	if d.NewID == nil {
+		d.NewID = uuid.NewString
+	}
+	return &ingestor{d: d}
+}
+
+// itemPlan is one validated item: its document, payload and hashes.
+type itemPlan struct {
+	doc       port.DocumentID
+	content   string
+	overrides *domain.BankConfig
+	oh        string
+	payload   DocumentPayload
+	unchanged bool
+}
+
+// Ingest implements Ingestor.
+func (i *ingestor) Ingest(ctx context.Context, req IngestRequest) (IngestResult, error) {
+	if req.Bank.IsZero() {
+		return IngestResult{}, fmt.Errorf("%w: retain needs a bank", domain.ErrInvalidArgument)
+	}
+	if len(req.Items) == 0 {
+		return IngestResult{}, fmt.Errorf("%w: retain needs at least one item", domain.ErrInvalidArgument)
+	}
+	base, err := i.bankConfig(ctx, req.Bank)
+	if err != nil {
+		return IngestResult{}, err
+	}
+	plans := make([]*itemPlan, len(req.Items))
+	seen := map[port.DocumentID]bool{}
+	for k, it := range req.Items {
+		if plans[k], err = i.plan(ctx, req, it, base); err != nil {
+			return IngestResult{}, fmt.Errorf("item %d: %w", k, err)
+		}
+		if seen[plans[k].doc] {
+			return IngestResult{}, fmt.Errorf("%w: item %d: document %q appears twice", domain.ErrInvalidArgument, k,
+				plans[k].doc)
+		}
+		seen[plans[k].doc] = true
+	}
+	if err := i.markUnchanged(ctx, req.Bank, plans); err != nil {
+		return IngestResult{}, err
+	}
+	if err := i.storeBlobs(ctx, plans); err != nil {
+		return IngestResult{}, err
+	}
+	res, err := i.write(ctx, req, plans)
+	if err != nil || req.RunAsync {
+		return res, err
+	}
+	return i.runInline(ctx, req.Bank, plans, res)
+}
+
+// bankConfig returns the bank's effective config, creating an unknown bank with tenant defaults first.
+func (i *ingestor) bankConfig(ctx context.Context, b port.BankRef) (domain.BankConfig, error) {
+	cfg, err := i.d.Config.Effective(ctx, b)
+	if !errors.Is(err, domain.ErrNotFound) {
+		return cfg, err
+	}
+	if err := i.d.Store.InTx(ctx, func(tx port.Tx) error {
+		_, err := tx.Banks().Ensure(ctx, b)
+		return err
+	}); err != nil {
+		return domain.BankConfig{}, err
+	}
+	return i.d.Config.Effective(ctx, b)
+}
+
+// plan validates one item and builds its document payload. Nothing is stored.
+func (i *ingestor) plan(
+	ctx context.Context, req IngestRequest, it IngestItem, base domain.BankConfig,
+) (*itemPlan, error) {
+	overrides, err := i.mergeOverrides(req.Overrides, it.Overrides)
+	if err != nil {
+		return nil, err
+	}
+	cfg := base
+	if overrides != nil {
+		if cfg, err = i.d.Config.Effective(ctx, req.Bank, *overrides); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.ExtractionMode == domain.ExtractionModeCustom && strings.TrimSpace(cfg.CustomExtractionPrompt) == "" {
+		return nil, fmt.Errorf("%w: extraction mode custom needs custom_extraction_prompt", domain.ErrInvalidArgument)
+	}
+	tags := domain.NormalizeTags(append(slices.Clone(it.Tags), req.DocumentTags...))
+	if err := i.checkFanout(req.Bank, tags, scopeMode(it.ObservationScopes, cfg)); err != nil {
+		return nil, err
+	}
+	oh, err := OverridesHash(overrides)
+	if err != nil {
+		return nil, err
+	}
+	doc := it.DocumentID
+	if doc == "" {
+		doc = port.DocumentID(i.d.NewID())
+	}
+	p := DocumentPayload{
+		DocumentID: doc, ContentHash: ContentHash(it.Content), Tags: tags, Context: it.Context,
+		Timeless: it.Timeless, Metadata: it.Metadata, Entities: payloadHints(it.Entities),
+		ResolveEntities: it.ResolveEntities, ObservationScopes: it.ObservationScopes,
+		ForceReextract: it.ForceReextract, SkipConsolidation: req.SkipConsolidation,
+	}
+	p.BlobKey = domain.DocumentBlobKey(req.Bank, doc, p.ContentHash)
+	if !it.Timeless {
+		at := i.d.Clock.Now().UTC()
+		if it.Timestamp != nil {
+			at = it.Timestamp.UTC()
+		}
+		p.Timestamp = &at
+	}
+	return &itemPlan{doc: doc, content: it.Content, overrides: overrides, oh: oh, payload: p}, nil
+}
+
+// mergeOverrides merges request < item overrides; nil when neither is set.
+func (i *ingestor) mergeOverrides(req, item *domain.BankConfig) (*domain.BankConfig, error) {
+	switch {
+	case req == nil && item == nil:
+		return nil, nil
+	case req == nil:
+		o := *item
+		return &o, nil
+	case item == nil:
+		o := *req
+		return &o, nil
+	case i.d.Merge == nil:
+		return nil, fmt.Errorf("%w: retain: no config merger wired", domain.ErrUnavailable)
+	}
+	o := i.d.Merge(*req, *item)
+	return &o, nil
+}
+
+// checkFanout rejects a scope fan-out over its cap: through the wired ScopeExpander, else by counting the
+// ALL_COMBINATIONS subsets (2^n - 1) against max_combinations.
+func (i *ingestor) checkFanout(b port.BankRef, tags []string, s domain.ObservationScopes) error {
+	if i.d.Scopes != nil {
+		_, err := i.d.Scopes.Expand(b, tags, s)
+		return err
+	}
+	if s.Mode != domain.ScopeModeAllCombinations {
+		return nil
+	}
+	limit := positive(s.MaxCombinations, domain.DefaultMaxCombinations)
+	if len(tags) >= 31 || (1<<len(tags))-1 > limit {
+		return fmt.Errorf("%w: %d tags fan out past max_combinations %d", domain.ErrTooManyScopes, len(tags), limit)
+	}
+	return nil
+}
+
+// markUnchanged flags items whose document's last completed retain had the same content and overrides
+// hash (and no force_reextract). It reads before anything is written: Upsert would clear extracted_at.
+func (i *ingestor) markUnchanged(ctx context.Context, b port.BankRef, plans []*itemPlan) error {
+	return i.d.Store.InTx(ctx, func(tx port.Tx) error {
+		for _, p := range plans {
+			p.unchanged = false
+			if p.payload.ForceReextract {
+				continue
+			}
+			d, err := tx.Documents().Get(ctx, b, p.doc)
+			if errors.Is(err, domain.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			p.unchanged = d.ExtractedAt != nil && d.ContentHash == p.payload.ContentHash && d.OverridesHash == p.oh
+		}
+		return nil
+	})
+}
+
+// storeBlobs writes each changed item's original text under its content-addressed key, before any
+// transaction (a repeated Put of the same key is harmless).
+func (i *ingestor) storeBlobs(ctx context.Context, plans []*itemPlan) error {
+	for _, p := range plans {
+		if p.unchanged {
+			continue
+		}
+		err := i.d.Blob.Put(ctx, p.payload.BlobKey, strings.NewReader(p.content), int64(len(p.content)),
+			"text/plain; charset=utf-8")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// write upserts the changed documents and, for an async retain, enqueues their retain_document jobs (under a
+// retain_batch parent when there are several), in one transaction.
+func (i *ingestor) write(ctx context.Context, req IngestRequest, plans []*itemPlan) (IngestResult, error) {
+	var res IngestResult
+	var opIDs []port.OperationID
+	err := i.d.Store.InTx(ctx, func(tx port.Tx) error {
+		res, opIDs = IngestResult{}, make([]port.OperationID, len(plans))
+		changed := 0
+		for _, p := range plans {
+			if !p.unchanged {
+				changed++
+			}
+		}
+		if changed == 0 {
+			return nil
+		}
+		if _, err := tx.Seq(ctx, req.Bank); err != nil { // Seq before Enqueue (lock order with ReclaimStale)
+			return err
+		}
+		for _, p := range plans {
+			if p.unchanged {
+				continue
+			}
+			if err := tx.Documents().Upsert(ctx, domain.Document{
+				ID: p.doc, Bank: req.Bank, Overrides: p.overrides, Tags: p.payload.Tags, BlobKey: p.payload.BlobKey,
+			}); err != nil {
+				return err
+			}
+		}
+		if !req.RunAsync {
+			return nil
+		}
+		var err error
+		res.ParentOperationID, err = i.enqueue(ctx, tx, req.Bank, plans, changed, opIDs)
+		return err
+	})
+	if err != nil {
+		return IngestResult{}, err
+	}
+	for k, p := range plans {
+		res.Documents = append(res.Documents, RetainedDocument{
+			DocumentID: p.doc, Unchanged: p.unchanged, OperationID: opIDs[k],
+		})
+	}
+	return res, nil
+}
+
+// enqueue inserts the retain_document jobs of the changed plans, under a retain_batch parent when there are
+// several, and records their ids in opIDs.
+func (i *ingestor) enqueue(
+	ctx context.Context, tx port.Tx, b port.BankRef, plans []*itemPlan, changed int, opIDs []port.OperationID,
+) (port.OperationID, error) {
+	var parent port.OperationID
+	if changed > 1 {
+		id, _, err := tx.Queue().Enqueue(ctx, port.Job{
+			Bank: b, Kind: domain.OperationKindRetainBatch, Payload: []byte(fmt.Sprintf(`{"documents":%d}`, changed)),
+		})
+		if err != nil {
+			return "", err
+		}
+		parent = id
+	}
+	for k, p := range plans {
+		if p.unchanged {
+			continue
+		}
+		payload, err := p.payload.Marshal()
+		if err != nil {
+			return "", err
+		}
+		opIDs[k], _, err = tx.Queue().Enqueue(ctx, port.Job{
+			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: DocumentSerialKey(p.doc),
+			Payload: payload, Overrides: p.overrides, ParentID: parent, Dedupe: port.DedupeNone,
+		})
+		if err != nil {
+			return "", err
+		}
+	}
+	return parent, nil
+}
+
+// runInline runs the Retainer for each changed document of a sync retain, in item order.
+func (i *ingestor) runInline(
+	ctx context.Context, b port.BankRef, plans []*itemPlan, res IngestResult,
+) (IngestResult, error) {
+	var usage []domain.Usage
+	for k, p := range plans {
+		if p.unchanged {
+			continue
+		}
+		payload, err := p.payload.Marshal()
+		if err != nil {
+			return IngestResult{}, err
+		}
+		out, err := i.d.Retainer.ProcessDocument(ctx, port.Job{
+			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: DocumentSerialKey(p.doc),
+			Payload: payload, Overrides: p.overrides,
+		})
+		usage = append(usage, out.Usage...)
+		if err != nil {
+			return IngestResult{}, fmt.Errorf("retain document %s: %w", p.doc, err)
+		}
+		res.Documents[k].UnitsCreated = out.UnitsCreated
+		res.Documents[k].Unchanged = out.Unchanged
+	}
+	res.Usage = SumUsage(usage)
+	return res, nil
 }
