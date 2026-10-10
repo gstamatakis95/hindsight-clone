@@ -59,7 +59,8 @@ func r(pattern string, fn resolver) rule {
 }
 
 // parseRules scans expr (a whole query or an extracted expression) for a recognized time expression and
-// returns its window; ok is false when no rule resolves.
+// returns its window; ok is false when no rule resolves. A resolved window with a bound outside years
+// 1-9999 ("999 decades ago") is consumed as no constraint: nil window with ok true, so no fallback call.
 func parseRules(expr string, ref time.Time) (*domain.TimeWindow, bool) {
 	s := normalize(expr)
 	if s == "" {
@@ -67,6 +68,9 @@ func parseRules(expr string, ref time.Time) (*domain.TimeWindow, bool) {
 	}
 	for _, set := range [][]rule{relDayRules, rangeRules, pointRules} {
 		if w, ok := scan(set, s, ref, false); ok {
+			if !inYearRange(w) {
+				return nil, true
+			}
 			return &w, true
 		}
 	}
@@ -99,10 +103,12 @@ var pointRules = concat(relDayRules, dateRules, qualifiedRules, relativeRules, n
 
 // dateRules are absolute calendar days.
 var dateRules = []rule{
-	r(`\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b`, func(m match, ref time.Time) (domain.TimeWindow, bool) {
+	// An ISO date may carry a time suffix ("2024-03-05t14:30:00z"); only the day is kept.
+	r(`\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\b|t\d)`, func(m match, ref time.Time) (domain.TimeWindow, bool) {
 		return dateWindow(m.n(1), m.n(2), m.n(3), ref)
 	}),
 	r(`\b(\d{1,2})/(\d{1,2})/(\d{4}|\d{2})\b`, resolveSlashDate),
+	r(`\b(`+monthAny+`)\s+(\d{1,2})`+ordinal+`\s*-\s*(\d{1,2})`+ordinal+`\s+(\d{4})\b`, resolveDayRange),
 	r(`\b(`+monthAny+`)\s+(\d{1,2})`+ordinal+`\s+(\d{4})\b`, func(m match, ref time.Time) (domain.TimeWindow, bool) {
 		return dateWindow(m.n(3), int(monthNames[m.g(1)]), m.n(2), ref)
 	}),
@@ -141,6 +147,13 @@ var qualifiedRules = []rule{
 			return domain.TimeWindow{}, false
 		}
 		return seasonWindow(seasonStart[m.g(1)], m.n(2), ref.Location()), true
+	}),
+	r(`\b(`+seasons+`|`+monthAny+`)\s+(?:of\s+)?'(\d{2})\b`, func(m match, ref time.Time) (domain.TimeWindow, bool) {
+		y := twoDigitYear(m.n(2), ref)
+		if first, ok := seasonStart[m.g(1)]; ok {
+			return seasonWindow(first, y, ref.Location()), true
+		}
+		return monthWindow(y, monthNames[m.g(1)], ref.Location()), true
 	}),
 	r(`\b(\d{3}0)'?s\b`, func(m match, ref time.Time) (domain.TimeWindow, bool) {
 		if !explicitYear(m.n(1)) {
@@ -187,12 +200,33 @@ func dateWindow(y, m, d int, ref time.Time) (domain.TimeWindow, bool) {
 	return dayWindow(day(y, time.Month(m), d, ref.Location())), true
 }
 
-// resolveSlashDate reads a/b/y as US month/day/year, or day/month/year when a > 12; a two-digit year is
-// 20yy.
+// resolveDayRange is "March 3-5 2024": [March 3, March 6).
+func resolveDayRange(m match, ref time.Time) (domain.TimeWindow, bool) {
+	mo := int(monthNames[m.g(1)])
+	first, okFirst := dateWindow(m.n(4), mo, m.n(2), ref)
+	last, okLast := dateWindow(m.n(4), mo, m.n(3), ref)
+	if !okFirst || !okLast || last.Start.Before(first.Start) {
+		return domain.TimeWindow{}, false
+	}
+	return domain.TimeWindow{Start: first.Start, End: last.End}, true
+}
+
+// twoDigitYear pivots yy around ref: the year in ref's century, or the century before when that would be
+// more than 20 years after ref (ref 2026: 46 -> 2046, 47 -> 1947).
+func twoDigitYear(yy int, ref time.Time) int {
+	y := ref.Year() - ref.Year()%100 + yy
+	if y > ref.Year()+20 {
+		y -= 100
+	}
+	return y
+}
+
+// resolveSlashDate reads a/b/y as US month/day/year, or day/month/year when a > 12; a two-digit year
+// pivots around ref (twoDigitYear).
 func resolveSlashDate(m match, ref time.Time) (domain.TimeWindow, bool) {
 	a, b, y := m.n(1), m.n(2), m.n(3)
 	if len(m.g(3)) == 2 {
-		y += 2000
+		y = twoDigitYear(y, ref)
 	}
 	if a > 12 {
 		a, b = b, a

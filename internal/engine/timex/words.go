@@ -77,7 +77,8 @@ func parseCount(s string) (n int, vague, ok bool) {
 }
 
 // normalize lowercases text and reduces it to space-separated tokens. Letters, digits, apostrophes, '$',
-// '#', '%', '/' and ':' survive; a hyphen survives only next to a digit ("2024-03-05", "2020 - 2022") so
+// '#', '%', '/' and ':' survive; a hyphen or en dash survives as '-' only next to a digit ("2024-03-05",
+// "2020 - 2022", "3–5") so
 // "mid-march" reads as "mid march"; everything else becomes a space.
 func normalize(text string) string {
 	rs := []rune(strings.ToLower(text))
@@ -91,8 +92,8 @@ func normalize(text string) string {
 			b.WriteRune('\'')
 		case strings.ContainsRune("$#%/:", r):
 			b.WriteRune(r)
-		case r == '-' && nearDigit(rs, i):
-			b.WriteRune(r)
+		case (r == '-' || r == '–') && nearDigit(rs, i):
+			b.WriteRune('-')
 		default:
 			b.WriteRune(' ')
 		}

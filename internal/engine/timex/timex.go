@@ -2,7 +2,10 @@ package timex
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"memd/internal/prompts"
@@ -33,7 +36,9 @@ func NewNormalizer(llm port.LLM, router port.ModelRouter, clock port.Clock) Time
 	return &normalizer{llm: llm, router: router, clock: clock}
 }
 
-// Normalize implements TimeNormalizer.
+// Normalize implements TimeNormalizer. A fallback failure that retrying cannot fix (an invalid argument
+// such as an unbound TIME_PARSE slot, or an undecodable answer) is logged and leaves the fact's dates
+// unset; any other failure, cancellation included, is returned so the job retries.
 func (n *normalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *domain.ExtractedFact,
 	ref time.Time,
 ) error {
@@ -45,7 +50,12 @@ func (n *normalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *do
 	if !ok {
 		var err error
 		if w, err = n.fallback(ctx, cfg, f.TimeExpression, "expression", ref); err != nil {
-			return err
+			if ctx.Err() != nil || !permanent(err) {
+				return err
+			}
+			slog.Default().WarnContext(ctx, "timex: time_parse failed permanently; fact keeps no dates",
+				"expression", f.TimeExpression, "error", err)
+			return nil
 		}
 	}
 	if w == nil {
@@ -56,7 +66,8 @@ func (n *normalizer) Normalize(ctx context.Context, cfg domain.BankConfig, f *do
 	return nil
 }
 
-// QueryWindow implements TimeNormalizer.
+// QueryWindow implements TimeNormalizer. Recall never fails on time analysis: a fallback failure is logged
+// and means no time constraint (nil, nil); only the caller's cancellation or deadline is returned.
 func (n *normalizer) QueryWindow(ctx context.Context, cfg domain.BankConfig, query string,
 	ref time.Time,
 ) (*domain.TimeWindow, error) {
@@ -67,7 +78,23 @@ func (n *normalizer) QueryWindow(ctx context.Context, cfg domain.BankConfig, que
 	if w, ok := parseRules(query, ref); ok {
 		return w, nil
 	}
-	return n.fallback(ctx, cfg, query, "query", ref)
+	w, err := n.fallback(ctx, cfg, query, "query", ref)
+	if err == nil {
+		return w, nil
+	}
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return nil, err
+	}
+	slog.Default().WarnContext(ctx, "timex: time_parse failed; query gets no time constraint", "error", err)
+	return nil, nil
+}
+
+// permanent reports whether a fallback error cannot be fixed by retrying: an invalid argument (an unbound
+// TIME_PARSE slot, a malformed request) or a model answer that does not decode.
+func permanent(err error) bool {
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	return errors.Is(err, domain.ErrInvalidArgument) || errors.As(err, &syntaxErr) || errors.As(err, &typeErr)
 }
 
 // reference is ref, or the clock's now when ref is zero.
@@ -157,7 +184,8 @@ func buildRequest(binding domain.ModelBinding, text, kind string, ref time.Time)
 	}, nil
 }
 
-// decodeWindow turns the model's bounds into a window, or nil when they carry no usable constraint.
+// decodeWindow turns the model's bounds into a window, or nil when they carry no usable constraint (a
+// bound outside years 1-9999 included).
 func decodeWindow(out timeParseResult, ref time.Time) *domain.TimeWindow {
 	start, okStart := parseBound(out.Start, ref.Location())
 	end, okEnd := parseBound(out.End, ref.Location())
@@ -167,7 +195,11 @@ func decodeWindow(out timeParseResult, ref time.Time) *domain.TimeWindow {
 	if !start.IsZero() && !end.IsZero() && !start.Before(end) {
 		return nil
 	}
-	return &domain.TimeWindow{Start: start, End: end}
+	w := domain.TimeWindow{Start: start, End: end}
+	if !inYearRange(w) {
+		return nil
+	}
+	return &w
 }
 
 // boundLayouts are the accepted bound formats; layouts without an offset are read in the ref's location.

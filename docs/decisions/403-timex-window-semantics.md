@@ -64,12 +64,39 @@ or a qualified period.
 - **Vague phrases go to the fallback:** "the day before my birthday", "around the holidays",
   "when I was in college", "the other day", "since then", and similar.
 
-### Fallback
-- `Structured` uses template `time_parse_system` with its schema, and returns `{start, end}`.
-- Both bounds null, start ≥ end, or an unparseable bound gives a nil window, not an error. A one-sided
+### Fallback and degradation (review round 1, after Hindsight temporal_extraction.py:99-115)
+- `Structured` uses template `time_parse_system` with its schema and returns `{start, end}`.
+- Both bounds null, start >= end, or an unparseable bound gives a nil window, not an error. A one-sided
   answer is kept.
-- Router and LLM errors are wrapped and returned. At retain that fails the job, which retries, rather
-  than storing a wrong date.
+- **Year range.** A window with any bound outside years 1..9999 is no window, from the rules or from the
+  LLM. The rules consume it, so no fallback call happens: "999 decades ago" gives nil, and so does
+  "December 9999", whose exclusive end is year 10000.
+- **QueryWindow degrades.** Any fallback error (router, LLM, decode, gateway timeout) is logged with
+  `slog` and gives `(nil, nil)`: recall runs without a temporal constraint. Only the caller's own
+  cancellation (`ctx.Err() != nil` or `context.Canceled`) is returned. A gateway per-call
+  `DeadlineExceeded` wrapped in `ErrUnavailable` still degrades.
+- **Normalize: transient vs permanent.**
+  - Permanent errors are `ErrInvalidArgument` (for example an unbound TIME_PARSE slot) and JSON decode
+    errors. They are logged, the fact keeps no dates, and Normalize returns nil.
+  - Everything else, including `ErrUnavailable`, unknown errors and a done ctx, is returned so the job
+    retries.
+
+### Forms added in review round 1
+- **Day ranges.** "March 3-5, 2024" or "March 3 - 5 2024" is [Mar 3, Mar 6). The year is required, and a
+  hyphen or en dash both work. A yearless "March 3-5" reads as March 3.
+- **Range ends.** "now", "right now", "present" and "the present" as a range end mean the instant `ref`;
+  "today" means the whole day. "since X until Y" is [X.Start, Y.End).
+- **Two-digit years** fall in ref's century, minus 100 when that would be more than ref+20 years ahead.
+  At ref 2026, 00-46 is 20yy and 47-99 is 19yy. This applies to slash dates and to "summer of '98" /
+  "March '24".
+- **ISO timestamps** ("2024-03-05T14:30:00Z", "2024-03-05 14:30") keep the date part only, as a day in
+  ref's location.
+- **Tighter cues.**
+  - Bare "weekend(s)" is not a cue. It needs a determiner, or over/on/during/at before it.
+  - "overnight" is never a cue.
+  - before/after/until are not cues before a bare pronoun or possessive ("before I deploy",
+    "after my workout"). They are cues before then/that, an event noun ("before my birthday"), or a
+    pronoun plus a past-tense verb ("after we moved").
 
 ## Known false positives (accepted)
 - "I have 2000 cats" reads as the year 2000.

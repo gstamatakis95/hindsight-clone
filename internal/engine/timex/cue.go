@@ -11,7 +11,9 @@ import (
 // in a temporal frame: a month name next to a day, a year or a preposition/determiner ("in March", not
 // "march on" or "may I ask"); a season or weekday after a determiner ("last fall", not "fall down",
 // "spring water" or "Sunday roast"); a four-digit number only when it reads as a year (not "port 2019",
-// "$2000"). "now" and "date" alone are not cues.
+// "$2000"). "now", "date", "overnight" and a bare "weekend" ("weekend plans") are not cues; neither is
+// before/after a pronoun or possessive ("before I deploy", "after my workout") unless an event noun follows
+// ("before my birthday").
 
 // cueYearMin and cueYearMax bound a bare four-digit number counted as a year (wider than the rules' bound).
 const (
@@ -21,10 +23,11 @@ const (
 
 // cuePatterns are the lexical cues, on normalized text.
 var cuePatterns = compileAll(
-	`\b(?:today|tonight|yesterday|tomorrow|ago|recently|lately|nowadays|weekends?|overnight)\b`,
+	`\b(?:today|tonight|yesterday|tomorrow|ago|recently|lately|nowadays)\b`,
 	`\b(?:last|this|next|past|previous|coming|upcoming|following|prior|current)\s+(?:[a-z0-9']+\s+){0,3}?`+
-		`(?:hours?|days?|nights?|weeks?|months?|years?|quarters?|decades?|semesters?|mornings?|`+
+		`(?:hours?|days?|nights?|weeks?|weekends?|months?|years?|quarters?|decades?|semesters?|mornings?|`+
 		`afternoons?|evenings?)\b`,
+	`\b(?:over|on|during|at)\s+(?:the\s+)?weekends?\b`,
 	`\b(?:`+counts+`|some|many)\s+(?:of\s+)?(?:hours?|days?|weeks?|months?|years?|decades?)\s+`+
 		`(?:ago|back|before|after|later|earlier|prior)\b`,
 	`\b(?:last|this|next|past|previous|coming|on|since|until|till|before|after|every|by|from|between)\s+`+
@@ -33,6 +36,7 @@ var cuePatterns = compileAll(
 	`\b(?:`+seasonPreceders+`|since|until|till|before|after|every|of|by|from|between)\s+(?:the\s+)?`+
 		`(?:`+seasons+`)\b`,
 	`\b(?:`+seasons+`)\s+(?:of\s+)?\d{4}\b`,
+	`\b(?:`+seasons+`|`+monthAny+`)\s+(?:of\s+)?'\d{2}\b`,
 	`\b(?:`+monthAny+`)\s+\d{1,2}`+ordinal+`\b`,
 	`\b\d{1,2}`+ordinal+`\s+(?:of\s+)?(?:`+monthAny+`)\b`,
 	`\b(?:`+monthAny+`)\s+(?:of\s+)?\d{4}\b`,
@@ -45,13 +49,14 @@ var cuePatterns = compileAll(
 	`\b(?:first|second|third|fourth|1st|2nd|3rd|4th|last|this|next|previous|past)\s+quarter\b`,
 	`\bthe\s+other\s+(?:day|night|week|month)\b`,
 	`\b(?:day|night|week|weekend|month|year|morning|evening)\s+(?:before|after)\b`,
-	`\b(?:when|while)\s+(?:i|we|you|he|she|they|it)\s+(?:was|were|lived|worked|studied|moved|started|left|`+
+	`\b(?:when|while|until|till|before|after)\s+(?:i|we|you|he|she|they|it)\s+(?:was|were|lived|worked|`+
+		`studied|moved|started|left|`+
 		`got|had)\b`,
 	`\bduring\b`,
-	`\b(?:around|over|since|until|till|before|after|through)\s+(?:the\s+)?(?:holidays?|christmas|thanksgiving|`+
-		`easter|halloween|new\s+year'?s?|vacation|summer\s+break|spring\s+break|break|semester|wedding|`+
-		`birthday|graduation)\b`,
-	`\b(?:until|till|before|after)\s+(?:then|that|my|our|his|her|their|we|i|he|she|they)\b`,
+	`\b(?:around|over|since|until|till|before|after|through)\s+(?:(?:the|my|our|his|her|their)\s+)?`+
+		`(?:holidays?|christmas|thanksgiving|easter|halloween|new\s+year'?s?|vacation|summer\s+break|`+
+		`spring\s+break|break|semester|wedding|birthday|graduation)\b`,
+	`\b(?:until|till|before|after)\s+(?:then|that)\b`,
 	`\bsince\s+(?:then|my|our|his|her|their)\b`,
 	`\bback\s+(?:then|when|in\s+(?:the\s+day|\d{4}|college|school|high\s+school|university))\b`,
 	`\b(?:at\s+the\s+time|in\s+the\s+past|a\s+while\s+back|a\s+bit\s+back)\b`,

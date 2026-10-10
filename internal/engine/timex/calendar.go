@@ -122,6 +122,22 @@ func calendarUnit(ref time.Time, unit string, n int) domain.TimeWindow {
 	return domain.TimeWindow{Start: s, End: unitShift(s, unit, 1)}
 }
 
+// Supported years: a window with a bound outside them means no constraint rather than an error.
+const (
+	minYear = 1
+	maxYear = 9999
+)
+
+// inYearRange reports whether every bound of w (an unbounded zero side aside) falls in years 1-9999.
+func inYearRange(w domain.TimeWindow) bool {
+	for _, t := range []time.Time{w.Start, w.End} {
+		if !t.IsZero() && (t.Year() < minYear || t.Year() > maxYear) {
+			return false
+		}
+	}
+	return true
+}
+
 // validDate reports whether y-m-d is a real calendar date.
 func validDate(y, m, d int) bool {
 	if m < 1 || m > 12 || d < 1 || d > 31 {

@@ -45,6 +45,10 @@ func TestHasTemporalCue(t *testing.T) {
 		{"in her 90s", false},
 		{"what were you up to", false},
 		{"the last time I checked", false},
+		{"what happened overnight", false},
+		{"before my birthday", true},
+		{"after we moved to Berlin", true},
+		{"what do I do on weekends", true},
 		{"", false},
 	}
 	for _, tt := range tests {

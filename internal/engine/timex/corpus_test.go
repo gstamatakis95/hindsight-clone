@@ -90,6 +90,7 @@ var relativeRows = []corpusRow{
 	{"relative", "last quarter", w(d(2026, 7, 1), d(2026, 10, 1)), z},
 	{"relative", "this quarter", w(d(2026, 10, 1), d(2027, 1, 1)), z},
 	{"relative", "the last decade", w(d(2010, 1, 1), d(2020, 1, 1)), z},
+	{"relative", "999 decades ago", nil, z}, // before year 1: consumed by the rules as no constraint
 }
 
 // namedRows are weekdays, seasons, months and quarters without a year.
@@ -135,6 +136,13 @@ var absoluteRows = []corpusRow{
 	{"absolute", "music from the 90s", w(d(1990, 1, 1), d(2000, 1, 1)), z},
 	{"absolute", "in the 1990s", w(d(1990, 1, 1), d(2000, 1, 1)), z},
 	{"absolute", "the '20s", w(d(2020, 1, 1), d(2030, 1, 1)), z},
+	{"absolute", "March 3-5, 2024", w(d(2024, 3, 3), d(2024, 3, 6)), z},
+	{"absolute", "March 3 - 5 2024", w(d(2024, 3, 3), d(2024, 3, 6)), z},
+	{"absolute", "3/5/99", w(d(1999, 3, 5), d(1999, 3, 6)), z},
+	{"absolute", "3/5/24", w(d(2024, 3, 5), d(2024, 3, 6)), z},
+	{"absolute", "summer of '98", w(d(1998, 6, 1), d(1998, 9, 1)), z},
+	{"absolute", "2024-03-05T14:30:00Z", w(d(2024, 3, 5), d(2024, 3, 6)), z},
+	{"absolute", "2024-03-05 14:30", w(d(2024, 3, 5), d(2024, 3, 6)), z},
 }
 
 // rangeRows are bounded and open ranges.
@@ -150,6 +158,9 @@ var rangeRows = []corpusRow{
 	{"range", "from March to May", w(d(2026, 3, 1), d(2026, 6, 1)), z},
 	{"range", "between Monday and Wednesday", w(d(2026, 10, 5), d(2026, 10, 8)), z},
 	{"range", "since yesterday", w(d(2026, 10, 9), testRef), z},
+	{"range", "from 2020 to now", w(d(2020, 1, 1), testRef), z},
+	{"range", "since 2021 until today", w(d(2021, 1, 1), d(2026, 10, 11)), z},
+	{"range", "between March and present", w(d(2026, 3, 1), testRef), z},
 }
 
 // zoneRows use a non-UTC reference: boundaries follow the reference's location.
@@ -182,6 +193,10 @@ var noneRows = []corpusRow{
 	{"none", "we fall in love easily", nil, z},
 	{"none", "the march in Washington", nil, z},
 	{"none", "last but not least, my dog", nil, z},
+	{"none", "remind me to run tests before I deploy", nil, z},
+	{"none", "what do I eat after my workout", nil, z},
+	{"none", "my overnight oats recipe", nil, z},
+	{"none", "any weekend plans?", nil, z},
 	{"none", "", nil, z},
 }
 

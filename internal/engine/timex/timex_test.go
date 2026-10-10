@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"reflect"
@@ -193,19 +194,80 @@ func TestFallbackOpenAndDateOnlyBounds(t *testing.T) {
 	}
 }
 
-// TestFallbackErrorsWrapped checks router and LLM failures surface wrapped.
-func TestFallbackErrorsWrapped(t *testing.T) {
+// TestQueryWindowFallbackErrorsDegrade checks router and LLM failures mean no window and no error, while
+// the caller's cancellation still surfaces wrapped.
+func TestQueryWindowFallbackErrorsDegrade(t *testing.T) {
 	h := newHarness()
-	_, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
-	if !errors.Is(err, errUnexpected) || !strings.HasPrefix(err.Error(), "timex: ") {
-		t.Fatalf("router error = %v", err)
+	got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
+	if got != nil || err != nil || len(h.router.ResolveCalls()) != 1 {
+		t.Fatalf("router error: got %v, %v; want nil, nil", got, err)
 	}
 	h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
 		return port.ModelBinding{Model: "tp"}, nil
 	}
-	_, err = h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
-	if !errors.Is(err, errUnexpected) || len(h.llm.StructuredCalls()) != 1 {
-		t.Fatalf("llm error = %v", err)
+	got, err = h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
+	if got != nil || err != nil || len(h.llm.StructuredCalls()) != 1 {
+		t.Fatalf("llm error: got %v, %v; want nil, nil", got, err)
+	}
+	// A gateway's own per-call timeout wraps DeadlineExceeded under a live ctx: it degrades too.
+	h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, _ any) (port.Usage, error) {
+		return port.Usage{}, fmt.Errorf("%w: gateway timeout: %w", domain.ErrUnavailable, context.DeadlineExceeded)
+	}
+	got, err = h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
+	if got != nil || err != nil {
+		t.Fatalf("gateway timeout: got %v, %v; want nil, nil", got, err)
+	}
+	h.llm.StructuredFunc = func(ctx context.Context, _ port.StructuredRequest, _ any) (port.Usage, error) {
+		return port.Usage{}, ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = h.tn.QueryWindow(ctx, domain.BankConfig{}, "the other day", testRef)
+	if !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "timex: ") {
+		t.Fatalf("cancelled: err = %v, want wrapped context.Canceled", err)
+	}
+}
+
+// TestNormalizeFallbackErrors checks permanent fallback failures (invalid argument, undecodable answer)
+// leave the fact undated without an error, while transient ones (unavailable, unknown, cancelled) are
+// returned for the job to retry.
+func TestNormalizeFallbackErrors(t *testing.T) {
+	unbound := fmt.Errorf("%w: time_parse slot unbound", domain.ErrInvalidArgument)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name      string
+		ctx       context.Context
+		routerErr error
+		raw       string
+		llmErr    error
+		wantErr   error
+	}{
+		{name: "unbound slot", ctx: context.Background(), routerErr: unbound},
+		{name: "undecodable answer", ctx: context.Background(), raw: `not json`},
+		{name: "unavailable", ctx: context.Background(), llmErr: domain.ErrUnavailable, wantErr: domain.ErrUnavailable},
+		{name: "unknown", ctx: context.Background(), llmErr: errUnexpected, wantErr: errUnexpected},
+		{name: "cancelled", ctx: cancelled, llmErr: context.Canceled, wantErr: context.Canceled},
+	}
+	for _, tt := range tests {
+		h := newHarness()
+		h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
+			return port.ModelBinding{Model: "tp"}, tt.routerErr
+		}
+		h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, out any) (port.Usage, error) {
+			if tt.llmErr != nil {
+				return port.Usage{}, tt.llmErr
+			}
+			return port.Usage{}, json.Unmarshal([]byte(tt.raw), out)
+		}
+		f := &domain.ExtractedFact{TimeExpression: "the long weekend in the mountains"}
+		err := h.tn.Normalize(tt.ctx, domain.BankConfig{}, f, testRef)
+		if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+			t.Errorf("%s: err = %v, want %v", tt.name, err, tt.wantErr)
+		}
+		if f.OccurredStart != nil || f.OccurredEnd != nil {
+			t.Errorf("%s: fact dated %v - %v", tt.name, f.OccurredStart, f.OccurredEnd)
+		}
 	}
 }
 
