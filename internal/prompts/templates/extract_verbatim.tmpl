@@ -1,0 +1,161 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/retain/fact_extraction.py — VERBATIM_FACT_EXTRACTION_PROMPT
+(_BASE_FACT_EXTRACTION_PROMPT + _VERBATIM_GUIDELINES), the VerbatimExtractedFact field descriptions,
+OPTIONAL_DIMENSIONS_SECTION and _build_labels_prompt_section. The chunk text is stored as the fact text in
+code; the model returns metadata only, so the "what"/"why" dimensions and causal links are omitted (as in
+Hindsight, .CausalLinks is ignored). memd changes: fact_type is world|assistant as in Hindsight (the retain
+engine maps "assistant" to experience), entities are {name, kind}, labels are {key, value} pairs,
+time_expression added; language rules dropped. .OptionalDimensions (Hindsight's
+retain_optional_fact_dimensions, default off) swaps the "N/A" placeholder for null and adds the OPTIONAL
+FIELDS section; the schema types when/where/who as string-or-null in both modes so it can stay static.
+Response schema: extract_verbatim.schema.json.
+Data (ExtractData): .OptionalDimensions, .FreeFormEntities, .Labels.
+*/ -}}
+{{- $na := `"N/A"`}}{{if .OptionalDimensions}}{{$na = "null"}}{{end -}}
+Extract metadata from text. The text itself is stored exactly as written.
+
+══════════════════════════════════════════════════════════════════════════
+VERBATIM MODE — Extract metadata only
+══════════════════════════════════════════════════════════════════════════
+
+The original text will be stored as-is in code. Your ONLY job is to extract metadata.
+
+RULES:
+- Produce EXACTLY ONE entry in "facts" for the input chunk.
+- DO NOT include a "what" field — it is not part of the output schema.
+- Extract all entities (people, places, organizations, objects, concepts).
+- Extract temporal information (occurred_start, occurred_end, fact_kind, when, time_expression).
+- Extract location (where) and people (who).
+- fact_type: use "world" for user preferences, rules, corrections, constraints, traits, and other objective facts, even when stated during an assistant interaction. Use "assistant" only for actions or experiences the assistant/agent actually performed.
+
+══════════════════════════════════════════════════════════════════════════
+FIELDS
+══════════════════════════════════════════════════════════════════════════
+
+1. "when": When it happened. {{$na}} if unknown. Use day name when known.
+2. "where": Location if relevant. {{$na}} if none.
+3. "who": People involved with relationships. {{$na}} if general.
+
+══════════════════════════════════════════════════════════════════════════
+COREFERENCE RESOLUTION
+══════════════════════════════════════════════════════════════════════════
+
+Link generic references to names when both appear:
+- "my roommate" + "Emily" → use "Emily (user's roommate)"
+- "the manager" + "Sarah" → use "Sarah (the manager)"
+
+══════════════════════════════════════════════════════════════════════════
+CLASSIFICATION
+══════════════════════════════════════════════════════════════════════════
+
+fact_kind:
+- "event": Specific datable occurrence (set occurred_start/end)
+- "conversation": Ongoing state, preference, trait (no dates)
+
+fact_type:
+- "world": Objective/external facts, including the user's preferences, rules, corrections, constraints, plans, traits, or context.
+- "assistant": First-person actions, experiences, or observations the assistant/agent actually performed.
+
+══════════════════════════════════════════════════════════════════════════
+TEMPORAL HANDLING
+══════════════════════════════════════════════════════════════════════════
+
+Use "Event Date" from input as reference for relative dates.
+- Resolve relative expressions in "when" to absolute dates ("yesterday" → "on November 12, 2024").
+- For events: set occurred_start AND occurred_end as ISO 8601 timestamps (same for point events)
+- Coarse dates (only a year, or only a month, is stated): span the WHOLE period —
+  "in 2015" → 2015-01-01 to 2015-12-31, "in March 2026" → 2026-03-01 to 2026-03-31.
+  Never collapse to the period's first day or to the Event Date, current year included.
+- For conversation facts: NO occurred dates (occurred_start and occurred_end are null)
+- "time_expression": the temporal phrase exactly as the text wrote it ("yesterday", "last spring",
+  "in March 2020"). null when the text states no time.
+
+══════════════════════════════════════════════════════════════════════════
+ENTITIES
+══════════════════════════════════════════════════════════════════════════
+
+ALWAYS return "entities" as an array of objects with a "name" and a "kind" — never plain strings, never null.
+Correct: entities=[{"name": "Alice", "kind": "person"}, {"name": "Kubernetes", "kind": "technology"}]
+- "name": the entity as the text names it; prefer the full name when the text gives one.
+- "kind": one lowercase word for what it is — person, organization, place, object, technology, concept,
+  event, or another fitting type. null when unclear.
+Use an empty array [] only when the text truly names nothing.
+
+Include: people names, organizations, places, key objects, abstract concepts (career, friendship, etc.)
+Always include "user" when the text is about the user.
+{{- if .OptionalDimensions}}
+
+══════════════════════════════════════════════════════════════════════════
+OPTIONAL FIELDS
+══════════════════════════════════════════════════════════════════════════
+
+"when", "where" and "who" may be null. Write null — not "N/A" — when the text
+states no value, and never carry over a value the text states about a different subject.
+{{- end}}
+{{- template "labels" .}}
+
+{{- define "labels"}}
+{{- if .Labels}}
+{{- $values := false}}{{$maps := false}}
+{{- range .Labels}}{{if eq .Type "map"}}{{$maps = true}}{{else}}{{$values = true}}{{end}}{{end}}
+
+══════════════════════════════════════════════════════════════════════════
+ENTITY LABELS - CLASSIFICATION ATTRIBUTES
+══════════════════════════════════════════════════════════════════════════
+
+{{if .FreeFormEntities -}}
+Classify each fact using the structured 'labels' field below. Continue extracting regular named entities in the 'entities' field.
+{{- else -}}
+Classify each fact using the structured 'labels' field below. Do NOT add regular named entities — labels-only mode: return "entities" as [].
+{{- end}}
+
+For each fact, fill the 'labels' array with {"key": ..., "value": ...} pairs. Each group below is a key; a
+group that takes several values gets one pair per value. Use the allowed values exactly as written.
+{{- if $values}}
+{{range .Labels}}{{if ne .Type "map"}}
+- {{.Key}} (
+{{- if eq .Type "text"}}free text, at most one pair
+{{- else if eq .Type "multi_text"}}list of free text, one pair per value, none if none
+{{- else if eq .Type "multi_values"}}multi-value (list), one pair per value
+{{- else}}single value, at most one pair{{end}})
+{{- with .Description}}: {{.}}{{end}}
+{{- range .Values}}
+    • "{{.Value}}"{{with .Description}} — {{.}}{{end}}
+{{- end}}
+{{end}}{{end}}
+Only assign labels when clearly applicable. Add no pair for a group the fact does not match.
+{{- end}}
+{{- if $maps}}
+
+══════════════════════════════════════════════════════════════════════════
+STRUCTURED ENTITY TYPES
+══════════════════════════════════════════════════════════════════════════
+
+For each fact, extract structured entities into 'labels' as well. Each structured entity type has defined
+fields; for every entity found, add one pair per field it has, with the key "group:field" (and
+"group:field:subfield" for a nested field), e.g. {"key": "person:role", "value": "engineer"}.
+{{range .Labels}}{{if eq .Type "map"}}
+- {{.Key}}{{with .Description}}: {{.}}{{end}}
+{{- $group := .Key}}
+{{- range $field, $f := .Fields}}
+    • {{$group}}:{{$field}} (
+{{- if eq $f.Type "map"}}object
+{{- else if eq $f.Type "multi_text"}}list of free text, one pair per value
+{{- else if eq $f.Type "multi_values"}}multi-values: {{range $i, $v := $f.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else if and (ne $f.Type "text") $f.Values}}one of: {{range $i, $v := $f.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else}}text{{end}})
+{{- with $f.Description}}: {{.}}{{end}}
+{{- range $sub, $s := $f.Fields}}
+        • {{$group}}:{{$field}}:{{$sub}} (
+{{- if eq $s.Type "multi_text"}}list of free text, one pair per value
+{{- else if eq $s.Type "multi_values"}}multi-values: {{range $i, $v := $s.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else if and (ne $s.Type "text") $s.Values}}one of: {{range $i, $v := $s.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else}}text{{end}})
+{{- with $s.Description}}: {{.}}{{end}}
+{{- end}}
+{{- end}}
+{{end}}{{end}}
+Only extract structured entities when clearly present in the text. Add no pairs if none are found.
+{{- end}}
+{{- end}}
+{{- end}}

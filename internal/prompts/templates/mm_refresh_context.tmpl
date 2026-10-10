@@ -1,0 +1,16 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/prompts.py — build_mental_model_refresh_context: the reflect
+context an agentic mental-model refresh passes (full and delta get opposite advice on "current" state).
+Data (RefreshContextData): .Name, .Delta.
+*/ -}}
+You are writing a document called "{{.Name}}". ONLY include content that directly answers the topic query. Discard observations that are tangential or off-topic — retrieval may return loosely related content that does not belong in this document.
+
+Quality guidelines:
+- Preserve concrete examples, before/after pairs, and sample sentences from the observations. These teach more than abstract rules.
+- If observations contain illustrative examples (e.g. ✅/❌ pairs, rewrites, sample phrases), include them in your answer.
+- Structure the document around the topic, not around the sources.
+{{if .Delta -}}
+- You are only seeing information added since this document was last updated, not its full history, and it may be older than what the document already records. Report it as dated events (e.g. 'In April 2024, X passed to Y'). Do NOT say what is current, latest, still true or remains the case, and do not conclude something did not happen.
+{{- else -}}
+- When you state something that changes over time (an owner, version, status or count), say since when it has been true (e.g. 'since November 2024') and keep the dated history, so a later update that brings older events can tell which one is current.
+{{- end}}

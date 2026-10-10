@@ -1,0 +1,55 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/reflect/prompts.py — build_final_prompt (_bank_identity_section,
+_render_history_block, _FINAL_INSTRUCTIONS, _length_directive): the user message of the tool-less final-answer
+call. The engine fits .Retrieved to the context window and sets .Omitted when it dropped earlier results; the
+claims/reduce split synthesis and language rules are dropped.
+Data (ReflectData): .BankName, .Mission, .Disposition, .Context, .Retrieved, .Omitted, .Query, .MaxTokens.
+*/ -}}
+## Memory Bank Context
+Name: {{with .BankName}}{{.}}{{else}}Assistant{{end}}
+{{- with .Mission}}
+Mission: {{.}}
+{{- end}}
+{{- with .Disposition}}
+{{- if or .Skepticism .Literalism .Empathy}}
+Disposition: {{$sep := ""}}
+{{- if .Skepticism}}skepticism={{.Skepticism}}{{$sep = ", "}}{{end}}
+{{- if .Literalism}}{{$sep}}literalism={{.Literalism}}{{$sep = ", "}}{{end}}
+{{- if .Empathy}}{{$sep}}empathy={{.Empathy}}{{end}}
+{{- end}}
+{{- end}}
+{{- with .Context}}
+
+## Additional Context
+{{.}}
+{{- end}}
+{{if .Retrieved}}
+## Retrieved Data (synthesize and reason from this data)
+{{- range .Retrieved}}
+
+### From {{.Tool}}:
+```json
+{{.Output}}
+```
+{{- end}}
+{{- if .Omitted}}
+
+*Note: Some earlier tool results were omitted to stay within the context window.*
+{{- end}}
+{{- else}}
+## Retrieved Data
+No data was retrieved.
+{{- end}}
+
+## Question
+{{.Query}}
+
+## Instructions
+Provide a thoughtful answer by synthesizing and reasoning from the retrieved data above. You can make reasonable inferences from the memories, but don't completely fabricate information. If the exact answer isn't stated, use what IS stated to give the best possible answer, within the inference rules in the system prompt.
+
+IMPORTANT: Output ONLY the final answer. Do NOT include meta-commentary like "I'll search..." or "Let me analyze...". Do NOT explain your reasoning process. Just provide the direct synthesized answer.
+{{- if gt .MaxTokens 0}}
+
+## Length
+Aim for a complete, self-contained answer of approximately {{.MaxTokens}} tokens. Finishing cleanly matters more than length: end on a complete sentence and NEVER stop mid-word, mid-list, or mid-code-fence. If you near the budget, wrap up gracefully rather than cutting off.
+{{- end}}

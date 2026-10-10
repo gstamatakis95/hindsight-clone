@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["facts"],
+  "properties": {
+    "facts": {
+      "type": "array",
+      "description": "List of metadata entries (exactly one for the chunk)",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "when", "where", "who", "fact_kind", "fact_type", "occurred_start", "occurred_end", "time_expression",
+          "entities", "labels"
+        ],
+        "properties": {
+          "when": {"type": ["string", "null"], "description": "When it happened. 'N/A' if unknown."},
+          "where": {"type": ["string", "null"], "description": "Location if relevant. 'N/A' if none."},
+          "who": {"type": ["string", "null"], "description": "People involved with relationships. 'N/A' if general."},
+          "fact_kind": {"type": "string", "enum": ["event", "conversation"], "description": "'event' or 'conversation'"},
+          "fact_type": {
+            "type": "string",
+            "enum": ["world", "assistant"],
+            "description": "'world' = objective/external facts. 'assistant' = first-person actions, experiences, or observations by the speaker."
+          },
+          "occurred_start": {"type": ["string", "null"], "description": "ISO 8601 timestamp for events; null otherwise"},
+          "occurred_end": {"type": ["string", "null"], "description": "ISO 8601 timestamp for event end; null otherwise"},
+          "time_expression": {
+            "type": ["string", "null"],
+            "description": "The temporal phrase exactly as the text wrote it (e.g. 'last spring'); null if none"
+          },
+          "entities": {
+            "type": "array",
+            "description": "People, places, organizations, objects and concepts the text names",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "kind"],
+              "properties": {
+                "name": {"type": "string", "description": "The entity as the text names it"},
+                "kind": {"type": ["string", "null"], "description": "One lowercase word: person, organization, place, ...; null if unclear"}
+              }
+            }
+          },
+          "labels": {
+            "type": "array",
+            "description": "Classification labels as key/value pairs; [] when no label applies or none are configured",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "value"],
+              "properties": {
+                "key": {"type": "string", "description": "Label key, or 'group:field' for a structured entity field"},
+                "value": {"type": "string", "description": "Label value"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

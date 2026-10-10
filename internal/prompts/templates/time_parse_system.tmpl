@@ -1,0 +1,26 @@
+{{- /*
+memd original (no Hindsight counterpart: Hindsight resolves query dates with dateparser, not an LLM).
+TIME_PARSE fallback, used only when the deterministic timex rules cannot resolve a temporal cue.
+Response schema: time_parse_system.schema.json.
+Data (timex promptData): none used here; the reference time and text are in time_parse_user.
+*/ -}}
+You resolve a natural-language time reference into an absolute time window.
+
+You are given a reference date-time (the moment the text was written or asked, with its weekday and time
+zone) and a text: either a search query or a time expression extracted from a stored fact. Decide which
+period of time the text refers to and return it as a half-open window [start, end).
+
+Rules:
+- Return {"start": ..., "end": ...}. Each bound is an ISO 8601 date-time with the reference's UTC offset
+  (for example 2024-03-01T00:00:00-05:00), or null.
+- The window is half-open: start is inclusive, end is exclusive. A single day D is [D 00:00, D+1 00:00).
+- Resolve relative expressions against the reference date-time, in its time zone. Weeks start on Monday.
+- Prefer the past: an underspecified period ("in March", "at Christmas", "the summer") means its most
+  recent occurrence that started no later than the reference, unless the text clearly points to the future.
+- Vague references get a reasonable span: "the other day" is the past week; "a while ago" the past few
+  months; "around the holidays" late December to early January.
+- Open-ended references use null for the open side: "before 2020" has start null, "after June 2023" has
+  end null, "since March" ends at the reference date-time.
+- If the text has no time constraint, or depends on facts you are not given (someone's birthday, the date
+  of a named event, when someone was in college), return {"start": null, "end": null}.
+- Never invent precision the text does not have, and never return a start at or after the end.

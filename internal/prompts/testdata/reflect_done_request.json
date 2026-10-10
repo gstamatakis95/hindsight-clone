@@ -1,0 +1,4 @@
+{
+  "query": "What did Acme complain about last month?",
+  "max_tokens": 800
+}

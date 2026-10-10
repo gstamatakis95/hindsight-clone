@@ -1,0 +1,236 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/retain/fact_extraction.py — VERBOSE_FACT_EXTRACTION_PROMPT plus the
+ExtractedFactVerbose field descriptions, CAUSAL_RELATIONSHIPS_SECTION, OPTIONAL_DIMENSIONS_SECTION and
+_build_labels_prompt_section.
+memd changes: fact_type is world|assistant as in Hindsight (the retain engine maps "assistant" to
+experience), entities are {name, kind}, labels are {key, value} pairs, time_expression added, causal links
+are caused_by indexes; language rules and attachments dropped.
+Gates (as in Hindsight's _build_extraction_prompt_and_schema): the CAUSAL section renders only with
+.CausalLinks (the schema keeps caused_by; the engine ignores it when causal links are off).
+.OptionalDimensions (Hindsight's retain_optional_fact_dimensions, default off) swaps the "N/A" placeholder
+for null and adds the OPTIONAL FIELDS section; the schema types when/where/who/why as string-or-null in both
+modes so it can stay static.
+Response schema: extract_verbose.schema.json.
+Data (ExtractData): .CausalLinks, .OptionalDimensions, .FreeFormEntities, .Labels.
+*/ -}}
+Extract facts from text into structured format with FIVE required dimensions - BE EXTREMELY DETAILED.
+
+══════════════════════════════════════════════════════════════════════════
+FACT FORMAT - ALL FIVE DIMENSIONS REQUIRED - MAXIMUM VERBOSITY
+══════════════════════════════════════════════════════════════════════════
+
+For EACH fact, CAPTURE ALL DETAILS - NEVER SUMMARIZE OR OMIT:
+
+1. **what**: WHAT happened - COMPLETE description with ALL specifics (objects, actions, quantities, details)
+2. **when**: WHEN it happened - ALWAYS include temporal info with DAY OF WEEK (e.g., "Monday, June 10, 2024")
+   - Always include the day name: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday
+   - Format: "day_name, month day, year" (e.g., "Saturday, June 9, 2024")
+3. **where**: WHERE it happened or is about - SPECIFIC locations, places, areas, regions (if applicable)
+4. **who**: WHO is involved - ALL people/entities with FULL relationships and background
+5. **why**: WHY it matters - ALL emotions, preferences, motivations, significance, nuance
+   - For assistant facts: MUST include what the user asked/requested that triggered this!
+
+Plus: fact_type, fact_kind, entities, occurred_start/end (for structured dates), time_expression
+
+VERBOSITY REQUIREMENT: Include EVERY detail mentioned. More detail is ALWAYS better than less.
+
+══════════════════════════════════════════════════════════════════════════
+COREFERENCE RESOLUTION (CRITICAL)
+══════════════════════════════════════════════════════════════════════════
+
+When text uses BOTH a generic relation AND a name for the same person → LINK THEM!
+
+Example input: "I went to my college roommate's wedding last June. Emily finally married Sarah after 5 years together."
+
+CORRECT output:
+- what: "Emily got married to Sarah at a rooftop garden ceremony"
+- when: "Saturday, June 8, 2024, after dating for 5 years"
+- where: "downtown San Francisco, at a rooftop garden venue"
+- who: "Emily (user's college roommate), Sarah (Emily's partner of 5 years)"
+- why: "User found it romantic and beautiful, dreams of similar outdoor ceremony"
+
+WRONG output:
+- what: "User's roommate got married" ← LOSES THE NAME!
+- who: "the roommate" ← WRONG - use the actual name!
+- where: (missing) ← WRONG - include the location!
+
+══════════════════════════════════════════════════════════════════════════
+FACT_KIND CLASSIFICATION (CRITICAL FOR TEMPORAL HANDLING)
+══════════════════════════════════════════════════════════════════════════
+
+⚠️ MUST set fact_kind correctly - this determines whether occurred_start/end are set!
+
+fact_kind="event" - USE FOR:
+- Actions that happened at a specific time: "went to", "attended", "visited", "bought", "made"
+- Past events: "yesterday I...", "last week...", "in March 2020..."
+- Future plans with dates: "will go to", "scheduled for"
+- Examples: "I went to a pottery workshop" → event
+           "Alice visited Paris in February" → event
+           "I bought a new car yesterday" → event
+           "The user graduated from MIT in March 2020" → event
+
+fact_kind="conversation" - USE FOR:
+- Ongoing states: "works as", "lives in", "is married to"
+- Preferences: "loves", "prefers", "enjoys"
+- Traits/abilities: "speaks fluent French", "knows Python"
+- Examples: "I love Italian food" → conversation
+           "Alice works at Google" → conversation
+           "I prefer outdoor dining" → conversation
+
+══════════════════════════════════════════════════════════════════════════
+TEMPORAL HANDLING (CRITICAL - USE EVENT DATE AS REFERENCE)
+══════════════════════════════════════════════════════════════════════════
+
+⚠️ IMPORTANT: Use the "Event Date" provided in the input as your reference point!
+All relative dates ("yesterday", "last week", "recently") must be resolved relative to the Event Date, NOT today's date.
+
+For EVENTS (fact_kind="event") - MUST SET BOTH occurred_start AND occurred_end:
+- Convert relative dates → absolute using Event Date as reference
+- If Event Date is "Saturday, March 15, 2020", then "yesterday" = Friday, March 14, 2020
+- Dates mentioned in text (e.g., "in March 2020") should use THAT year, not current year
+- CRITICAL: If the content mentions an absolute date (e.g., "March 15, 2024", "2024-03-15"), you MUST extract it and set occurred_start in ISO format
+- Always include the day name (Monday, Tuesday, etc.) in the 'when' field
+- Set occurred_start AND occurred_end to WHEN IT HAPPENED (not when mentioned)
+- For single-day/point events: set occurred_end = occurred_start (same timestamp)
+- COARSE DATES (the text states only a year, or only a month): set occurred_start and
+  occurred_end to the FULL SPAN of that period, so the range says how precisely the date
+  is actually known:
+    "in 2015"        → occurred_start="2015-01-01T00:00:00", occurred_end="2015-12-31T23:59:59"
+    "in March 2026"  → occurred_start="2026-03-01T00:00:00", occurred_end="2026-03-31T23:59:59"
+  Do NOT collapse a coarse date to the first day of the period, and do NOT resolve it to the
+  Event Date — even when the period is the current year. A year-only date is not a precise
+  date; recording it as one makes the memory claim a day it never stated.
+
+For CONVERSATIONS (fact_kind="conversation"):
+- General info, preferences, ongoing states → NO occurred dates (null)
+- Examples: "loves coffee", "works as engineer"
+
+time_expression: the temporal phrase exactly as the text wrote it ("yesterday", "last spring",
+"in March 2020"), even though you resolved it above. null when the text states no time for this fact.
+
+══════════════════════════════════════════════════════════════════════════
+FACT TYPE
+══════════════════════════════════════════════════════════════════════════
+
+- **world**: User's life, preferences, rules, corrections, constraints, other people, and events (facts that would exist without this conversation)
+- **assistant**: Actions or experiences the assistant/agent actually performed while helping the user (requests, recommendations, help)
+  ⚠️ CRITICAL for assistant facts: ALWAYS capture the user's request/question in the fact!
+  Include: what the user asked, what problem they wanted solved, what context they provided
+
+══════════════════════════════════════════════════════════════════════════
+ENTITIES - EXTRACT EVERYTHING
+══════════════════════════════════════════════════════════════════════════
+
+Return "entities" as an array of objects {"name": ..., "kind": ...} — never plain strings, never null.
+- "name": the entity as the text names it; prefer the full name when the text gives one.
+- "kind": one lowercase word for what it is — person, organization, place, object, technology, concept,
+  event, or another fitting type. null when unclear.
+
+Extract ALL of the following from the fact:
+- People names (Emily, Alice, Dr. Smith)
+- Organizations (Google, MIT, local coffee shop)
+- Places (San Francisco, Brooklyn, Paris)
+- Significant objects mentioned (coffee maker, new car, wedding dress)
+- Abstract concepts/themes (friendship, career growth, loss, celebration)
+
+ALWAYS include "user" when fact is about the user.
+Extract anything that could help link related facts together.
+{{- template "causal" .}}
+{{- template "optional" .}}
+{{- template "labels" .}}
+
+{{- define "causal"}}
+{{- if .CausalLinks}}
+
+══════════════════════════════════════════════════════════════════════════
+CAUSAL RELATIONSHIPS
+══════════════════════════════════════════════════════════════════════════
+
+Link facts with caused_by (max 2 per fact): the 0-based indexes of EARLIER facts in your "facts" array
+that caused this fact. Every index must be less than this fact's own index.
+
+Example: "Lost job → couldn't pay rent → moved apartment"
+- Fact 0: Lost job, caused_by: []
+- Fact 1: Couldn't pay rent, caused_by: [0]
+- Fact 2: Moved apartment, caused_by: [1]
+{{- end}}
+{{- end}}
+
+{{- define "optional"}}
+{{- if .OptionalDimensions}}
+
+══════════════════════════════════════════════════════════════════════════
+OPTIONAL FIELDS
+══════════════════════════════════════════════════════════════════════════
+
+"when", "where", "who" and "why" may be null. Write null — not "N/A" — when the
+text states no value for the fact you are writing, and never carry over a value
+the text states about a different subject.
+{{- end}}
+{{- end}}
+
+{{- define "labels"}}
+{{- if .Labels}}
+{{- $values := false}}{{$maps := false}}
+{{- range .Labels}}{{if eq .Type "map"}}{{$maps = true}}{{else}}{{$values = true}}{{end}}{{end}}
+
+══════════════════════════════════════════════════════════════════════════
+ENTITY LABELS - CLASSIFICATION ATTRIBUTES
+══════════════════════════════════════════════════════════════════════════
+
+{{if .FreeFormEntities -}}
+Classify each fact using the structured 'labels' field below. Continue extracting regular named entities in the 'entities' field.
+{{- else -}}
+Classify each fact using the structured 'labels' field below. Do NOT add regular named entities — labels-only mode: return "entities" as [].
+{{- end}}
+
+For each fact, fill the 'labels' array with {"key": ..., "value": ...} pairs. Each group below is a key; a
+group that takes several values gets one pair per value. Use the allowed values exactly as written.
+{{- if $values}}
+{{range .Labels}}{{if ne .Type "map"}}
+- {{.Key}} (
+{{- if eq .Type "text"}}free text, at most one pair
+{{- else if eq .Type "multi_text"}}list of free text, one pair per value, none if none
+{{- else if eq .Type "multi_values"}}multi-value (list), one pair per value
+{{- else}}single value, at most one pair{{end}})
+{{- with .Description}}: {{.}}{{end}}
+{{- range .Values}}
+    • "{{.Value}}"{{with .Description}} — {{.}}{{end}}
+{{- end}}
+{{end}}{{end}}
+Only assign labels when clearly applicable. Add no pair for a group the fact does not match.
+{{- end}}
+{{- if $maps}}
+
+══════════════════════════════════════════════════════════════════════════
+STRUCTURED ENTITY TYPES
+══════════════════════════════════════════════════════════════════════════
+
+For each fact, extract structured entities into 'labels' as well. Each structured entity type has defined
+fields; for every entity found, add one pair per field it has, with the key "group:field" (and
+"group:field:subfield" for a nested field), e.g. {"key": "person:role", "value": "engineer"}.
+{{range .Labels}}{{if eq .Type "map"}}
+- {{.Key}}{{with .Description}}: {{.}}{{end}}
+{{- $group := .Key}}
+{{- range $field, $f := .Fields}}
+    • {{$group}}:{{$field}} (
+{{- if eq $f.Type "map"}}object
+{{- else if eq $f.Type "multi_text"}}list of free text, one pair per value
+{{- else if eq $f.Type "multi_values"}}multi-values: {{range $i, $v := $f.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else if and (ne $f.Type "text") $f.Values}}one of: {{range $i, $v := $f.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else}}text{{end}})
+{{- with $f.Description}}: {{.}}{{end}}
+{{- range $sub, $s := $f.Fields}}
+        • {{$group}}:{{$field}}:{{$sub}} (
+{{- if eq $s.Type "multi_text"}}list of free text, one pair per value
+{{- else if eq $s.Type "multi_values"}}multi-values: {{range $i, $v := $s.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else if and (ne $s.Type "text") $s.Values}}one of: {{range $i, $v := $s.Values}}{{if $i}}, {{end}}{{$v.Value}}{{end}}
+{{- else}}text{{end}})
+{{- with $s.Description}}: {{.}}{{end}}
+{{- end}}
+{{- end}}
+{{end}}{{end}}
+Only extract structured entities when clearly present in the text. Add no pairs if none are found.
+{{- end}}
+{{- end}}
+{{- end}}

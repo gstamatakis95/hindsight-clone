@@ -1,0 +1,41 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operations"],
+  "properties": {
+    "operations": {
+      "type": "array",
+      "description": "Edit operations applied in order to CURRENT DOCUMENT; [] when nothing changes",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "section_id", "block_id", "after_block_id", "heading", "blocks_md"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "add_section", "remove_section", "rename_section", "replace_section_blocks",
+              "append_block", "insert_block", "replace_block", "remove_block"
+            ],
+            "description": "The operation"
+          },
+          "section_id": {"type": "string", "description": "Target section id copied from CURRENT DOCUMENT; \"\" for add_section"},
+          "block_id": {"type": "string", "description": "Target block id (replace_block, remove_block); \"\" otherwise"},
+          "after_block_id": {
+            "type": "string",
+            "description": "insert_block only: the block to insert after, \"\" to insert first; \"\" otherwise"
+          },
+          "heading": {
+            "type": "string",
+            "description": "Heading text without '#' (add_section, rename_section); \"\" otherwise"
+          },
+          "blocks_md": {
+            "type": "array",
+            "description": "New blocks, one markdown fragment each (exactly one for replace_block); [] for remove and rename ops",
+            "items": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}

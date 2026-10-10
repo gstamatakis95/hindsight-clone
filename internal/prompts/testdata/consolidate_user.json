@@ -1,0 +1,29 @@
+{
+  "mission": "Track the user's pets and their health.",
+  "capacity": {"max": 10, "remaining": 1},
+  "facts": [
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "text": "User's dog Rex died on March 15, 2025.",
+      "occurred_start": "2025-03-15T00:00:00Z",
+      "occurred_end": "2025-03-15T23:59:59Z",
+      "mentioned_at": "2025-03-20T09:00:00Z"
+    },
+    {"id": "d4e5f6a7-b8c9-0123-defa-234567890123", "text": "User adopted a cat named Miso."}
+  ],
+  "observations": [
+    {
+      "id": "22222222-2222-2222-2222-222222222222",
+      "text": "User has a dog named Rex.",
+      "proof_count": 2,
+      "mentioned_at": "2024-11-02T10:00:00Z",
+      "source_memories": [
+        {
+          "text": "User walks Rex every morning.",
+          "context": "morning chat",
+          "mentioned_at": "2024-11-02T10:00:00Z"
+        }
+      ]
+    }
+  ]
+}

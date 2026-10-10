@@ -1,0 +1,40 @@
+{{- /*
+Source: Hindsight hindsight_api/engine/consolidation/prompts.py — build_consolidation_input (_DEFAULT_MISSION,
+build_mission_section, _SPLIT_INPUT_SECTION) and the capacity note and fact lines of
+consolidator.py:_consolidate_batch_with_llm. memd has no DELETE, so a full scope may only UPDATE.
+Only new facts show their [id] (what source_fact_ids copies) and observations their id (observation_id);
+source_memories carry no id, as in Hindsight's _build_observations_for_llm.
+Data (ConsolidateData): .Mission, .Capacity (.Max, .Remaining), .Facts, .Observations (rendered as JSON).
+*/ -}}
+## MISSION
+
+{{with .Mission}}{{.}}{{else}}Track anything notable in the new facts — names, numbers, dates, places, events, decisions, claims, relationships, and recurring patterns.{{end}}
+{{with .Capacity}}
+{{- if le .Remaining 0}}
+## CAPACITY CONSTRAINT
+
+OBSERVATION LIMIT REACHED ({{.Max}}/{{.Max}}). Only UPDATE existing observations. Do NOT create new ones — merge new knowledge into existing observations via UPDATE.
+{{else if le .Remaining (len $.Facts)}}
+## CAPACITY CONSTRAINT
+
+This scope has {{.Remaining}} observation slot(s) remaining (out of {{.Max}}). Prefer UPDATE over CREATE when possible.
+{{end}}
+{{- end}}
+## INPUT
+
+### New facts
+
+{{range .Facts -}}
+[{{.ID}}] {{.Text}}
+{{- if or .OccurredStart .OccurredEnd .MentionedAt}} (
+{{- $sep := ""}}
+{{- with .OccurredStart}}occurred_start={{.Format "2006-01-02T15:04:05Z07:00"}}{{$sep = ", "}}{{end}}
+{{- with .OccurredEnd}}{{$sep}}occurred_end={{.Format "2006-01-02T15:04:05Z07:00"}}{{$sep = ", "}}{{end}}
+{{- with .MentionedAt}}{{$sep}}mentioned_at={{.Format "2006-01-02T15:04:05Z07:00"}}{{end}})
+{{- end}}
+{{else -}}
+(none)
+{{end}}
+### Existing observations
+
+{{if .Observations}}{{json .Observations}}{{else}}[]{{end}}

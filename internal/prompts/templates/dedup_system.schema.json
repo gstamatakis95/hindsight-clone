@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "text", "reason"],
+  "properties": {
+    "action": {"type": "string", "enum": ["merge", "keep"], "description": "merge = same fact; keep = distinct facts"},
+    "text": {"type": "string", "description": "The merged observation preserving every detail of both (merge); empty string (keep)"},
+    "reason": {"type": "string", "description": "One sentence explaining the verdict"}
+  }
+}

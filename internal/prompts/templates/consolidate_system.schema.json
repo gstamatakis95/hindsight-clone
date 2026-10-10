@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["creates", "updates"],
+  "properties": {
+    "creates": {
+      "type": "array",
+      "description": "New observations; [] when none",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "source_fact_ids", "reason"],
+        "properties": {
+          "text": {"type": "string", "description": "The observation text, clean prose"},
+          "source_fact_ids": {
+            "type": "array",
+            "description": "EXACT ids of the new facts this observation rests on",
+            "items": {"type": "string"}
+          },
+          "reason": {"type": "string", "description": "One sentence: which observations were considered and why none matched"}
+        }
+      }
+    },
+    "updates": {
+      "type": "array",
+      "description": "Rewrites of existing observations, at most one per observation_id; [] when none",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["observation_id", "text", "source_fact_ids", "reason"],
+        "properties": {
+          "observation_id": {"type": "string", "description": "EXACT id of the existing observation"},
+          "text": {"type": "string", "description": "The full updated observation text, clean prose"},
+          "source_fact_ids": {
+            "type": "array",
+            "description": "EXACT ids of the new facts merged into this observation",
+            "items": {"type": "string"}
+          },
+          "reason": {"type": "string", "description": "One sentence explaining the update"}
+        }
+      }
+    }
+  }
+}

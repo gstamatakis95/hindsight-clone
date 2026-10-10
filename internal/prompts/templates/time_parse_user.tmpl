@@ -1,0 +1,14 @@
+{{- /*
+memd original. User message of the TIME_PARSE fallback (system prompt: time_parse_system).
+Data (timex promptData): .Reference (RFC 3339 with offset), .Weekday, .Timezone, .Kind ("query" or
+"expression"), .Text.
+*/ -}}
+Reference date-time: {{.Reference}} ({{.Weekday}}, time zone {{.Timezone}})
+{{if eq .Kind "query" -}}
+Search query:
+{{- else -}}
+Time expression from a stored fact:
+{{- end}}
+{{.Text}}
+
+Return the time window this {{.Kind}} refers to, or nulls if it has none.

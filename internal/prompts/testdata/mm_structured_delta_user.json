@@ -1,0 +1,41 @@
+{
+  "name": "Acme account",
+  "source_query": "What is the state of the Acme account?",
+  "document": {
+    "sections": [
+      {
+        "id": "plan",
+        "heading": "Plan",
+        "level": 2,
+        "blocks": [{"id": "b3f9a1c2", "text": "Acme is on the Enterprise plan since March 2026."}]
+      },
+      {
+        "id": "members",
+        "heading": "Members",
+        "level": 2,
+        "blocks": [{"id": "b17c4d80", "text": "- Alice — admin\n- Bob — billing"}]
+      }
+    ]
+  },
+  "observations": [{"id": "o-2", "text": "Acme reported slow exports.", "mentioned_at": "2026-09-12T10:00:00Z"}],
+  "facts": [
+    {
+      "id": "f-3",
+      "type": "world",
+      "text": "Carol joined Acme as a junior engineer.",
+      "occurred_start": "2026-10-01T00:00:00Z",
+      "occurred_end": "2026-10-01T00:00:00Z",
+      "mentioned_at": "2026-10-02T00:00:00Z"
+    }
+  ],
+  "max_output_tokens": 2000,
+  "document_tokens": 760,
+  "document_budget": 900,
+  "truncated": false,
+  "rejected": [
+    {
+      "op": "{\"kind\":\"append_block\",\"section_id\":\"team\",\"blocks_md\":[\"- Carol\"]}",
+      "reason": "unknown section_id \"team\""
+    }
+  ]
+}

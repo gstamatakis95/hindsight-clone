@@ -1,0 +1,42 @@
+{{- /*
+New in memd (single-shot SYNTHESIZE, full refresh), in the style of Hindsight
+hindsight_api/engine/reflect/prompts.py build_final_prompt and _length_directive. Observations come before facts.
+Data (SynthesizeData): .Name, .SourceQuery, .Observations, .Facts, .MaxTokens.
+*/ -}}
+## Document
+{{with .Name}}{{.}}{{else}}(untitled){{end}}
+
+## Topic
+{{.SourceQuery}}
+
+## OBSERVATIONS (consolidated knowledge — build on these first)
+{{- range .Observations}}
+- [{{.ID}}] {{.Text}}{{template "dates" .}}
+{{- else}}
+(none retrieved)
+{{- end}}
+
+## FACTS (raw memories — use for specifics and gaps)
+{{- range .Facts}}
+- [{{with .Type}}{{.}}:{{end}}{{.ID}}] {{.Text}}{{template "dates" .}}
+{{- else}}
+(none retrieved)
+{{- end}}
+{{- if gt .MaxTokens 0}}
+
+## Length
+Aim for a complete, self-contained document of approximately {{.MaxTokens}} tokens, and never more. Finishing cleanly matters more than length: end on a complete sentence and NEVER stop mid-word, mid-list, or mid-code-fence. If you near the budget, wrap up gracefully rather than cutting off.
+{{- end}}
+
+## Task
+Write the document now: a complete markdown page that answers the topic from the observations and facts above. Output ONLY the document.
+
+{{- define "dates"}}
+{{- if or .OccurredStart .MentionedAt}} (
+{{- with .OccurredStart}}{{$start := .Format "2006-01-02"}}occurred: {{$start}}
+{{- with $.OccurredEnd}}{{$end := .Format "2006-01-02"}}{{if ne $start $end}} to {{$end}}{{end}}{{end}}
+{{- end}}
+{{- if and .OccurredStart .MentionedAt}}; {{end}}
+{{- with .MentionedAt}}mentioned_at: {{.Format "2006-01-02"}}{{end}})
+{{- end}}
+{{- end}}

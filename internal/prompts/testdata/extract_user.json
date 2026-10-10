@@ -1,0 +1,8 @@
+{
+  "mission": "Focus on the user's travel plans and preferences.",
+  "mentioned_at": "2024-06-10T14:30:00Z",
+  "context": "Chat between the user and their assistant",
+  "metadata": {"source": "slack", "channel": "travel"},
+  "hints": [{"text": "Alice", "type": "person"}, {"text": "Lisbon"}],
+  "text": "I'm flying to Lisbon with Alice next Friday. I prefer window seats."
+}
