@@ -116,7 +116,7 @@ func (r *recaller) Recall(ctx context.Context, req RecallRequest) (RecallResult,
 	}
 	enr, err := r.includer.Enrich(ctx, req.Bank, packed, req.Include)
 	if err != nil {
-		return RecallResult{}, err
+		return RecallResult{}, fmt.Errorf("recall: include: %w", err)
 	}
 	out := result(packed, enr)
 	if req.Trace {
@@ -183,7 +183,7 @@ func (r *recaller) rank(ctx context.Context, q *ParsedQuery, fused []Candidate, 
 	}
 	scored, err := r.scorer.Score(ctx, q, hydrated)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("recall: score: %w", err)
 	}
 	kept, reranked := scored[:0:0], 0
 	for _, c := range scored {
