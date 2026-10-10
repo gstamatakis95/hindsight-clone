@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 	pgvector_go "github.com/pgvector/pgvector-go"
 )
 
@@ -70,7 +69,7 @@ type Entity struct {
 	BankID        string
 	CanonicalName string
 	Kind          string
-	LabelValue    pgtype.Text
+	LabelValue    *string
 	MentionCount  int32
 	FirstSeen     *time.Time
 	LastSeen      *time.Time
@@ -139,7 +138,7 @@ type MemoryUnit struct {
 	ID                    uuid.UUID
 	TenantID              string
 	BankID                string
-	DocumentID            pgtype.Text
+	DocumentID            *string
 	ChunkID               uuid.NullUUID
 	FactType              string
 	Text                  string
@@ -152,7 +151,7 @@ type MemoryUnit struct {
 	MentionedAt           *time.Time
 	Timeless              bool
 	ProofCount            int32
-	ScopeKey              pgtype.Text
+	ScopeKey              *string
 	Version               int64
 	Seq                   int64
 	ConsolidatedAt        *time.Time
@@ -166,7 +165,7 @@ type MemoryUnitsArchive struct {
 	ID               uuid.UUID
 	TenantID         string
 	BankID           string
-	DocumentID       pgtype.Text
+	DocumentID       *string
 	ChunkID          uuid.NullUUID
 	FactType         string
 	Text             string
@@ -195,7 +194,7 @@ type MentalModel struct {
 	SourceQuery          string
 	FolderPath           string
 	Tags                 []string
-	MaxTokens            pgtype.Int4
+	MaxTokens            *int32
 	Trigger              json.RawMessage
 	Overrides            json.RawMessage
 	ContentMd            string
@@ -209,7 +208,7 @@ type MentalModel struct {
 	SourceIds            []uuid.UUID
 	LastTrace            json.RawMessage
 	Embedding            *pgvector_go.Vector
-	RefreshCron          pgtype.Text
+	RefreshCron          *string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
@@ -227,7 +226,7 @@ type MentalModelHistory struct {
 	BankID          string
 	MentalModelID   string
 	Kind            string
-	Version         pgtype.Int8
+	Version         *int64
 	PreviousContent string
 	Outcome         string
 	FailureReason   string
@@ -270,19 +269,19 @@ type Operation struct {
 	BankID            string
 	Kind              string
 	Status            string
-	SerialKey         pgtype.Text
+	SerialKey         *string
 	Payload           json.RawMessage
 	Overrides         json.RawMessage
 	Joinable          bool
 	ParentID          uuid.NullUUID
 	Attempts          int32
 	RunAt             time.Time
-	WorkerID          pgtype.Text
+	WorkerID          *string
 	HeartbeatAt       *time.Time
 	Progress          json.RawMessage
 	Usage             json.RawMessage
 	Result            json.RawMessage
-	Error             pgtype.Text
+	Error             *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	FinishedAt        *time.Time

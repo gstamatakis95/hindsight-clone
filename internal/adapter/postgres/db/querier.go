@@ -6,12 +6,273 @@ package db
 
 import (
 	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
-	// Placeholder: sqlc refuses to run with an empty queries/ directory. WP-01 adds the real
-	// queries next to this file; delete it then if nothing uses Ping.
-	Ping(ctx context.Context) (int32, error)
+	// BankChangeSeq returns the bank's latest committed change_seq.
+	BankChangeSeq(ctx context.Context, arg BankChangeSeqParams) (int64, error)
+	// BankDeleteArchive deletes up to lim memory_units_archive rows of the bank.
+	BankDeleteArchive(ctx context.Context, arg BankDeleteArchiveParams) (int64, error)
+	// BankDeleteChunks deletes up to lim chunks rows of the bank.
+	BankDeleteChunks(ctx context.Context, arg BankDeleteChunksParams) (int64, error)
+	// BankDeleteCooccurrences deletes up to lim entity_cooccurrences rows of the bank (via entities).
+	BankDeleteCooccurrences(ctx context.Context, arg BankDeleteCooccurrencesParams) (int64, error)
+	// BankDeleteDirectives deletes up to lim directives rows of the bank.
+	BankDeleteDirectives(ctx context.Context, arg BankDeleteDirectivesParams) (int64, error)
+	// BankDeleteDocuments deletes up to lim documents rows of the bank.
+	BankDeleteDocuments(ctx context.Context, arg BankDeleteDocumentsParams) (int64, error)
+	// BankDeleteEntities deletes up to lim entities rows of the bank.
+	BankDeleteEntities(ctx context.Context, arg BankDeleteEntitiesParams) (int64, error)
+	// BankDeleteEntityMaintenance deletes up to lim entity_maintenance rows of the bank.
+	BankDeleteEntityMaintenance(ctx context.Context, arg BankDeleteEntityMaintenanceParams) (int64, error)
+	// BankDeleteEvents deletes every lifecycle event of a bank.
+	BankDeleteEvents(ctx context.Context, arg BankDeleteEventsParams) error
+	// BankDeleteEvidence deletes up to lim observation_evidence rows of the bank (via memory_units).
+	BankDeleteEvidence(ctx context.Context, arg BankDeleteEvidenceParams) (int64, error)
+	// BankDeleteGraphDirty deletes up to lim graph_dirty rows of the bank.
+	BankDeleteGraphDirty(ctx context.Context, arg BankDeleteGraphDirtyParams) (int64, error)
+	// BankDeleteLinks deletes up to lim memory_links rows of the bank (via memory_units).
+	BankDeleteLinks(ctx context.Context, arg BankDeleteLinksParams) (int64, error)
+	// BankDeleteMemoryAudit deletes up to lim memory_audit rows of the bank.
+	BankDeleteMemoryAudit(ctx context.Context, arg BankDeleteMemoryAuditParams) (int64, error)
+	// BankDeleteModelFolders deletes up to lim mental_model_folders rows of the bank.
+	BankDeleteModelFolders(ctx context.Context, arg BankDeleteModelFoldersParams) (int64, error)
+	// BankDeleteModelHistory deletes up to lim mental_model_history rows of the bank.
+	BankDeleteModelHistory(ctx context.Context, arg BankDeleteModelHistoryParams) (int64, error)
+	// BankDeleteModels deletes up to lim mental_models rows of the bank.
+	BankDeleteModels(ctx context.Context, arg BankDeleteModelsParams) (int64, error)
+	// BankDeleteObservationScopes deletes up to lim observation_scopes rows of the bank.
+	BankDeleteObservationScopes(ctx context.Context, arg BankDeleteObservationScopesParams) (int64, error)
+	// BankDeleteObservationVersions deletes up to lim observation_versions rows of the bank.
+	BankDeleteObservationVersions(ctx context.Context, arg BankDeleteObservationVersionsParams) (int64, error)
+	// BankDeleteOperations deletes every operation of a bank.
+	BankDeleteOperations(ctx context.Context, arg BankDeleteOperationsParams) error
+	// BankDeleteParkedLinks deletes up to lim parked_links rows of the bank.
+	BankDeleteParkedLinks(ctx context.Context, arg BankDeleteParkedLinksParams) (int64, error)
+	// BankDeleteRow deletes a tombstoned bank's row; a live bank matches nothing.
+	BankDeleteRow(ctx context.Context, arg BankDeleteRowParams) (int64, error)
+	// BankDeleteUnitEntities deletes up to lim unit_entities rows of the bank (via memory_units).
+	BankDeleteUnitEntities(ctx context.Context, arg BankDeleteUnitEntitiesParams) (int64, error)
+	// BankDeleteUnits deletes up to lim memory_units rows of the bank.
+	BankDeleteUnits(ctx context.Context, arg BankDeleteUnitsParams) (int64, error)
+	// BumpBankSeq increments a live bank's change_seq and returns it; the row lock is held until commit.
+	BumpBankSeq(ctx context.Context, arg BumpBankSeqParams) (int64, error)
+	// ChunkCommitted returns a document's committed chunks as (index, content hash).
+	ChunkCommitted(ctx context.Context, arg ChunkCommittedParams) ([]ChunkCommittedRow, error)
+	// ChunkDeleteReplaced deletes another chunk at the same (document, index), so the new one can replace it.
+	ChunkDeleteReplaced(ctx context.Context, arg ChunkDeleteReplacedParams) error
+	// ChunkInsert stores one chunk; a replayed insert of the same id rewrites it in place.
+	ChunkInsert(ctx context.Context, arg ChunkInsertParams) error
+	// ClaimAlive reports whether a job is processing without a cancel request in a live bank.
+	ClaimAlive(ctx context.Context, id uuid.UUID) (bool, error)
+	// ClaimAppendFailedEvent appends one OPERATION_FAILED lifecycle event.
+	ClaimAppendFailedEvent(ctx context.Context, arg ClaimAppendFailedEventParams) error
+	// ClaimCancelStale moves stale cancel-requested processing jobs to CANCELLED.
+	ClaimCancelStale(ctx context.Context, arg ClaimCancelStaleParams) (int64, error)
+	// ClaimComplete finishes a processing job: COMPLETED, or CANCELLED when its cancel was requested.
+	ClaimComplete(ctx context.Context, arg ClaimCompleteParams) (string, error)
+	// ClaimFinishFailed ends a processing job FAILED, or CANCELLED when its cancel was requested. With
+	// stale_secs set it only matches a job whose heartbeat is older than that and that has the given attempts.
+	ClaimFinishFailed(ctx context.Context, arg ClaimFinishFailedParams) (string, error)
+	// ClaimHeartbeat refreshes the worker's processing jobs and reports which have a cancel request.
+	ClaimHeartbeat(ctx context.Context, arg ClaimHeartbeatParams) ([]ClaimHeartbeatRow, error)
+	// ClaimMark moves the selected jobs to processing under the worker with a fresh heartbeat.
+	ClaimMark(ctx context.Context, arg ClaimMarkParams) error
+	// ClaimPeek reads a job's bank, status and cancel request without locking it.
+	ClaimPeek(ctx context.Context, id uuid.UUID) (ClaimPeekRow, error)
+	// ClaimProgress records a processing job's checkpoint.
+	ClaimProgress(ctx context.Context, arg ClaimProgressParams) (int64, error)
+	// ClaimRequeueStale returns stale processing jobs without a cancel request to pending with attempts+1.
+	ClaimRequeueStale(ctx context.Context, arg ClaimRequeueStaleParams) (int64, error)
+	// ClaimRetryLater returns a processing job to pending at run_at with attempts+1, or CANCELLED when its
+	// cancel was requested.
+	ClaimRetryLater(ctx context.Context, arg ClaimRetryLaterParams) (string, error)
+	// ClaimSelect is the spec's claim query (only $1 gains a ::text[] cast): due jobs of the given kinds whose
+	// serial key is free, oldest first.
+	ClaimSelect(ctx context.Context, arg ClaimSelectParams) ([]Operation, error)
+	// ClaimStale lists processing jobs whose heartbeat is older than the ttl.
+	ClaimStale(ctx context.Context, staleSecs float64) ([]ClaimStaleRow, error)
+	// CreateBank inserts a new bank with its name and config.
+	CreateBank(ctx context.Context, arg CreateBankParams) error
+	// DirectiveDelete removes one directive.
+	DirectiveDelete(ctx context.Context, arg DirectiveDeleteParams) (int64, error)
+	// DirectiveList returns a bank's directives (only active ones when active_only), oldest first.
+	DirectiveList(ctx context.Context, arg DirectiveListParams) ([]Directive, error)
+	// DirectiveUpsert creates a directive or replaces its name, rules, tags and active flag.
+	DirectiveUpsert(ctx context.Context, arg DirectiveUpsertParams) error
+	// DocumentComplete stamps the hashes and extracted_at of a finished retain.
+	DocumentComplete(ctx context.Context, arg DocumentCompleteParams) (int64, error)
+	// DocumentGet returns one document of a bank.
+	DocumentGet(ctx context.Context, arg DocumentGetParams) (Document, error)
+	// DocumentSetTags replaces a document's tag set.
+	DocumentSetTags(ctx context.Context, arg DocumentSetTagsParams) (int64, error)
+	// DocumentUnitCounts counts a document's live units per fact type.
+	DocumentUnitCounts(ctx context.Context, arg DocumentUnitCountsParams) ([]DocumentUnitCountsRow, error)
+	// DocumentUpsert inserts a document or replaces its tags, overrides and blob key; either way extracted_at is
+	// cleared and the hashes of the last completed retain are kept.
+	DocumentUpsert(ctx context.Context, arg DocumentUpsertParams) error
+	// EntityAttach links a unit to entities, skipping existing rows, and returns the newly linked entity ids.
+	EntityAttach(ctx context.Context, arg EntityAttachParams) ([]uuid.UUID, error)
+	// EntityBumpCooccurrences counts one more co-occurrence for every pair of a newly attached entity with another entity of the unit.
+	EntityBumpCooccurrences(ctx context.Context, arg EntityBumpCooccurrencesParams) error
+	// EntityBumpMentions adds one mention to each of the entities.
+	EntityBumpMentions(ctx context.Context, ids []uuid.UUID) error
+	// EntityCandidates returns up to lim entities of a bank whose lower-cased names are trigram-similar (pg_trgm %) to the lower-cased name, most similar first.
+	EntityCandidates(ctx context.Context, arg EntityCandidatesParams) ([]EntityCandidatesRow, error)
+	// EntityClearMaintenance removes entities from a bank's entity_maintenance.
+	EntityClearMaintenance(ctx context.Context, arg EntityClearMaintenanceParams) error
+	// EntityCooccurrence counts how many of others have a co-occurrence row with the entity.
+	EntityCooccurrence(ctx context.Context, arg EntityCooccurrenceParams) (int32, error)
+	// EntityDeleteOrphans deletes those of the bank's entities that no unit references (their co-occurrences go by cascade).
+	EntityDeleteOrphans(ctx context.Context, arg EntityDeleteOrphansParams) (int64, error)
+	// EntityDetach removes a unit's entity rows, queues the entities in entity_maintenance and takes the mentions off mention_count.
+	EntityDetach(ctx context.Context, unitID uuid.UUID) error
+	// EntityInsert inserts an entity and returns its id; a label entity whose (kind, label value) exists resolves to that row.
+	EntityInsert(ctx context.Context, arg EntityInsertParams) (uuid.UUID, error)
+	// EntityLock locks the bank's entities with the given ids in id order (FOR NO KEY UPDATE) and returns the ids found.
+	EntityLock(ctx context.Context, arg EntityLockParams) ([]uuid.UUID, error)
+	// EntityLockForDelete locks the bank's entities with the given ids in id order (FOR UPDATE), so no unit can attach them until commit.
+	EntityLockForDelete(ctx context.Context, arg EntityLockForDeleteParams) ([]uuid.UUID, error)
+	// EntityPendingMaintenance returns up to lim entity ids queued in a bank's entity_maintenance, oldest first.
+	EntityPendingMaintenance(ctx context.Context, arg EntityPendingMaintenanceParams) ([]uuid.UUID, error)
+	// EntityUnitBank returns the tenant and bank of a live unit.
+	EntityUnitBank(ctx context.Context, id uuid.UUID) (EntityUnitBankRow, error)
+	// EntityUpdate replaces a bank's entity's name, kind and label value, widens its first and last seen, and returns its id.
+	EntityUpdate(ctx context.Context, arg EntityUpdateParams) (uuid.UUID, error)
+	// EventAppend stores one lifecycle event; a NULL at takes the database's now().
+	EventAppend(ctx context.Context, arg EventAppendParams) error
+	// EventList pages a bank's events after after_seq in one statement (one snapshot). The page ends at the seq of
+	// the lim-th matching event (lim <= 0: no limit) or, with fewer matches, at the highest seq after after_seq
+	// (after_seq itself when there is none), so a seq group is never split. Every row carries that bound; with no
+	// matching event the single row has NULL event columns.
+	EventList(ctx context.Context, arg EventListParams) ([]EventListRow, error)
+	// EventPrune deletes events written before the cutoff.
+	EventPrune(ctx context.Context, before time.Time) (int64, error)
+	// EvidenceAdd records an observation's evidence, skipping existing (observation, unit) pairs.
+	EvidenceAdd(ctx context.Context, arg EvidenceAddParams) error
+	// EvidenceCites reports whether an observation of the bank in the scope cites the unit.
+	EvidenceCites(ctx context.Context, arg EvidenceCitesParams) (bool, error)
+	// EvidenceCiting locks, in id order, the bank's observations citing any of the units and returns their ids.
+	EvidenceCiting(ctx context.Context, arg EvidenceCitingParams) ([]uuid.UUID, error)
+	// EvidenceObservationBank returns the tenant and bank of a live observation.
+	EvidenceObservationBank(ctx context.Context, id uuid.UUID) (EvidenceObservationBankRow, error)
+	// EvidenceOtherSources returns the distinct units the observations cite, other than the excluded ones.
+	EvidenceOtherSources(ctx context.Context, arg EvidenceOtherSourcesParams) ([]uuid.UUID, error)
+	// EvidenceResetSources clears consolidated_at on the bank's units, so they are consolidated again.
+	EvidenceResetSources(ctx context.Context, arg EvidenceResetSourcesParams) error
+	// GetBank returns one bank, tombstoned or not.
+	GetBank(ctx context.Context, arg GetBankParams) (Bank, error)
+	// GetTenantConfig returns the tenant-level config.
+	GetTenantConfig(ctx context.Context, id string) (json.RawMessage, error)
+	// GetUnits returns the live units of a bank with the given ids, with their entity names and cited sources.
+	GetUnits(ctx context.Context, arg GetUnitsParams) ([]GetUnitsRow, error)
+	// InsertBankIfMissing creates a bank with empty overrides unless it exists.
+	InsertBankIfMissing(ctx context.Context, arg InsertBankIfMissingParams) error
+	// LinkClearDirty removes units from a bank's graph_dirty.
+	LinkClearDirty(ctx context.Context, arg LinkClearDirtyParams) error
+	// LinkCount counts the links of one kind touching a unit in either direction.
+	LinkCount(ctx context.Context, arg LinkCountParams) (int32, error)
+	// LinkDeleteForUnit removes the links of the given kinds (every kind when kinds is empty) touching a unit in either direction.
+	LinkDeleteForUnit(ctx context.Context, arg LinkDeleteForUnitParams) (int64, error)
+	// LinkDirty returns up to lim live units queued in a bank's graph_dirty, oldest first.
+	LinkDirty(ctx context.Context, arg LinkDirtyParams) ([]uuid.UUID, error)
+	// LinkInsert stores one edge; an existing (from, to, kind) edge keeps its row with the new weight.
+	LinkInsert(ctx context.Context, arg LinkInsertParams) error
+	// MarkBankDeleting sets deleting_at unless already set.
+	MarkBankDeleting(ctx context.Context, arg MarkBankDeletingParams) (int64, error)
+	// MentalModelAppendHistory adds one history entry; a NULL changed_at takes the database's now().
+	MentalModelAppendHistory(ctx context.Context, arg MentalModelAppendHistoryParams) error
+	// MentalModelCreate inserts a new mental model.
+	MentalModelCreate(ctx context.Context, arg MentalModelCreateParams) error
+	// MentalModelDelete removes a mental model; its history cascades.
+	MentalModelDelete(ctx context.Context, arg MentalModelDeleteParams) (int64, error)
+	// MentalModelGet returns one mental model of a bank.
+	MentalModelGet(ctx context.Context, arg MentalModelGetParams) (MentalModel, error)
+	// MentalModelHistory returns a model's history entries (one kind, or all when kind is ''), newest first;
+	// lim <= 0 returns all.
+	MentalModelHistory(ctx context.Context, arg MentalModelHistoryParams) ([]MentalModelHistory, error)
+	// MentalModelTrimHistory keeps only the newest keep entries of one kind of a model.
+	MentalModelTrimHistory(ctx context.Context, arg MentalModelTrimHistoryParams) error
+	// MentalModelUpdate replaces a mental model's spec, content and refresh state.
+	MentalModelUpdate(ctx context.Context, arg MentalModelUpdateParams) (int64, error)
+	// QueueCancel cancels a pending job at once or records the cancel request of a processing one.
+	QueueCancel(ctx context.Context, arg QueueCancelParams) (Operation, error)
+	// QueueCancelBank cancels every pending job of a bank except its delete_bank job.
+	QueueCancelBank(ctx context.Context, arg QueueCancelBankParams) (int64, error)
+	// QueueDedupeLock serializes dedupe enqueues of one (tenant, bank, kind, serial key) until the tx ends.
+	QueueDedupeLock(ctx context.Context, arg QueueDedupeLockParams) error
+	// QueueFindJoinable locks and returns the oldest joinable row an enqueue may join.
+	QueueFindJoinable(ctx context.Context, arg QueueFindJoinableParams) (uuid.UUID, error)
+	// QueueGet returns one operation of a bank.
+	QueueGet(ctx context.Context, arg QueueGetParams) (Operation, error)
+	// QueueInsert inserts one pending job; a NULL run_at means the database's now().
+	QueueInsert(ctx context.Context, arg QueueInsertParams) error
+	// QueueList pages a bank's operations newest first, after an optional (created_at, id) cursor.
+	QueueList(ctx context.Context, arg QueueListParams) ([]Operation, error)
+	// QueueLockBank takes FOR KEY SHARE on the bank row and returns its tombstone (NULL = live).
+	QueueLockBank(ctx context.Context, arg QueueLockBankParams) (*time.Time, error)
+	// QueueLockOp locks one operation row and returns it.
+	QueueLockOp(ctx context.Context, id uuid.UUID) (Operation, error)
+	// QueuePrune deletes terminal operations finished before the cutoff.
+	QueuePrune(ctx context.Context, before time.Time) (int64, error)
+	// QueueReschedule sets a pending job's run_at.
+	QueueReschedule(ctx context.Context, arg QueueRescheduleParams) (int64, error)
+	// QueueRetry re-queues a failed or cancelled job as a fresh pending row due now.
+	QueueRetry(ctx context.Context, arg QueueRetryParams) (Operation, error)
+	// QueueSetPayload replaces a pending job's payload and overrides.
+	QueueSetPayload(ctx context.Context, arg QueueSetPayloadParams) error
+	// QueueStatus returns an operation's status.
+	QueueStatus(ctx context.Context, id uuid.UUID) (string, error)
+	// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
+	UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error
+	// UnitArchive copies a live unit into memory_units_archive, stamped with seq, with JSON snapshots of its entities ({id, name}) and causal links ({from, to, kind, weight, created_at}).
+	UnitArchive(ctx context.Context, arg UnitArchiveParams) (int64, error)
+	// UnitDeleteIDs deletes the bank's live units with the given ids (links, entity rows and evidence go by cascade) and drops them from graph_dirty.
+	UnitDeleteIDs(ctx context.Context, arg UnitDeleteIDsParams) error
+	// UnitHandOverLinks appends the snapshot's causal links whose partner is itself archived in the bank to that partner's links snapshot, so restoring the partner later restores them.
+	UnitHandOverLinks(ctx context.Context, arg UnitHandOverLinksParams) error
+	// UnitInsert stores one unit exactly as given; a NULL created_at takes the database's now().
+	UnitInsert(ctx context.Context, arg UnitInsertParams) error
+	// UnitLockDocument locks a document's live units in id order and returns their ids.
+	UnitLockDocument(ctx context.Context, arg UnitLockDocumentParams) ([]uuid.UUID, error)
+	// UnitLockIDs locks the bank's live units with the given ids in id order and returns the ids found.
+	UnitLockIDs(ctx context.Context, arg UnitLockIDsParams) ([]uuid.UUID, error)
+	// UnitMarkConsolidated stamps consolidated_at on the units.
+	UnitMarkConsolidated(ctx context.Context, arg UnitMarkConsolidatedParams) error
+	// UnitMarkConsolidationFailed stamps consolidation_failed_at on the units.
+	UnitMarkConsolidationFailed(ctx context.Context, arg UnitMarkConsolidationFailedParams) error
+	// UnitQueueEntities records in entity_maintenance the entities of the units and takes their mentions off mention_count.
+	UnitQueueEntities(ctx context.Context, ids []uuid.UUID) error
+	// UnitQueueNeighbours records in graph_dirty the link neighbours of the units that are not among them.
+	UnitQueueNeighbours(ctx context.Context, ids []uuid.UUID) error
+	// UnitRecordObservationVersion appends one history row of an observation; a NULL at takes now().
+	UnitRecordObservationVersion(ctx context.Context, arg UnitRecordObservationVersionParams) error
+	// UnitRestore inserts an archived unit back as a live, unconsolidated unit without embedding; a chunk that no longer exists is dropped.
+	UnitRestore(ctx context.Context, arg UnitRestoreParams) error
+	// UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank and counts their mentions back.
+	UnitRestoreEntities(ctx context.Context, arg UnitRestoreEntitiesParams) error
+	// UnitRestoreLinks reattaches the snapshot's causal links whose partner is live in the bank.
+	UnitRestoreLinks(ctx context.Context, arg UnitRestoreLinksParams) error
+	// UnitScopeUpsert records an observation scope of a bank; an existing scope only gets a new updated_at.
+	UnitScopeUpsert(ctx context.Context, arg UnitScopeUpsertParams) error
+	// UnitSetDocumentTags rewrites the tags and seq of a document's live units, clears their consolidation stamps and returns their ids.
+	UnitSetDocumentTags(ctx context.Context, arg UnitSetDocumentTagsParams) ([]uuid.UUID, error)
+	// UnitTakeArchived deletes a bank's archived unit and returns its row.
+	UnitTakeArchived(ctx context.Context, arg UnitTakeArchivedParams) (MemoryUnitsArchive, error)
+	// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp, with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays).
+	UnitUnconsolidated(ctx context.Context, arg UnitUnconsolidatedParams) ([]UnitUnconsolidatedRow, error)
+	// UnitUpdate replaces a live fact's curated fields and embedding and clears its consolidation stamps.
+	UnitUpdate(ctx context.Context, arg UnitUpdateParams) (int64, error)
+	// UnitUpsertObservation inserts an observation, or replaces the text, proof count, embedding, version and seq of the same bank's observation with that id; an id held by any other row affects nothing.
+	UnitUpsertObservation(ctx context.Context, arg UnitUpsertObservationParams) (int64, error)
+	// UpsertBankConfig creates the bank if needed and replaces its overrides; a tombstoned bank matches nothing.
+	UpsertBankConfig(ctx context.Context, arg UpsertBankConfigParams) (int64, error)
+	// UpsertTenantConfig replaces the tenant-level config.
+	UpsertTenantConfig(ctx context.Context, arg UpsertTenantConfigParams) error
 }
 
 var _ Querier = (*Queries)(nil)
