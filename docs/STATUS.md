@@ -123,3 +123,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   RPC names the server passes (Retain, Recall, Reflect, UpdateMemory, Consolidate, ReprocessDocument,
   PreviewPrompt, CreateMentalModel, RefreshMentalModel); check this against WP-04 at WP-14.
   CreateBankFromTemplate drops `name`: WP-13 to extend TemplateCodec.Create.
+- 2026-10-10 WP-02 review: BLOCK on 2 HIGH (the fake LLM ignores the schema; the fake LinkRepo accepts
+  self-links). Both make the fakes looser than production. Ruling: move the gateway JSON-schema validator to a
+  shared internal/jsonschema package (WP-02 may touch internal/adapter/gateway for that move only) so the fake
+  validates outputs the same way. Fixes and MEDIUMs sent back to the worker.
