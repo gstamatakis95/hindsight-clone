@@ -15,10 +15,10 @@
         ],
         "properties": {
           "what": {"type": "string", "description": "Core fact - concise but complete (1-2 sentences)"},
-          "when": {"type": ["string", "null"], "description": "When it happened. 'N/A' if unknown."},
-          "where": {"type": ["string", "null"], "description": "Location if relevant. 'N/A' if none."},
-          "who": {"type": ["string", "null"], "description": "People involved with relationships. 'N/A' if general."},
-          "why": {"type": ["string", "null"], "description": "Context/significance if important. 'N/A' if obvious."},
+          "when": {"type": "string", "description": "When it happened. 'N/A' if unknown."},
+          "where": {"type": "string", "description": "Location if relevant. 'N/A' if none."},
+          "who": {"type": "string", "description": "People involved with relationships. 'N/A' if general."},
+          "why": {"type": "string", "description": "Context/significance if important. 'N/A' if obvious."},
           "fact_kind": {"type": "string", "enum": ["event", "conversation"], "description": "'event' or 'conversation'"},
           "fact_type": {
             "type": "string",

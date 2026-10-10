@@ -8,8 +8,8 @@ are caused_by indexes; language rules and attachments dropped.
 Gates (as in Hindsight's _build_extraction_prompt_and_schema): the CAUSAL section renders only with
 .CausalLinks (the schema keeps caused_by; the engine ignores it when causal links are off).
 .OptionalDimensions (Hindsight's retain_optional_fact_dimensions, default off) swaps the "N/A" placeholder
-for null and adds the OPTIONAL FIELDS section; the schema types when/where/who/why as string-or-null in both
-modes so it can stay static.
+for null and adds the OPTIONAL FIELDS section; prompts.ExtractSchema types when/where/who/why as plain
+strings, nullable only with the flag on (Hindsight #4457).
 Response schema: extract_concise.schema.json.
 Data (ExtractData): .CausalLinks, .OptionalDimensions, .FreeFormEntities, .Labels.
 */ -}}
@@ -113,7 +113,7 @@ Example 1 - Selective extraction (Event Date: June 10, 2024):
 Input: "Hey! How's it going? Good morning! So I'm planning my wedding - want a small outdoor ceremony. Just got back from Emily's wedding, she married Sarah at a rooftop garden. It was nice weather. I grabbed a coffee on the way."
 
 Output: ONLY 2 facts (skip greetings, weather, coffee):
-1. what="User planning wedding, wants small outdoor ceremony", who="user", why=null, entities=[{"name": "user", "kind": "person"}, {"name": "wedding", "kind": "event"}]
+1. what="User planning wedding, wants small outdoor ceremony", who="user", why={{$na}}, entities=[{"name": "user", "kind": "person"}, {"name": "wedding", "kind": "event"}]
 2. what="Emily married Sarah at rooftop garden", who="Emily (user's friend), Sarah", occurred_start="2024-06-09", time_expression=null, entities=[{"name": "Emily", "kind": "person"}, {"name": "Sarah", "kind": "person"}, {"name": "wedding", "kind": "event"}]
 
 Example 2 - Professional context:

@@ -75,11 +75,15 @@ or a qualified period.
   `slog` and gives `(nil, nil)`: recall runs without a temporal constraint. Only the caller's own
   cancellation (`ctx.Err() != nil` or `context.Canceled`) is returned. A gateway per-call
   `DeadlineExceeded` wrapped in `ErrUnavailable` still degrades.
-- **Normalize: transient vs permanent.**
-  - Permanent errors are `ErrInvalidArgument` (for example an unbound TIME_PARSE slot) and JSON decode
-    errors. They are logged, the fact keeps no dates, and Normalize returns nil.
-  - Everything else, including `ErrUnavailable`, unknown errors and a done ctx, is returned so the job
-    retries.
+- **Normalize never fails a retain on dates** (Hindsight never does; post-merge follow-up).
+  - Every fallback error is logged, the fact keeps no dates, and Normalize returns nil. That covers an
+    unbound slot, `ErrUnavailable` wrapping a jsonschema error (persistently invalid output after the
+    gateway's retries), a plain `ErrUnavailable` (non-retryable 4xx), a gateway timeout, and a decode
+    error.
+  - Only the caller's own cancellation or deadline (`ctx.Err() != nil` or `context.Canceled`) is
+    returned.
+  - The earlier transient/permanent split let a broken TIME_PARSE model fail the retain job after its
+    attempt cap.
 
 ### Forms added in review round 1
 - **Day ranges.** "March 3-5, 2024" or "March 3 - 5 2024" is [Mar 3, Mar 6). The year is required, and a

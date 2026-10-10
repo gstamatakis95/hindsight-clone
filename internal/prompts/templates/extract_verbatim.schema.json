@@ -14,9 +14,9 @@
           "entities", "labels"
         ],
         "properties": {
-          "when": {"type": ["string", "null"], "description": "When it happened. 'N/A' if unknown."},
-          "where": {"type": ["string", "null"], "description": "Location if relevant. 'N/A' if none."},
-          "who": {"type": ["string", "null"], "description": "People involved with relationships. 'N/A' if general."},
+          "when": {"type": "string", "description": "When it happened. 'N/A' if unknown."},
+          "where": {"type": "string", "description": "Location if relevant. 'N/A' if none."},
+          "who": {"type": "string", "description": "People involved with relationships. 'N/A' if general."},
           "fact_kind": {"type": "string", "enum": ["event", "conversation"], "description": "'event' or 'conversation'"},
           "fact_type": {
             "type": "string",

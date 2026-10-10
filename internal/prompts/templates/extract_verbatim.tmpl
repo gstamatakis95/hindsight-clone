@@ -7,7 +7,7 @@ Hindsight, .CausalLinks is ignored). memd changes: fact_type is world|assistant 
 engine maps "assistant" to experience), entities are {name, kind}, labels are {key, value} pairs,
 time_expression added; language rules dropped. .OptionalDimensions (Hindsight's
 retain_optional_fact_dimensions, default off) swaps the "N/A" placeholder for null and adds the OPTIONAL
-FIELDS section; the schema types when/where/who as string-or-null in both modes so it can stay static.
+FIELDS section; prompts.ExtractSchema types when/where/who as plain strings, nullable only with the flag on.
 Response schema: extract_verbatim.schema.json.
 Data (ExtractData): .OptionalDimensions, .FreeFormEntities, .Labels.
 */ -}}

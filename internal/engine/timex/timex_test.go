@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jsonschema"
 	"memd/internal/port"
 	"reflect"
 	"strings"
@@ -228,45 +229,99 @@ func TestQueryWindowFallbackErrorsDegrade(t *testing.T) {
 	}
 }
 
-// TestNormalizeFallbackErrors checks permanent fallback failures (invalid argument, undecodable answer)
-// leave the fact undated without an error, while transient ones (unavailable, unknown, cancelled) are
-// returned for the job to retry.
+// gatewayErrors builds the error shapes the real gateway adapter returns (internal/adapter/gateway):
+// persistently schema-invalid output after its retries, a non-retryable 4xx, and a per-call timeout.
+func gatewayErrors(t *testing.T) map[string]error {
+	t.Helper()
+	sch, err := jsonschema.Compile(json.RawMessage(`{"type":"object","required":["start"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := sch.Validate([]byte(`{"end":null}`))
+	if invalid == nil {
+		t.Fatal("schema accepted an invalid answer")
+	}
+	const path = "/v1/chat/completions"
+	return map[string]error{
+		"invalid output": fmt.Errorf("%w: gateway %s: %w", domain.ErrUnavailable, path, invalid),
+		"4xx": fmt.Errorf("%w: gateway %s: %w",
+			domain.ErrUnavailable, path, errors.New("status 400: bad request")),
+		"timeout": fmt.Errorf("%w: gateway %s: timed out after 30s: %w",
+			domain.ErrUnavailable, path, context.DeadlineExceeded),
+	}
+}
+
+// normalizeErrCase is one fallback failure fed to Normalize.
+type normalizeErrCase struct {
+	name      string
+	ctx       context.Context
+	routerErr error
+	llmErr    error
+	raw       string
+	wantErr   error
+}
+
+// TestNormalizeFallbackErrors checks a retain never fails on dates: every fallback failure (unbound
+// slot, the real gateway error shapes, an undecodable answer) leaves the fact undated with no error, and
+// only the caller's cancellation is returned.
 func TestNormalizeFallbackErrors(t *testing.T) {
-	unbound := fmt.Errorf("%w: time_parse slot unbound", domain.ErrInvalidArgument)
+	tests := []normalizeErrCase{
+		{name: "unbound slot", routerErr: fmt.Errorf("%w: no model bound", domain.ErrInvalidArgument)},
+		{name: "undecodable answer", raw: `not json`},
+	}
+	for name, gerr := range gatewayErrors(t) {
+		tests = append(tests, normalizeErrCase{name: "gateway " + name, llmErr: gerr})
+	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	tests := []struct {
-		name      string
-		ctx       context.Context
-		routerErr error
-		raw       string
-		llmErr    error
-		wantErr   error
-	}{
-		{name: "unbound slot", ctx: context.Background(), routerErr: unbound},
-		{name: "undecodable answer", ctx: context.Background(), raw: `not json`},
-		{name: "unavailable", ctx: context.Background(), llmErr: domain.ErrUnavailable, wantErr: domain.ErrUnavailable},
-		{name: "unknown", ctx: context.Background(), llmErr: errUnexpected, wantErr: errUnexpected},
-		{name: "cancelled", ctx: cancelled, llmErr: context.Canceled, wantErr: context.Canceled},
-	}
+	tests = append(tests, normalizeErrCase{
+		name: "cancelled", ctx: cancelled,
+		llmErr:  fmt.Errorf("gateway /v1/chat/completions: %w", context.Canceled),
+		wantErr: context.Canceled,
+	})
 	for _, tt := range tests {
+		runNormalizeErrCase(t, tt)
+	}
+}
+
+func runNormalizeErrCase(t *testing.T, tt normalizeErrCase) {
+	t.Helper()
+	if tt.ctx == nil {
+		tt.ctx = context.Background()
+	}
+	h := newHarness()
+	h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
+		return port.ModelBinding{Model: "tp"}, tt.routerErr
+	}
+	h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, out any) (port.Usage, error) {
+		if tt.llmErr != nil {
+			return port.Usage{}, tt.llmErr
+		}
+		return port.Usage{}, json.Unmarshal([]byte(tt.raw), out)
+	}
+	f := &domain.ExtractedFact{TimeExpression: "the long weekend in the mountains"}
+	err := h.tn.Normalize(tt.ctx, domain.BankConfig{}, f, testRef)
+	if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+		t.Errorf("%s: err = %v, want %v", tt.name, err, tt.wantErr)
+	}
+	if f.OccurredStart != nil || f.OccurredEnd != nil {
+		t.Errorf("%s: fact dated %v - %v", tt.name, f.OccurredStart, f.OccurredEnd)
+	}
+}
+
+// TestQueryWindowGatewayErrorsDegrade checks the real gateway error shapes give no window and no error.
+func TestQueryWindowGatewayErrorsDegrade(t *testing.T) {
+	for name, gerr := range gatewayErrors(t) {
 		h := newHarness()
 		h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
-			return port.ModelBinding{Model: "tp"}, tt.routerErr
+			return port.ModelBinding{Model: "tp"}, nil
 		}
-		h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, out any) (port.Usage, error) {
-			if tt.llmErr != nil {
-				return port.Usage{}, tt.llmErr
-			}
-			return port.Usage{}, json.Unmarshal([]byte(tt.raw), out)
+		h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, _ any) (port.Usage, error) {
+			return port.Usage{}, gerr
 		}
-		f := &domain.ExtractedFact{TimeExpression: "the long weekend in the mountains"}
-		err := h.tn.Normalize(tt.ctx, domain.BankConfig{}, f, testRef)
-		if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
-			t.Errorf("%s: err = %v, want %v", tt.name, err, tt.wantErr)
-		}
-		if f.OccurredStart != nil || f.OccurredEnd != nil {
-			t.Errorf("%s: fact dated %v - %v", tt.name, f.OccurredStart, f.OccurredEnd)
+		got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
+		if got != nil || err != nil {
+			t.Errorf("%s: got %v, %v; want nil, nil", name, got, err)
 		}
 	}
 }
