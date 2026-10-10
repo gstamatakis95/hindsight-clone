@@ -41,22 +41,56 @@ func (r *linkRepo) Insert(ctx context.Context, ls []domain.Link) error {
 	return nil
 }
 
-// DeleteForUnit is not implemented yet.
+// DeleteForUnit removes the links of the given kinds (empty = all) touching unit in either direction and
+// returns how many it removed.
 func (r *linkRepo) DeleteForUnit(ctx context.Context, unit port.UnitID, kinds []domain.LinkKind) (int, error) {
-	return 0, errNotImplemented
+	uid, err := parseID(unit)
+	if err != nil {
+		return 0, err
+	}
+	ks := make([]string, len(kinds))
+	for i, k := range kinds {
+		ks[i] = string(k)
+	}
+	n, err := r.q.LinkDeleteForUnit(ctx, db.LinkDeleteForUnitParams{UnitID: uid, Kinds: ks})
+	if err != nil {
+		return 0, mapErr("delete unit links", err)
+	}
+	return int(n), nil
 }
 
-// Count is not implemented yet.
+// Count returns how many links of kind touch unit in either direction.
 func (r *linkRepo) Count(ctx context.Context, unit port.UnitID, kind domain.LinkKind) (int, error) {
-	return 0, errNotImplemented
+	uid, err := parseID(unit)
+	if err != nil {
+		return 0, err
+	}
+	n, err := r.q.LinkCount(ctx, db.LinkCountParams{UnitID: uid, Kind: string(kind)})
+	if err != nil {
+		return 0, mapErr("count unit links", err)
+	}
+	return int(n), nil
 }
 
-// Dirty is not implemented yet.
+// Dirty returns up to limit live units queued in the bank's graph_dirty, oldest first. Queue rows of units
+// removed since they were queued are skipped.
 func (r *linkRepo) Dirty(ctx context.Context, b port.BankRef, limit int) ([]port.UnitID, error) {
-	return nil, errNotImplemented
+	if limit <= 0 {
+		return []port.UnitID{}, nil
+	}
+	ids, err := r.q.LinkDirty(ctx, db.LinkDirtyParams{TenantID: b.Tenant, BankID: b.Bank, Lim: contentLimit(limit)})
+	if err != nil {
+		return nil, mapErr("dirty units", err)
+	}
+	return idsOf[port.UnitID](ids), nil
 }
 
-// ClearDirty is not implemented yet.
+// ClearDirty removes ids from the bank's graph_dirty.
 func (r *linkRepo) ClearDirty(ctx context.Context, b port.BankRef, ids []port.UnitID) error {
-	return errNotImplemented
+	uuids := parseIDs(ids)
+	if len(uuids) == 0 {
+		return nil
+	}
+	err := r.q.LinkClearDirty(ctx, db.LinkClearDirtyParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	return mapErr("clear dirty units", err)
 }

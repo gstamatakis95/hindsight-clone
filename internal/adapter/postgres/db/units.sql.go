@@ -14,6 +14,138 @@ import (
 	pgvector_go "github.com/pgvector/pgvector-go"
 )
 
+const unitAppendAudit = `-- name: UnitAppendAudit :exec
+INSERT INTO memory_audit (tenant_id, bank_id, unit_id, action, reason, before, after, operation_id, at)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    COALESCE($9::timestamptz, now())
+)
+`
+
+type UnitAppendAuditParams struct {
+	TenantID    string
+	BankID      string
+	UnitID      uuid.UUID
+	Action      string
+	Reason      string
+	Before      json.RawMessage
+	After       json.RawMessage
+	OperationID uuid.NullUUID
+	At          *time.Time
+}
+
+// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
+func (q *Queries) UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error {
+	_, err := q.db.Exec(ctx, unitAppendAudit,
+		arg.TenantID,
+		arg.BankID,
+		arg.UnitID,
+		arg.Action,
+		arg.Reason,
+		arg.Before,
+		arg.After,
+		arg.OperationID,
+		arg.At,
+	)
+	return err
+}
+
+const unitArchive = `-- name: UnitArchive :execrows
+INSERT INTO memory_units_archive (
+    id, tenant_id, bank_id, document_id, chunk_id, fact_type, text, context, metadata, tags,
+    occurred_start, occurred_end, mentioned_at, timeless, seq, edited_at, entities_snapshot, links_snapshot,
+    reason, created_at
+)
+SELECT u.id, u.tenant_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata,
+    u.tags, u.occurred_start, u.occurred_end, u.mentioned_at, u.timeless, $1::bigint, u.edited_at,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', e.id, 'name', e.canonical_name) ORDER BY e.id)
+              FROM unit_entities ue JOIN entities e ON e.id = ue.entity_id
+              WHERE ue.unit_id = u.id), '[]'::jsonb),
+    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                  'from', l.from_unit_id, 'to', l.to_unit_id, 'kind', l.kind, 'weight', l.weight,
+                  'created_at', l.created_at) ORDER BY l.from_unit_id, l.to_unit_id)
+              FROM memory_links l
+              WHERE l.kind = 'causal' AND (l.from_unit_id = u.id OR l.to_unit_id = u.id)), '[]'::jsonb),
+    $2::text, u.created_at
+FROM memory_units u
+WHERE u.id = $3 AND u.tenant_id = $4 AND u.bank_id = $5
+`
+
+type UnitArchiveParams struct {
+	Seq      int64
+	Reason   string
+	ID       uuid.UUID
+	TenantID string
+	BankID   string
+}
+
+// UnitArchive copies a live unit into memory_units_archive, stamped with seq, with JSON snapshots of its entities ({id, name}) and causal links ({from, to, kind, weight, created_at}).
+func (q *Queries) UnitArchive(ctx context.Context, arg UnitArchiveParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unitArchive,
+		arg.Seq,
+		arg.Reason,
+		arg.ID,
+		arg.TenantID,
+		arg.BankID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const unitDeleteIDs = `-- name: UnitDeleteIDs :exec
+WITH gone AS (
+    DELETE FROM memory_units
+    WHERE tenant_id = $1 AND bank_id = $2 AND id = ANY($3::uuid[])
+    RETURNING id
+)
+DELETE FROM graph_dirty g
+WHERE g.tenant_id = $1 AND g.bank_id = $2 AND g.unit_id IN (SELECT gone.id FROM gone)
+`
+
+type UnitDeleteIDsParams struct {
+	TenantID string
+	BankID   string
+	Ids      []uuid.UUID
+}
+
+// UnitDeleteIDs deletes the bank's live units with the given ids (links, entity rows and evidence go by cascade) and drops them from graph_dirty.
+func (q *Queries) UnitDeleteIDs(ctx context.Context, arg UnitDeleteIDsParams) error {
+	_, err := q.db.Exec(ctx, unitDeleteIDs, arg.TenantID, arg.BankID, arg.Ids)
+	return err
+}
+
+const unitHandOverLinks = `-- name: UnitHandOverLinks :exec
+UPDATE memory_units_archive a SET links_snapshot = a.links_snapshot || s.links
+FROM (
+    SELECT CASE WHEN (x.v->>'from')::uuid = $3::uuid THEN (x.v->>'to')::uuid
+                ELSE (x.v->>'from')::uuid END AS partner,
+        jsonb_agg(x.v) AS links
+    FROM jsonb_array_elements($4::jsonb) AS x(v)
+    GROUP BY 1
+) AS s
+WHERE a.id = s.partner AND a.tenant_id = $1 AND a.bank_id = $2
+`
+
+type UnitHandOverLinksParams struct {
+	TenantID string
+	BankID   string
+	UnitID   uuid.UUID
+	Snapshot json.RawMessage
+}
+
+// UnitHandOverLinks appends the snapshot's causal links whose partner is itself archived in the bank to that partner's links snapshot, so restoring the partner later restores them.
+func (q *Queries) UnitHandOverLinks(ctx context.Context, arg UnitHandOverLinksParams) error {
+	_, err := q.db.Exec(ctx, unitHandOverLinks,
+		arg.TenantID,
+		arg.BankID,
+		arg.UnitID,
+		arg.Snapshot,
+	)
+	return err
+}
+
 const unitInsert = `-- name: UnitInsert :exec
 INSERT INTO memory_units (
     id, tenant_id, bank_id, document_id, chunk_id, fact_type, text, context, metadata, tags, embedding,
@@ -80,4 +212,599 @@ func (q *Queries) UnitInsert(ctx context.Context, arg UnitInsertParams) error {
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const unitLockDocument = `-- name: UnitLockDocument :many
+SELECT id FROM memory_units
+WHERE tenant_id = $1 AND bank_id = $2 AND document_id = $3::text
+ORDER BY id FOR UPDATE
+`
+
+type UnitLockDocumentParams struct {
+	TenantID   string
+	BankID     string
+	DocumentID string
+}
+
+// UnitLockDocument locks a document's live units in id order and returns their ids.
+func (q *Queries) UnitLockDocument(ctx context.Context, arg UnitLockDocumentParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, unitLockDocument, arg.TenantID, arg.BankID, arg.DocumentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unitLockIDs = `-- name: UnitLockIDs :many
+SELECT id FROM memory_units
+WHERE tenant_id = $1 AND bank_id = $2 AND id = ANY($3::uuid[])
+ORDER BY id FOR UPDATE
+`
+
+type UnitLockIDsParams struct {
+	TenantID string
+	BankID   string
+	Ids      []uuid.UUID
+}
+
+// UnitLockIDs locks the bank's live units with the given ids in id order and returns the ids found.
+func (q *Queries) UnitLockIDs(ctx context.Context, arg UnitLockIDsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, unitLockIDs, arg.TenantID, arg.BankID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unitMarkConsolidated = `-- name: UnitMarkConsolidated :exec
+UPDATE memory_units SET consolidated_at = $1::timestamptz WHERE id = ANY($2::uuid[])
+`
+
+type UnitMarkConsolidatedParams struct {
+	At  time.Time
+	Ids []uuid.UUID
+}
+
+// UnitMarkConsolidated stamps consolidated_at on the units.
+func (q *Queries) UnitMarkConsolidated(ctx context.Context, arg UnitMarkConsolidatedParams) error {
+	_, err := q.db.Exec(ctx, unitMarkConsolidated, arg.At, arg.Ids)
+	return err
+}
+
+const unitMarkConsolidationFailed = `-- name: UnitMarkConsolidationFailed :exec
+UPDATE memory_units SET consolidation_failed_at = $1::timestamptz WHERE id = ANY($2::uuid[])
+`
+
+type UnitMarkConsolidationFailedParams struct {
+	At  time.Time
+	Ids []uuid.UUID
+}
+
+// UnitMarkConsolidationFailed stamps consolidation_failed_at on the units.
+func (q *Queries) UnitMarkConsolidationFailed(ctx context.Context, arg UnitMarkConsolidationFailedParams) error {
+	_, err := q.db.Exec(ctx, unitMarkConsolidationFailed, arg.At, arg.Ids)
+	return err
+}
+
+const unitQueueEntities = `-- name: UnitQueueEntities :exec
+WITH ue AS (
+    SELECT x.tenant_id, x.bank_id, x.entity_id, count(*)::int AS n
+    FROM unit_entities x WHERE x.unit_id = ANY($1::uuid[])
+    GROUP BY x.tenant_id, x.bank_id, x.entity_id
+), queued AS (
+    INSERT INTO entity_maintenance (tenant_id, bank_id, entity_id)
+    SELECT ue.tenant_id, ue.bank_id, ue.entity_id FROM ue
+    ON CONFLICT DO NOTHING
+)
+UPDATE entities e SET mention_count = GREATEST(e.mention_count - ue.n, 0), updated_at = now()
+FROM ue WHERE e.id = ue.entity_id
+`
+
+// UnitQueueEntities records in entity_maintenance the entities of the units and takes their mentions off mention_count.
+func (q *Queries) UnitQueueEntities(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, unitQueueEntities, ids)
+	return err
+}
+
+const unitQueueNeighbours = `-- name: UnitQueueNeighbours :exec
+INSERT INTO graph_dirty (tenant_id, bank_id, unit_id)
+SELECT DISTINCT n.tenant_id, n.bank_id, n.id FROM (
+    SELECT l.tenant_id, l.bank_id, l.to_unit_id AS id FROM memory_links l WHERE l.from_unit_id = ANY($1::uuid[])
+    UNION
+    SELECT l.tenant_id, l.bank_id, l.from_unit_id AS id FROM memory_links l WHERE l.to_unit_id = ANY($1::uuid[])
+) AS n
+WHERE n.id <> ALL($1::uuid[])
+ON CONFLICT DO NOTHING
+`
+
+// UnitQueueNeighbours records in graph_dirty the link neighbours of the units that are not among them.
+func (q *Queries) UnitQueueNeighbours(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, unitQueueNeighbours, ids)
+	return err
+}
+
+const unitRecordObservationVersion = `-- name: UnitRecordObservationVersion :exec
+INSERT INTO observation_versions (tenant_id, bank_id, observation_id, version, text, source_ids, at)
+VALUES (
+    $1, $2, $3, $4, $5, $6::uuid[],
+    COALESCE($7::timestamptz, now())
+)
+`
+
+type UnitRecordObservationVersionParams struct {
+	TenantID      string
+	BankID        string
+	ObservationID uuid.UUID
+	Version       int64
+	Text          string
+	SourceIds     []uuid.UUID
+	At            *time.Time
+}
+
+// UnitRecordObservationVersion appends one history row of an observation; a NULL at takes now().
+func (q *Queries) UnitRecordObservationVersion(ctx context.Context, arg UnitRecordObservationVersionParams) error {
+	_, err := q.db.Exec(ctx, unitRecordObservationVersion,
+		arg.TenantID,
+		arg.BankID,
+		arg.ObservationID,
+		arg.Version,
+		arg.Text,
+		arg.SourceIds,
+		arg.At,
+	)
+	return err
+}
+
+const unitRestore = `-- name: UnitRestore :exec
+INSERT INTO memory_units (
+    id, tenant_id, bank_id, document_id, chunk_id, fact_type, text, context, metadata, tags,
+    occurred_start, occurred_end, mentioned_at, timeless, scope_key, seq, edited_at, created_at
+) VALUES (
+    $1, $2, $3, $4, (SELECT c.id FROM chunks c WHERE c.id = $5::uuid),
+    $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18
+)
+`
+
+type UnitRestoreParams struct {
+	ID            uuid.UUID
+	TenantID      string
+	BankID        string
+	DocumentID    *string
+	ChunkID       uuid.NullUUID
+	FactType      string
+	Text          string
+	Context       string
+	Metadata      json.RawMessage
+	Tags          []string
+	OccurredStart *time.Time
+	OccurredEnd   *time.Time
+	MentionedAt   *time.Time
+	Timeless      bool
+	ScopeKey      *string
+	Seq           int64
+	EditedAt      *time.Time
+	CreatedAt     time.Time
+}
+
+// UnitRestore inserts an archived unit back as a live, unconsolidated unit without embedding; a chunk that no longer exists is dropped.
+func (q *Queries) UnitRestore(ctx context.Context, arg UnitRestoreParams) error {
+	_, err := q.db.Exec(ctx, unitRestore,
+		arg.ID,
+		arg.TenantID,
+		arg.BankID,
+		arg.DocumentID,
+		arg.ChunkID,
+		arg.FactType,
+		arg.Text,
+		arg.Context,
+		arg.Metadata,
+		arg.Tags,
+		arg.OccurredStart,
+		arg.OccurredEnd,
+		arg.MentionedAt,
+		arg.Timeless,
+		arg.ScopeKey,
+		arg.Seq,
+		arg.EditedAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const unitRestoreEntities = `-- name: UnitRestoreEntities :exec
+WITH ins AS (
+    INSERT INTO unit_entities (tenant_id, bank_id, unit_id, entity_id)
+    SELECT e.tenant_id, e.bank_id, $1::uuid, e.id FROM entities e
+    WHERE e.tenant_id = $2 AND e.bank_id = $3
+      AND e.id IN (SELECT (x.v->>'id')::uuid FROM jsonb_array_elements($4::jsonb) AS x(v))
+    ON CONFLICT DO NOTHING
+    RETURNING entity_id
+)
+UPDATE entities e SET mention_count = e.mention_count + 1, updated_at = now()
+FROM ins WHERE e.id = ins.entity_id
+`
+
+type UnitRestoreEntitiesParams struct {
+	UnitID   uuid.UUID
+	TenantID string
+	BankID   string
+	Snapshot json.RawMessage
+}
+
+// UnitRestoreEntities reattaches a restored unit to the snapshot's entities that still exist in its bank and counts their mentions back.
+func (q *Queries) UnitRestoreEntities(ctx context.Context, arg UnitRestoreEntitiesParams) error {
+	_, err := q.db.Exec(ctx, unitRestoreEntities,
+		arg.UnitID,
+		arg.TenantID,
+		arg.BankID,
+		arg.Snapshot,
+	)
+	return err
+}
+
+const unitRestoreLinks = `-- name: UnitRestoreLinks :exec
+INSERT INTO memory_links (tenant_id, bank_id, from_unit_id, to_unit_id, kind, weight, created_at)
+SELECT p.tenant_id, p.bank_id, s.from_id, s.to_id, 'causal', s.weight, s.created_at
+FROM (
+    SELECT (x.v->>'from')::uuid AS from_id, (x.v->>'to')::uuid AS to_id,
+        COALESCE((x.v->>'weight')::float8, 1) AS weight,
+        COALESCE((x.v->>'created_at')::timestamptz, now()) AS created_at
+    FROM jsonb_array_elements($1::jsonb) AS x(v)
+) AS s
+JOIN memory_units p ON p.id = CASE WHEN s.from_id = $2::uuid THEN s.to_id ELSE s.from_id END
+WHERE p.tenant_id = $3 AND p.bank_id = $4 AND s.from_id <> s.to_id
+ON CONFLICT (from_unit_id, to_unit_id, kind) DO NOTHING
+`
+
+type UnitRestoreLinksParams struct {
+	Snapshot json.RawMessage
+	UnitID   uuid.UUID
+	TenantID string
+	BankID   string
+}
+
+// UnitRestoreLinks reattaches the snapshot's causal links whose partner is live in the bank.
+func (q *Queries) UnitRestoreLinks(ctx context.Context, arg UnitRestoreLinksParams) error {
+	_, err := q.db.Exec(ctx, unitRestoreLinks,
+		arg.Snapshot,
+		arg.UnitID,
+		arg.TenantID,
+		arg.BankID,
+	)
+	return err
+}
+
+const unitScopeUpsert = `-- name: UnitScopeUpsert :exec
+INSERT INTO observation_scopes (tenant_id, bank_id, scope_key, tags)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, bank_id, scope_key) DO UPDATE SET updated_at = now()
+`
+
+type UnitScopeUpsertParams struct {
+	TenantID string
+	BankID   string
+	ScopeKey string
+	Tags     []string
+}
+
+// UnitScopeUpsert records an observation scope of a bank; an existing scope only gets a new updated_at.
+func (q *Queries) UnitScopeUpsert(ctx context.Context, arg UnitScopeUpsertParams) error {
+	_, err := q.db.Exec(ctx, unitScopeUpsert,
+		arg.TenantID,
+		arg.BankID,
+		arg.ScopeKey,
+		arg.Tags,
+	)
+	return err
+}
+
+const unitSetDocumentTags = `-- name: UnitSetDocumentTags :many
+UPDATE memory_units SET
+    tags = $1, seq = $2, consolidated_at = NULL, consolidation_failed_at = NULL, updated_at = now()
+WHERE tenant_id = $3 AND bank_id = $4 AND document_id = $5::text
+RETURNING id
+`
+
+type UnitSetDocumentTagsParams struct {
+	Tags       []string
+	Seq        int64
+	TenantID   string
+	BankID     string
+	DocumentID string
+}
+
+// UnitSetDocumentTags rewrites the tags and seq of a document's live units, clears their consolidation stamps and returns their ids.
+func (q *Queries) UnitSetDocumentTags(ctx context.Context, arg UnitSetDocumentTagsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, unitSetDocumentTags,
+		arg.Tags,
+		arg.Seq,
+		arg.TenantID,
+		arg.BankID,
+		arg.DocumentID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unitTakeArchived = `-- name: UnitTakeArchived :one
+DELETE FROM memory_units_archive
+WHERE id = $1 AND tenant_id = $2 AND bank_id = $3
+RETURNING id, tenant_id, bank_id, document_id, chunk_id, fact_type, text, context, metadata, tags, occurred_start, occurred_end, mentioned_at, timeless, seq, edited_at, entities_snapshot, links_snapshot, reason, operation_id, created_at, archived_at
+`
+
+type UnitTakeArchivedParams struct {
+	ID       uuid.UUID
+	TenantID string
+	BankID   string
+}
+
+// UnitTakeArchived deletes a bank's archived unit and returns its row.
+func (q *Queries) UnitTakeArchived(ctx context.Context, arg UnitTakeArchivedParams) (MemoryUnitsArchive, error) {
+	row := q.db.QueryRow(ctx, unitTakeArchived, arg.ID, arg.TenantID, arg.BankID)
+	var i MemoryUnitsArchive
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.BankID,
+		&i.DocumentID,
+		&i.ChunkID,
+		&i.FactType,
+		&i.Text,
+		&i.Context,
+		&i.Metadata,
+		&i.Tags,
+		&i.OccurredStart,
+		&i.OccurredEnd,
+		&i.MentionedAt,
+		&i.Timeless,
+		&i.Seq,
+		&i.EditedAt,
+		&i.EntitiesSnapshot,
+		&i.LinksSnapshot,
+		&i.Reason,
+		&i.OperationID,
+		&i.CreatedAt,
+		&i.ArchivedAt,
+	)
+	return i, err
+}
+
+const unitUnconsolidated = `-- name: UnitUnconsolidated :many
+SELECT u.id, u.tenant_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata, u.tags, u.embedding, u.occurred_start, u.occurred_end, u.mentioned_at, u.timeless, u.proof_count, u.scope_key, u.version, u.seq, u.consolidated_at, u.consolidation_failed_at, u.edited_at, u.created_at, u.updated_at,
+    COALESCE((SELECT array_agg(e.canonical_name ORDER BY e.canonical_name)
+              FROM unit_entities ue JOIN entities e ON e.id = ue.entity_id
+              WHERE ue.unit_id = u.id), '{}')::text[] AS entity_names
+FROM memory_units u
+WHERE u.tenant_id = $1 AND u.bank_id = $2
+  AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
+  AND (NOT $3::bool OR EXISTS (
+      SELECT 1 FROM jsonb_array_elements($4::jsonb) AS s(tags)
+      WHERE u.tags @> ARRAY(SELECT jsonb_array_elements_text(s.tags))))
+ORDER BY u.created_at, u.id
+LIMIT $5
+`
+
+type UnitUnconsolidatedParams struct {
+	TenantID     string
+	BankID       string
+	FilterScopes bool
+	Scopes       json.RawMessage
+	Lim          int32
+}
+
+type UnitUnconsolidatedRow struct {
+	MemoryUnit  MemoryUnit
+	EntityNames []string
+}
+
+// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp, with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays).
+func (q *Queries) UnitUnconsolidated(ctx context.Context, arg UnitUnconsolidatedParams) ([]UnitUnconsolidatedRow, error) {
+	rows, err := q.db.Query(ctx, unitUnconsolidated,
+		arg.TenantID,
+		arg.BankID,
+		arg.FilterScopes,
+		arg.Scopes,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []UnitUnconsolidatedRow{}
+	for rows.Next() {
+		var i UnitUnconsolidatedRow
+		if err := rows.Scan(
+			&i.MemoryUnit.ID,
+			&i.MemoryUnit.TenantID,
+			&i.MemoryUnit.BankID,
+			&i.MemoryUnit.DocumentID,
+			&i.MemoryUnit.ChunkID,
+			&i.MemoryUnit.FactType,
+			&i.MemoryUnit.Text,
+			&i.MemoryUnit.Context,
+			&i.MemoryUnit.Metadata,
+			&i.MemoryUnit.Tags,
+			&i.MemoryUnit.Embedding,
+			&i.MemoryUnit.OccurredStart,
+			&i.MemoryUnit.OccurredEnd,
+			&i.MemoryUnit.MentionedAt,
+			&i.MemoryUnit.Timeless,
+			&i.MemoryUnit.ProofCount,
+			&i.MemoryUnit.ScopeKey,
+			&i.MemoryUnit.Version,
+			&i.MemoryUnit.Seq,
+			&i.MemoryUnit.ConsolidatedAt,
+			&i.MemoryUnit.ConsolidationFailedAt,
+			&i.MemoryUnit.EditedAt,
+			&i.MemoryUnit.CreatedAt,
+			&i.MemoryUnit.UpdatedAt,
+			&i.EntityNames,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const unitUpdate = `-- name: UnitUpdate :execrows
+UPDATE memory_units SET
+    text = $1, context = $2, occurred_start = $3, occurred_end = $4,
+    timeless = $5, fact_type = $6, edited_at = $7, seq = $8, embedding = $9,
+    consolidated_at = NULL, consolidation_failed_at = NULL, updated_at = now()
+WHERE id = $10 AND tenant_id = $11 AND bank_id = $12 AND fact_type <> 'observation'
+`
+
+type UnitUpdateParams struct {
+	Text          string
+	Context       string
+	OccurredStart *time.Time
+	OccurredEnd   *time.Time
+	Timeless      bool
+	FactType      string
+	EditedAt      *time.Time
+	Seq           int64
+	Embedding     *pgvector_go.Vector
+	ID            uuid.UUID
+	TenantID      string
+	BankID        string
+}
+
+// UnitUpdate replaces a live fact's curated fields and embedding and clears its consolidation stamps.
+func (q *Queries) UnitUpdate(ctx context.Context, arg UnitUpdateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unitUpdate,
+		arg.Text,
+		arg.Context,
+		arg.OccurredStart,
+		arg.OccurredEnd,
+		arg.Timeless,
+		arg.FactType,
+		arg.EditedAt,
+		arg.Seq,
+		arg.Embedding,
+		arg.ID,
+		arg.TenantID,
+		arg.BankID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const unitUpsertObservation = `-- name: UnitUpsertObservation :execrows
+INSERT INTO memory_units AS m (
+    id, tenant_id, bank_id, document_id, chunk_id, fact_type, text, context, metadata, tags, embedding,
+    occurred_start, occurred_end, mentioned_at, timeless, proof_count, scope_key, version, seq,
+    consolidated_at, consolidation_failed_at, edited_at, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18,
+    $19, $20, $21, $22, COALESCE($23::timestamptz, now())
+)
+ON CONFLICT (id) DO UPDATE SET
+    text = EXCLUDED.text, proof_count = EXCLUDED.proof_count, embedding = EXCLUDED.embedding,
+    version = EXCLUDED.version, seq = EXCLUDED.seq, updated_at = now()
+WHERE m.fact_type = 'observation' AND m.tenant_id = EXCLUDED.tenant_id AND m.bank_id = EXCLUDED.bank_id
+`
+
+type UnitUpsertObservationParams struct {
+	ID                    uuid.UUID
+	TenantID              string
+	BankID                string
+	DocumentID            *string
+	ChunkID               uuid.NullUUID
+	FactType              string
+	Text                  string
+	Context               string
+	Metadata              json.RawMessage
+	Tags                  []string
+	Embedding             *pgvector_go.Vector
+	OccurredStart         *time.Time
+	OccurredEnd           *time.Time
+	MentionedAt           *time.Time
+	Timeless              bool
+	ProofCount            int32
+	ScopeKey              *string
+	Version               int64
+	Seq                   int64
+	ConsolidatedAt        *time.Time
+	ConsolidationFailedAt *time.Time
+	EditedAt              *time.Time
+	CreatedAt             *time.Time
+}
+
+// UnitUpsertObservation inserts an observation, or replaces the text, proof count, embedding, version and seq of the same bank's observation with that id; an id held by any other row affects nothing.
+func (q *Queries) UnitUpsertObservation(ctx context.Context, arg UnitUpsertObservationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unitUpsertObservation,
+		arg.ID,
+		arg.TenantID,
+		arg.BankID,
+		arg.DocumentID,
+		arg.ChunkID,
+		arg.FactType,
+		arg.Text,
+		arg.Context,
+		arg.Metadata,
+		arg.Tags,
+		arg.Embedding,
+		arg.OccurredStart,
+		arg.OccurredEnd,
+		arg.MentionedAt,
+		arg.Timeless,
+		arg.ProofCount,
+		arg.ScopeKey,
+		arg.Version,
+		arg.Seq,
+		arg.ConsolidatedAt,
+		arg.ConsolidationFailedAt,
+		arg.EditedAt,
+		arg.CreatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
