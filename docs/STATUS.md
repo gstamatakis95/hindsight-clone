@@ -155,3 +155,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - For the Phase 2 CCR batch: Memory.stale outside Recall needs a stale field from the curate lister.
 - 2026-10-10 WP-06 round-1 fixes in at 0f2815d (leaf-path implied masks; per-RPC forwarding test for all 48 RPCs); narrow round-2 review spawned.
 - 2026-10-10 WP-06 review round 2: MERGE (mutations now caught). Merged into main; gates pass. WP-06 done.
+- 2026-10-10 WP-04 round-1 fixes in at bd81d61; narrow round-2 review spawned. API notes for Phase 2:
+  ConsolidateObservation.SourceMemories is []SourceMemory; the directive done tools are read via
+  prompts.DoneTool; WP-08 maps "assistant" to FactTypeExperience; WP-10 injects the source_fact_ids enum,
+  minItems and maxItems; engines treat "N/A" and null as empty dimensions.
