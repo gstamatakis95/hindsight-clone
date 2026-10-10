@@ -15,12 +15,12 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-05 | Worker runtime | merged (08d057d) | wp/WP-05-worker-runtime | 7afa08e | — | — | H3 attempt-charge gap; LOWs in log |
 | WP-06 | Server shell | merged | wp/WP-06-server-shell | 0f2815d | — | — | jsonToStruct non-object (LOW) |
 | WP-07 | Eval harness | merged (f5da652 + follow-up) | wp/WP-07-eval | 7865932 | — | WP-07-1 approved + applied | 1 LOW accepted (see log) |
-| WP-08 | Retain engine | ready (awaiting user go-ahead) | — | — | — | — | — |
-| WP-09 | Recall engine | ready (awaiting user go-ahead) | — | — | — | — | — |
-| WP-10 | Consolidation engine | ready (awaiting user go-ahead) | — | — | — | — | — |
-| WP-11 | Reflect engine | ready (awaiting user go-ahead) | — | — | — | — | — |
-| WP-12 | Mental model engine | ready (awaiting user go-ahead) | — | — | — | — | — |
-| WP-13 | Bank, curation, documents, maintenance | ready (awaiting user go-ahead) | — | — | — | — | — |
+| WP-08 | Retain engine | in progress | wp/WP-08-retain | — | — | — | — |
+| WP-09 | Recall engine | in progress | wp/WP-09-recall | — | — | — | — |
+| WP-10 | Consolidation engine | in progress | wp/WP-10-consolidate | — | — | — | — |
+| WP-11 | Reflect engine | in progress | wp/WP-11-reflect | — | — | — | — |
+| WP-12 | Mental model engine | in progress | wp/WP-12-mentalmodel | — | — | — | — |
+| WP-13 | Bank, curation, documents, maintenance | in progress | wp/WP-13-bank-curate-docs-maint | — | — | — | — |
 | WP-14 | Integration | waiting | — | — | all | — | — |
 
 ## Environment notes
@@ -180,3 +180,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   Notes: InTx retries the whole fn up to 3 times on 40P01/40001, so an InTx fn must have no side effects outside
   the tx (engine WPs). A row Claim fails as undecodable gets no OPERATION_FAILED event. The fake now runs the
   gap suites; the porttest placeholders are gone.
+- 2026-10-10 user said yes: Phase 2 started. WP-08..13 workers launched in parallel worktrees (decision ranges
+  800-1399). CCR process for this phase: engines declare consumer interfaces and file CCRs for missing port
+  methods; the orchestrator batches approvals; a follow-up package (WP-15) implements them in the fake,
+  Postgres and porttest before WP-14 wires everything.
