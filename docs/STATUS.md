@@ -7,7 +7,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 
 | WP | Title | State | Branch | PR | Blockers | Open CCRs | LOW findings |
 |----|-------|-------|--------|----|----------|-----------|--------------|
-| WP-00 | Contracts and scaffold | in review | wp/WP-00-contracts | 17fe418 | — | WP-00-1 (approved, pending apply) | — |
+| WP-00 | Contracts and scaffold | fixing review round 1 | wp/WP-00-contracts | 17fe418 | review: 6 HIGH | WP-00-1 (approved, pending apply) | see log |
 | WP-01 | Postgres adapter | waiting | — | — | WP-00 | — | — |
 | WP-02 | Fakes | waiting | — | — | WP-00 | — | — |
 | WP-03 | Gateway and S3 adapters | waiting | — | — | WP-00 | — | — |
@@ -36,3 +36,12 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-00 handed in on wp/WP-00-contracts @ 17fe418; worker reports all Accept checks pass. Reviewer spawned.
 - 2026-10-10 ruling CCR WP-00-1 APPROVED: add golang.org/x/text for NFC tag normalization (spec requires NFC;
   stdlib lacks it). Applied on the WP-00 branch before merge, since contracts aren't frozen until merge.
+- 2026-10-10 WP-00 review round 1: BLOCK (6 HIGH, 13 MEDIUM, 4 LOW groups). All gates passed; findings are in
+  contract semantics (Reschedule/Upgrade/dedupe, ModelBinding and TagGroup comments, event paging, fencing).
+- 2026-10-10 ruling: overrides-never-dedupe (SPEC 908/1219/2034) applies to all kinds except
+  refresh_mental_model, which always joins the queued refresh and upgrades it (SPEC 1924/2005); specific rule wins.
+- 2026-10-10 ruling: Upgrade merges (force_full OR-ed; overrides/strategy replaced only when supplied);
+  Reschedule only on PENDING; worker fencing via ErrFailedPrecondition without signature changes; cancelled
+  processing jobs keep their serial key until the handler stops; Enqueue on a deleting bank fails except
+  delete_bank. Findings and rulings sent back to the WP-00 worker. LOW findings: worker fixes the cheap ones,
+  leftovers to be listed here after round 2.
