@@ -15,7 +15,7 @@
     }
   ],
   "checks": [
-    {"id": "car", "category": "knowledge-update", "query": "What car does Omar drive now?", "accept": ["Ioniq"]},
-    {"id": "coffee", "category": "knowledge-update", "query": "What coffee does Omar drink now?", "accept": ["cortado"]}
+    {"id": "car", "category": "presence-updated", "query": "What car does Omar drive now?", "accept": ["Ioniq"]},
+    {"id": "coffee", "category": "presence-updated", "query": "What coffee does Omar drink now?", "accept": ["cortado"]}
   ]
 }

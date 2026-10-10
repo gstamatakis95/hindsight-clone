@@ -88,7 +88,7 @@ func checkUsageAndLatency(t *testing.T, tr harness.TargetReport, mode string) {
 	for _, u := range tr.Usage {
 		slots[u.Slot] = u.InputTokens > 0
 	}
-	if !slots["CONSOLIDATE"] || slots["REFLECT"] != (mode == harness.ModeReflect) {
+	if !slots["CONSOLIDATE"] || !slots["EXTRACT"] || slots["REFLECT"] != (mode == harness.ModeReflect) {
 		t.Fatalf("usage = %+v", tr.Usage)
 	}
 	ops := map[string]harness.LatencyStats{}

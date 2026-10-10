@@ -15,10 +15,10 @@
     }
   ],
   "checks": [
-    {"id": "city", "category": "single-hop", "query": "Which city did Maya move to?", "accept": ["Lisbon"]},
-    {"id": "employer", "category": "single-hop", "query": "Where does Maya work now?", "accept": ["Tidewater"]},
-    {"id": "pet", "category": "single-hop", "query": "What is the name of Maya's dog?", "accept": ["Biscuit"]},
-    {"id": "hobby", "category": "single-hop", "query": "What class did Maya sign up for?", "accept": ["pottery"]},
-    {"id": "visitor", "category": "single-hop", "query": "Which sister is coming to visit Maya?", "accept": ["Ines"]}
+    {"id": "city", "category": "presence", "query": "Which city did Maya move to?", "accept": ["Lisbon"]},
+    {"id": "employer", "category": "presence", "query": "Where does Maya work now?", "accept": ["Tidewater"]},
+    {"id": "pet", "category": "presence", "query": "What is the name of Maya's dog?", "accept": ["Biscuit"]},
+    {"id": "hobby", "category": "presence", "query": "What class did Maya sign up for?", "accept": ["pottery"]},
+    {"id": "visitor", "category": "presence", "query": "Which sister is coming to visit Maya?", "accept": ["Ines"]}
   ]
 }

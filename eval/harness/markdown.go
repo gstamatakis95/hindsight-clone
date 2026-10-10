@@ -44,6 +44,9 @@ func (r Report) accuracyTable(b *strings.Builder) {
 		if c.Errors > 0 {
 			s += fmt.Sprintf(", %d errors", c.Errors)
 		}
+		if c.NotApplicable > 0 {
+			s += fmt.Sprintf(", %d n/a", c.NotApplicable)
+		}
 		return s
 	}
 	row := []string{"**overall**"}
