@@ -148,3 +148,8 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-02 review round 2: MERGE. Merged into main; gates pass. WP-02 done. internal/jsonschema is now a
   shared package (gateway + fake). Cosmetic LOWs left: a no-op %w wrap in gateway chat.go:215; a broken doc
   comment in fake/entities.go:58-61.
+- 2026-10-10 WP-06 review: BLOCK on 2 HIGH: (1) a no-mask update replaces whole nested sub-structs, silently
+  wiping stored overrides (data loss); (2) the bufconn/round-trip acceptance tests never assert what is forwarded
+  (a hard-coded tenant passed every test). Tenant isolation, id checks and error mapping were verified correct.
+  Fixes, the override-validation MEDIUM and cheap LOWs sent back to the worker.
+- For the Phase 2 CCR batch: Memory.stale outside Recall needs a stale field from the curate lister.
