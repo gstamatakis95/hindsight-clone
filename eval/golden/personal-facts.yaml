@@ -1,0 +1,24 @@
+{
+  "name": "personal-facts",
+  "sessions": [
+    {
+      "id": "pf-1",
+      "time": "2024-03-04T09:15:00Z",
+      "context": "Chat between the user (Maya) and an assistant.",
+      "content": "user: I'm Maya and I just moved to the city of Lisbon.\nuser: I work at Tidewater Labs now.\nassistant: Congratulations on the move!\nuser: Thanks. My dog Biscuit is still getting used to the apartment."
+    },
+    {
+      "id": "pf-2",
+      "time": "2024-03-11T18:40:00Z",
+      "context": "Chat between the user (Maya) and an assistant.",
+      "content": "user: I signed up for a pottery class on Thursdays.\nassistant: That sounds relaxing.\nuser: My sister Ines is coming to visit in April."
+    }
+  ],
+  "checks": [
+    {"id": "city", "category": "single-hop", "query": "Which city did Maya move to?", "accept": ["Lisbon"]},
+    {"id": "employer", "category": "single-hop", "query": "Where does Maya work now?", "accept": ["Tidewater"]},
+    {"id": "pet", "category": "single-hop", "query": "What is the name of Maya's dog?", "accept": ["Biscuit"]},
+    {"id": "hobby", "category": "single-hop", "query": "What class did Maya sign up for?", "accept": ["pottery"]},
+    {"id": "visitor", "category": "single-hop", "query": "Which sister is coming to visit Maya?", "accept": ["Ines"]}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "temporal",
+  "sessions": [
+    {
+      "id": "tm-1",
+      "time": "2023-05-08T13:56:00Z",
+      "context": "Conversation between Caroline and Melanie.",
+      "content": "Caroline: I went to an LGBTQ support group yesterday and it was really inspiring.\nMelanie: That's great! I ran a charity 5K race on Saturday."
+    },
+    {
+      "id": "tm-2",
+      "time": "2023-07-20T19:05:00Z",
+      "context": "Conversation between Caroline and Melanie.",
+      "content": "Caroline: I'm starting a counseling certification in September.\nMelanie: I painted a sunrise over the lake last weekend."
+    }
+  ],
+  "checks": [
+    {"id": "group", "category": "temporal", "query": "When did Caroline go to the support group?", "accept": ["support group"]},
+    {"id": "race", "category": "temporal", "query": "What race did Melanie run?", "accept": ["5K"]},
+    {"id": "cert", "category": "temporal", "query": "When does Caroline start the counseling certification?", "accept": ["certification"]}
+  ]
+}
