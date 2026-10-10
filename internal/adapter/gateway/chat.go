@@ -98,24 +98,25 @@ func (c *Client) complete(ctx context.Context, slot domain.ModelSlot, b domain.M
 	var resp chatResponse
 	err := c.retry(ctx, c.retriesFor(b), func() error {
 		var err error
-		resp, err = c.completeOnce(ctx, slot, b, body)
-		if err == nil {
-			addUsage(&sum, resp.Usage.toUsage(slot, modelOf(resp.Model, b.Model)))
-		}
+		resp, err = c.completeOnce(ctx, slot, b, body, &sum)
 		return err
 	})
 	return resp, finalUsage(sum, b.Model), err
 }
 
-// completeOnce makes one HTTP attempt at a chat completion and records its usage.
+// completeOnce makes one HTTP attempt at a chat completion, records its usage and adds it to sum, even when
+// the response turns out to have no choices.
 func (c *Client) completeOnce(ctx context.Context, slot domain.ModelSlot, b domain.ModelBinding, body any,
+	sum *domain.Usage,
 ) (chatResponse, error) {
 	var resp chatResponse
 	a := attempt{slot: slot, path: chatPath, timeout: c.timeoutFor(b)}
 	if err := c.post(ctx, a, body, &resp); err != nil {
 		return resp, err
 	}
-	c.record(ctx, resp.Usage.toUsage(slot, modelOf(resp.Model, b.Model)))
+	u := resp.Usage.toUsage(slot, modelOf(resp.Model, b.Model))
+	c.record(ctx, u)
+	addUsage(sum, u)
 	if len(resp.Choices) == 0 {
 		return resp, transient(fmt.Errorf("%w: gateway %s: response has no choices", domain.ErrUnavailable, chatPath))
 	}
@@ -192,11 +193,10 @@ func (c *Client) Structured(ctx context.Context, req port.StructuredRequest, out
 	err = c.retry(ctx, c.retriesFor(req.Binding), func() error {
 		body := chatBody(req.Binding, req.MaxOut, msgs)
 		body["response_format"] = format
-		resp, err := c.completeOnce(ctx, req.Slot, req.Binding, body)
+		resp, err := c.completeOnce(ctx, req.Slot, req.Binding, body, &sum)
 		if err != nil {
 			return err
 		}
-		addUsage(&sum, resp.Usage.toUsage(req.Slot, modelOf(resp.Model, req.Binding.Model)))
 		content := deref(resp.Choices[0].Message.Content)
 		if verr := decodeValid(sch, content, out); verr != nil {
 			msgs = append(msgs, textMessage(port.ChatRoleAssistant, content), textMessage(port.ChatRoleUser, verr.Error()))
@@ -246,7 +246,6 @@ func (c *Client) Chat(ctx context.Context, req port.ChatRequest) (port.ChatRespo
 		if choice := toolChoice(req.ToolChoice); choice != nil {
 			body["tool_choice"] = choice
 		}
-		maps.Copy(body, req.Binding.Extra)
 	}
 	resp, usage, err := c.complete(ctx, req.Slot, req.Binding, body)
 	if err != nil {

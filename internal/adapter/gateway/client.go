@@ -36,7 +36,8 @@ const (
 	maxResponseBytes = 64 << 20
 )
 
-// Config configures the gateway client. Zero fields take the Default* values.
+// Config configures the gateway client. Zero fields take the Default* values; MaxConcurrent, EmbedBatchSize
+// and Timeout also take them when negative.
 type Config struct {
 	// BaseURL is the OpenAI-style base URL including the version, e.g. "http://gateway:4000/v1"; the client
 	// posts to BaseURL+"/chat/completions", BaseURL+"/embeddings" and BaseURL+RerankPath.
@@ -70,13 +71,21 @@ type Config struct {
 func (cfg Config) withDefaults() Config {
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
 	cfg.EmbedModel = orDefault(cfg.EmbedModel, DefaultEmbedModel)
-	cfg.EmbedBatchSize = orDefault(cfg.EmbedBatchSize, DefaultEmbedBatchSize)
+	cfg.EmbedBatchSize = positiveOr(cfg.EmbedBatchSize, DefaultEmbedBatchSize)
 	cfg.RerankPath = orDefault(cfg.RerankPath, DefaultRerankPath)
-	cfg.MaxConcurrent = orDefault(cfg.MaxConcurrent, DefaultMaxConcurrent)
-	cfg.Timeout = orDefault(cfg.Timeout, DefaultTimeout)
+	cfg.MaxConcurrent = positiveOr(cfg.MaxConcurrent, DefaultMaxConcurrent)
+	cfg.Timeout = positiveOr(cfg.Timeout, DefaultTimeout)
 	cfg.MaxRetries = orDefault(cfg.MaxRetries, DefaultMaxRetries)
 	cfg.RetryBackoff = orDefault(cfg.RetryBackoff, DefaultRetryBackoff)
 	return cfg
+}
+
+// positiveOr returns def when v <= 0, else v.
+func positiveOr[T int | time.Duration](v, def T) T {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
 
 // orDefault returns def when v is the zero value, else v.

@@ -338,3 +338,26 @@ func TestStructuredFailedDecodeLeavesNoPartialFields(t *testing.T) {
 		t.Errorf("got %d requests, want 2", n)
 	}
 }
+
+func TestChatNoChoicesUsageIsSummed(t *testing.T) {
+	g := newFakeGateway(t)
+	g.chat = func(n int, _ map[string]any) (int, any) {
+		if n == 0 {
+			return http.StatusOK, map[string]any{
+				"model": "served-model", "choices": []any{},
+				"usage": map[string]any{"prompt_tokens": 5, "completion_tokens": 0},
+			}
+		}
+		return http.StatusOK, chatReply("ok", 7, 2)
+	}
+	b := binding("m")
+	b.MaxRetries = ptr(1)
+	resp, err := g.client(gateway.Config{}).Chat(t.Context(), port.ChatRequest{Slot: domain.ModelSlotReflect, Binding: b})
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	want := domain.Usage{Slot: domain.ModelSlotReflect, Model: "served-model", InputTokens: 12, OutputTokens: 2}
+	if resp.Usage != want {
+		t.Errorf("usage = %+v, want %+v (the no-choices attempt counted)", resp.Usage, want)
+	}
+}
