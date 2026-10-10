@@ -8,13 +8,13 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP | Title | State | Branch | PR | Blockers | Open CCRs | LOW findings |
 |----|-------|-------|--------|----|----------|-----------|--------------|
 | WP-00 | Contracts and scaffold | merged (0374c87, tag contracts-v1) | wp/WP-00-contracts | f5ab75f | — | WP-00-1 approved + applied | see carried-forward |
-| WP-01 | Postgres adapter | ready | — | — | — | — | — |
-| WP-02 | Fakes | ready | — | — | — | — | — |
-| WP-03 | Gateway and S3 adapters | ready | — | — | — | — | — |
-| WP-04 | Config, routing, time, prompts | ready | — | — | — | — | — |
+| WP-01 | Postgres adapter | in progress | wp/WP-01-postgres | — | — | — | — |
+| WP-02 | Fakes | in progress | wp/WP-02-fakes | — | — | — | — |
+| WP-03 | Gateway and S3 adapters | in progress | wp/WP-03-gateway-s3 | — | — | — | — |
+| WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
 | WP-05 | Worker runtime | ready | — | — | — | — | — |
-| WP-06 | Server shell | ready | — | — | — | — | — |
-| WP-07 | Eval harness | ready | — | — | — | — | — |
+| WP-06 | Server shell | in progress | wp/WP-06-server-shell | — | — | — | — |
+| WP-07 | Eval harness | in progress | wp/WP-07-eval | — | — | — | — |
 | WP-08 | Retain engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-09 | Recall engine | waiting | — | — | WP-02, WP-04 | — | — |
 | WP-10 | Consolidation engine | waiting | — | — | WP-02, WP-04 | — | — |
@@ -75,3 +75,6 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   non-live rows; Validate allows Match=EXACT with groups; GraphQuery direction unstated; non-object Upgrade
   payload / empty-key dedupe not rejected; ifacedoc gen/ skip not root-anchored; Complete/Fail have no
   worker token (fencing via heartbeat only).
+- 2026-10-10 user said continue: Phase 1 started. WP-01, 02, 03, 04, 06, 07 workers launched in parallel worktrees.
+  Decision-note number ranges per WP: WP-0N uses N00-N99. WP-05 launch blocked by the auto-mode permission
+  classifier; awaiting the user.
