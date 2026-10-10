@@ -11,16 +11,16 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-01 | Postgres adapter | in progress | wp/WP-01-postgres | — | — | — | — |
 | WP-02 | Fakes | merged | wp/WP-02-fakes | 0d2775e | — | — | 2 cosmetic LOW |
 | WP-03 | Gateway and S3 adapters | merged (8dd2090 + follow-up) | wp/WP-03-gateway-s3 | 20fab3d | — | — | 5 LOW accepted (see log) |
-| WP-04 | Config, routing, time, prompts | in progress | wp/WP-04-config-prompts | — | — | — | — |
+| WP-04 | Config, routing, time, prompts | merged (756d945); follow-up in progress | wp/WP-04-config-prompts | bd81d61 | — | WP-04-1 approved + applied | follow-up: Normalize never fails retain; non-nullable default schema |
 | WP-05 | Worker runtime | merged (08d057d) | wp/WP-05-worker-runtime | 7afa08e | — | — | H3 attempt-charge gap; LOWs in log |
 | WP-06 | Server shell | merged | wp/WP-06-server-shell | 0f2815d | — | — | jsonToStruct non-object (LOW) |
 | WP-07 | Eval harness | merged (f5da652 + follow-up) | wp/WP-07-eval | 7865932 | — | WP-07-1 approved + applied | 1 LOW accepted (see log) |
-| WP-08 | Retain engine | waiting | — | — | WP-02, WP-04 | — | — |
-| WP-09 | Recall engine | waiting | — | — | WP-02, WP-04 | — | — |
-| WP-10 | Consolidation engine | waiting | — | — | WP-02, WP-04 | — | — |
-| WP-11 | Reflect engine | waiting | — | — | WP-02, WP-04 | — | — |
-| WP-12 | Mental model engine | waiting | — | — | WP-02, WP-04 | — | — |
-| WP-13 | Bank, curation, documents, maintenance | waiting | — | — | WP-02, WP-04 | — | — |
+| WP-08 | Retain engine | ready (awaiting user go-ahead) | — | — | — | — | — |
+| WP-09 | Recall engine | ready (awaiting user go-ahead) | — | — | — | — | — |
+| WP-10 | Consolidation engine | ready (awaiting user go-ahead) | — | — | — | — | — |
+| WP-11 | Reflect engine | ready (awaiting user go-ahead) | — | — | — | — | — |
+| WP-12 | Mental model engine | ready (awaiting user go-ahead) | — | — | — | — | — |
+| WP-13 | Bank, curation, documents, maintenance | ready (awaiting user go-ahead) | — | — | — | — | — |
 | WP-14 | Integration | waiting | — | — | all | — | — |
 
 ## Environment notes
@@ -159,3 +159,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   ConsolidateObservation.SourceMemories is []SourceMemory; the directive done tools are read via
   prompts.DoneTool; WP-08 maps "assistant" to FactTypeExperience; WP-10 injects the source_fact_ids enum,
   minItems and maxItems; engines treat "N/A" and null as empty dimensions.
+- 2026-10-10 WP-04 review round 2: MERGE. Merged into main as 756d945; gates pass. Phase 2 dependencies (WP-02,
+  WP-04) are now met. Follow-up sent to the WP-04 worker: Normalize must never fail a retain on a TIME_PARSE
+  error; the default extraction schema is non-nullable.
+- 2026-10-10 user checkpoint: Phase 2 (WP-08..13) awaits the user's go-ahead.
