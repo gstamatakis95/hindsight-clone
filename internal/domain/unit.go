@@ -80,6 +80,9 @@ type Unit struct {
 	ConsolidationFailedAt *time.Time
 	// EditedAt is set by a curation edit.
 	EditedAt *time.Time
+	// Stale is set on an observation by Reader.GetUnit and Reader.ListUnits when a live fact in its scope
+	// waits for consolidation; it is computed at read time (never stored) and always false elsewhere.
+	Stale bool
 	// State is valid for live units and invalidated for archived ones.
 	State MemoryState
 	// CreatedAt is the creation time.
@@ -127,6 +130,9 @@ type Document struct {
 	Tags []string
 	// BlobKey is where the original text lives.
 	BlobKey string
+	// ObservationScopes is the retain item's observation_scopes, kept across reprocess; nil = none (the
+	// stored overrides' or the bank's default applies).
+	ObservationScopes *ObservationScopes
 	// ExtractedAt is set when the last retain committed its last chunk; nil while in flight or failed.
 	ExtractedAt *time.Time
 	// UnitCount is the number of live units (filled by readers).

@@ -104,7 +104,8 @@ CREATE TABLE public.documents (
     blob_key text DEFAULT ''::text NOT NULL,
     extracted_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    observation_scopes jsonb
 );
 
 --

@@ -195,7 +195,19 @@ func (r *unitRepo) AppendAudit(ctx context.Context, a domain.AuditEntry) error {
 	return mapErr("append audit", r.q.UnitAppendAudit(ctx, p))
 }
 
-// Unconsolidated returns up to limit of the bank's facts with neither consolidation stamp, oldest
+// IDsByDocument returns the ids of doc's live units in b, sorted; it writes and locks nothing.
+func (r *unitRepo) IDsByDocument(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
+	ids, err := r.q.UnitIDsByDocument(ctx, db.UnitIDsByDocumentParams{
+		TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
+	})
+	if err != nil {
+		return nil, mapErr("unit ids of document", err)
+	}
+	return idsOf[port.UnitID](ids), nil
+}
+
+// Unconsolidated returns up to limit of the bank's facts with neither consolidation stamp and with an
+// embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), oldest
 // created_at then id first, with their entity names. With scopes, only units whose tags contain every tag
 // of at least one scope are returned (so the shared scope matches every unit); the scopes' banks are
 // ignored in favour of b.

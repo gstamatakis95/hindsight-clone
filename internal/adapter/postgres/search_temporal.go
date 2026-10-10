@@ -44,6 +44,23 @@ func windowAnchor(w port.TemporalQuery) *float64 {
 	}
 }
 
+// temporalFilterOn reports whether the relevance filter applies: an embedding and a positive floor
+// (decision 1500).
+func temporalFilterOn(q port.TemporalQuery) bool {
+	return len(q.Embedding) > 0 && q.MinSimilarity > 0
+}
+
+// temporalRelevance returns the relevance filter's WHERE fragment (with a leading " AND "), or "" when it is
+// off: units without an embedding are excluded and the rest need cosine similarity >= MinSimilarity. It sits
+// in the span CTE, so it applies before bucketing and the limit; the hit score stays the temporal score.
+func temporalRelevance(q port.TemporalQuery, a *sqlArgs) string {
+	if !temporalFilterOn(q) {
+		return ""
+	}
+	return " AND embedding IS NOT NULL AND 1 - (embedding <=> " + a.add(vec(q.Embedding), "::vector") +
+		") >= " + a.add(q.MinSimilarity, "::float8")
+}
+
 // temporalSQL builds the temporal query. The CTE "hit" holds every overlapping unit with mid, the midpoint
 // of its span clamped to the window (GREATEST / LEAST ignore the NULL of an open bound), and its score
 // 1 / (1 + |mid - anchor| in days), in (0, 1], higher = closer to the window's center. With Buckets > 1 and
@@ -64,6 +81,7 @@ func temporalSQL(q port.TemporalQuery) (string, []any) {
 	if !q.Window.Start.IsZero() {
 		b.WriteString(" AND " + temporalEnd + " >= " + a.add(q.Window.Start, "::timestamptz"))
 	}
+	b.WriteString(temporalRelevance(q, &a))
 	b.WriteString("), mid AS (SELECT id, (GREATEST(us, " + a.add(start, "::float8") + ") + LEAST(ue, ")
 	b.WriteString(a.add(end, "::float8") + ")) / 2 AS mid FROM span), hit AS (SELECT id, mid, ")
 	if anchor := windowAnchor(q); anchor != nil {

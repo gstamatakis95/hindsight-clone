@@ -35,3 +35,15 @@ func TestSeqContract(t *testing.T) { porttest.RunSeqSuite(t, storeFactory) }
 
 // TestQueueContract runs porttest.RunQueueSuite against Postgres.
 func TestQueueContract(t *testing.T) { porttest.RunQueueSuite(t, queueFactory) }
+
+// TestReadsContract runs porttest.RunReadsSuite (WP-15) against Postgres.
+func TestReadsContract(t *testing.T) { porttest.RunReadsSuite(t, storeFactory) }
+
+// TestCurationReadsContract runs porttest.RunCurationReadsSuite (WP-15) against Postgres.
+func TestCurationReadsContract(t *testing.T) { porttest.RunCurationReadsSuite(t, storeFactory) }
+
+// TestMaintenanceContract runs porttest.RunMaintenanceSuite (WP-15) against Postgres.
+func TestMaintenanceContract(t *testing.T) { porttest.RunMaintenanceSuite(t, queueFactory) }
+
+// TestObservationAdminContract runs porttest.RunObservationAdminSuite (WP-15) against Postgres.
+func TestObservationAdminContract(t *testing.T) { porttest.RunObservationAdminSuite(t, storeFactory) }

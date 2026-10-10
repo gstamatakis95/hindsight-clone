@@ -18,8 +18,8 @@ const manyKeys = 1050
 var blobBank = port.BankRef{Tenant: "t", Bank: "b"}
 
 // RunBlobSuite runs the contract tests of port.Blob: Put/Get round trip, overwrite, missing keys, Delete and
-// DeletePrefix (including more keys than one S3 page). newBlob is called once per subtest and must return
-// an empty bucket or namespace.
+// DeletePrefix (including more keys than one S3 page) and List paging (CCR WP-13-2). newBlob is called once
+// per subtest and must return an empty bucket or namespace.
 func RunBlobSuite(t *testing.T, newBlob BlobFactory) {
 	t.Helper()
 	cases := []struct {
@@ -33,6 +33,9 @@ func RunBlobSuite(t *testing.T, newBlob BlobFactory) {
 		{"DeleteMissing", testBlobDeleteMissing},
 		{"DeletePrefixExact", testBlobDeletePrefix},
 		{"DeletePrefixManyKeys", testBlobDeletePrefixMany},
+		{"ListPaging", testBlobListPaging},
+		{"ListManyKeys", testBlobListManyKeys},
+		{"ListRejects", testBlobListRejects},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -179,4 +182,82 @@ func testBlobDeletePrefixMany(t *testing.T, b port.Blob) {
 		wantMissing(t, b, key(i))
 	}
 	wantContent(t, b, "t/other/docs/d/h", []byte("kept"))
+}
+
+// list calls List and fails the test on error.
+func list(t *testing.T, b port.Blob, prefix, after string, limit int) []string {
+	t.Helper()
+	keys, err := b.List(t.Context(), prefix, after, limit)
+	if err != nil {
+		t.Fatalf("List(%q, %q, %d): %v", prefix, after, limit, err)
+	}
+	return keys
+}
+
+// testBlobListPaging: List pages through a prefix in ascending byte order with after and limit, never
+// returns another prefix's keys, and returns an empty page once no key is left (CCR WP-13-2).
+func testBlobListPaging(t *testing.T, b port.Blob) {
+	// Byte order: "A" < "a" < "docs" < "é".
+	mine := []string{"t/b/A", "t/b/a", "t/b/docs/d1/h1", "t/b/docs/d2/h2", "t/b/é"}
+	for _, k := range append([]string{"t/bb/docs/d1/h1", "t/b2/x", "u/b/docs/d1/h1", "t/a"}, mine...) {
+		put(t, b, k, []byte(k))
+	}
+	var got []string
+	after := ""
+	for range len(mine) + 1 {
+		page := list(t, b, domain.BankBlobPrefix(blobBank), after, 2)
+		if len(page) == 0 {
+			break
+		}
+		if len(page) > 2 {
+			t.Fatalf("List page %v exceeds limit 2", page)
+		}
+		got = append(got, page...)
+		after = page[len(page)-1]
+	}
+	if fmt.Sprint(got) != fmt.Sprint(mine) {
+		t.Errorf("paged List = %v, want %v", got, mine)
+	}
+	if page := list(t, b, "t/b/", "t/b/é", 10); len(page) != 0 {
+		t.Errorf("List after the last key = %v, want empty", page)
+	}
+	if page := list(t, b, "t/b/", "t/b/a", 1); fmt.Sprint(page) != "[t/b/docs/d1/h1]" {
+		t.Errorf("List after t/b/a limit 1 = %v, want [t/b/docs/d1/h1]", page)
+	}
+}
+
+// testBlobListManyKeys: one List with a limit above one S3 page (1,000 keys) returns every key in order.
+func testBlobListManyKeys(t *testing.T, b port.Blob) {
+	key := func(i int) string { return fmt.Sprintf("t/many/docs/d%04d/h", i) }
+	for i := range manyKeys {
+		put(t, b, key(i), []byte(key(i)))
+	}
+	put(t, b, "t/other/docs/d/h", []byte("kept"))
+	keys := list(t, b, "t/many/", "", manyKeys+10)
+	if len(keys) != manyKeys {
+		t.Fatalf("List over %d keys returned %d", manyKeys, len(keys))
+	}
+	for i, k := range keys {
+		if k != key(i) {
+			t.Fatalf("List[%d] = %q, want %q", i, k, key(i))
+		}
+	}
+	want := []string{key(1000), key(1001), key(1002)}
+	if keys := list(t, b, "t/many/", key(999), 3); fmt.Sprint(keys) != fmt.Sprint(want) {
+		t.Errorf("List after key 999 = %v, want %v", keys, want)
+	}
+}
+
+// testBlobListRejects: an empty prefix or a limit <= 0 is ErrInvalidArgument, never the whole store or an
+// empty page that reads as "nothing left".
+func testBlobListRejects(t *testing.T, b port.Blob) {
+	put(t, b, "t/b/docs/d1/h1", []byte("x"))
+	for _, c := range []struct {
+		prefix string
+		limit  int
+	}{{"", 10}, {"t/b/", 0}, {"t/b/", -1}} {
+		if _, err := b.List(t.Context(), c.prefix, "", c.limit); !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("List(%q, limit %d) err = %v, want ErrInvalidArgument", c.prefix, c.limit, err)
+		}
+	}
 }

@@ -23,12 +23,8 @@ func (r *documentRepo) Get(ctx context.Context, b port.BankRef, id port.Document
 	if err != nil {
 		return domain.Document{}, mapErr(fmt.Sprintf("document %s", id), err)
 	}
-	d := domain.Document{
-		ID: id, Bank: b, ContentHash: row.ContentHash, OverridesHash: row.OverridesHash, Tags: row.Tags,
-		BlobKey: row.BlobKey, ExtractedAt: row.ExtractedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		UnitsByFactType: map[domain.FactType]int64{},
-	}
-	if d.Overrides, err = unmarshalPtr[domain.BankConfig]("document overrides", row.Overrides); err != nil {
+	d, err := documentOf(row)
+	if err != nil {
 		return domain.Document{}, err
 	}
 	counts, err := r.q.DocumentUnitCounts(ctx, db.DocumentUnitCountsParams{
@@ -44,8 +40,29 @@ func (r *documentRepo) Get(ctx context.Context, b port.BankRef, id port.Document
 	return d, nil
 }
 
-// Upsert inserts the document or replaces its tags, overrides and blob key, and clears extracted_at; the
-// hashes of the last completed retain stay until Complete. An unknown bank is domain.ErrNotFound.
+// documentOf builds a domain.Document from its row, without the unit counts (UnitsByFactType is empty).
+func documentOf(row db.Document) (domain.Document, error) {
+	d := domain.Document{
+		ID: port.DocumentID(row.ID), Bank: port.BankRef{Tenant: row.TenantID, Bank: row.BankID},
+		ContentHash: row.ContentHash, OverridesHash: row.OverridesHash, Tags: row.Tags, BlobKey: row.BlobKey,
+		ExtractedAt: row.ExtractedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		UnitsByFactType: map[domain.FactType]int64{},
+	}
+	var err error
+	if d.Overrides, err = unmarshalPtr[domain.BankConfig]("document overrides", row.Overrides); err != nil {
+		return domain.Document{}, err
+	}
+	d.ObservationScopes, err = unmarshalPtr[domain.ObservationScopes]("document observation scopes",
+		row.ObservationScopes)
+	if err != nil {
+		return domain.Document{}, err
+	}
+	return d, nil
+}
+
+// Upsert inserts the document or replaces its tags, overrides, observation scopes and blob key, and clears
+// extracted_at; the hashes of the last completed retain stay until Complete. A nil ObservationScopes is
+// stored as NULL. An unknown bank is domain.ErrNotFound.
 func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
 	if err := checkTags(d.Tags); err != nil {
 		return err
@@ -54,9 +71,13 @@ func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
 	if err != nil {
 		return err
 	}
+	scopes, err := marshalPtr("document observation scopes", d.ObservationScopes)
+	if err != nil {
+		return err
+	}
 	err = r.q.DocumentUpsert(ctx, db.DocumentUpsertParams{
 		TenantID: d.Bank.Tenant, BankID: d.Bank.Bank, ID: string(d.ID), Overrides: overrides,
-		Tags: tagsOrEmpty(d.Tags), BlobKey: d.BlobKey,
+		Tags: tagsOrEmpty(d.Tags), BlobKey: d.BlobKey, ObservationScopes: scopes,
 	})
 	return mapErr(fmt.Sprintf("upsert document %s", d.ID), err)
 }

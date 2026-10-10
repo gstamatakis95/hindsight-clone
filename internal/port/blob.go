@@ -19,4 +19,8 @@ type Blob interface {
 	// DeletePrefix removes every object whose key starts with prefix (bank delete: "{tenant}/{bank}/",
 	// domain.BankBlobPrefix) and returns how many it removed.
 	DeletePrefix(ctx context.Context, prefix string) (int, error)
+	// List returns up to limit (> 0) keys that start with prefix and sort strictly after after ("" = from
+	// the start), in ascending byte order. An empty result means no key is left. An empty prefix is
+	// domain.ErrInvalidArgument, so a computed prefix can never list the whole store.
+	List(ctx context.Context, prefix, after string, limit int) ([]string, error)
 }

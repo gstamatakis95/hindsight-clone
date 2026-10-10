@@ -45,6 +45,8 @@ type state struct {
 	evidence map[evidenceKey]string
 	// obsVersions is observation_versions in insertion order.
 	obsVersions []obsVersionRow
+	// scopes is observation_scopes: every scope that has held an observation, with its normalized tags.
+	scopes map[scopeRowKey][]string
 	// audit is memory_audit in insertion order.
 	audit []domain.AuditEntry
 	// models is mental_models keyed by (bank, id).
@@ -77,6 +79,7 @@ func newState() *state {
 		dirty:        map[bankUnitKey]int64{},
 		entMaint:     map[bankEntityKey]int64{},
 		evidence:     map[evidenceKey]string{},
+		scopes:       map[scopeRowKey][]string{},
 		models:       map[modelKey]modelRow{},
 		directives:   map[directiveKey]directiveRow{},
 		ops:          map[port.OperationID]opRow{},
@@ -100,6 +103,7 @@ func (s *state) clone() *state {
 		entMaint:     maps.Clone(s.entMaint),
 		evidence:     maps.Clone(s.evidence),
 		obsVersions:  slices.Clone(s.obsVersions),
+		scopes:       maps.Clone(s.scopes),
 		audit:        slices.Clone(s.audit),
 		models:       maps.Clone(s.models),
 		history:      slices.Clone(s.history),
@@ -134,9 +138,11 @@ type unitRow struct {
 type archiveRow struct {
 	u        domain.Unit
 	entities []port.EntityID
-	links    []domain.Link
-	reason   string
-	at       time.Time
+	// names are the canonical names of entities at archive time, sorted (the entities_snapshot names).
+	names  []string
+	links  []domain.Link
+	reason string
+	at     time.Time
 }
 
 // docKey is a document's primary key.
@@ -145,10 +151,11 @@ type docKey struct {
 	id   port.DocumentID
 }
 
-// docRow is one documents row; overrides are stored as JSON.
+// docRow is one documents row; overrides and observation scopes are stored as JSON (nil = SQL NULL).
 type docRow struct {
 	d         domain.Document
 	overrides []byte
+	scopes    []byte
 }
 
 // chunkKey is a chunk's (bank, document, index) unique key.
@@ -210,6 +217,12 @@ type bankEntityKey struct {
 // evidenceKey is one observation_evidence row.
 type evidenceKey struct {
 	obs, unit port.UnitID
+}
+
+// scopeRowKey is an observation_scopes primary key: the bank and the scope's ScopeKey.String().
+type scopeRowKey struct {
+	bank port.BankRef
+	key  string
 }
 
 // obsVersionRow is one observation_versions row.

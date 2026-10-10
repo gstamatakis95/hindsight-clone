@@ -158,9 +158,20 @@ func (r evidenceRepo) DeleteCiting(
 			doomed[k.obs] = true
 		}
 	}
+	deleted, reset = r.deleteObservations(b, doomed, ids)
+	return deleted, reset, nil
+}
+
+// deleteObservations deletes the doomed observations of b and clears consolidated_at on the live units they
+// cite, except those in exclude. It returns the deleted and the reset ids, both sorted. DeleteCiting,
+// DeleteScopes and DeleteAllObservations all delete through it, so they behave identically.
+func (r evidenceRepo) deleteObservations(
+	b port.BankRef, doomed map[port.UnitID]bool, exclude []port.UnitID,
+) (deleted, reset []port.UnitID) {
+	st := r.t.st
 	resetSet := map[port.UnitID]bool{}
 	for k := range st.evidence {
-		if doomed[k.obs] && !slices.Contains(ids, k.unit) && !doomed[k.unit] {
+		if doomed[k.obs] && !slices.Contains(exclude, k.unit) && !doomed[k.unit] {
 			resetSet[k.unit] = true
 		}
 	}
@@ -172,5 +183,81 @@ func (r evidenceRepo) DeleteCiting(
 			st.units[id] = row
 		}
 	}
+	return deleted, reset
+}
+
+// CitingScopes returns the distinct scopes of b's live observations that cite any of ids, ordered by
+// ScopeKey.String().
+func (r evidenceRepo) CitingScopes(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, ctxErr(err)
+	}
+	st := r.t.st
+	byKey := map[string]port.ScopeKey{}
+	for k := range st.evidence {
+		o, ok := st.units[k.obs]
+		if !ok || o.u.Bank != b || o.u.Type != domain.FactTypeObservation || !slices.Contains(ids, k.unit) {
+			continue
+		}
+		s := domain.NewScopeKey(b, o.u.Tags)
+		byKey[s.String()] = s
+	}
+	out := make([]port.ScopeKey, 0, len(byKey))
+	for _, key := range slices.Sorted(maps.Keys(byKey)) {
+		out = append(out, byKey[key])
+	}
+	return out, nil
+}
+
+// DeleteScopes deletes b's live observations whose scope is one of scopes (each matched under b by
+// NewScopeKey(b, s.Tags).String(); its own BankRef is ignored) exactly as DeleteCiting deletes, resets all
+// their live sources, and returns both sets sorted. observation_scopes rows are kept; an empty scopes
+// argument does nothing.
+func (r evidenceRepo) DeleteScopes(
+	ctx context.Context, b port.BankRef, scopes []port.ScopeKey,
+) (deleted, reset []port.UnitID, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, ctxErr(err)
+	}
+	keys := map[string]bool{}
+	for _, s := range scopes {
+		keys[domain.NewScopeKey(b, s.Tags).String()] = true
+	}
+	return r.deleteMatching(b, func(u domain.Unit) bool { return keys[obsScopeKey(u)] })
+}
+
+// DeleteAllObservations is DeleteScopes over every live observation of b.
+func (r evidenceRepo) DeleteAllObservations(
+	ctx context.Context, b port.BankRef,
+) (deleted, reset []port.UnitID, err error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, ctxErr(err)
+	}
+	return r.deleteMatching(b, func(domain.Unit) bool { return true })
+}
+
+// deleteMatching deletes b's live observations matching match through deleteObservations with nothing
+// excluded; the results are never nil.
+func (r evidenceRepo) deleteMatching(
+	b port.BankRef, match func(domain.Unit) bool,
+) (deleted, reset []port.UnitID, err error) {
+	doomed := map[port.UnitID]bool{}
+	for id, row := range r.t.st.units {
+		if row.u.Bank == b && row.u.Type == domain.FactTypeObservation && match(row.u) {
+			doomed[id] = true
+		}
+	}
+	deleted, reset = r.deleteObservations(b, doomed, nil)
+	if deleted == nil {
+		deleted = []port.UnitID{}
+	}
+	if reset == nil {
+		reset = []port.UnitID{}
+	}
 	return deleted, reset, nil
+}
+
+// obsScopeKey is an observation's scope_key: the encoding of its (normalized) tags.
+func obsScopeKey(u domain.Unit) string {
+	return domain.NewScopeKey(u.Bank, u.Tags).String()
 }

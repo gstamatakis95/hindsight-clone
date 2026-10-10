@@ -18,22 +18,30 @@ func (r docRepo) Get(_ context.Context, b port.BankRef, id port.DocumentID) (dom
 	if !ok {
 		return domain.Document{}, notFound("document %s", id)
 	}
+	return r.t.st.docOut(row), nil
+}
+
+// docOut returns a caller-owned copy of a stored document with UnitCount and UnitsByFactType filled from
+// its live units.
+func (s *state) docOut(row docRow) domain.Document {
 	d := row.d
 	d.Tags = slices.Clone(d.Tags)
 	d.Overrides = fromJSON[domain.BankConfig](row.overrides)
+	d.ObservationScopes = fromJSON[domain.ObservationScopes](row.scopes)
 	d.ExtractedAt = ptrCopy(d.ExtractedAt)
 	d.UnitsByFactType = map[domain.FactType]int64{}
-	for _, u := range r.t.st.units {
-		if u.u.Bank == b && u.u.DocumentID == id {
+	for _, u := range s.units {
+		if u.u.Bank == d.Bank && u.u.DocumentID == d.ID {
 			d.UnitCount++
 			d.UnitsByFactType[u.u.Type]++
 		}
 	}
-	return d, nil
+	return d
 }
 
-// Upsert inserts the document or replaces its tags, overrides and blob key and clears extracted_at; the
-// hashes of the last completed retain are kept. The bank must exist (domain.ErrNotFound otherwise).
+// Upsert inserts the document or replaces its tags, overrides, observation scopes and blob key and clears
+// extracted_at; the hashes of the last completed retain are kept. The bank must exist (domain.ErrNotFound
+// otherwise).
 func (r docRepo) Upsert(_ context.Context, d domain.Document) error {
 	if _, ok := r.t.st.banks[d.Bank]; !ok {
 		return notFound("bank %s/%s", d.Bank.Tenant, d.Bank.Bank)
@@ -48,7 +56,7 @@ func (r docRepo) Upsert(_ context.Context, d domain.Document) error {
 	}
 	row.d.Tags, row.d.BlobKey, row.d.ExtractedAt = slices.Clone(d.Tags), d.BlobKey, nil
 	row.d.UpdatedAt = r.t.now
-	row.overrides = jsonOf(d.Overrides)
+	row.overrides, row.scopes = jsonOf(d.Overrides), jsonOf(d.ObservationScopes)
 	r.t.st.documents[k] = row
 	return nil
 }

@@ -50,17 +50,18 @@ type Directive struct {
 }
 
 type Document struct {
-	TenantID      string
-	BankID        string
-	ID            string
-	ContentHash   string
-	OverridesHash string
-	Overrides     json.RawMessage
-	Tags          []string
-	BlobKey       string
-	ExtractedAt   *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	TenantID          string
+	BankID            string
+	ID                string
+	ContentHash       string
+	OverridesHash     string
+	Overrides         json.RawMessage
+	Tags              []string
+	BlobKey           string
+	ExtractedAt       *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	ObservationScopes json.RawMessage
 }
 
 type Entity struct {

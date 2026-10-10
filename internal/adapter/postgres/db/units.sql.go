@@ -146,6 +146,39 @@ func (q *Queries) UnitHandOverLinks(ctx context.Context, arg UnitHandOverLinksPa
 	return err
 }
 
+const unitIDsByDocument = `-- name: UnitIDsByDocument :many
+SELECT id FROM memory_units
+WHERE tenant_id = $1 AND bank_id = $2 AND document_id = $3::text
+ORDER BY id
+`
+
+type UnitIDsByDocumentParams struct {
+	TenantID   string
+	BankID     string
+	DocumentID string
+}
+
+// UnitIDsByDocument returns the ids of a document's live units, sorted.
+func (q *Queries) UnitIDsByDocument(ctx context.Context, arg UnitIDsByDocumentParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, unitIDsByDocument, arg.TenantID, arg.BankID, arg.DocumentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unitInsert = `-- name: UnitInsert :exec
 INSERT INTO memory_units (
     id, tenant_id, bank_id, document_id, chunk_id, fact_type, text, context, metadata, tags, embedding,
@@ -643,6 +676,7 @@ SELECT u.id, u.tenant_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.t
 FROM memory_units u
 WHERE u.tenant_id = $1 AND u.bank_id = $2
   AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
+  AND u.embedding IS NOT NULL
   AND (NOT $3::bool OR EXISTS (
       SELECT 1 FROM jsonb_array_elements($4::jsonb) AS s(tags)
       WHERE u.tags @> ARRAY(SELECT jsonb_array_elements_text(s.tags))))
@@ -663,7 +697,7 @@ type UnitUnconsolidatedRow struct {
 	EntityNames []string
 }
 
-// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp, with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays).
+// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
 func (q *Queries) UnitUnconsolidated(ctx context.Context, arg UnitUnconsolidatedParams) ([]UnitUnconsolidatedRow, error) {
 	rows, err := q.db.Query(ctx, unitUnconsolidated,
 		arg.TenantID,
