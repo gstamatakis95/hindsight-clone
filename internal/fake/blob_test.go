@@ -3,6 +3,7 @@ package fake_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"memd/internal/domain"
 	"memd/internal/fake"
@@ -100,5 +101,26 @@ func TestBlobCancelledContext(t *testing.T) {
 	}
 	if _, err := b.Get(ctx, "k"); !errors.Is(err, context.Canceled) {
 		t.Errorf("Get error = %v, want context.Canceled", err)
+	}
+}
+
+// TestBlobFailWith: every call fails with the injected error until it is cleared; objects survive.
+func TestBlobFailWith(t *testing.T) {
+	b := fake.NewBlob()
+	ctx := t.Context()
+	if err := b.Put(ctx, "k", strings.NewReader("v"), 1, "text/plain"); err != nil {
+		t.Fatal(err)
+	}
+	down := fmt.Errorf("%w: s3 down", domain.ErrUnavailable)
+	b.FailWith(down)
+	if _, err := b.Get(ctx, "k"); !errors.Is(err, domain.ErrUnavailable) {
+		t.Errorf("Get while failing = %v, want ErrUnavailable", err)
+	}
+	if err := b.Put(ctx, "k2", strings.NewReader("v"), 1, ""); !errors.Is(err, down) {
+		t.Errorf("Put while failing = %v, want the injected error", err)
+	}
+	b.FailWith(nil)
+	if _, err := b.Get(ctx, "k"); err != nil {
+		t.Errorf("Get after FailWith(nil) = %v", err)
 	}
 }

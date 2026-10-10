@@ -3,6 +3,7 @@ package fake
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"maps"
 	"memd/internal/domain"
 	"memd/internal/port"
@@ -20,6 +21,9 @@ var _ port.LinkRepo = linkRepo{}
 func (r linkRepo) Insert(_ context.Context, ls []domain.Link) error {
 	st := r.t.st
 	for _, l := range ls {
+		if l.From == l.To {
+			return fmt.Errorf("%w: self-link on unit %s", domain.ErrInvalidArgument, l.From)
+		}
 		from, okF := st.units[l.From]
 		to, okT := st.units[l.To]
 		if l.Bank.IsZero() && okF {
@@ -108,10 +112,16 @@ func (r evidenceRepo) Add(_ context.Context, obs port.UnitID, ev []domain.Eviden
 	if !ok {
 		return notFound("observation %s", obs)
 	}
+	if o.u.Type != domain.FactTypeObservation {
+		return fmt.Errorf("%w: evidence owner %s is not an observation", domain.ErrInvalidArgument, obs)
+	}
 	for _, e := range ev {
 		u, ok := st.units[e.Unit]
 		if !ok || u.u.Bank != o.u.Bank {
 			return notFound("evidence unit %s", e.Unit)
+		}
+		if !isFactType(u.u.Type) {
+			return fmt.Errorf("%w: evidence unit %s is not a fact", domain.ErrInvalidArgument, e.Unit)
 		}
 		k := evidenceKey{obs, e.Unit}
 		if _, dup := st.evidence[k]; !dup {

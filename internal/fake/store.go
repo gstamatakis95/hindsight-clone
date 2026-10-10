@@ -80,6 +80,9 @@ func (s *Store) write(ctx context.Context, fn func(*tx) error) error {
 	if err := fn(t); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil { // like a Postgres tx whose context ended before COMMIT
+		return fmt.Errorf("%w: fake store: not committed: %w", domain.ErrUnavailable, err)
+	}
 	s.cur.Store(t.st)
 	return t.after
 }

@@ -56,17 +56,19 @@ func (r entityRepo) Cooccurrence(
 }
 
 // Upsert inserts e (a new id when e.ID is empty) or replaces the existing entity's fields; a label entity
-// with the same (kind, label value) resolves to the existing row. The bank must exist; an id owned by
+// with the same (kind, label value) always resolves to (and updates) the existing row, whatever e.ID says.
+// The bank must exist; an id owned by
 // another bank is domain.ErrNotFound.
 func (r entityRepo) Upsert(_ context.Context, e domain.Entity) (port.EntityID, error) {
 	st := r.t.st
 	if _, ok := st.banks[e.Bank]; !ok {
 		return "", notFound("bank %s/%s", e.Bank.Tenant, e.Bank.Bank)
 	}
-	if e.ID == "" && e.IsLabel() {
+	if e.IsLabel() { // (bank, kind, label value) is unique: adopt the existing row's id, then update it
 		for id, row := range st.entities {
 			if row.e.Bank == e.Bank && row.e.Kind == e.Kind && row.e.LabelValue == e.LabelValue {
-				return id, nil
+				e.ID = id
+				break
 			}
 		}
 	}

@@ -212,7 +212,7 @@ func (c *Client) Structured(ctx context.Context, req port.StructuredRequest, out
 // decoding).
 func decodeValid(sch *jsonschema.Schema, content string, out any) error {
 	if err := sch.Validate([]byte(content)); err != nil {
-		return err
+		return fmt.Errorf("%w", err) // the message goes back to the model verbatim
 	}
 	if out == nil {
 		return nil

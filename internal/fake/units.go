@@ -44,7 +44,7 @@ func (r unitRepo) insert(u domain.Unit) error {
 			return notFound("document %s of unit %s", u.DocumentID, u.ID)
 		}
 	}
-	if err := checkDims(u); err != nil {
+	if err := validUnit(u); err != nil {
 		return err
 	}
 	u = cloneUnit(u)
@@ -59,12 +59,18 @@ func (r unitRepo) insert(u domain.Unit) error {
 // UpsertObservation inserts the observation or replaces the text, proof count, embedding, version and seq
 // of the existing one with the same id.
 func (r unitRepo) UpsertObservation(_ context.Context, o domain.Unit) error {
+	if o.Type != domain.FactTypeObservation {
+		return fmt.Errorf("%w: UpsertObservation of a %q unit", domain.ErrInvalidArgument, o.Type)
+	}
 	row, ok := r.t.st.units[o.ID]
 	if !ok {
 		return r.insert(o)
 	}
 	if row.u.Bank != o.Bank {
 		return notFound("observation %s in bank %s/%s", o.ID, o.Bank.Tenant, o.Bank.Bank)
+	}
+	if row.u.Type != domain.FactTypeObservation {
+		return fmt.Errorf("%w: unit %s is a fact, not an observation", domain.ErrInvalidArgument, o.ID)
 	}
 	if err := checkDims(o); err != nil {
 		return err
@@ -97,6 +103,10 @@ func (r unitRepo) Update(_ context.Context, u domain.Unit) error {
 	if !ok || row.u.Bank != u.Bank {
 		return notFound("unit %s", u.ID)
 	}
+	if row.u.Type == domain.FactTypeObservation || !isFactType(u.Type) {
+		return fmt.Errorf("%w: Update edits facts only (unit %s is %q, new type %q)", domain.ErrInvalidArgument,
+			u.ID, row.u.Type, u.Type)
+	}
 	if err := checkDims(u); err != nil {
 		return err
 	}
@@ -115,6 +125,9 @@ func (r unitRepo) Update(_ context.Context, u domain.Unit) error {
 func (r unitRepo) SetDocumentTags(
 	_ context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64,
 ) ([]port.UnitID, error) {
+	if err := checkTags(tags); err != nil {
+		return nil, err
+	}
 	var ids []port.UnitID
 	for id, row := range r.t.st.units {
 		if row.u.Bank != b || row.u.DocumentID != doc {
@@ -248,7 +261,8 @@ func (r unitRepo) Archive(_ context.Context, b port.BankRef, id port.UnitID, rea
 	return nil
 }
 
-// Restore moves an archived unit back under the transaction's change seq (taking it if needed) and
+// Restore moves an archived unit back under the transaction's change seq (the caller must have called
+// Tx.Seq for the bank; domain.ErrFailedPrecondition otherwise) and
 // reattaches the snapshot entities and causal links whose partners still exist. The embedding stays
 // empty and the consolidation stamps unset.
 func (r unitRepo) Restore(_ context.Context, b port.BankRef, id port.UnitID) error {
@@ -257,9 +271,9 @@ func (r unitRepo) Restore(_ context.Context, b port.BankRef, id port.UnitID) err
 	if !ok || a.u.Bank != b {
 		return notFound("archived unit %s", id)
 	}
-	seq, err := r.t.seq(b)
-	if err != nil {
-		return err
+	seq, ok := r.t.seqs[b]
+	if !ok {
+		return precondition("Restore of unit %s: call Tx.Seq for the bank first", id)
 	}
 	u := a.u
 	u.State, u.Seq, u.UpdatedAt = domain.MemoryStateValid, seq, r.t.now
@@ -395,6 +409,31 @@ func checkDims(u domain.Unit) error {
 	if len(u.Embedding) != 0 && len(u.Embedding) != domain.EmbeddingDim {
 		return fmt.Errorf("%w: unit %s embedding has %d dims, want %d", domain.ErrInvalidArgument, u.ID,
 			len(u.Embedding), domain.EmbeddingDim)
+	}
+	return nil
+}
+
+// validUnit checks a unit about to be stored: a known fact type, normalized tags, a 768-dim embedding.
+func validUnit(u domain.Unit) error {
+	if !isFactType(u.Type) && u.Type != domain.FactTypeObservation {
+		return fmt.Errorf("%w: unit %s has fact type %q", domain.ErrInvalidArgument, u.ID, u.Type)
+	}
+	if err := checkTags(u.Tags); err != nil {
+		return err
+	}
+	return checkDims(u)
+}
+
+// isFactType reports whether t is world or experience.
+func isFactType(t domain.FactType) bool {
+	return t == domain.FactTypeWorld || t == domain.FactTypeExperience
+}
+
+// checkTags rejects tags that are not already in domain.NormalizeTags form (the domain types say stored
+// tags are normalized; writers normalize).
+func checkTags(tags []string) error {
+	if !slices.Equal(tags, domain.NormalizeTags(tags)) {
+		return fmt.Errorf("%w: tags %q are not normalized (domain.NormalizeTags)", domain.ErrInvalidArgument, tags)
 	}
 	return nil
 }

@@ -74,3 +74,17 @@ Gates: `make gen` (no diff), `make lint BREAKING_AGAINST=contracts-v1` (0 issues
 - The fake does not check that ids are UUIDs. Postgres's uuid columns would reject an id like "u1".
 - Archive and observation-version and audit rows have no read port, so they are stored but not
   inspectable beyond DeleteBatch.
+
+## Review round 1 fixes
+| Item | Fix | Test |
+|---|---|---|
+| HIGH 1 Structured ignores req.Schema | Validator moved to `internal/jsonschema` (gateway imports it); fake rejects empty/bad schema (ErrInvalidArgument) and validates output | `TestLLMStructuredValidatesSchema`; moved `TestValidateSchema`, `TestCompileSchemaRejectsBadSchema`, `TestSchemaRefLoopBounded` |
+| HIGH 2 self-link | ErrInvalidArgument | `TestLinkRejectsSelfLink` |
+| MED 3 label upsert | resolve by (bank, kind, label), then update | `TestLabelEntityUpsertUpdatesExisting` |
+| MED 4 Restore takes Seq | requires prior Tx.Seq (ErrFailedPrecondition) | `TestRestoreRequiresSeq` |
+| MED 5 ctx cancelled during fn | not published; error wraps ctx.Err() | `TestInTxContextCancelledDuringFn` |
+| MED 6 un-normalized tags | rejected on unit/document writes (decision 203) | `TestUnnormalizedTagsRejected` |
+| LOW Blob.FailWith | added | `TestBlobFailWith` |
+| LOW fact-type checks | Update, UpsertObservation, Evidence.Add | `TestFactTypeChecks` |
+| LOW stopword note | EmbedSimilar doc | — |
+| LOW SetConfig/MarkDeleting unknown bank | decision 203 | existing contract tests |

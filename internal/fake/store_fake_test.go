@@ -185,7 +185,8 @@ func TestTenantIsolationWritePorts(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	u := f.unit(theirs, "u-theirs", "doc-1")
-	other := f.unit(mine, "u-mine", "")
+	other := domain.Unit{ID: "o-mine", Bank: mine, Type: domain.FactTypeObservation, Text: "observation"}
+	f.tx(func(tx port.Tx) error { return tx.Units().Insert(ctx, []domain.Unit{other}) })
 	checks := map[string]func(tx port.Tx) error{
 		"Units.Update": func(tx port.Tx) error {
 			v := u
@@ -196,7 +197,7 @@ func TestTenantIsolationWritePorts(t *testing.T) {
 		"Units.Restore": func(tx port.Tx) error { return tx.Units().Restore(ctx, mine, u.ID) },
 		"Units.UpsertObservation": func(tx port.Tx) error {
 			v := u
-			v.Bank = mine
+			v.Bank, v.Type = mine, domain.FactTypeObservation
 			return tx.Units().UpsertObservation(ctx, v)
 		},
 		"Units.RecordObservationVersion": func(tx port.Tx) error {

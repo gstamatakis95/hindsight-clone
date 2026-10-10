@@ -40,6 +40,15 @@
 //     (domain.ErrInvalidArgument): call Tx.Seq first and stamp the event with it.
 //   - Embeddings must be domain.EmbeddingDim long (domain.ErrInvalidArgument), like the vector(768) column.
 //   - Every by-id write that names a bank returns domain.ErrNotFound for a row of another bank or tenant.
+//   - Unit and document tags must already be domain.NormalizeTags output; fact types must fit the call
+//     (Update: facts; UpsertObservation: observations; evidence: observation citing facts); self-links
+//     are rejected (all domain.ErrInvalidArgument).
+//   - UnitRepo.Restore needs Tx.Seq taken for the bank first (domain.ErrFailedPrecondition).
+//   - A label entity always resolves to its (bank, kind, label value) row, which Upsert then updates.
+//   - A ctx that ends while the InTx callback runs aborts the commit.
+//
+// LLM.Structured validates req.Schema (internal/jsonschema, the gateway's validator) and the scripted
+// output against it, exactly like the gateway: script replies that match the engine's schema.
 //
 // Search arms approximate Postgres closely enough for ranking tests:
 //   - SearchVector: exact cosine similarity.

@@ -27,7 +27,8 @@ const (
 	// token (a run of Unicode letters and digits) adds weight to one bucket chosen by the FNV-1a hash of
 	// the token modulo domain.EmbeddingDim, and the result is normalized. Texts with no shared tokens are
 	// (near) orthogonal; word order and punctuation don't matter. A text with no tokens falls back to its
-	// EmbedHash vector.
+	// EmbedHash vector. There is no stopword list: "the", "a", "is" count like any word, so two texts
+	// sharing only function words still get a positive cosine. Keep fixture texts distinct in content words.
 	EmbedSimilar
 )
 

@@ -24,10 +24,11 @@ type blobObject struct {
 // Put reads r to the end; when size >= 0 and the byte count differs from size it stores nothing and
 // returns an error wrapping domain.ErrInvalidArgument (size < 0 means unknown). Get of a missing key
 // returns an error wrapping domain.ErrNotFound; Delete of a missing key succeeds. Every method returns
-// ctx.Err() (wrapped) when ctx is already done.
+// ctx.Err() (wrapped) when ctx is already done, and the FailWith error while one is set.
 type Blob struct {
 	mu   sync.Mutex
 	objs map[string]blobObject
+	fail error
 }
 
 var _ port.Blob = (*Blob)(nil)
@@ -37,10 +38,31 @@ func NewBlob() *Blob {
 	return &Blob{objs: map[string]blobObject{}}
 }
 
+// FailWith makes every later call return an error wrapping err (errors.Is matches; use an error wrapping
+// domain.ErrUnavailable to mimic S3 being down) until FailWith(nil). Stored objects are kept.
+func (b *Blob) FailWith(err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.fail = err
+}
+
+// gate returns the error a call must fail with: a done ctx or the FailWith error.
+func (b *Blob) gate(ctx context.Context, op, key string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("fake blob %s %q: %w", op, key, err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.fail != nil {
+		return fmt.Errorf("fake blob %s %q: %w", op, key, b.fail)
+	}
+	return nil
+}
+
 // Put stores the bytes of r under key with contentType, replacing any existing object.
 func (b *Blob) Put(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("fake blob put %q: %w", key, err)
+	if err := b.gate(ctx, "put", key); err != nil {
+		return err
 	}
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -58,8 +80,8 @@ func (b *Blob) Put(ctx context.Context, key string, r io.Reader, size int64, con
 
 // Get returns a reader over a copy of the object under key.
 func (b *Blob) Get(ctx context.Context, key string) (io.ReadCloser, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("fake blob get %q: %w", key, err)
+	if err := b.gate(ctx, "get", key); err != nil {
+		return nil, err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -72,8 +94,8 @@ func (b *Blob) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 
 // Delete removes the object under key; a missing key is not an error.
 func (b *Blob) Delete(ctx context.Context, key string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("fake blob delete %q: %w", key, err)
+	if err := b.gate(ctx, "delete", key); err != nil {
+		return err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -83,8 +105,8 @@ func (b *Blob) Delete(ctx context.Context, key string) error {
 
 // DeletePrefix removes every object whose key starts with prefix and returns how many it removed.
 func (b *Blob) DeletePrefix(ctx context.Context, prefix string) (int, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, fmt.Errorf("fake blob delete prefix %q: %w", prefix, err)
+	if err := b.gate(ctx, "delete prefix", prefix); err != nil {
+		return 0, err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()

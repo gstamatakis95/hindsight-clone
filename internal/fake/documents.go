@@ -38,6 +38,9 @@ func (r docRepo) Upsert(_ context.Context, d domain.Document) error {
 	if _, ok := r.t.st.banks[d.Bank]; !ok {
 		return notFound("bank %s/%s", d.Bank.Tenant, d.Bank.Bank)
 	}
+	if err := checkTags(d.Tags); err != nil {
+		return err
+	}
 	k := docKey{d.Bank, d.ID}
 	row, ok := r.t.st.documents[k]
 	if !ok {
@@ -67,6 +70,9 @@ func (r docRepo) Complete(
 
 // SetTags replaces the document's tag set.
 func (r docRepo) SetTags(_ context.Context, b port.BankRef, id port.DocumentID, tags []string) error {
+	if err := checkTags(tags); err != nil {
+		return err
+	}
 	k := docKey{b, id}
 	row, ok := r.t.st.documents[k]
 	if !ok {
