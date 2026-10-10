@@ -21,6 +21,7 @@ func workerCases() []queueCase {
 		{"HeartbeatReportsLostJobs", testHeartbeatLostJobs},
 		{"ReclaimStale", testReclaimStale},
 		{"ReclaimMaxAttempts", testReclaimMaxAttempts},
+		{"ReclaimPastMaxFails", testReclaimPastMaxFails},
 		{"ReclaimSkipsTerminalAndPending", testReclaimSkips},
 		{"StaleWorkerFenced", testStaleWorkerFenced},
 		{"TerminalRowsFenced", testTerminalFenced},
@@ -121,38 +122,62 @@ func testReclaimStale(t *testing.T, q queueEnv) {
 }
 
 // testReclaimMaxAttempts: a retain_document job fails for good after MaxAttempts reclaims (with an
-// OPERATION_FAILED event); a consolidate job (unbounded) keeps coming back; a refresh_mental_model job
-// (HasFinalizer) returns to pending with Attempt == MaxAttempts for its finalizer instead of failing.
+// OPERATION_FAILED event); a consolidate job (unbounded) keeps coming back.
 func testReclaimMaxAttempts(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	retain := q.add(t, doc("1"))
 	cons := q.add(t, job(bankA, domain.OperationKindConsolidate, "consolidate", `{}`))
-	ref := q.add(t, refresh("a", `{"model_id":"a"}`))
 	before := bankSeq(t, q.s, bankA)
 	maxAttempts := domain.OperationKindRetainDocument.MaxAttempts()
-	if maxAttempts != domain.OperationKindRefreshMentalModel.MaxAttempts() || maxAttempts == 0 {
-		t.Fatalf("test assumes retain_document and refresh_mental_model share a bounded MaxAttempts")
+	if maxAttempts == 0 {
+		t.Fatalf("test assumes retain_document has a bounded MaxAttempts")
 	}
 	for round := range maxAttempts {
 		got := attemptsByID(q.claimAll(t))
-		for _, id := range []port.OperationID{retain, cons, ref} {
+		for _, id := range []port.OperationID{retain, cons} {
 			if a, ok := got[id]; !ok || a != round {
 				t.Fatalf("round %d: Claim = %v, want %s at attempt %d", round, got, id, round)
 			}
 		}
 		time.Sleep(staleSleep)
-		if n := q.reclaim(t); n != 3 {
-			t.Errorf("round %d: ReclaimStale touched %d rows, want 3", round, n)
+		if n := q.reclaim(t); n != 2 {
+			t.Errorf("round %d: ReclaimStale touched %d rows, want 2", round, n)
 		}
 	}
-	want := map[port.OperationID]int{cons: maxAttempts, ref: maxAttempts}
+	want := map[port.OperationID]int{cons: maxAttempts}
 	if got := attemptsByID(q.claimAll(t)); !maps.Equal(got, want) {
-		t.Errorf("Claim after %d reclaims = %v, want %v (consolidate and the refresh for its finalizer)",
-			maxAttempts, got, want)
+		t.Errorf("Claim after %d reclaims = %v, want %v (consolidate only)", maxAttempts, got, want)
 	}
 	q.wantStatus(t, "retain_document past max attempts", retain, domain.OperationStatusFailed)
 	q.wantAlive(t, "retain_document past max attempts", retain, false)
 	wantFailedEvent(t, q.s, before, retain)
+}
+
+// testReclaimPastMaxFails: a refresh_mental_model job whose worker keeps crashing becomes FAILED at max
+// attempts with exactly one OPERATION_FAILED event (no finalizer hand-back); a later reclaim leaves it alone
+// and a later refresh of the model is a new row, not a join.
+func testReclaimPastMaxFails(t *testing.T, q queueEnv) {
+	ensureBanks(t, q.s, bankA)
+	ref := q.add(t, refresh("a", `{"model_id":"a"}`))
+	before := bankSeq(t, q.s, bankA)
+	for round := range domain.OperationKindRefreshMentalModel.MaxAttempts() {
+		if got := q.claimOne(t, ref); got.Attempt != round {
+			t.Errorf("round %d: Attempt = %d", round, got.Attempt)
+		}
+		time.Sleep(staleSleep)
+		if n := q.reclaim(t); n != 1 {
+			t.Errorf("round %d: ReclaimStale touched %d rows, want 1", round, n)
+		}
+	}
+	q.wantStatus(t, "refresh past max attempts", ref, domain.OperationStatusFailed)
+	q.claimNone(t, "after the refresh failed for good")
+	if n := q.reclaim(t); n != 0 {
+		t.Errorf("ReclaimStale after the refresh failed touched %d rows, want 0", n)
+	}
+	wantFailedEvent(t, q.s, before, ref)
+	if id, joined := q.enqueue(t, refresh("a", `{"model_id":"a"}`)); joined || id == ref {
+		t.Errorf("refresh after the failed one = (%s, %v), want a new row", id, joined)
+	}
 }
 
 // testReclaimSkips: ReclaimStale never touches completed, failed or pending rows, however old.

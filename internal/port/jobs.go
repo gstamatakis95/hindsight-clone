@@ -59,6 +59,8 @@ type Job struct {
 	// Overrides are request overrides; nil = none. A job with overrides is never deduplicated in either
 	// direction (it neither joins a queued row nor is joined later), except refresh_mental_model, which
 	// always joins its model's queued refresh and is then upgraded (decision 012, R1).
+	// Self-continuations (consolidate, graph_maintenance, delete_bank re-enqueuing leftover work) use
+	// DedupePending.
 	Overrides *domain.BankConfig
 	// ParentID is the retain_batch parent; empty = none.
 	ParentID OperationID
@@ -67,7 +69,6 @@ type Job struct {
 	// Dedupe is None, Pending or PendingOrRunning, on (bank, kind, serial key).
 	Dedupe DedupePolicy
 	// Attempt counts earlier attempts that failed with a retry or were reclaimed; 0 on the first run.
-	// A job claimed with Attempt >= Kind.MaxAttempts() (only kinds with HasFinalizer) is due its finalizer.
 	Attempt int
 }
 
@@ -85,8 +86,8 @@ type OperationFilter struct {
 	PageToken string
 }
 
-// LostJobsError reports jobs a worker no longer holds: reclaimed, cancelled, finished or re-claimed by
-// another worker. Its Unwrap is domain.ErrConflict, so errors.Is(err, domain.ErrConflict) holds.
+// LostJobsError reports jobs whose handler must stop: cancel requested, reclaimed, finished or re-claimed
+// by another worker. Its Unwrap is domain.ErrConflict, so errors.Is(err, domain.ErrConflict) holds.
 type LostJobsError struct {
 	// IDs are the jobs the worker lost.
 	IDs []OperationID
@@ -113,16 +114,20 @@ func LostJobs(err error) []OperationID {
 // Everything it writes commits (or rolls back) with the caller's transaction.
 type Queue interface {
 	// Enqueue inserts j, or returns the matching joinable row (joined=true, row left unchanged) when
-	// j.Dedupe finds one. The adapter serializes dedupe Enqueues per (tenant, bank, kind, serial key) for
-	// the rest of the transaction (Postgres: pg_advisory_xact_lock), so concurrent enqueuers never both
+	// j.Dedupe finds one. Rows enqueued with DedupeNone or with overrides, and rows whose cancel was
+	// requested, are never joined. A refresh_mental_model job always dedupes as DedupePending (DedupeNone
+	// is treated as Pending). The adapter serializes dedupe Enqueues per (tenant, bank, kind, serial key)
+	// for the rest of the transaction (Postgres: pg_advisory_xact_lock), so concurrent enqueuers never both
 	// insert. A tombstoned bank returns domain.ErrBankDeleting (except for a delete_bank job); an unknown
 	// bank returns domain.ErrNotFound.
+	// Adapter obligations: take the advisory lock in its own statement before the lookup (keys in sorted
+	// order when one tx enqueues several, or retry on 40P01); lock a joined row FOR UPDATE so a claim can't
+	// land between the join and an Upgrade; take FOR KEY SHARE on the bank row.
 	Enqueue(ctx context.Context, j Job) (id OperationID, joined bool, err error)
 	// Upgrade merges a joiner's request into a PENDING job under the row lock. payload is a JSON object
-	// shallow-merged into the row's payload: a key present in payload replaces the row's value, except a
-	// boolean, which is OR-ed (a true flag such as force_full is never cleared); absent keys are kept (a
-	// nil payload keeps the whole payload). o
-	// non-nil replaces the overrides; nil keeps them. A row that is not PENDING returns
+	// shallow-merged into the row's payload: a key present in payload replaces the row's value, except
+	// force_full, which is OR-ed (never cleared); absent keys are kept (a nil payload keeps the whole
+	// payload). o non-nil replaces the overrides; nil keeps them. A row that is not PENDING returns
 	// domain.ErrFailedPrecondition; an unknown id returns domain.ErrNotFound.
 	Upgrade(ctx context.Context, id OperationID, payload json.RawMessage, o *domain.BankConfig) error
 	// Reschedule releases or parks a PENDING job by setting run_at = at. Any other status returns
@@ -135,14 +140,16 @@ type Queue interface {
 	Get(ctx context.Context, b BankRef, id OperationID) (domain.Operation, error)
 	// List pages the bank's operations, newest first, and returns the next page token ("" = last page).
 	List(ctx context.Context, b BankRef, f OperationFilter) ([]domain.Operation, string, error)
-	// Cancel cancels a PENDING or PROCESSING operation and returns it. A pending row is finished at once.
-	// A processing row becomes CANCELLED but keeps holding its serial key until its handler's terminal
-	// Complete or Fail (or ReclaimStale, if the worker died) finishes it; committed work stays. Other
-	// statuses return domain.ErrFailedPrecondition; an unknown id returns domain.ErrNotFound.
+	// Cancel cancels a PENDING or PROCESSING operation and returns it. A pending row becomes CANCELLED at
+	// once. On a processing row it only records the request (cancel_requested_at): the status stays
+	// PROCESSING, so the serial key stays held, Alive turns false and Heartbeat reports the job, and the
+	// handler's terminal Complete or Fail (or ReclaimStale, if the worker died) moves it to CANCELLED;
+	// committed work stays. Other statuses return domain.ErrFailedPrecondition; an unknown id returns
+	// domain.ErrNotFound.
 	Cancel(ctx context.Context, b BankRef, id OperationID) (domain.Operation, error)
-	// Retry resets a FAILED or finished CANCELLED operation to PENDING with run_at = now and returns it
-	// (attempt reset to 0, error and finished_at cleared). Other statuses, including a cancelled row whose
-	// handler has not finished, return domain.ErrFailedPrecondition; an unknown id returns
+	// Retry resets a FAILED or CANCELLED operation to PENDING with run_at = now and returns it (attempt
+	// reset to 0; error, finished_at and the cancel request cleared). Other statuses (including a
+	// cancel-requested PROCESSING row) return domain.ErrFailedPrecondition; an unknown id returns
 	// domain.ErrNotFound.
 	Retry(ctx context.Context, b BankRef, id OperationID) (domain.Operation, error)
 	// Prune deletes terminal, finished operations whose finished_at is before before and returns how many.
@@ -153,42 +160,46 @@ type Queue interface {
 // Claimer is the worker side; each call is its own short transaction.
 //
 // Fencing: Progress, Complete and Fail act only on a PROCESSING row; on any other status they change
-// nothing and return domain.ErrFailedPrecondition, with one exception: on a row cancelled while
-// processing, Complete and Fail finish it (set finished_at, releasing the serial key), keep it CANCELLED
-// and return domain.ErrCancelled. An unknown id (for example the delete_bank job whose final transaction
-// deleted its own row with the bank) returns domain.ErrNotFound, which the runner treats as done for
-// delete_bank. A worker that lost its job (reclaimed and re-claimed elsewhere) learns it from Heartbeat's
-// *LostJobsError and must stop the handler.
+// nothing and return domain.ErrFailedPrecondition. On a cancel-requested row, Complete and Fail move it to
+// CANCELLED instead (no event) and return domain.ErrCancelled. An unknown id (for example the delete_bank
+// job whose final transaction deleted its own row with the bank) returns domain.ErrNotFound, which the
+// runner treats as done for delete_bank. A worker that lost its job (reclaimed and re-claimed elsewhere)
+// learns it from Heartbeat's *LostJobsError and must stop the handler.
+//
+// Runner obligation: keep heartbeating an id until its handler returns, and on every exit (panic
+// included) defer Complete or Fail. The runner owns the attempt cap: at attempt+1 >= MaxAttempts it calls
+// Fail(nil); the Claimer never caps a Fail with retryAt.
 type Claimer interface {
 	// Claim takes up to n due jobs of kinds with FOR UPDATE SKIP LOCKED, skipping a job whose
-	// serial key has a PROCESSING row, a cancelled-but-unfinished row or an older due PENDING row, and
+	// serial key has a PROCESSING row or an older due PENDING row, and
 	// skipping deleting banks (except their delete_bank job). Claimed rows become PROCESSING with
 	// worker_id = worker and a fresh heartbeat; jobs come back oldest first. A lost race on the unique
 	// processing index is retried inside Claim and never surfaces as an error.
 	Claim(ctx context.Context, worker string, kinds []JobKind, n int) ([]Job, error)
-	// Heartbeat refreshes heartbeat_at on the given jobs held by worker: PROCESSING rows and rows cancelled
-	// while processing that are not finished yet (so a cancelled job keeps its serial key while its handler
-	// winds down). If any id is not PROCESSING under worker (cancelled, reclaimed, finished or re-claimed by
-	// another worker) it returns a *LostJobsError naming those ids, after refreshing the held ones; the
-	// runner stops their handlers.
+	// Heartbeat refreshes heartbeat_at on the given jobs still PROCESSING under worker (cancel-requested
+	// ones included, so their serial key stays held while the handler winds down). It returns a
+	// *LostJobsError naming every id whose cancel was requested or that worker no longer holds (reclaimed,
+	// finished or re-claimed elsewhere), after refreshing the rest; the runner stops those handlers.
 	Heartbeat(ctx context.Context, worker string, ids []OperationID) error
 	// Progress records the job's latest checkpoint (fenced: PROCESSING rows only).
 	Progress(ctx context.Context, id OperationID, p domain.Progress) error
-	// Alive reports whether the job should keep running: true only while it is PROCESSING and its bank is
-	// neither tombstoned nor gone (a delete_bank job stays alive). An unknown id is (false, nil).
+	// Alive reports whether the job should keep running: true only while it is PROCESSING without a cancel
+	// request and its bank is neither tombstoned nor gone (a delete_bank job stays alive). An unknown id is
+	// (false, nil).
 	Alive(ctx context.Context, id OperationID) (bool, error)
 	// Complete marks the job COMPLETED (and finished) with its result and per-slot usage (fenced).
 	Complete(ctx context.Context, id OperationID, result json.RawMessage, usage []Usage) error
 	// Fail records cause on the job (fenced). retryAt != nil returns it to PENDING with run_at = *retryAt
 	// and attempt+1; nil = terminal FAILED, which also appends an OPERATION_FAILED lifecycle event under a
-	// fresh bank change seq (skipped when the bank is tombstoned or gone). On a row cancelled while
-	// processing it only finishes the row (no event) and returns domain.ErrCancelled.
+	// fresh bank change seq (skipped when the bank is tombstoned or gone). A failed refresh_mental_model is
+	// paused and recorded as REFRESH_FAILED by an idempotent reconcile in RunMaintenance (WP-05 / WP-12),
+	// not by the Claimer.
 	Fail(ctx context.Context, id OperationID, cause error, retryAt *time.Time) error
 	// ReclaimStale handles PROCESSING jobs whose heartbeat is older than ttl. Below their kind's max
 	// attempts (domain.OperationKind.MaxAttempts; 0 = unbounded) they return to PENDING with attempt+1 and
-	// run_at unchanged. At attempt+1 >= max they fail like Fail(nil) (FAILED plus OPERATION_FAILED),
-	// except kinds with HasFinalizer, which return to PENDING with Attempt = max so the runner hands them
-	// to the kind's finalizer. Cancelled-but-unfinished rows with a stale heartbeat are finished. Terminal
-	// rows are never touched. It returns how many rows it changed.
+	// run_at unchanged. At attempt+1 >= max they become FAILED with exactly one OPERATION_FAILED event, as
+	// with Fail(nil); on a tombstoned or gone bank they still become FAILED, without the event, and the
+	// sweep never fails because of one bank. Stale cancel-requested rows become CANCELLED. Terminal rows
+	// are never touched. It returns how many rows it changed.
 	ReclaimStale(ctx context.Context, ttl time.Duration) (int, error)
 }

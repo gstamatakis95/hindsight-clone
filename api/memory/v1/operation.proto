@@ -23,8 +23,9 @@ service OperationService {
   rpc GetOperation(GetOperationRequest) returns (GetOperationResponse);
   // ListOperations pages through the bank's operations, optionally filtered by status and kind.
   rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
-  // CancelOperation cancels a PENDING or PROCESSING operation. Cooperative: handlers stop at their next
-  // checkpoint and committed work stays; workers never overwrite CANCELLED.
+  // CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
+  // A processing one stays PROCESSING with the cancel recorded (its serial key stays held) until its
+  // handler stops at the next checkpoint, then becomes CANCELLED; committed work stays.
   rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse);
   // RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
   // next_run_at = now. Other states are rejected.
@@ -110,7 +111,8 @@ message Operation {
   google.protobuf.Timestamp updated_at = 11;
   // When a parked job becomes claimable: backoff, debounce or refresh interval floor.
   google.protobuf.Timestamp next_run_at = 12;
-  // Claims so far; transient failures retry with backoff (60 s x attempt) up to the kind's limit.
+  // Earlier attempts that failed with a retry or were reclaimed (0 on the first run); transient failures
+  // retry with backoff (60 s x attempt) up to the kind's limit (consolidate: unbounded).
   int32 attempts = 13;
   // Worker liveness while PROCESSING; the runner heartbeats every 15 s.
   google.protobuf.Timestamp heartbeat_at = 14;
@@ -172,7 +174,7 @@ message CancelOperationResponse {
 message RetryOperationRequest {
   // Bank owning the operation.
   string bank_id = 1;
-  // Operation id; must be FAILED or CANCELLED.
+  // Operation id; must be FAILED or CANCELLED (a cancel-requested PROCESSING operation is refused).
   string operation_id = 2;
 }
 

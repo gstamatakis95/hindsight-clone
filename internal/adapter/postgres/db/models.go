@@ -265,27 +265,28 @@ type ObservationVersion struct {
 }
 
 type Operation struct {
-	ID          uuid.UUID
-	TenantID    string
-	BankID      string
-	Kind        string
-	Status      string
-	SerialKey   pgtype.Text
-	Payload     json.RawMessage
-	Overrides   json.RawMessage
-	Joinable    bool
-	ParentID    uuid.NullUUID
-	Attempts    int32
-	RunAt       time.Time
-	WorkerID    pgtype.Text
-	HeartbeatAt *time.Time
-	Progress    json.RawMessage
-	Usage       json.RawMessage
-	Result      json.RawMessage
-	Error       pgtype.Text
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	FinishedAt  *time.Time
+	ID                uuid.UUID
+	TenantID          string
+	BankID            string
+	Kind              string
+	Status            string
+	SerialKey         pgtype.Text
+	Payload           json.RawMessage
+	Overrides         json.RawMessage
+	Joinable          bool
+	ParentID          uuid.NullUUID
+	Attempts          int32
+	RunAt             time.Time
+	WorkerID          pgtype.Text
+	HeartbeatAt       *time.Time
+	Progress          json.RawMessage
+	Usage             json.RawMessage
+	Result            json.RawMessage
+	Error             pgtype.Text
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	FinishedAt        *time.Time
+	CancelRequestedAt *time.Time
 }
 
 type ParkedLink struct {

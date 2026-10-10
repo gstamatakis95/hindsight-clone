@@ -36,7 +36,7 @@ concurrency stay reliable on both a real Postgres and a fake. Several properties
   - Dedupe: eight concurrent `DedupePending` enqueuers of one key end with exactly one row (one insert, every
     caller gets its id).
   - Upgrade: two concurrent joiners each join and upgrade one row in their own transaction; both payload keys
-    survive and booleans are OR-ed. Goroutines never wait on each other inside a transaction, because the
+    survive and `force_full` is OR-ed. Goroutines never wait on each other inside a transaction, because the
     dedupe advisory lock serializes the joiners until commit.
 
   Stores must therefore serve at least two connections, and `Read()` must not block on an open `InTx`. While
@@ -82,21 +82,27 @@ concurrency stay reliable on both a real Postgres and a fake. Several properties
   - Graph-dirty and entity-maintenance queues are cleared to a baseline (`ClearDirty`, `PruneOrphans` of
     referenced entities) before the delete or archive under test, so it doesn't matter whether `Insert` or
     `Attach` also queue rows.
-  - `DeleteBatch` runs on a bank that is not tombstoned, so the follow-up reads (documents, models,
-    directives, chunks) do not depend on how repositories treat a deleting bank.
-  - `RecordObservationVersion` and `AppendAudit` have no read port yet; they are only checked to be accepted.
-  - `Retry` of a row cancelled while processing but not yet finished is not tested.
-- **Fencing and cancel assumptions** (review round 1, R3, R7, R8):
+  - `DeleteBatch` and `Delete` act only on a tombstoned bank (a live one is `ErrFailedPrecondition`), so
+    the post-delete reads (units, documents, chunks, entities, co-occurrences, links, evidence, graph_dirty,
+    entity_maintenance, models and their history, directives) run on a tombstoned bank and are assumed to
+    work there (reads do not check `deleting_at`). The deleted bank's archive is not observable: `Restore`
+    needs `Tx.Seq`, which a tombstoned bank refuses, so only the other tenant's surviving archive is checked.
+  - `RecordObservationVersion` and `AppendAudit` have no read port yet; they are only checked to be accepted
+    (and that `DeleteBatch` still reaches 0 with them present).
+- **Fencing and cancel assumptions** (review round 1, R3, R7; review round 3, R8'):
   - `Progress`, `Complete` and `Fail` on a row that is not PROCESSING return `ErrFailedPrecondition` and change
     nothing. This covers a reclaimed row whose stale worker reports late, a completed row, and a row cancelled
-    while pending (finished at once). An unknown id returns `ErrNotFound`. The only exception is a row
-    cancelled while processing and not yet finished: `Complete` and `Fail` finish it, keep it CANCELLED and
-    return `ErrCancelled`.
+    while pending (CANCELLED at once). An unknown id returns `ErrNotFound`. The only exception is a
+    cancel-requested PROCESSING row: `Complete` and `Fail` move it to CANCELLED and return `ErrCancelled`.
   - `Reschedule` and `Upgrade` act on PENDING rows only.
-  - A row cancelled while processing keeps its serial key until it is finished. `Heartbeat` keeps such a row
-    fresh but still reports it in `*LostJobsError`. `ReclaimStale` finishes the row once its heartbeat is
-    stale. `Alive` is true only for PROCESSING rows, so a parked, retried or reclaimed pending row is not
-    alive.
+  - Cancel on a PROCESSING row only records the request: `Get` still shows PROCESSING, the serial key stays
+    held, a `DedupePendingOrRunning` enqueue no longer joins it, and `Retry` is `ErrFailedPrecondition`.
+    `Heartbeat` keeps such a row fresh but reports it in `*LostJobsError`; `ReclaimStale` moves it to
+    CANCELLED once its heartbeat is stale. `Alive` is true only for PROCESSING rows without a cancel request,
+    so a parked, retried or reclaimed pending row is not alive either.
+  - There is no finalizer: `ReclaimStale` at max attempts fails every capped kind (refresh_mental_model
+    included) with exactly one `OPERATION_FAILED` event, and a later refresh enqueue inserts a new row.
+    A refresh_mental_model enqueue always dedupes as `DedupePending`, even when asked for `DedupeNone`.
 - **Placeholders name the pending work package.** `porttest_test.go` has one test per (suite, implementation)
   pair. Each only calls `t.Skip`, naming the WP that wires it:
   - WP-01: Postgres adapter, testcontainers.

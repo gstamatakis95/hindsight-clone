@@ -138,9 +138,9 @@ message RecallRequest {
   // Boolean tag filter, top-level groups AND-ed; mutually exclusive with tags (both set =
   // INVALID_ARGUMENT).
   repeated TagGroup tag_groups = 6;
-  // Size class: retriever caps (100 / 300 / 1000) and the token budget when max_tokens is unset.
+  // Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
   Budget budget = 7;
-  // Token budget for packed results; 0 = derived from budget.
+  // Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
   int32 max_tokens = 8;
   // Reference time for relative expressions and recency; unset = now.
   google.protobuf.Timestamp query_time = 9;

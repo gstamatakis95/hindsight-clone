@@ -2,6 +2,7 @@ package porttest
 
 import (
 	"encoding/json"
+	"errors"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -15,10 +16,14 @@ func curationCases() []storeCase {
 	return []storeCase{
 		{"UnitsUpdate", testUnitUpdate},
 		{"UnitsSetDocumentTags", testSetDocumentTags},
+		{"UpdateAndRetagResetConsolidation", testResetConsolidation},
 		{"DirectivesUpsertListDelete", testDirectives},
 		{"LinksCountDirtyClearDirty", testLinksDirty},
 		{"EntitiesPendingMaintenancePruneOrphans", testEntityMaintenance},
+		{"RederiveDetachAndDeleteLinks", testRederiveDetach},
 		{"BanksDeleteBatch", testDeleteBatch},
+		{"DeleteRefusesLiveBank", testDeleteRefusesLive},
+		{"DeleteBatchCoversAllTables", testDeleteBatchAllTables},
 		{"EventsPrune", testEventsPrune},
 	}
 }
@@ -104,6 +109,42 @@ func testSetDocumentTags(t *testing.T, s port.Store) {
 				want.tags, want.seq)
 		}
 	}
+}
+
+// testResetConsolidation: Update and SetDocumentTags clear consolidated_at and consolidation_failed_at, so the
+// edited and the retagged fact are back in Unconsolidated.
+func testResetConsolidation(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	upsertDocs(t, s, bankA, "doc-1")
+	u, v := fact(bankA, "edited"), fact(bankA, "retagged")
+	u.CreatedAt, v.CreatedAt, v.DocumentID = day(1), day(2), "doc-1"
+	insertUnits(t, s, u, v)
+	inTx(t, s, func(tx port.Tx) error { // both stamps on both units, so each reset must clear both
+		if err := tx.Units().MarkConsolidated(t.Context(), []port.UnitID{u.ID, v.ID}, day(3)); err != nil {
+			return err
+		}
+		return tx.Units().MarkConsolidationFailed(t.Context(), []port.UnitID{u.ID, v.ID}, day(3))
+	})
+	wantSeq(t, "Unconsolidated after the marks", unitIDs(unconsolidated(t, s, bankA, nil, 10)), nil)
+	u.Text = "edited again"
+	inTx(t, s, func(tx port.Tx) error {
+		var err error
+		if u.Seq, err = tx.Seq(t.Context(), bankA); err != nil {
+			return err
+		}
+		return tx.Units().Update(t.Context(), u)
+	})
+	wantSeq(t, "Unconsolidated after Update", unitIDs(unconsolidated(t, s, bankA, nil, 10)), []port.UnitID{u.ID})
+	inTx(t, s, func(tx port.Tx) error {
+		seq, err := tx.Seq(t.Context(), bankA)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", []string{"x"}, seq)
+		return err
+	})
+	wantSeq(t, "Unconsolidated after SetDocumentTags", unitIDs(unconsolidated(t, s, bankA, nil, 10)),
+		[]port.UnitID{u.ID, v.ID})
 }
 
 // ---------- DirectiveRepo ----------
@@ -354,6 +395,46 @@ func testEntityMaintenance(t *testing.T, s port.Store) {
 	}
 }
 
+// testRederiveDetach: Detach removes a unit's entity rows and queues its entities, so PruneOrphans deletes the
+// one only it referenced; DeleteForUnit removes the unit's links of the given kinds in either direction and
+// keeps the others.
+func testRederiveDetach(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	u, other, partner := fact(bankA, "u"), fact(bankA, "other"), fact(bankA, "partner")
+	insertUnits(t, s, u, other, partner)
+	only := upsertEntity(t, s, domain.Entity{Bank: bankA, CanonicalName: "Zanzibar Expedition", Kind: "event"})
+	shared := upsertEntity(t, s, domain.Entity{Bank: bankA, CanonicalName: "Quentin Blake", Kind: "person"})
+	inTx(t, s, func(tx port.Tx) error {
+		if err := tx.Entities().Attach(t.Context(), u.ID, []port.EntityID{only, shared}); err != nil {
+			return err
+		}
+		return tx.Entities().Attach(t.Context(), other.ID, []port.EntityID{shared})
+	})
+	pruneOrphans(t, s, only, shared) // a baseline whatever Attach queued
+	insertLinks(t, s, link(bankA, u.ID, partner.ID, domain.LinkSemantic, 0.9),
+		link(bankA, partner.ID, u.ID, domain.LinkSemantic, 0.8), link(bankA, u.ID, partner.ID, domain.LinkTemporal, 0.7))
+	var n int
+	inTx(t, s, func(tx port.Tx) error {
+		if err := tx.Entities().Detach(t.Context(), u.ID); err != nil {
+			return err
+		}
+		var err error
+		n, err = tx.Links().DeleteForUnit(t.Context(), u.ID, []domain.LinkKind{domain.LinkSemantic})
+		return err
+	})
+	if n != 2 {
+		t.Errorf("DeleteForUnit(semantic) = %d, want 2 (both directions)", n)
+	}
+	wantSet(t, "PendingMaintenance after Detach", pendingMaintenance(t, s, 10), []port.EntityID{only, shared})
+	if n := pruneOrphans(t, s, only, shared); n != 1 {
+		t.Errorf("PruneOrphans after Detach = %d, want 1 (the entity only the detached unit referenced)", n)
+	}
+	if sem, tmp := linkCount(t, s, u.ID, domain.LinkSemantic), linkCount(t, s, u.ID, domain.LinkTemporal); sem != 0 ||
+		tmp != 1 {
+		t.Errorf("links of u after DeleteForUnit(semantic) = %d semantic, %d temporal; want 0, 1", sem, tmp)
+	}
+}
+
 // ---------- BankRepo.DeleteBatch and EventRepo.Prune ----------
 
 // fillBank writes one of each content row DeleteBatch removes into bank b: a document with a chunk, two
@@ -413,12 +494,13 @@ func deleteBatches(t *testing.T, s port.Store, limit int) int {
 	return total
 }
 
-// testDeleteBatch: DeleteBatch removes a bank's content in batches until it returns 0, leaving the bank row
-// and its events; another bank's content stays.
+// testDeleteBatch: DeleteBatch removes a tombstoned bank's content in batches until it returns 0, leaving the
+// bank row and its events; another bank's content stays.
 func testDeleteBatch(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA, bankB)
 	ids := fillBank(t, s, bankA)
 	otherIDs := fillBank(t, s, bankB)
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().MarkDeleting(t.Context(), bankA, day(1)) })
 	if total := deleteBatches(t, s, 3); total < len(ids) {
 		t.Errorf("DeleteBatch deleted %d rows in total, want at least the %d units", total, len(ids))
 	}
@@ -438,6 +520,180 @@ func testDeleteBatch(t *testing.T, s port.Store) {
 	}
 	wantSeq(t, "Events after DeleteBatch (kept)", eventSubjects(listEvents(t, s, bankA, 0, 10)), []string{"event"})
 	wantSeq(t, "bank B units after bank A's DeleteBatch", unitIDs(getUnits(t, s, bankB, otherIDs...)), otherIDs)
+}
+
+// testDeleteRefusesLive: DeleteBatch and Delete of a bank that is not tombstoned are ErrFailedPrecondition
+// and delete nothing.
+func testDeleteRefusesLive(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	ids := fillBank(t, s, bankA)
+	err := txErr(t, s, func(tx port.Tx) error {
+		_, err := tx.Banks().DeleteBatch(t.Context(), bankA, 100)
+		return err
+	})
+	wantErrIs(t, "DeleteBatch(live bank)", err, domain.ErrFailedPrecondition)
+	err = txErr(t, s, func(tx port.Tx) error { return tx.Banks().Delete(t.Context(), bankA) })
+	wantErrIs(t, "Delete(live bank)", err, domain.ErrFailedPrecondition)
+	mustBank(t, s, bankA)
+	wantSeq(t, "units after the refused deletes", unitIDs(getUnits(t, s, bankA, ids...)), ids)
+	if _, err := getDocument(t, s, bankA, "doc-1"); err != nil {
+		t.Errorf("Documents().Get after the refused deletes: %v", err)
+	}
+}
+
+// filledBank is what fillAllTables wrote: the live units fillBank wrote, the archived unit, and two entities
+// that co-occur on the first unit.
+type filledBank struct {
+	units    []port.UnitID
+	archived port.UnitID
+	ents     [2]port.EntityID
+}
+
+// fillAllTables writes fillBank's rows into bank b plus an archived unit, a deleted document's unit (queueing
+// graph_dirty and entity_maintenance rows), co-occurring entities, an observation version, an audit row and
+// a mental-model history entry, so every bank-keyed table a port can reach holds a row.
+func fillAllTables(t *testing.T, s port.Store, b port.BankRef) filledBank {
+	t.Helper()
+	f := filledBank{units: fillBank(t, s, b)}
+	upsertDocs(t, s, b, "doc-2")
+	gone, arch := fact(b, "gone"), fact(b, "archived")
+	gone.DocumentID, f.archived = "doc-2", arch.ID
+	insertUnits(t, s, gone, arch)
+	f.ents[0] = upsertEntity(t, s, domain.Entity{Bank: b, CanonicalName: "Beatrix Potter", Kind: "person"})
+	f.ents[1] = upsertEntity(t, s, domain.Entity{Bank: b, CanonicalName: "Cyrus Vance", Kind: "person"})
+	inTx(t, s, func(tx port.Tx) error {
+		ctx, ents, units := t.Context(), tx.Entities(), tx.Units()
+		if err := ents.Attach(ctx, f.units[0], f.ents[:]); err != nil {
+			return err
+		}
+		if err := ents.Attach(ctx, gone.ID, f.ents[:1]); err != nil {
+			return err
+		}
+		if err := ents.Attach(ctx, arch.ID, f.ents[1:]); err != nil {
+			return err
+		}
+		ls := []domain.Link{link(b, gone.ID, f.units[1], domain.LinkSemantic, 1), link(b, f.units[1], arch.ID,
+			domain.LinkCausal, 1)}
+		if err := tx.Links().Insert(ctx, ls); err != nil {
+			return err
+		}
+		v := domain.ObservationVersion{Version: 1, Text: "obs", SourceIDs: f.units[:1], At: day(1)}
+		if err := units.RecordObservationVersion(ctx, b, f.units[2], v); err != nil {
+			return err
+		}
+		a := domain.AuditEntry{Bank: b, UnitID: f.units[0], Action: domain.CurationEdit, Reason: "r", At: day(1)}
+		if err := units.AppendAudit(ctx, a); err != nil {
+			return err
+		}
+		return tx.MentalModels().AppendHistory(ctx, b, "model", historyEntry(domain.HistoryKindVersion, 1), 0)
+	})
+	inTx(t, s, func(tx port.Tx) error {
+		if _, err := tx.Seq(t.Context(), b); err != nil {
+			return err
+		}
+		if _, err := tx.Units().DeleteByDocument(t.Context(), b, "doc-2"); err != nil {
+			return err
+		}
+		return tx.Units().Archive(t.Context(), b, arch.ID, "wrong fact")
+	})
+	return f
+}
+
+// notFoundZero maps a domain.ErrNotFound read to a count of 0.
+func notFoundZero(n int, err error) (int, error) {
+	if errors.Is(err, domain.ErrNotFound) {
+		return 0, nil
+	}
+	return n, err
+}
+
+// boolCount is 1 for true and 0 for false.
+func boolCount(ok bool) int {
+	if ok {
+		return 1
+	}
+	return 0
+}
+
+// bankCounts reads, table by table, how many of fillAllTables' rows bank b still has (as far as the read
+// ports can see them; the archive, observation versions and audit rows have no read port).
+func bankCounts(t *testing.T, s port.Store, b port.BankRef, f filledBank) map[string]int {
+	t.Helper()
+	ctx := t.Context()
+	reads := map[string]func(tx port.Tx) (int, error){
+		"units": func(port.Tx) (int, error) { us, err := s.Read().GetUnits(ctx, b, f.units); return len(us), err },
+		"documents": func(tx port.Tx) (int, error) {
+			_, err := tx.Documents().Get(ctx, b, "doc-1")
+			return notFoundZero(1, err)
+		},
+		"chunks": func(tx port.Tx) (int, error) { m, err := tx.Chunks().Committed(ctx, b, "doc-1"); return len(m), err },
+		"entities": func(tx port.Tx) (int, error) {
+			cs, err := tx.Entities().Candidates(ctx, b, "Beatrix Potter", 5)
+			return len(cs), err
+		},
+		"entity_cooccurrences": func(tx port.Tx) (int, error) {
+			return tx.Entities().Cooccurrence(ctx, b, f.ents[0], f.ents[1:])
+		},
+		"memory_links": func(tx port.Tx) (int, error) { return tx.Links().Count(ctx, f.units[0], domain.LinkSemantic) },
+		"observation_evidence": func(tx port.Tx) (int, error) {
+			ok, err := tx.Evidence().Cites(ctx, domain.NewScopeKey(b, nil), f.units[0])
+			return boolCount(ok), err
+		},
+		"graph_dirty": func(tx port.Tx) (int, error) { ids, err := tx.Links().Dirty(ctx, b, 10); return len(ids), err },
+		"entity_maintenance": func(tx port.Tx) (int, error) {
+			ids, err := tx.Entities().PendingMaintenance(ctx, b, 10)
+			return len(ids), err
+		},
+		"mental_models": func(tx port.Tx) (int, error) {
+			_, err := tx.MentalModels().Get(ctx, b, "model")
+			return notFoundZero(1, err)
+		},
+		"mental_model_history": func(tx port.Tx) (int, error) {
+			es, err := tx.MentalModels().History(ctx, b, "model", domain.HistoryKindUnspecified, 10)
+			return notFoundZero(len(es), err)
+		},
+		"directives": func(tx port.Tx) (int, error) { ds, err := tx.Directives().List(ctx, b, false); return len(ds), err },
+	}
+	out := map[string]int{}
+	for name, read := range reads {
+		inTx(t, s, func(tx port.Tx) error {
+			var err error
+			out[name], err = read(tx)
+			return err
+		})
+	}
+	return out
+}
+
+// testDeleteBatchAllTables: DeleteBatch empties every bank-keyed table of the tombstoned bank (as far as the
+// read ports see), keeping the bank row and its events, while the same bank id under another tenant (not
+// tombstoned) keeps every row, its archive included.
+func testDeleteBatchAllTables(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA, bankOtherTenant)
+	mine := fillAllTables(t, s, bankA)
+	theirs := fillAllTables(t, s, bankOtherTenant)
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().MarkDeleting(t.Context(), bankA, day(1)) })
+	deleteBatches(t, s, 5)
+	for table, n := range bankCounts(t, s, bankA, mine) {
+		if n != 0 {
+			t.Errorf("%s: %d rows left in the tombstoned bank after DeleteBatch, want 0", table, n)
+		}
+	}
+	for table, n := range bankCounts(t, s, bankOtherTenant, theirs) {
+		if n == 0 {
+			t.Errorf("%s: the other tenant's rows are gone after bank A's DeleteBatch", table)
+		}
+	}
+	mustBank(t, s, bankA)
+	wantSeq(t, "events after DeleteBatch (kept)", eventSubjects(listEvents(t, s, bankA, 0, 10)), []string{"event"})
+	inTx(t, s, func(tx port.Tx) error {
+		if _, err := tx.Seq(t.Context(), bankOtherTenant); err != nil {
+			return err
+		}
+		return tx.Units().Restore(t.Context(), bankOtherTenant, theirs.archived)
+	})
+	wantSeq(t, "the other tenant's archived unit after Restore",
+		unitIDs(getUnits(t, s, bankOtherTenant, theirs.archived)), []port.UnitID{theirs.archived})
 }
 
 // pruneEvents runs EventRepo.Prune(before) and returns how many it deleted.

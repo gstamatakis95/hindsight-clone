@@ -1,9 +1,11 @@
-# 012 — Job, event and config rulings from review round 1
+# 012 — Job, event and config rulings from review rounds 1 and 2
 
 ## Context
 Review round 1 of WP-00 found places where the spec is ambiguous or self-contradictory: the queue
 semantics, event paging, model-binding merge and tag filters. The orchestrator ruled on each one
-(orchestrator ruling, review round 1). This note records how the contracts implement those rulings.
+(orchestrator ruling, review round 1). Review round 2 replaced R8 and R10 with R8' and R10' and
+added H3/H4 and a few contract fixes (orchestrator ruling, review round 2). This note records how
+the contracts implement those rulings.
 The port doc comments in `internal/port/jobs.go` and `repos.go` are normative. The porttest suites
 assert each rule.
 
@@ -51,32 +53,35 @@ assert each rule.
   - an empty any_of / or is false;
   - a malformed node matches nothing.
 
-**R6 — Event paging**
+**R6 — Event paging** (amended by H4, review round 2)
 - `EventRepo.List` and `ListEvents` never split a seq group, which is all the events of one transaction.
   The limit is soft: the page is extended to finish its last seq.
-- `last_seq` is the highest seq in the page, or the request's `after_seq` when the page is empty. It is
-  never 0 unless `after_seq` was 0.
+- `EventRepo.List` takes the `types` filter itself and returns `lastSeq`: the highest seq scanned,
+  filtered-out events included, and never below `after_seq`. A filter that matches nothing still
+  advances the poll.
 
 **R7 — Worker fencing, without changing the spec's signatures**
 - `Progress`, `Complete` and `Fail` act only on a PROCESSING row. On any other status they change
-  nothing and return `ErrFailedPrecondition`. The one exception is R8's cancelled row.
+  nothing and return `ErrFailedPrecondition`. The one exception is R8's cancel-requested row.
 - `Heartbeat` refreshes the jobs the worker still holds. It returns `*port.LostJobsError`, which wraps
   `ErrConflict`, naming the jobs it lost; the runner stops those handlers.
-- `Alive` is true only while the row is PROCESSING and its bank is alive.
+- `Alive` is true only while the row is PROCESSING without a cancel request and its bank is alive.
 - **Known limit:** a worker whose job was reclaimed *and* re-claimed by another worker is fenced only
   through Heartbeat. Complete and Fail carry no worker id, so a write inside that window is possible.
   Closing the window needs a worker or attempt token in the signatures, which would be a spec change.
 
-**R8 — Cancelling a PROCESSING job keeps its serial key**
-- `Queue.Cancel` on a processing row sets CANCELLED with `finished_at` NULL. The handler's terminal
-  `Complete` or `Fail` sets `finished_at`, keeps the row CANCELLED and returns `ErrCancelled`.
-  `ReclaimStale` finishes stale cancelled rows.
-- While the handler winds down, `Heartbeat` keeps refreshing the cancelled row, so the key stays held for
-  as long as the worker lives. It also reports the row in `*LostJobsError`, so the runner cancels the
-  handler's context. Only a dead worker's cancelled row goes stale, and `ReclaimStale` then finishes it.
-- A pending row is finished at once.
-- The claim's NOT EXISTS treats `status = 'cancelled' AND finished_at IS NULL` like PROCESSING. The full
-  amended claim SQL is in decision 004.
+**R8' — Cancelling a PROCESSING job keeps its serial key** (replaces R8, review round 2)
+- `Queue.Cancel` on a processing row records `cancel_requested_at` and sets `joinable = false`. The
+  status stays PROCESSING, so the spec's claim SQL and unique processing index keep holding the serial
+  key unchanged.
+- `Alive` turns false, and `Heartbeat` keeps refreshing the row but names it in `*LostJobsError`. The
+  handler stops at its next checkpoint.
+- The handler's terminal `Complete` or `Fail` moves the row to CANCELLED (no event) and returns
+  `ErrCancelled`. `ReclaimStale` moves a stale cancel-requested row to CANCELLED.
+- A pending row becomes CANCELLED at once. `Retry` refuses every non-terminal row, a cancel-requested
+  one included.
+- Runner obligation: keep heartbeating an id until its handler returns, and on every exit (panic
+  included) defer Complete or Fail.
 
 **R9 — Tombstoned banks**
 - `Queue.Enqueue` returns `ErrBankDeleting` except for `delete_bank`, and `Tx.Seq` already refuses the
@@ -86,13 +91,34 @@ assert each rule.
   the bank row with its remaining events and operations (including the delete_bank row itself; the
   runner treats `ErrNotFound` from its Complete as done). A recreated bank therefore starts clean.
 
-**R10 — Terminal failures**
-- `Fail(nil)` and `ReclaimStale` past max attempts write FAILED and append an OPERATION_FAILED event
-  under a fresh `Tx.Seq`. The event is skipped when the bank is tombstoned or gone.
-- Refresh bookkeeping (pause, REFRESH_FAILED history) belongs to the handler. Kinds with
-  `domain.OperationKind.HasFinalizer()` (only `refresh_mental_model`) are not failed by `ReclaimStale`.
-  They return to PENDING with `Attempt = MaxAttempts`, and the runner hands a job claimed at that
-  attempt to the kind's finalizer. The finalizer writes its bookkeeping and calls `Fail(nil)`.
+**R10' — Terminal failures** (replaces R10, review round 2; the finalizer is gone)
+- The runner owns the attempt cap: at attempt+1 >= `MaxAttempts` it calls `Fail(nil)`. The Claimer never
+  caps a `Fail` with retryAt. Consolidate keeps its unbounded, capped-backoff retry (SPEC 1950).
+- `Fail(nil)` writes FAILED and appends one OPERATION_FAILED event under a fresh `Tx.Seq`.
+- `ReclaimStale` past max attempts does the same: FAILED with exactly one event. On a tombstoned or gone
+  bank the row still becomes FAILED, without the event, and the sweep never fails because of one bank.
+- Refresh pause and REFRESH_FAILED history (SPEC 2003) come from an idempotent reconcile in
+  `RunMaintenance` (WP-05 / WP-12). It finds models whose latest refresh operation is FAILED and that
+  are not yet paused or recorded. The Claimer never touches mental-model tables.
+
+**Other round-2 fixes**
+- **H3.** `BankRepo.DeleteBatch` and `Delete` return `ErrFailedPrecondition` unless `deleting_at` is
+  set. `DeleteBatch`'s doc lists every bank-keyed table. The deleter re-checks the tombstone before
+  `Blob.DeletePrefix`.
+- **Refresh dedupe.** A refresh_mental_model Enqueue with `DedupeNone` is treated as `DedupePending`.
+- **Self-continuations** (consolidate, graph_maintenance and delete_bank re-enqueuing leftover work)
+  use `DedupePending`.
+- **Rederive support.** `UnitRepo.Update` and `SetDocumentTags` clear `consolidated_at` and
+  `consolidation_failed_at`; the old observations go through `EvidenceRepo.DeleteCiting`.
+  `LinkRepo.DeleteForUnit` and `EntityRepo.Detach` let rederive rebuild links and entities.
+- **Restore** skips snapshot entities and link partners that no longer exist, and stamps the
+  transaction's seq.
+- **Adapter obligations** are one-line doc notes and become WP-01 acceptance items:
+  - InTx runs at READ COMMITTED.
+  - The dedupe advisory lock is taken in its own statement before the lookup, with keys in sorted
+    order when one tx enqueues several (or a retry on 40P01).
+  - A joined row is locked FOR UPDATE.
+  - The bank row is locked FOR KEY SHARE on Enqueue.
 
 **Write-side ports added now** because the spec clearly requires them (decision 005 lists the rest):
 
@@ -100,8 +126,8 @@ assert each rule.
 |---|---|
 | `Tx.Directives()` / `DirectiveRepo` | Directive RPCs |
 | `UnitRepo` | `Update` (curation edit, embedding cleared), `SetDocumentTags` (retag, SPEC 1923), `AppendAudit` (SPEC 1963), `RecordObservationVersion` (SPEC 1971) |
-| `EntityRepo` | `PendingMaintenance`, `PruneOrphans` (SPEC 1925) |
-| `LinkRepo` | `Count`, `Dirty`, `ClearDirty` (SPEC 1925) |
+| `EntityRepo` | `PendingMaintenance`, `PruneOrphans` (SPEC 1925), `Detach` (round 2) |
+| `LinkRepo` | `Count`, `Dirty`, `ClearDirty` (SPEC 1925), `DeleteForUnit` (round 2) |
 | `BankRepo` | `DeleteBatch` (SPEC 1926) |
 | `Queue` | `Get`, `List`, `Cancel`, `Retry`, `Prune` (OperationService, SPEC 1845, 2010-2015) |
 | `EventRepo` | `Prune` |

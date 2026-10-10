@@ -43,8 +43,13 @@ comments say the same thing.
     default, not an inherited value (R4).
   - tags and tag_groups are mutually exclusive on Recall and Reflect. Only RefreshTrigger /
     ResolvedScope tag_groups override a model's tags (R5).
-  - ListEvents' limit is soft and never splits a seq group. `last_seq` is the highest returned seq, or
-    the request's after_seq when the page is empty (R6).
+  - ListEvents' limit is soft and never splits a seq group. `last_seq` is the highest seq scanned,
+    filtered-out events included, and never below after_seq (R6 as amended by H4, round 2).
+  - `Operation.attempts` counts earlier attempts that failed with a retry or were reclaimed (0 on the
+    first run). CancelOperation on a processing operation records the request; it becomes CANCELLED
+    when its handler stops (R8', round 2).
+  - `RecallRequest.budget` unset means BUDGET_MID; `max_tokens` = 0 means the server's default packing
+    budget. The budget only sets candidate caps, never the token budget (round 2).
   - Unset `TagsMatch` behaves as ANY unless a field documents another default (TagLeaf and
     ListDocuments: ANY_STRICT; RefreshTrigger on a tagged model: ALL_STRICT).
   - Every `overrides` comment lists exactly the reach in SPEC 898-906; other fields are

@@ -17,11 +17,15 @@ type UnitRepo interface {
 	UpsertObservation(ctx context.Context, o domain.Unit) error
 	// RecordObservationVersion appends one observation_versions row (written on every create and update).
 	RecordObservationVersion(ctx context.Context, b BankRef, obs UnitID, v domain.ObservationVersion) error
-	// Update replaces a live fact's curated fields (text, context, occurred dates, fact type, edited_at,
-	// seq) and its embedding: a nil Embedding clears it, so the unit leaves semantic search until
-	// rederive sets it again. Unknown or archived ids return domain.ErrNotFound.
+	// Update replaces a live fact's curated fields (text, context, occurred dates, timeless, fact type,
+	// edited_at, seq) and its embedding: a nil Embedding clears it, so the unit leaves semantic search until
+	// rederive sets it again. It also clears consolidated_at and consolidation_failed_at so the unit is
+	// consolidated again (its old observations are removed separately with EvidenceRepo.DeleteCiting).
+	// Unknown or archived ids return domain.ErrNotFound.
 	Update(ctx context.Context, u domain.Unit) error
-	// SetDocumentTags rewrites the tags (and seq) of every live unit of a document and returns their ids.
+	// SetDocumentTags rewrites the tags (and seq) of every live unit of a document, clears their
+	// consolidated_at and consolidation_failed_at (callers delete the old observations with
+	// EvidenceRepo.DeleteCiting), and returns their ids.
 	SetDocumentTags(ctx context.Context, b BankRef, doc DocumentID, tags []string, seq int64) ([]UnitID, error)
 	// AppendAudit writes one memory_audit row.
 	AppendAudit(ctx context.Context, a domain.AuditEntry) error
@@ -40,9 +44,10 @@ type UnitRepo interface {
 	// Nothing references the archive by foreign key; the unit's links and entity rows are deleted, its
 	// link neighbours go to graph_dirty and its entities to entity_maintenance.
 	Archive(ctx context.Context, b BankRef, id UnitID, reason string) error
-	// Restore moves an archived unit back and reattaches its entities and causal links from the snapshot
-	// (links whose other unit is gone are dropped). The embedding stays empty until rederive recomputes it.
-	// An id that is not archived returns domain.ErrNotFound.
+	// Restore moves an archived unit back and reattaches its entities and causal links from the snapshot;
+	// snapshot entities and link partners that no longer exist are skipped. The restored unit carries the
+	// transaction's change seq (the caller calls Tx.Seq first). The embedding stays empty until rederive
+	// recomputes it. An id that is not archived returns domain.ErrNotFound.
 	Restore(ctx context.Context, b BankRef, id UnitID) error
 }
 
@@ -80,6 +85,9 @@ type EntityRepo interface {
 	Attach(ctx context.Context, unit UnitID, ents []EntityID) error
 	// PendingMaintenance returns up to limit entity ids queued in entity_maintenance for b.
 	PendingMaintenance(ctx context.Context, b BankRef, limit int) ([]EntityID, error)
+	// Detach removes every unit_entities row of unit (rederive re-resolves them) and queues the detached
+	// entities in entity_maintenance. Co-occurrence counts are not decremented.
+	Detach(ctx context.Context, unit UnitID) error
 	// PruneOrphans deletes those of ids that no live unit references (with their co-occurrences), removes
 	// all of ids from entity_maintenance and returns how many entities it deleted.
 	PruneOrphans(ctx context.Context, b BankRef, ids []EntityID) (int, error)
@@ -89,6 +97,9 @@ type EntityRepo interface {
 type LinkRepo interface {
 	// Insert stores links; an existing (from, to, kind) edge is kept with the new weight.
 	Insert(ctx context.Context, ls []domain.Link) error
+	// DeleteForUnit removes the links of the given kinds (empty = all) touching unit in either direction,
+	// so rederive can rebuild them, and returns how many it removed.
+	DeleteForUnit(ctx context.Context, unit UnitID, kinds []domain.LinkKind) (int, error)
 	// Count returns how many links of kind touch unit (either direction), for the per-unit caps.
 	Count(ctx context.Context, unit UnitID, kind domain.LinkKind) (int, error)
 	// Dirty returns up to limit live units queued in graph_dirty for b, oldest first.
@@ -112,10 +123,13 @@ type EvidenceRepo interface {
 type EventRepo interface {
 	// Append stores e; e.Seq must be the tx's change seq (from Tx.Seq).
 	Append(ctx context.Context, e domain.LifecycleEvent) error
-	// List returns events of the bank with seq > afterSeq in seq order. The limit is soft: a page never
-	// splits a seq group (one transaction's events), so it ends with every event of its last seq. The
-	// next poll passes the highest returned seq (or the same afterSeq when the page is empty).
-	List(ctx context.Context, b BankRef, afterSeq int64, limit int) ([]domain.LifecycleEvent, error)
+	// List returns events of the bank with seq > afterSeq in seq order, keeping only types (empty = all).
+	// The limit is soft: a page never splits a seq group (one transaction's events). lastSeq is the highest
+	// seq scanned, filtered-out events included, and never below afterSeq; the next poll passes it as
+	// afterSeq, so a type filter over non-matching events still advances.
+	List(
+		ctx context.Context, b BankRef, afterSeq int64, limit int, types []domain.EventType,
+	) (events []domain.LifecycleEvent, lastSeq int64, err error)
 	// Prune deletes events whose At is before before and returns how many.
 	Prune(ctx context.Context, before time.Time) (int, error)
 }
@@ -145,14 +159,18 @@ type BankRepo interface {
 	SetConfig(ctx context.Context, b BankRef, cfg domain.BankConfig) error
 	// MarkDeleting tombstones the bank by setting deleting_at; marking it again keeps the first time.
 	MarkDeleting(ctx context.Context, b BankRef, at time.Time) error
-	// DeleteBatch deletes up to limit of the bank's content rows (units, archive, documents, chunks,
-	// entities, links, observations, mental models, directives, queues) and returns how many it deleted;
-	// 0 means nothing is left but the bank row, its events and its operations.
+	// DeleteBatch deletes up to limit rows of the tombstoned bank's content and returns how many it
+	// deleted; 0 means nothing is left but the bank row, its events and its operations. It covers every
+	// bank-keyed table: memory_units, memory_units_archive, documents, chunks, entities, unit_entities,
+	// entity_cooccurrences, memory_links, parked_links, graph_dirty, entity_maintenance,
+	// observation_evidence, observation_scopes, observation_versions, memory_audit, mental_models,
+	// mental_model_history, mental_model_folders and directives. A bank whose deleting_at is not set
+	// returns domain.ErrFailedPrecondition and deletes nothing.
 	DeleteBatch(ctx context.Context, b BankRef, limit int) (int, error)
-	// Delete removes the bank row together with the bank's remaining lifecycle events and operations
+	// Delete removes the tombstoned bank's row together with its remaining lifecycle events and operations
 	// (including the running delete_bank job's own row, so its Complete then reports domain.ErrNotFound,
-	// which the runner treats as done). A write afterwards creates a fresh, empty bank. Unknown =
-	// domain.ErrNotFound.
+	// which the runner treats as done). A write afterwards creates a fresh, empty bank. A bank whose
+	// deleting_at is not set returns domain.ErrFailedPrecondition; unknown = domain.ErrNotFound.
 	Delete(ctx context.Context, b BankRef) error
 	// TenantConfig returns the tenant-level config; a tenant with none set returns the zero config.
 	TenantConfig(ctx context.Context, tenant string) (domain.BankConfig, error)

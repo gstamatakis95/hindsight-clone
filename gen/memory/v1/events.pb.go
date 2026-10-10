@@ -269,8 +269,9 @@ type ListEventsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Events with seq > after_seq, ascending.
 	Events []*LifecycleEvent `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
-	// Seq to pass as after_seq on the next poll: the highest seq in this page, or the request's after_seq
-	// when the page is empty (so never 0 unless after_seq was 0).
+	// Seq to pass as after_seq on the next poll: the highest seq scanned for this page, including events
+	// the types filter dropped, and never below the request's after_seq (so a filter over non-matching
+	// events still advances).
 	LastSeq       int64 `protobuf:"varint,2,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -550,9 +550,9 @@ type RecallRequest struct {
 	// Boolean tag filter, top-level groups AND-ed; mutually exclusive with tags (both set =
 	// INVALID_ARGUMENT).
 	TagGroups []*TagGroup `protobuf:"bytes,6,rep,name=tag_groups,json=tagGroups,proto3" json:"tag_groups,omitempty"`
-	// Size class: retriever caps (100 / 300 / 1000) and the token budget when max_tokens is unset.
+	// Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
 	Budget Budget `protobuf:"varint,7,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
-	// Token budget for packed results; 0 = derived from budget.
+	// Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
 	MaxTokens int32 `protobuf:"varint,8,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 	// Reference time for relative expressions and recency; unset = now.
 	QueryTime *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=query_time,json=queryTime,proto3" json:"query_time,omitempty"`

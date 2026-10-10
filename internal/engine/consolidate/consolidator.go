@@ -21,6 +21,6 @@ type ConsolidationResult struct {
 	Processed int
 	// Changed are the scopes whose observations changed; drives mental-model refresh triggers.
 	Changed []port.ScopeKey
-	// More reports that unconsolidated units remain, so the handler re-enqueues.
+	// More reports that unconsolidated units remain, so the handler re-enqueues (DedupePending).
 	More bool
 }

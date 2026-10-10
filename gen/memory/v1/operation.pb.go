@@ -274,7 +274,8 @@ type Operation struct {
 	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
 	// When a parked job becomes claimable: backoff, debounce or refresh interval floor.
 	NextRunAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=next_run_at,json=nextRunAt,proto3" json:"next_run_at,omitempty"`
-	// Claims so far; transient failures retry with backoff (60 s x attempt) up to the kind's limit.
+	// Earlier attempts that failed with a retry or were reclaimed (0 on the first run); transient failures
+	// retry with backoff (60 s x attempt) up to the kind's limit (consolidate: unbounded).
 	Attempts int32 `protobuf:"varint,13,opt,name=attempts,proto3" json:"attempts,omitempty"`
 	// Worker liveness while PROCESSING; the runner heartbeats every 15 s.
 	HeartbeatAt   *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=heartbeat_at,json=heartbeatAt,proto3" json:"heartbeat_at,omitempty"`
@@ -763,7 +764,7 @@ type RetryOperationRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Bank owning the operation.
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
-	// Operation id; must be FAILED or CANCELLED.
+	// Operation id; must be FAILED or CANCELLED (a cancel-requested PROCESSING operation is refused).
 	OperationId   string `protobuf:"bytes,2,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

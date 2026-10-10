@@ -77,16 +77,29 @@ func writeEverything(t *testing.T, tx port.Tx) (txFixture, error) {
 	return f, tx.Events().Append(ctx, ev)
 }
 
-// listEvents lists bank b's events after afterSeq in a read transaction.
+// listEvents lists bank b's events (every type) after afterSeq in a read transaction.
 func listEvents(t *testing.T, s port.Store, b port.BankRef, afterSeq int64, limit int) []domain.LifecycleEvent {
 	t.Helper()
-	var evs []domain.LifecycleEvent
+	evs, _ := listEventsOf(t, s, b, afterSeq, limit, nil)
+	return evs
+}
+
+// listEventsOf lists bank b's events of types (empty = all) after afterSeq and returns them with List's
+// lastSeq.
+func listEventsOf(
+	t *testing.T, s port.Store, b port.BankRef, afterSeq int64, limit int, types []domain.EventType,
+) ([]domain.LifecycleEvent, int64) {
+	t.Helper()
+	var (
+		evs     []domain.LifecycleEvent
+		lastSeq int64
+	)
 	inTx(t, s, func(tx port.Tx) error {
 		var err error
-		evs, err = tx.Events().List(t.Context(), b, afterSeq, limit)
+		evs, lastSeq, err = tx.Events().List(t.Context(), b, afterSeq, limit, types)
 		return err
 	})
-	return evs
+	return evs, lastSeq
 }
 
 // getDocument reads a document in its own transaction and returns Get's error unchanged.

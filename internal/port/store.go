@@ -10,6 +10,7 @@ import (
 // Store opens transactions. No LLM, embedding or rerank call ever runs inside one.
 type Store interface {
 	// InTx runs fn in one transaction and commits when fn returns nil; any error (or panic) rolls back.
+	// Adapter obligation: the transaction runs at READ COMMITTED.
 	// fn must not call a model: read, call the gateway, then write in a short InTx.
 	InTx(ctx context.Context, fn func(Tx) error) error
 	// Read returns the read-only view used by the stateless API path. The Reader is long-lived and safe

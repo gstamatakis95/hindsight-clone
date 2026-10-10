@@ -51,10 +51,8 @@ func ParseScopeKey(b BankRef, s string) (ScopeKey, error) {
 	if err != nil {
 		return ScopeKey{}, err
 	}
-	for i, t := range tags {
-		if t == "" || NormalizeTag(t) != t || (i > 0 && tags[i-1] >= t) {
-			return ScopeKey{}, fmt.Errorf("%w: scope key %q is not canonical", ErrInvalidArgument, s)
-		}
+	if EncodeScopeTags(NormalizeTags(tags)) != s {
+		return ScopeKey{}, fmt.Errorf("%w: scope key %q is not canonical", ErrInvalidArgument, s)
 	}
 	return ScopeKey{BankRef: b, Tags: tags}, nil
 }

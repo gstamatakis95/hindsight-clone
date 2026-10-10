@@ -15,7 +15,8 @@ type BankDeleter interface { //nolint:revive // stutter: name fixed by the spec
 	// reads with domain.ErrNotFound. Tombstoning an already deleting bank returns its delete_bank operation.
 	Tombstone(ctx context.Context, b port.BankRef) (domain.Operation, error)
 	// Run is the delete_bank job: it removes rows with BankRepo.DeleteBatch in committed batches and
-	// reports done=false when its budget runs out (the handler re-enqueues). Once nothing is left it
+	// reports done=false when its budget runs out (the handler re-enqueues with DedupePending). It
+	// re-checks the tombstone (deleting_at) before Blob.DeletePrefix. Once nothing is left it
 	// deletes the blob prefix {tenant}/{bank}/, then BankRepo.Delete removes the bank row with its
 	// remaining events and operations, so a later write creates a clean bank.
 	Run(ctx context.Context, j port.Job) (done bool, err error)

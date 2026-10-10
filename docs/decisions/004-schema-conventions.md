@@ -99,27 +99,41 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
 - `operations.joinable boolean NOT NULL DEFAULT false`. Enqueue sets it true only for a row
   inserted under a dedupe policy (Pending or PendingOrRunning) without overrides, except
   refresh_mental_model rows, which are always joinable. Dedupe lookups match joinable rows
-  only, so a row enqueued with overrides (or with no dedupe policy) is never joined. The
-  schema doesn't encode this policy (no CHECK on kind or overrides); Go owns it.
-- Dedupe Enqueue is race-safe without a leader: before its dedupe SELECT, and in the same
-  transaction as the INSERT, the Postgres adapter takes
+  only, so a row enqueued with overrides (or with no dedupe policy) is never joined, and
+  Cancel clears `joinable` so a cancel-requested row is never joined either. `joinable` is
+  the only dedupe mechanism. The schema doesn't encode this policy (no CHECK on kind or
+  overrides); Go owns it.
+- Dedupe Enqueue is race-safe without a leader: in the same transaction as the INSERT, the
+  Postgres adapter takes
   `pg_advisory_xact_lock(hashtextextended(tenant_id || '/' || bank_id || '/' || kind || '/' || serial_key, 0))`,
   so two concurrent enqueuers of the same (tenant, bank, kind, serial key) never both insert.
   Dedupe enqueues always carry a serial key (a NULL key would hash to NULL and take no lock).
   Hash collisions only serialize unrelated enqueues, which is harmless.
+- `cancel_requested_at timestamptz NULL`, set only on processing or cancelled rows
+  (`operations_cancel_requested_at_status CHECK (cancel_requested_at IS NULL OR status IN ('processing', 'cancelled'))`).
+  Cancel on a PENDING row sets `status = 'cancelled'`, `finished_at = now()`. Cancel on a
+  PROCESSING row sets `cancel_requested_at = now()` and leaves the status `processing`, so the
+  row keeps holding its serial key under the spec's claim predicate and unique index; Alive
+  returns false for it. The handler's terminal Complete / Fail, or ReclaimStale, then moves
+  the row to `cancelled` and sets `finished_at`. Both forms of Cancel set `joinable = false`.
 - `finished_at` is set only on terminal rows
   (`operations_finished_at_terminal_only CHECK (finished_at IS NULL OR status IN ('completed', 'failed', 'cancelled'))`),
-  so Retry must clear it when it re-queues a row. Terminal rows are not required to have it
-  set: a cancelled row with `finished_at` NULL is still running.
-- Cancel on a PENDING row sets `status = 'cancelled'`, `finished_at = now()`. Cancel on a
-  PROCESSING row sets `status = 'cancelled'` and leaves `finished_at` NULL: the row keeps
-  holding its serial key until the handler stops. The handler's terminal Complete / Fail
-  then sets only `finished_at` (status stays `cancelled`); ReclaimStale sets `finished_at`
-  on cancelled-but-unfinished rows whose heartbeat is stale.
-- Prune deletes terminal rows with `finished_at < cutoff`, so it never removes a row that
-  still holds its key.
-- The claim is the spec's SQL plus one clause: a cancelled-but-unfinished row holds the key.
-  `joinable` plays no part in it.
+  and every transition to a terminal status sets it, so Prune (terminal rows with
+  `finished_at < cutoff`) never removes a row that holds its key. Retry must clear
+  `finished_at` and `cancel_requested_at` when it re-queues a row.
+- ReclaimStale re-queues a stale processing row, or sets it FAILED once it is past max
+  attempts; the Go side then appends one OPERATION_FAILED event, skipped when the bank is
+  tombstoned.
+- Postgres adapter obligations:
+  - InTx runs at READ COMMITTED.
+  - The dedupe advisory lock is taken in its own statement before the dedupe lookup; an
+    enqueue that takes several keys takes them in sorted order (or retries on 40P01).
+  - Enqueue locks a joined row `FOR UPDATE`, so a claim can't land between the join and
+    Upgrade.
+  - Enqueue takes `FOR KEY SHARE` on the bank row.
+  - BankRepo.DeleteBatch / Delete refuse a bank whose `deleting_at` is not set.
+- The claim is the spec's SQL verbatim. `joinable` and `cancel_requested_at` play no part in
+  it.
 
   ```sql
   SELECT o.* FROM operations o
@@ -130,7 +144,6 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
       SELECT 1 FROM operations p
       WHERE (p.tenant_id, p.bank_id, p.serial_key) = (o.tenant_id, o.bank_id, o.serial_key)
         AND (p.status = 'processing'
-             OR (p.status = 'cancelled' AND p.finished_at IS NULL)
              OR (p.status = 'pending' AND p.run_at <= now()
                  AND (p.created_at, p.id) < (o.created_at, o.id))))
   ORDER BY o.created_at
@@ -157,17 +170,13 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
   `consolidated_at IS NULL AND consolidation_failed_at IS NULL AND fact_type <> 'observation'`:
   observations are consolidation's output and are never consolidated themselves.
 - `operations_active_serial_key_idx` is `(tenant_id, bank_id, serial_key, kind) WHERE status
-  IN ('pending', 'processing') OR (status = 'cancelled' AND finished_at IS NULL)`: every row
-  that holds or queues a key. The claim's NOT EXISTS uses its first three columns, and the
-  dedupe lookup uses all four (with `joinable` as a filter), so no separate dedupe index is
-  needed. Both plans were checked with EXPLAIN.
-- The reclaim index `operations_running_heartbeat_idx` is `(heartbeat_at) WHERE status =
-  'processing' OR (status = 'cancelled' AND finished_at IS NULL)`, so ReclaimStale finds stale
-  cancelled-but-running rows too. Status isn't a column: the predicate already fixes it.
+  IN ('pending', 'processing')`: every row that holds or queues a key. The claim's NOT EXISTS
+  uses its first three columns, and the dedupe lookup uses all four (with `joinable` as a
+  filter), so no separate dedupe index is needed. Both plans were checked with EXPLAIN.
+- The reclaim index `operations_processing_heartbeat_idx` is `(heartbeat_at) WHERE status =
+  'processing'`; cancel-requested rows are still processing, so ReclaimStale finds them too.
 - Unique `operations (tenant_id, bank_id, serial_key) WHERE status = 'processing'` backs the
-  claim, exactly as in the spec; NULL serial keys never conflict. It isn't widened to
-  cancelled rows: Cancel only turns the one processing holder into a cancelled holder, and the
-  claim's NOT EXISTS already waits on cancelled holders.
+  claim, exactly as in the spec; NULL serial keys never conflict.
 - `parked_links_archived_unit_idx (tenant_id, bank_id, archived_unit_id)` serves restore and
   bank-scoped deletes; `parked_links_other_unit_idx (other_unit_id)` serves deletes of the
   other unit.
@@ -186,7 +195,7 @@ Directive, ObservationVersion, MentalModelHistoryEntry) decide which columns exi
   1017 (alembic owns the schema, raw SQL via `op.execute()`).
 - SPEC.md 1089-1314, "Ports": `Seq` (1124), `BankSeq` (1144), `UnitRepo.Archive` (1162), EventRepo,
   Claimer.
-- SPEC.md 1903-1955, "Jobs": the claim SQL (amended above for cancelled-but-running rows),
+- SPEC.md 1903-1955, "Jobs": the claim SQL (used verbatim),
   dedupe policies and the unique processing index (1928).
 - SPEC.md 1957-1971, "Curation": archive, audit, observation_versions.
 - SPEC.md 1973-2015, "Behavioural rules": unknown bank creation (1979), DeleteBank (1980), change

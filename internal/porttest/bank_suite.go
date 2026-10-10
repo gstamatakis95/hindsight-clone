@@ -165,13 +165,14 @@ func testBankMarkDeleting(t *testing.T, s port.Store) {
 	}
 }
 
-// testBankDelete: Delete removes the bank; a later Ensure creates a new, empty one.
+// testBankDelete: Delete removes the tombstoned bank; a later Ensure creates a new, empty one.
 func testBankDelete(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA)
 	inTx(t, s, func(tx port.Tx) error {
 		_, err := tx.Seq(t.Context(), bankA)
 		return err
 	})
+	inTx(t, s, func(tx port.Tx) error { return tx.Banks().MarkDeleting(t.Context(), bankA, day(1)) })
 	inTx(t, s, func(tx port.Tx) error { return tx.Banks().Delete(t.Context(), bankA) })
 	_, err := getBank(t, s, bankA)
 	wantErrIs(t, "Get after Delete", err, domain.ErrNotFound)

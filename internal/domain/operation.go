@@ -33,20 +33,14 @@ const (
 // DefaultMaxAttempts is the attempt cap of every retried kind except consolidate.
 const DefaultMaxAttempts = 3
 
-// MaxAttempts is the number of attempts after which a failing or reclaimed job of kind k fails for good.
-// Zero means unbounded: consolidate retries indefinitely with capped backoff.
+// MaxAttempts is the number of attempts after which a failing or reclaimed job of kind k fails for good
+// (the runner enforces it on Fail, ReclaimStale on reclaim). Zero means unbounded: consolidate retries
+// indefinitely with capped backoff.
 func (k OperationKind) MaxAttempts() int {
 	if k == OperationKindConsolidate {
 		return 0
 	}
 	return DefaultMaxAttempts
-}
-
-// HasFinalizer reports whether a job of kind k that exhausts its attempts through reclaim is handed back
-// to its handler's finalizer instead of being failed by the Claimer. Only refresh_mental_model has one:
-// its final failure must also pause the model and write REFRESH_FAILED history (decision 012, R10).
-func (k OperationKind) HasFinalizer() bool {
-	return k == OperationKindRefreshMentalModel
 }
 
 // OperationStatus is an operation's lifecycle state.

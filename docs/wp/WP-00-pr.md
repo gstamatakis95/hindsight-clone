@@ -54,8 +54,8 @@ Branch `wp/WP-00-contracts`. The plan is in `docs/wp/WP-00.md`. After merge, tag
   - `scripts/schema-{dump,check}.sh`.
   - `internal/adapter/postgres/sqlc.yaml` with pgx/v5, uuid and pgvector overrides. It includes a
     placeholder `queries/ping.sql`, because sqlc refuses an empty query dir.
-- [x] **Contract test suites.** `internal/porttest` has `RunStoreSuite` (60 subtests), `RunSeqSuite`
-  (8), `RunQueueSuite` (45) and `RunBlobSuite` (7), all with real assertions. None has run against an
+- [x] **Contract test suites.** `internal/porttest` has `RunStoreSuite` (65 subtests), `RunSeqSuite`
+  (8), `RunQueueSuite` (48) and `RunBlobSuite` (7), all with real assertions. None has run against an
   implementation yet; WP-01, WP-02 and WP-03 are the first.
 - [x] **Agent docs.**
   - Root `AGENTS.md`, from the spec block plus a frozen-contracts section.
@@ -133,7 +133,8 @@ Unit tests shipped with the contracts, all passing under `-race`:
 - New column `operations.joinable`, the non-joinable marker.
 - A `finished_at` CHECK on `operations`.
 - The active index is now `(tenant_id, bank_id, serial_key, kind)`, and its predicate covers
-  cancelled-but-unfinished rows. A running-heartbeat index was added.
+  cancelled-but-unfinished rows (reverted in round 2 by R8'). A running-heartbeat index was added (also
+  reverted in round 2).
 - `parked_links` gained CHECKs and an index.
 - Every FK's ON DELETE is explicit.
 
@@ -165,7 +166,7 @@ Unit tests shipped with the contracts, all passing under `-race`:
     concurrent dedupe enqueuers;
   - Upgrade merge, including the concurrent case;
   - fencing and lost jobs, cancel holding the key, retry, prune;
-  - OPERATION_FAILED events, the refresh finalizer, and the bank-delete cleanup.
+  - OPERATION_FAILED events and the bank-delete cleanup (the refresh finalizer was removed in round 2).
 - Claim must not surface `ErrConflict`, and vacuous checks were removed.
 
 **Tooling**
@@ -176,7 +177,88 @@ Unit tests shipped with the contracts, all passing under `-race`:
 - `maintenance` no longer imports `retain`: `CauseMap` is now a type alias, and an assignability test
   covers it.
 
+## Review round 2 (fixed on this branch; scope per the user: solid early iteration, no overengineering)
+
+Each item is listed with the test that proves it, or with the file:line of the contract.
+
+**R10' — the finalizer is dropped**
+- Removed `HasFinalizer` from `internal/domain/operation.go`.
+- Contract: the runner owns the attempt cap (`internal/port/jobs.go:169`). ReclaimStale past max makes
+  the row FAILED with one event (`jobs.go:204`). The refresh-pause reconcile is in RunMaintenance
+  (`internal/engine/mentalmodel/scheduler.go:12`, `jobs.go:197`).
+- Test: `RunQueueSuite/ReclaimPastMaxFails`.
+
+**R8' — cancel-requested flag**
+- Schema: `operations.cancel_requested_at` plus a CHECK (`migrations/versions/0007_ops.py`). The spec's
+  claim SQL and index predicates are restored verbatim (`0008_indexes.py`, decision 004).
+- Contract: `jobs.go:149` (Cancel), `jobs.go:154` (Retry), `jobs.go:183` (Heartbeat), `jobs.go:189`
+  (Alive), and `jobs.go:169` (runner obligation).
+- Proto comments: `api/memory/v1/operation.proto` (CancelOperation, attempts, Retry request).
+- Tests: `RunQueueSuite/CancelProcessingHoldsKey` and `RunQueueSuite/CancelProcessingReportedLost`.
+
+**H3 — no deletes on a live bank**
+- Contract: `internal/port/repos.go:169` (DeleteBatch) and `repos.go:174` (Delete). The deleter
+  re-checks the tombstone before `Blob.DeletePrefix` (`internal/engine/bank/deleter.go:19`).
+- Test: `RunStoreSuite/DeleteRefusesLiveBank`.
+
+**H4 — last_seq advances past filtered events**
+- Contract: `EventRepo.List` takes the types filter and returns the scanned high-water mark
+  (`repos.go:132`); see also `api/memory/v1/events.proto:70`.
+- Test: `RunStoreSuite/EventsTypeFilterAdvancesLastSeq`.
+
+**Refresh `DedupeNone` is treated as Pending**
+- Contract: `jobs.go:126` (Enqueue doc).
+- Test: `RunQueueSuite/RefreshDedupeNoneIsPending`.
+
+**Self-continuations use `DedupePending`**
+- `jobs.go:62`, plus the docs in `internal/engine/consolidate/consolidator.go`,
+  `internal/engine/maintenance/graph.go` and `internal/engine/bank/deleter.go`.
+
+**Clearing consolidation state on edit and retag**
+- Contract: `repos.go:25` (`Update`) and `repos.go:29` (`SetDocumentTags`), cross-referencing
+  `DeleteCiting`.
+- Test: `RunStoreSuite/UpdateAndRetagResetConsolidation`.
+
+**Rederive support**
+- Contract: `LinkRepo.DeleteForUnit` (`repos.go:102`) and `EntityRepo.Detach` (`repos.go:90`).
+- Test: `RunStoreSuite/RederiveDetachAndDeleteLinks`.
+
+**DeleteBatch covers every bank-keyed table**
+- The table list is at `repos.go:169`.
+- Test: `RunStoreSuite/DeleteBatchCoversAllTables`. It fills both the tombstoned bank and a same-id bank
+  under another tenant; the other tenant's data survives.
+
+**Restore**
+- Skips missing entities and link partners, and stamps the tx seq (`repos.go:51`).
+
+**Adapter obligations** (one-line doc notes, WP-01 acceptance items)
+- READ COMMITTED: `internal/port/store.go:13`.
+- Advisory-lock statement and order, joined row `FOR UPDATE`, bank `FOR KEY SHARE`: `jobs.go:123`.
+
+**LOWs done because each was a one-line change**
+- `ParseScopeKey` rejects any key whose re-encoding differs from the input (`internal/domain/scope.go:49`;
+  `TestParseScopeKeyCanonicalOnly`).
+- The `max_tokens` / budget-default comments are fixed (`api/memory/v1/memory.proto:142-144`) and
+  recorded in 011.
+- The `Operation.attempts` comment is fixed (`api/memory/v1/operation.proto:116`) and recorded in 011.
+- Upgrade ORs only `force_full` (`jobs.go`, Upgrade doc).
+- `UnitRepo.Update` covers `timeless` (`repos.go:25`).
+
+**Docs:** decision 012 has R8' and R10' rewritten and the round-2 fixes added; decisions 004, 005, 009
+and 011 are updated.
+
 ## Known gaps
+
+**Skipped in round 2 per the user's scope**
+- `Validate` does not reject `Match=EXACT` combined with groups.
+- The `GraphQuery` direction is not stated.
+- A non-object Upgrade payload and an empty-key dedupe are not rejected with `ErrInvalidArgument`.
+- The ifacedoc `gen/` skip matches by path suffix rather than being anchored to the module root.
+- `EntityRepo.Detach` does not decrement co-occurrence counts.
+- Restore does not recreate missing entities; it skips them, as documented.
+- `LinkRepo.Dirty` does not purge non-live rows; it only returns live units.
+
+**Other gaps**
 
 - **Worker fencing window (R7).** Complete and Fail carry no worker or attempt token. A worker whose job
   was reclaimed *and* re-claimed by another worker is fenced only through Heartbeat's

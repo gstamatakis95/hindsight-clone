@@ -10,7 +10,7 @@ import (
 // GraphMaintainer drains graph_dirty (link top-ups) and entity_maintenance (orphan pruning) in batches.
 type GraphMaintainer interface {
 	// Run works on bank b until both queues are empty (done=true) or budget runs out (done=false, the
-	// handler re-enqueues).
+	// handler re-enqueues with DedupePending).
 	Run(ctx context.Context, b port.BankRef, budget time.Duration) (done bool, err error)
 }
 

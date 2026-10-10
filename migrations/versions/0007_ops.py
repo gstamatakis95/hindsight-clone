@@ -6,9 +6,12 @@ remaining operations and lifecycle_events explicitly, together with the bank row
 
 ``joinable`` marks rows a deduplicating enqueue may join: true only for rows inserted under
 a dedupe policy without overrides (refresh_mental_model rows are always joinable); Go owns
-that policy. ``finished_at`` is set only on terminal rows. A cancelled row whose handler is
-still running has ``finished_at`` NULL and keeps holding its serial key until the handler's
-terminal call (or ReclaimStale) sets it.
+that policy; Cancel clears it. ``finished_at`` is set only on terminal rows.
+
+Cancelling a processing row sets ``cancel_requested_at`` and leaves the status 'processing',
+so the row keeps holding its serial key; the handler's terminal Complete / Fail (or
+ReclaimStale) then moves it to 'cancelled'. A pending row is cancelled directly.
+``cancel_requested_at`` is only set on processing or cancelled rows.
 
 Several events written in one transaction share the bank change_seq, so
 lifecycle_events.seq is not unique; id orders events within a seq.
@@ -54,8 +57,11 @@ def upgrade() -> None:
             created_at   timestamptz NOT NULL DEFAULT now(),
             updated_at   timestamptz NOT NULL DEFAULT now(),
             finished_at  timestamptz NULL,
+            cancel_requested_at timestamptz NULL,
             CONSTRAINT operations_finished_at_terminal_only
-                CHECK (finished_at IS NULL OR status IN ('completed', 'failed', 'cancelled'))
+                CHECK (finished_at IS NULL OR status IN ('completed', 'failed', 'cancelled')),
+            CONSTRAINT operations_cancel_requested_at_status
+                CHECK (cancel_requested_at IS NULL OR status IN ('processing', 'cancelled'))
         )
     """)
     op.execute("""

@@ -7,6 +7,11 @@ import (
 )
 
 // RefreshScheduler decides whether an automatic trigger runs now, parks, or is skipped.
+//
+// A refresh_mental_model operation that ends FAILED (handler Fail(nil) or reclaim past max attempts) is
+// turned into auto_refresh_paused plus a REFRESH_FAILED history entry by an idempotent reconcile in
+// RunMaintenance, which finds models whose latest refresh operation failed and that are not yet paused
+// or recorded (decision 012, R10'). The Claimer never touches mental-model tables.
 type RefreshScheduler interface {
 	// Decide applies auto_refresh_paused, the trigger kind, debounce and the interval floor to m at now.
 	Decide(ctx context.Context, m domain.MentalModel, now time.Time) (RefreshDecision, error)

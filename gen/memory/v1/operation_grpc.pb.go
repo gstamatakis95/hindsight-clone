@@ -44,8 +44,9 @@ type OperationServiceClient interface {
 	GetOperation(ctx context.Context, in *GetOperationRequest, opts ...grpc.CallOption) (*GetOperationResponse, error)
 	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
 	ListOperations(ctx context.Context, in *ListOperationsRequest, opts ...grpc.CallOption) (*ListOperationsResponse, error)
-	// CancelOperation cancels a PENDING or PROCESSING operation. Cooperative: handlers stop at their next
-	// checkpoint and committed work stays; workers never overwrite CANCELLED.
+	// CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
+	// A processing one stays PROCESSING with the cancel recorded (its serial key stays held) until its
+	// handler stops at the next checkpoint, then becomes CANCELLED; committed work stays.
 	CancelOperation(ctx context.Context, in *CancelOperationRequest, opts ...grpc.CallOption) (*CancelOperationResponse, error)
 	// RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
 	// next_run_at = now. Other states are rejected.
@@ -122,8 +123,9 @@ type OperationServiceServer interface {
 	GetOperation(context.Context, *GetOperationRequest) (*GetOperationResponse, error)
 	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
 	ListOperations(context.Context, *ListOperationsRequest) (*ListOperationsResponse, error)
-	// CancelOperation cancels a PENDING or PROCESSING operation. Cooperative: handlers stop at their next
-	// checkpoint and committed work stays; workers never overwrite CANCELLED.
+	// CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
+	// A processing one stays PROCESSING with the cancel recorded (its serial key stays held) until its
+	// handler stops at the next checkpoint, then becomes CANCELLED; committed work stays.
 	CancelOperation(context.Context, *CancelOperationRequest) (*CancelOperationResponse, error)
 	// RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
 	// next_run_at = now. Other states are rejected.

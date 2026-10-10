@@ -65,6 +65,7 @@ func RunQueueSuite(t *testing.T, newQueue QueueFactory) {
 		{"DedupePendingOrRunning", testDedupePendingOrRunning},
 		{"DedupeOverridesNeverJoin", testDedupeOverrides},
 		{"DedupeRefreshJoinsDespiteOverrides", testDedupeRefreshOverrides},
+		{"RefreshDedupeNoneIsPending", testRefreshDedupeNone},
 		{"DedupeConcurrentEnqueuers", testDedupeConcurrent},
 		{"UpgradeMergesPayloadAndOverrides", testUpgradeMerge},
 		{"UpgradeCronJoinerKeepsManualFull", testUpgradeKeepsFull},
@@ -507,6 +508,18 @@ func testDedupeRefreshOverrides(t *testing.T, q queueEnv) {
 	}
 }
 
+// testRefreshDedupeNone: a refresh_mental_model job always dedupes as DedupePending, so a second DedupeNone
+// refresh of the same model joins the queued one.
+func testRefreshDedupeNone(t *testing.T, q queueEnv) {
+	ensureBanks(t, q.s, bankA)
+	j := refresh("a", `{"model_id":"a"}`)
+	j.Dedupe = port.DedupeNone
+	first := q.add(t, j)
+	if id, joined := q.enqueue(t, j); !joined || id != first {
+		t.Errorf("second DedupeNone refresh = (%s, %v), want to join %s", id, joined, first)
+	}
+}
+
 // enqueueResult is one concurrent enqueuer's outcome.
 type enqueueResult struct {
 	id     port.OperationID
@@ -582,8 +595,8 @@ func (q queueEnv) claimedByID(t *testing.T, want int) map[port.OperationID]port.
 	return got
 }
 
-// testUpgradeMerge: Upgrade shallow-merges the payload (present keys replace, absent keys are kept, booleans
-// are OR-ed so a true force_full survives a false one); nil overrides keep the row's, non-nil replace them.
+// testUpgradeMerge: Upgrade shallow-merges the payload (present keys replace, absent keys are kept, force_full
+// is OR-ed so a true one survives a false one); nil overrides keep the row's, non-nil replace them.
 func testUpgradeMerge(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	oldO := &domain.BankConfig{ReflectMission: "old"}
@@ -624,7 +637,7 @@ func testUpgradeKeepsFull(t *testing.T, q queueEnv) {
 }
 
 // testUpgradeConcurrent: two joiners, each in its own transaction, join and upgrade one row at once; both
-// payload keys are present afterwards and booleans are OR-ed.
+// payload keys are present afterwards and force_full is OR-ed.
 func testUpgradeConcurrent(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	base := refresh("d", `{"model_id":"d","force_full":false}`)

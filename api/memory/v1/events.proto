@@ -64,7 +64,8 @@ message ListEventsRequest {
 message ListEventsResponse {
   // Events with seq > after_seq, ascending.
   repeated LifecycleEvent events = 1;
-  // Seq to pass as after_seq on the next poll: the highest seq in this page, or the request's after_seq
-  // when the page is empty (so never 0 unless after_seq was 0).
+  // Seq to pass as after_seq on the next poll: the highest seq scanned for this page, including events
+  // the types filter dropped, and never below the request's after_seq (so a filter over non-matching
+  // events still advances).
   int64 last_seq = 2;
 }

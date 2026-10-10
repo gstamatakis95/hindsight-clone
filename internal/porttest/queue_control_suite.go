@@ -17,7 +17,8 @@ func controlCases() []queueCase {
 		{"GetReflectsJob", testGetFields},
 		{"ListFiltersAndPages", testList},
 		{"CancelPending", testCancelPending},
-		{"CancelProcessingHoldsKeyUntilFinished", testCancelProcessing},
+		{"CancelProcessingReportedLost", testCancelProcessing},
+		{"CancelProcessingHoldsKey", testCancelHoldsKey},
 		{"CancelStaleFinishedByReclaim", testCancelReclaimed},
 		{"CancelledPendingFenced", testCancelledStays},
 		{"RetryFailedAndCancelled", testRetry},
@@ -42,15 +43,16 @@ func (q queueEnv) cancel(t *testing.T, id port.OperationID) (domain.Operation, e
 	return op, err
 }
 
-// mustCancel cancels bank A's id and fails the test unless the returned operation is CANCELLED.
-func (q queueEnv) mustCancel(t *testing.T, id port.OperationID) {
+// mustCancel cancels bank A's id and fails the test unless the returned operation has status want
+// (CANCELLED for a pending row; PROCESSING for a processing row, whose cancel is only requested).
+func (q queueEnv) mustCancel(t *testing.T, id port.OperationID, want domain.OperationStatus) {
 	t.Helper()
 	op, err := q.cancel(t, id)
 	if err != nil {
 		t.Fatalf("Cancel(%s): %v", id, err)
 	}
-	if op.ID != id || op.Status != domain.OperationStatusCancelled {
-		t.Errorf("Cancel(%s) returned %s %q, want the operation, cancelled", id, op.ID, op.Status)
+	if op.ID != id || op.Status != want {
+		t.Errorf("Cancel(%s) returned %s %q, want the operation, %q", id, op.ID, op.Status, want)
 	}
 }
 
@@ -176,7 +178,7 @@ func testList(t *testing.T, q queueEnv) {
 func testCancelPending(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	first, second := q.add(t, doc("k")), q.add(t, doc("k"))
-	q.mustCancel(t, first)
+	q.mustCancel(t, first, domain.OperationStatusCancelled)
 	q.wantStatus(t, "after Cancel(pending)", first, domain.OperationStatusCancelled)
 	q.claimOne(t, second)
 	_, err := q.cancel(t, first)
@@ -187,9 +189,9 @@ func testCancelPending(t *testing.T, q queueEnv) {
 	q.wantStatus(t, "after Cancel(completed)", second, domain.OperationStatusCompleted)
 }
 
-// testCancelProcessing: a job cancelled while processing is CANCELLED and not Alive, but holds its serial key
-// until its handler's Complete or Fail, which return ErrCancelled and keep it cancelled. Heartbeats report
-// it lost yet keep it fresh, so ReclaimStale does not finish it meanwhile.
+// testCancelProcessing: a job whose cancel was requested while processing stays PROCESSING but is not
+// Alive; heartbeats report it lost yet keep it fresh, so ReclaimStale leaves it alone; its handler's Complete
+// or Fail moves it to CANCELLED and returns ErrCancelled, releasing its serial key.
 func testCancelProcessing(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	a1, b1 := q.add(t, doc("k1")), q.add(t, doc("k1"))
@@ -197,41 +199,69 @@ func testCancelProcessing(t *testing.T, q queueEnv) {
 	wantSet(t, "first Claim", jobIDs(q.claimAll(t)), []port.OperationID{a1, a2})
 	time.Sleep(staleSleep)
 	for _, id := range []port.OperationID{a1, a2} {
-		q.mustCancel(t, id)
-		q.wantStatus(t, "after Cancel(processing)", id, domain.OperationStatusCancelled)
+		q.mustCancel(t, id, domain.OperationStatusProcessing)
 		q.wantAlive(t, "after Cancel(processing)", id, false)
 	}
 	err := q.c.Heartbeat(t.Context(), worker1, []port.OperationID{a1, a2})
-	wantErrIs(t, "Heartbeat of cancelled jobs", err, domain.ErrConflict)
-	wantSet(t, "LostJobs of cancelled jobs", port.LostJobs(err), []port.OperationID{a1, a2})
+	wantErrIs(t, "Heartbeat of cancel-requested jobs", err, domain.ErrConflict)
+	wantSet(t, "LostJobs of cancel-requested jobs", port.LostJobs(err), []port.OperationID{a1, a2})
 	if n := q.reclaim(t); n != 0 {
-		t.Errorf("ReclaimStale after a heartbeat of cancelled jobs touched %d rows, want 0", n)
+		t.Errorf("ReclaimStale after a heartbeat of cancel-requested jobs touched %d rows, want 0", n)
 	}
-	q.claimNone(t, "while the cancelled jobs' handlers still run")
-	wantErrIs(t, "Complete(cancelled while processing)", q.c.Complete(t.Context(), a1, json.RawMessage(`{}`), nil),
+	q.claimNone(t, "while the cancel-requested jobs' handlers still run")
+	wantErrIs(t, "Complete(cancel requested)", q.c.Complete(t.Context(), a1, json.RawMessage(`{}`), nil),
 		domain.ErrCancelled)
-	wantErrIs(t, "Fail(cancelled while processing)", q.c.Fail(t.Context(), a2, errors.New("stopped"), nil),
+	wantErrIs(t, "Fail(cancel requested)", q.c.Fail(t.Context(), a2, errors.New("stopped"), nil),
 		domain.ErrCancelled)
 	q.wantStatus(t, "after Complete", a1, domain.OperationStatusCancelled)
 	q.wantStatus(t, "after Fail", a2, domain.OperationStatusCancelled)
 	wantSet(t, "Claim after the handlers finished", jobIDs(q.claimAll(t)), []port.OperationID{b1, b2})
 }
 
-// testCancelReclaimed: ReclaimStale finishes a cancelled-while-processing job whose worker died, releasing
+// testCancelHoldsKey: cancelling a processing graph_maintenance job leaves it PROCESSING (Get), holding its
+// serial key; Retry is ErrFailedPrecondition; a DedupePendingOrRunning enqueue no longer joins it; the
+// handler's Complete is ErrCancelled and moves it to CANCELLED, after which the new same-key row is claimable.
+func testCancelHoldsKey(t *testing.T, q queueEnv) {
+	ensureBanks(t, q.s, bankA)
+	g := job(bankA, domain.OperationKindGraphMaintenance, "graph", `{}`)
+	g.Dedupe = port.DedupePendingOrRunning
+	held := q.add(t, g)
+	q.claimOne(t, held)
+	if id, joined := q.enqueue(t, g); !joined || id != held {
+		t.Fatalf("Enqueue before the cancel = (%s, %v), want to join the running %s", id, joined, held)
+	}
+	q.mustCancel(t, held, domain.OperationStatusProcessing)
+	q.wantStatus(t, "after Cancel(processing)", held, domain.OperationStatusProcessing)
+	q.wantAlive(t, "after Cancel(processing)", held, false)
+	next, joined := q.enqueue(t, g)
+	if joined || next == held {
+		t.Errorf("Enqueue after the cancel = (%s, %v), want a new row", next, joined)
+	}
+	q.claimNone(t, "while the cancel-requested job holds its key")
+	_, err := q.retry(t, held)
+	wantErrIs(t, "Retry(cancel requested)", err, domain.ErrFailedPrecondition)
+	q.wantStatus(t, "after Retry(cancel requested)", held, domain.OperationStatusProcessing)
+	wantErrIs(t, "Complete(cancel requested)", q.c.Complete(t.Context(), held, json.RawMessage(`{}`), nil),
+		domain.ErrCancelled)
+	q.wantStatus(t, "after Complete", held, domain.OperationStatusCancelled)
+	q.claimOne(t, next)
+}
+
+// testCancelReclaimed: ReclaimStale moves a cancel-requested job whose worker died to CANCELLED, releasing
 // its key; the dead worker's late Complete is then ErrFailedPrecondition.
 func testCancelReclaimed(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	first, second := q.add(t, doc("k")), q.add(t, doc("k"))
 	q.claimOne(t, first)
-	q.mustCancel(t, first)
-	q.claimNone(t, "while the cancelled job holds its key")
+	q.mustCancel(t, first, domain.OperationStatusProcessing)
+	q.claimNone(t, "while the cancel-requested job holds its key")
 	time.Sleep(staleSleep)
 	if n := q.reclaim(t); n != 1 {
-		t.Errorf("ReclaimStale touched %d rows, want 1 (the stale cancelled job)", n)
+		t.Errorf("ReclaimStale touched %d rows, want 1 (the stale cancel-requested job)", n)
 	}
 	q.wantStatus(t, "after ReclaimStale", first, domain.OperationStatusCancelled)
 	q.claimOne(t, second)
-	wantErrIs(t, "late Complete of a finished cancelled job", q.c.Complete(t.Context(), first, json.RawMessage(`{}`), nil),
+	wantErrIs(t, "late Complete of a cancelled job", q.c.Complete(t.Context(), first, json.RawMessage(`{}`), nil),
 		domain.ErrFailedPrecondition)
 }
 
@@ -268,14 +298,14 @@ func (q queueEnv) failForGood(t *testing.T, id port.OperationID) {
 	}
 }
 
-// testRetry: Retry resets a failed or finished cancelled job to a claimable PENDING row at attempt 0 with
+// testRetry: Retry resets a failed or cancelled job to a claimable PENDING row at attempt 0 with
 // the error cleared; Retry of a pending job is ErrFailedPrecondition.
 func testRetry(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	failed := q.add(t, doc("failed"))
 	q.failForGood(t, failed)
 	cancelled := q.add(t, doc("cancelled"))
-	q.mustCancel(t, cancelled)
+	q.mustCancel(t, cancelled, domain.OperationStatusCancelled)
 	for _, id := range []port.OperationID{failed, cancelled} {
 		op, err := q.retry(t, id)
 		if err != nil {
@@ -309,7 +339,7 @@ func (q queueEnv) pruneOps(t *testing.T, before time.Time) int {
 }
 
 // testPrune: Prune deletes only terminal, finished operations finished before the cutoff; pending,
-// processing and cancelled-but-unfinished operations stay.
+// processing operations (cancel-requested ones included) stay.
 func testPrune(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
 	done := q.add(t, doc("done"))
@@ -322,23 +352,23 @@ func testPrune(t *testing.T, q queueEnv) {
 	}
 	winding := q.add(t, doc("winding-down"))
 	q.claimOne(t, winding)
-	q.mustCancel(t, winding)
+	q.mustCancel(t, winding, domain.OperationStatusProcessing)
 	running := q.add(t, doc("running"))
 	q.claimOne(t, running)
 	cancelled := q.add(t, doc("cancelled"))
-	q.mustCancel(t, cancelled)
+	q.mustCancel(t, cancelled, domain.OperationStatusCancelled)
 	pending := q.add(t, doc("pending"))
 	if n := q.pruneOps(t, past()); n != 0 {
 		t.Errorf("Prune(an hour ago) = %d, want 0", n)
 	}
 	if n := q.pruneOps(t, future()); n != 3 {
-		t.Errorf("Prune(in an hour) = %d, want 3 (completed, failed, finished cancelled)", n)
+		t.Errorf("Prune(in an hour) = %d, want 3 (completed, failed, cancelled)", n)
 	}
 	for _, id := range []port.OperationID{done, failed, cancelled} {
 		_, err := getOp(t, q.s, bankA, id)
 		wantErrIs(t, "Get of a pruned operation", err, domain.ErrNotFound)
 	}
-	q.wantStatus(t, "cancelled while processing, unfinished", winding, domain.OperationStatusCancelled)
+	q.wantStatus(t, "cancel requested while processing", winding, domain.OperationStatusProcessing)
 	q.wantStatus(t, "processing", running, domain.OperationStatusProcessing)
 	q.wantStatus(t, "pending", pending, domain.OperationStatusPending)
 }

@@ -38,12 +38,13 @@ any downstream CCR starts from an honest baseline.
     enqueued with a dedupe policy and no overrides, plus every refresh_mental_model row (R1).
   - `Attempt` counts earlier failed or reclaimed runs and is 0 on the first run.
   - `domain.OperationKind.MaxAttempts()` returns 3 for every kind and 0 (unbounded) for consolidate.
-  - ReclaimStale fails a job when attempt+1 >= max, except kinds with `HasFinalizer` (R10).
+  - ReclaimStale fails a job when attempt+1 >= max; the runner caps `Fail` itself (R10').
   - Upgrade shallow-merges the payload (booleans OR-ed) and replaces overrides only when given (R2).
   - Reschedule acts on PENDING rows only and returns `ErrFailedPrecondition` otherwise (R3).
-  - Progress, Complete and Fail are fenced to PROCESSING rows (R7). Cancelling a processing row keeps
-    its serial key until the handler stops (R8).
-  - `Alive` is true only while PROCESSING, and stays true for a delete_bank job of a tombstoned bank.
+  - Progress, Complete and Fail are fenced to PROCESSING rows (R7). Cancelling a processing row only
+    records the request, so it keeps its serial key until the handler stops (R8').
+  - `Alive` is true only while PROCESSING without a cancel request, and stays true for a delete_bank
+    job of a tombstoned bank.
 - **Chat types** follow the OpenAI chat-completions shape: `ChatMessage`, `ToolSpec`, `ToolCall` (raw
   JSON arguments, possibly malformed), `ChatResponse` and `ChatRole`. `StructuredRequest` and
   `ChatRequest` also carry a `Name` (prompt template name), which the scripted LLM fake keys on

@@ -469,6 +469,8 @@ CREATE TABLE public.operations (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     finished_at timestamp with time zone,
+    cancel_requested_at timestamp with time zone,
+    CONSTRAINT operations_cancel_requested_at_status CHECK (((cancel_requested_at IS NULL) OR (status = ANY (ARRAY['processing'::text, 'cancelled'::text])))),
     CONSTRAINT operations_finished_at_terminal_only CHECK (((finished_at IS NULL) OR (status = ANY (ARRAY['completed'::text, 'failed'::text, 'cancelled'::text])))),
     CONSTRAINT operations_kind_check CHECK ((kind = ANY (ARRAY['retain_batch'::text, 'retain_document'::text, 'consolidate'::text, 'rederive_memory'::text, 'retag_document'::text, 'refresh_mental_model'::text, 'graph_maintenance'::text, 'delete_bank'::text]))),
     CONSTRAINT operations_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
@@ -891,7 +893,7 @@ CREATE INDEX observation_versions_bank_idx ON public.observation_versions USING 
 -- Name: operations_active_serial_key_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX operations_active_serial_key_idx ON public.operations USING btree (tenant_id, bank_id, serial_key, kind) WHERE ((status = ANY (ARRAY['pending'::text, 'processing'::text])) OR ((status = 'cancelled'::text) AND (finished_at IS NULL)));
+CREATE INDEX operations_active_serial_key_idx ON public.operations USING btree (tenant_id, bank_id, serial_key, kind) WHERE (status = ANY (ARRAY['pending'::text, 'processing'::text]));
 
 --
 -- Name: operations_bank_created_idx; Type: INDEX; Schema: public; Owner: -
@@ -912,16 +914,16 @@ CREATE INDEX operations_parent_idx ON public.operations USING btree (parent_id) 
 CREATE INDEX operations_pending_run_at_idx ON public.operations USING btree (run_at) WHERE (status = 'pending'::text);
 
 --
+-- Name: operations_processing_heartbeat_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX operations_processing_heartbeat_idx ON public.operations USING btree (heartbeat_at) WHERE (status = 'processing'::text);
+
+--
 -- Name: operations_processing_serial_key_uniq; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX operations_processing_serial_key_uniq ON public.operations USING btree (tenant_id, bank_id, serial_key) WHERE (status = 'processing'::text);
-
---
--- Name: operations_running_heartbeat_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX operations_running_heartbeat_idx ON public.operations USING btree (heartbeat_at) WHERE ((status = 'processing'::text) OR ((status = 'cancelled'::text) AND (finished_at IS NULL)));
 
 --
 -- Name: operations_terminal_finished_idx; Type: INDEX; Schema: public; Owner: -

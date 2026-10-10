@@ -30,6 +30,7 @@ func repoCases() []storeCase {
 		{"EvidenceDeleteCiting", testEvidenceDeleteCiting},
 		{"EventsAppendList", testEvents},
 		{"EventsListNeverSplitsSeqGroup", testEventsSeqGroups},
+		{"EventsTypeFilterAdvancesLastSeq", testEventsTypeFilter},
 		{"BanksGetDeleteUnknown", testBankUnknown},
 		{"BanksEnsure", testBankEnsure},
 		{"BanksCreateDuplicate", testBankCreate},
@@ -729,4 +730,20 @@ func testEventsSeqGroups(t *testing.T, s port.Store) {
 	wantSeqGroup(t, "List(after 0, limit 1)", listEvents(t, s, bankA, 0, 1), s1, "e1", "e2")
 	wantSeqGroup(t, "List(after the first group, limit 1)", listEvents(t, s, bankA, s1, 1), s2, "e3", "e4")
 	wantSeqGroup(t, "List(after the second group, limit 1)", listEvents(t, s, bankA, s2, 1), 0)
+}
+
+// testEventsTypeFilter: a type filter matching none of the scanned events returns no events, yet lastSeq is
+// the highest seq scanned, so the next poll advances; lastSeq is never below afterSeq.
+func testEventsTypeFilter(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	appendEvents(t, s, bankA, "e1", "e2")
+	s2 := appendEvents(t, s, bankA, "e3")
+	failed := []domain.EventType{domain.EventTypeOperationFailed}
+	evs, last := listEventsOf(t, s, bankA, 0, 10, failed)
+	if len(evs) != 0 || last != s2 {
+		t.Errorf("List(after 0, OPERATION_FAILED only) = %d events, lastSeq %d; want none, %d", len(evs), last, s2)
+	}
+	if evs, last = listEventsOf(t, s, bankA, s2, 10, failed); len(evs) != 0 || last != s2 {
+		t.Errorf("List(after %d, OPERATION_FAILED only) = %d events, lastSeq %d; want none, %d", s2, len(evs), last, s2)
+	}
 }
