@@ -8,7 +8,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP | Title | State | Branch | PR | Blockers | Open CCRs | LOW findings |
 |----|-------|-------|--------|----|----------|-----------|--------------|
 | WP-00 | Contracts and scaffold | merged (0374c87, tag contracts-v1) | wp/WP-00-contracts | f5ab75f | — | WP-00-1 approved + applied | see carried-forward |
-| WP-01 | Postgres adapter | in progress | wp/WP-01-postgres | — | — | — | — |
+| WP-01 | Postgres adapter | merged (991ae7d); follow-up in progress | wp/WP-01-postgres | dbbd51b | — | — | follow-up list (see log) |
 | WP-02 | Fakes | merged | wp/WP-02-fakes | 0d2775e | — | — | 2 cosmetic LOW |
 | WP-03 | Gateway and S3 adapters | merged (8dd2090 + follow-up) | wp/WP-03-gateway-s3 | 20fab3d | — | — | 5 LOW accepted (see log) |
 | WP-04 | Config, routing, time, prompts | merged (756d945 + follow-up) | wp/WP-04-config-prompts | fb9fa38 | — | WP-04-1 approved + applied | — |
@@ -166,3 +166,13 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-04 follow-up fb9fa38 checked by the orchestrator and merged; gates pass. WP-04 done. Note for WP-08:
   get the extraction schema from prompts.ExtractSchema(name, data.OptionalDimensions), not Schema.
 - 2026-10-10 WP-01 handed in (dbbd51b); reviewer spawned. Worker notes: the fake should also run RunStoreGapsSuite/RunQueueGapsSuite (2 lines in internal/fake); delete the porttest_test.go placeholders after merge.
+- 2026-10-10 WP-01 review: MERGE (0 CRITICAL/HIGH). Merged into main as 991ae7d; full gates pass (postgres
+  suite 94 s). Phase 1 complete apart from follow-ups. MEDIUMs sent back as a follow-up (SQLSTATE class 22 ->
+  InvalidArgument, DeleteBatch tombstone re-check in tx, FK-less tables in the final Delete, tag
+  normalization, degenerate temporal window, InTx deadlock retry, test hardening, fake gap-suite wiring).
+- Carried forward to engine WPs (Phase 2):
+  - handlers test port.LostJobs(err), not errors.Is(err, ErrConflict);
+  - call tx.Seq before Enqueue inside a tx (the reverse order can deadlock with ReclaimStale);
+  - WP-08: Chunks.Committed also returns the previous completed retain's hashes, and DeleteByDocument doesn't
+    delete chunks. Retain must tell "committed in this retain" from leftovers, or an interrupted re-retain
+    loses facts.
