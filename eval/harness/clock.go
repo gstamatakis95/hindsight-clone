@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -27,7 +28,7 @@ func (SystemClock) Sleep(ctx context.Context, d time.Duration) error {
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
-		return context.Cause(ctx)
+		return fmt.Errorf("sleep: %w", context.Cause(ctx))
 	case <-t.C:
 		return nil
 	}
