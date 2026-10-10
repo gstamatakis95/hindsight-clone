@@ -1,9 +1,10 @@
-package gateway
+package jsonschema_test
 
 import (
 	"encoding/json"
 	"errors"
 	"memd/internal/domain"
+	"memd/internal/jsonschema"
 	"strings"
 	"testing"
 )
@@ -57,11 +58,11 @@ func TestValidateSchema(t *testing.T) {
 		{"oneOf one", `{"facts":[{"text":"a","kind":"world","tag":"abcd"}]}`, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s, err := compileSchema(json.RawMessage(facts))
+			s, err := jsonschema.Compile(json.RawMessage(facts))
 			if err != nil {
 				t.Fatalf("compileSchema: %v", err)
 			}
-			err = s.validate([]byte(tc.doc))
+			err = s.Validate([]byte(tc.doc))
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Errorf("validate: %v, want nil", err)
@@ -74,18 +75,18 @@ func TestValidateSchema(t *testing.T) {
 
 func TestCompileSchemaRejectsBadSchema(t *testing.T) {
 	for _, raw := range []string{"", "  ", "{", `{"type":"object"} x`} {
-		if _, err := compileSchema(json.RawMessage(raw)); !errors.Is(err, domain.ErrInvalidArgument) {
-			t.Errorf("compileSchema(%q) = %v, want ErrInvalidArgument", raw, err)
+		if _, err := jsonschema.Compile(json.RawMessage(raw)); !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("jsonschema.Compile(%q) = %v, want ErrInvalidArgument", raw, err)
 		}
 	}
 }
 
 func TestSchemaRefLoopBounded(t *testing.T) {
-	s, err := compileSchema(json.RawMessage(`{"$ref":"#"}`))
+	s, err := jsonschema.Compile(json.RawMessage(`{"$ref":"#"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.validate([]byte(`{}`)); err == nil || !strings.Contains(err.Error(), "nests too deeply") {
+	if err := s.Validate([]byte(`{}`)); err == nil || !strings.Contains(err.Error(), "nests too deeply") {
 		t.Errorf("validate = %v, want a depth error", err)
 	}
 }

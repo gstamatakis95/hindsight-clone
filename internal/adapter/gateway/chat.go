@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"memd/internal/domain"
+	"memd/internal/jsonschema"
 	"memd/internal/port"
 	"reflect"
 	"regexp"
@@ -178,9 +179,9 @@ func schemaName(name string) string {
 // budget. The returned usage sums every attempt, failed ones included.
 func (c *Client) Structured(ctx context.Context, req port.StructuredRequest, out any) (port.Usage, error) {
 	sum := domain.Usage{Slot: req.Slot}
-	sch, err := compileSchema(req.Schema)
+	sch, err := jsonschema.Compile(req.Schema)
 	if err != nil {
-		return finalUsage(sum, req.Binding.Model), err
+		return finalUsage(sum, req.Binding.Model), fmt.Errorf("gateway %s: %w", chatPath, err)
 	}
 	var msgs []outMessage
 	if req.System != "" {
@@ -209,9 +210,9 @@ func (c *Client) Structured(ctx context.Context, req port.StructuredRequest, out
 
 // decodeValid validates content against sch and, when it matches, decodes it into out (a nil out skips
 // decoding).
-func decodeValid(sch *schema, content string, out any) error {
-	if err := sch.validate([]byte(content)); err != nil {
-		return err
+func decodeValid(sch *jsonschema.Schema, content string, out any) error {
+	if err := sch.Validate([]byte(content)); err != nil {
+		return fmt.Errorf("%w", err) // the message goes back to the model verbatim
 	}
 	if out == nil {
 		return nil
