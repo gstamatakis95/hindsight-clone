@@ -79,3 +79,9 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   Decision-note number ranges per WP: WP-0N uses N00-N99. WP-05 launch blocked by the auto-mode permission
   classifier; awaiting the user.
 - 2026-10-10 WP-05 launch retried at the user's request; worker running.
+- 2026-10-10 WP-03 and WP-07 handed in (e304714, 2b33aa0); reviewers spawned.
+- 2026-10-10 ruling CCR WP-07-1 APPROVED and applied on main: RetainResponse.usage (repeated SlotUsage = 3),
+  additive, per SPEC Model routing "usage accounting". Affects WP-08 (return usage), WP-06/WP-14 (copy into
+  response), WP-07 (read it).
+- 2026-10-10 env: a stale golangci-lint v1 in ~/go/bin shadows Homebrew's v2.14; run make with
+  PATH="/opt/homebrew/bin:$PATH". Running workers told.

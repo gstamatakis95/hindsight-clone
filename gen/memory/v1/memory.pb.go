@@ -404,8 +404,11 @@ type RetainResponse struct {
 	Documents []*RetainedDocument `protobuf:"bytes,1,rep,name=documents,proto3" json:"documents,omitempty"`
 	// retain_batch parent operation; set when there was more than one document.
 	ParentOperationId string `protobuf:"bytes,2,opt,name=parent_operation_id,json=parentOperationId,proto3" json:"parent_operation_id,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Token usage per slot and model of the LLM and embedding calls a synchronous retain made; empty when
+	// run_async (the usage is then on the retain_document operations).
+	Usage         []*SlotUsage `protobuf:"bytes,3,rep,name=usage,proto3" json:"usage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RetainResponse) Reset() {
@@ -450,6 +453,13 @@ func (x *RetainResponse) GetParentOperationId() string {
 		return x.ParentOperationId
 	}
 	return ""
+}
+
+func (x *RetainResponse) GetUsage() []*SlotUsage {
+	if x != nil {
+		return x.Usage
+	}
+	return nil
 }
 
 // RecallInclude asks Recall to attach extra material, each within its own token budget.
@@ -1290,10 +1300,11 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"documentId\x12#\n" +
 	"\runits_created\x18\x02 \x01(\x05R\funitsCreated\x12\x1c\n" +
 	"\tunchanged\x18\x03 \x01(\bR\tunchanged\x12!\n" +
-	"\foperation_id\x18\x04 \x01(\tR\voperationId\"{\n" +
+	"\foperation_id\x18\x04 \x01(\tR\voperationId\"\xa7\x01\n" +
 	"\x0eRetainResponse\x129\n" +
 	"\tdocuments\x18\x01 \x03(\v2\x1b.memory.v1.RetainedDocumentR\tdocuments\x12.\n" +
-	"\x13parent_operation_id\x18\x02 \x01(\tR\x11parentOperationId\"\xbd\x02\n" +
+	"\x13parent_operation_id\x18\x02 \x01(\tR\x11parentOperationId\x12*\n" +
+	"\x05usage\x18\x03 \x03(\v2\x14.memory.v1.SlotUsageR\x05usage\"\xbd\x02\n" +
 	"\rRecallInclude\x12\x1b\n" +
 	"\x06chunks\x18\x01 \x01(\bH\x00R\x06chunks\x88\x01\x01\x12/\n" +
 	"\x11chunks_max_tokens\x18\x02 \x01(\x05H\x01R\x0fchunksMaxTokens\x88\x01\x01\x12&\n" +
@@ -1425,16 +1436,16 @@ var file_memory_v1_memory_proto_goTypes = []any{
 	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
 	(*ObservationScopes)(nil),     // 18: memory.v1.ObservationScopes
 	(*BankConfig)(nil),            // 19: memory.v1.BankConfig
-	(FactType)(0),                 // 20: memory.v1.FactType
-	(TagsMatch)(0),                // 21: memory.v1.TagsMatch
-	(*TagGroup)(nil),              // 22: memory.v1.TagGroup
-	(Budget)(0),                   // 23: memory.v1.Budget
-	(*MinScores)(nil),             // 24: memory.v1.MinScores
-	(*Memory)(nil),                // 25: memory.v1.Memory
-	(*RecallTrace)(nil),           // 26: memory.v1.RecallTrace
-	(*Directive)(nil),             // 27: memory.v1.Directive
-	(*ReflectTrace)(nil),          // 28: memory.v1.ReflectTrace
-	(*SlotUsage)(nil),             // 29: memory.v1.SlotUsage
+	(*SlotUsage)(nil),             // 20: memory.v1.SlotUsage
+	(FactType)(0),                 // 21: memory.v1.FactType
+	(TagsMatch)(0),                // 22: memory.v1.TagsMatch
+	(*TagGroup)(nil),              // 23: memory.v1.TagGroup
+	(Budget)(0),                   // 24: memory.v1.Budget
+	(*MinScores)(nil),             // 25: memory.v1.MinScores
+	(*Memory)(nil),                // 26: memory.v1.Memory
+	(*RecallTrace)(nil),           // 27: memory.v1.RecallTrace
+	(*Directive)(nil),             // 28: memory.v1.Directive
+	(*ReflectTrace)(nil),          // 29: memory.v1.ReflectTrace
 	(*Chunk)(nil),                 // 30: memory.v1.Chunk
 }
 var file_memory_v1_memory_proto_depIdxs = []int32{
@@ -1446,46 +1457,47 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	1,  // 5: memory.v1.RetainRequest.items:type_name -> memory.v1.RetainItem
 	19, // 6: memory.v1.RetainRequest.overrides:type_name -> memory.v1.BankConfig
 	3,  // 7: memory.v1.RetainResponse.documents:type_name -> memory.v1.RetainedDocument
-	20, // 8: memory.v1.RecallRequest.types:type_name -> memory.v1.FactType
-	21, // 9: memory.v1.RecallRequest.tags_match:type_name -> memory.v1.TagsMatch
-	22, // 10: memory.v1.RecallRequest.tag_groups:type_name -> memory.v1.TagGroup
-	23, // 11: memory.v1.RecallRequest.budget:type_name -> memory.v1.Budget
-	17, // 12: memory.v1.RecallRequest.query_time:type_name -> google.protobuf.Timestamp
-	17, // 13: memory.v1.RecallRequest.time_window_start:type_name -> google.protobuf.Timestamp
-	17, // 14: memory.v1.RecallRequest.time_window_end:type_name -> google.protobuf.Timestamp
-	24, // 15: memory.v1.RecallRequest.min_scores:type_name -> memory.v1.MinScores
-	5,  // 16: memory.v1.RecallRequest.include:type_name -> memory.v1.RecallInclude
-	19, // 17: memory.v1.RecallRequest.overrides:type_name -> memory.v1.BankConfig
-	25, // 18: memory.v1.RecallResponse.results:type_name -> memory.v1.Memory
-	14, // 19: memory.v1.RecallResponse.source_facts:type_name -> memory.v1.RecallResponse.SourceFactsEntry
-	15, // 20: memory.v1.RecallResponse.chunks:type_name -> memory.v1.RecallResponse.ChunksEntry
-	16, // 21: memory.v1.RecallResponse.entities:type_name -> memory.v1.RecallResponse.EntitiesEntry
-	26, // 22: memory.v1.RecallResponse.trace:type_name -> memory.v1.RecallTrace
-	21, // 23: memory.v1.ReflectRequest.tags_match:type_name -> memory.v1.TagsMatch
-	22, // 24: memory.v1.ReflectRequest.tag_groups:type_name -> memory.v1.TagGroup
-	23, // 25: memory.v1.ReflectRequest.budget:type_name -> memory.v1.Budget
-	27, // 26: memory.v1.ReflectRequest.extra_directives:type_name -> memory.v1.Directive
-	9,  // 27: memory.v1.ReflectRequest.include:type_name -> memory.v1.ReflectInclude
-	17, // 28: memory.v1.ReflectRequest.query_time:type_name -> google.protobuf.Timestamp
-	19, // 29: memory.v1.ReflectRequest.overrides:type_name -> memory.v1.BankConfig
-	12, // 30: memory.v1.ReflectResponse.based_on:type_name -> memory.v1.BasedOn
-	28, // 31: memory.v1.ReflectResponse.trace:type_name -> memory.v1.ReflectTrace
-	29, // 32: memory.v1.ReflectResponse.usage:type_name -> memory.v1.SlotUsage
-	25, // 33: memory.v1.BasedOn.memories:type_name -> memory.v1.Memory
-	25, // 34: memory.v1.RecallResponse.SourceFactsEntry.value:type_name -> memory.v1.Memory
-	30, // 35: memory.v1.RecallResponse.ChunksEntry.value:type_name -> memory.v1.Chunk
-	7,  // 36: memory.v1.RecallResponse.EntitiesEntry.value:type_name -> memory.v1.EntityState
-	2,  // 37: memory.v1.MemoryService.Retain:input_type -> memory.v1.RetainRequest
-	6,  // 38: memory.v1.MemoryService.Recall:input_type -> memory.v1.RecallRequest
-	10, // 39: memory.v1.MemoryService.Reflect:input_type -> memory.v1.ReflectRequest
-	4,  // 40: memory.v1.MemoryService.Retain:output_type -> memory.v1.RetainResponse
-	8,  // 41: memory.v1.MemoryService.Recall:output_type -> memory.v1.RecallResponse
-	11, // 42: memory.v1.MemoryService.Reflect:output_type -> memory.v1.ReflectResponse
-	40, // [40:43] is the sub-list for method output_type
-	37, // [37:40] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	20, // 8: memory.v1.RetainResponse.usage:type_name -> memory.v1.SlotUsage
+	21, // 9: memory.v1.RecallRequest.types:type_name -> memory.v1.FactType
+	22, // 10: memory.v1.RecallRequest.tags_match:type_name -> memory.v1.TagsMatch
+	23, // 11: memory.v1.RecallRequest.tag_groups:type_name -> memory.v1.TagGroup
+	24, // 12: memory.v1.RecallRequest.budget:type_name -> memory.v1.Budget
+	17, // 13: memory.v1.RecallRequest.query_time:type_name -> google.protobuf.Timestamp
+	17, // 14: memory.v1.RecallRequest.time_window_start:type_name -> google.protobuf.Timestamp
+	17, // 15: memory.v1.RecallRequest.time_window_end:type_name -> google.protobuf.Timestamp
+	25, // 16: memory.v1.RecallRequest.min_scores:type_name -> memory.v1.MinScores
+	5,  // 17: memory.v1.RecallRequest.include:type_name -> memory.v1.RecallInclude
+	19, // 18: memory.v1.RecallRequest.overrides:type_name -> memory.v1.BankConfig
+	26, // 19: memory.v1.RecallResponse.results:type_name -> memory.v1.Memory
+	14, // 20: memory.v1.RecallResponse.source_facts:type_name -> memory.v1.RecallResponse.SourceFactsEntry
+	15, // 21: memory.v1.RecallResponse.chunks:type_name -> memory.v1.RecallResponse.ChunksEntry
+	16, // 22: memory.v1.RecallResponse.entities:type_name -> memory.v1.RecallResponse.EntitiesEntry
+	27, // 23: memory.v1.RecallResponse.trace:type_name -> memory.v1.RecallTrace
+	22, // 24: memory.v1.ReflectRequest.tags_match:type_name -> memory.v1.TagsMatch
+	23, // 25: memory.v1.ReflectRequest.tag_groups:type_name -> memory.v1.TagGroup
+	24, // 26: memory.v1.ReflectRequest.budget:type_name -> memory.v1.Budget
+	28, // 27: memory.v1.ReflectRequest.extra_directives:type_name -> memory.v1.Directive
+	9,  // 28: memory.v1.ReflectRequest.include:type_name -> memory.v1.ReflectInclude
+	17, // 29: memory.v1.ReflectRequest.query_time:type_name -> google.protobuf.Timestamp
+	19, // 30: memory.v1.ReflectRequest.overrides:type_name -> memory.v1.BankConfig
+	12, // 31: memory.v1.ReflectResponse.based_on:type_name -> memory.v1.BasedOn
+	29, // 32: memory.v1.ReflectResponse.trace:type_name -> memory.v1.ReflectTrace
+	20, // 33: memory.v1.ReflectResponse.usage:type_name -> memory.v1.SlotUsage
+	26, // 34: memory.v1.BasedOn.memories:type_name -> memory.v1.Memory
+	26, // 35: memory.v1.RecallResponse.SourceFactsEntry.value:type_name -> memory.v1.Memory
+	30, // 36: memory.v1.RecallResponse.ChunksEntry.value:type_name -> memory.v1.Chunk
+	7,  // 37: memory.v1.RecallResponse.EntitiesEntry.value:type_name -> memory.v1.EntityState
+	2,  // 38: memory.v1.MemoryService.Retain:input_type -> memory.v1.RetainRequest
+	6,  // 39: memory.v1.MemoryService.Recall:input_type -> memory.v1.RecallRequest
+	10, // 40: memory.v1.MemoryService.Reflect:input_type -> memory.v1.ReflectRequest
+	4,  // 41: memory.v1.MemoryService.Retain:output_type -> memory.v1.RetainResponse
+	8,  // 42: memory.v1.MemoryService.Recall:output_type -> memory.v1.RecallResponse
+	11, // 43: memory.v1.MemoryService.Reflect:output_type -> memory.v1.ReflectResponse
+	41, // [41:44] is the sub-list for method output_type
+	38, // [38:41] is the sub-list for method input_type
+	38, // [38:38] is the sub-list for extension type_name
+	38, // [38:38] is the sub-list for extension extendee
+	0,  // [0:38] is the sub-list for field type_name
 }
 
 func init() { file_memory_v1_memory_proto_init() }

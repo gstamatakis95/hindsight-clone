@@ -105,6 +105,9 @@ message RetainResponse {
   repeated RetainedDocument documents = 1;
   // retain_batch parent operation; set when there was more than one document.
   string parent_operation_id = 2;
+  // Token usage per slot and model of the LLM and embedding calls a synchronous retain made; empty when
+  // run_async (the usage is then on the retain_document operations).
+  repeated SlotUsage usage = 3;
 }
 
 // ======================= recall =======================
