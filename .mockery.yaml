@@ -1,0 +1,18 @@
+# mockery v3: a mock for every interface in port, the engines and the worker runtime, written to
+# internal/mocks/<path relative to internal/>, one Go package per source package (package mock<name>).
+# The matryer (moq-style) template needs only the standard library; testify is not an approved
+# dependency (docs/decisions/007-mockery-matryer.md). Never hand-edit the output; run `make gen`.
+template: matryer
+all: true
+recursive: true
+include-auto-generated: false
+force-file-write: true
+formatter: goimports
+dir: 'internal/mocks/{{ trimPrefix "internal/" .InterfaceDirRelative }}'
+filename: mocks.go
+pkgname: 'mock{{ .SrcPackageName }}'
+structname: '{{ .InterfaceName }}'
+packages:
+  memd/internal/port: {}
+  memd/internal/engine: {}
+  memd/internal/worker: {}

@@ -1,0 +1,29 @@
+[project]
+name = "memd-migrations"
+version = "0.1.0"
+description = "Alembic revisions that own memd's Postgres schema (raw SQL only)."
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6"]
+
+# Not an installable package: `pip install -e migrations` only pulls in the dependencies.
+[tool.setuptools]
+py-modules = []
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "C90", "D"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

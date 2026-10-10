@@ -1,0 +1,47 @@
+version: "2"
+linters:
+  default: standard
+  enable: [gocyclo, lll, revive, godot, depguard, errorlint, wrapcheck, contextcheck, gosec]
+  settings:
+    gocyclo:
+      min-complexity: 15        # McCabe: anything above 15 fails
+    lll:
+      line-length: 120
+    revive:
+      rules:
+        - name: exported        # doc comment on every exported identifier
+        - name: package-comments
+        - name: unused-parameter
+    wrapcheck:
+      ignore-package-globs: ["memd/internal/port"]   # errors crossing a port are already typed
+    depguard:
+      rules:
+        engines:
+          files: ["**/internal/engine/**"]
+          deny:
+            - pkg: "memd/internal/adapter"
+              desc: engines depend on ports only
+            - pkg: "memd/internal/server"
+              desc: engines don't know about gRPC
+            - pkg: "memd/internal/worker"
+              desc: engines don't know about job plumbing
+            - pkg: "memd/gen"
+              desc: no proto types in engines; use domain
+            - pkg: "github.com/jackc/pgx"
+              desc: use port.Store
+            - pkg: "net/http"
+              desc: use port.LLM / port.Embedder / port.Reranker
+            - pkg: "github.com/aws"
+              desc: use port.Blob
+        server:
+          files: ["**/internal/server/**"]
+          deny:
+            - pkg: "memd/internal/adapter"
+              desc: handlers call engines
+        domain:
+          files: ["**/internal/domain/**"]
+          deny:
+            - pkg: "memd/internal"
+              desc: domain imports nothing internal
+formatters:
+  enable: [gofumpt, goimports]

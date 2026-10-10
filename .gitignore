@@ -115,3 +115,11 @@ go.work.sum
 
 # Hindsight reference source, cloned read-only for porting (not vendored)
 third_party/hindsight/
+
+# Python (migrations tooling)
+__pycache__/
+*.egg-info/
+.ruff_cache/
+
+# Tool binaries built by make (mockery)
+.bin/
