@@ -143,7 +143,9 @@ func (r *entityRepo) Attach(ctx context.Context, unit port.UnitID, ents []port.E
 
 // countAttached adds a mention to each of the newly attached entities and bumps the co-occurrence count of
 // each of them with every other entity of the unit.
-func (r *entityRepo) countAttached(ctx context.Context, bank db.EntityUnitBankRow, unit uuid.UUID, added []uuid.UUID) error {
+func (r *entityRepo) countAttached(
+	ctx context.Context, bank db.EntityUnitBankRow, unit uuid.UUID, added []uuid.UUID,
+) error {
 	if err := r.q.EntityBumpMentions(ctx, added); err != nil {
 		return mapErr("count entity mentions", err)
 	}

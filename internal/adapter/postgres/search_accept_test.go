@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"memd/internal/adapter/postgres"
 	"memd/internal/adapter/postgres/pgtest"
@@ -33,8 +34,18 @@ func loadAcceptFixture(t *testing.T, pool *pgxpool.Pool) map[port.UnitID]bool {
 	t.Helper()
 	ctx := t.Context()
 	start := time.Now()
+	var indexDef string
+	if err := pool.QueryRow(ctx, `SELECT indexdef FROM pg_indexes
+		WHERE schemaname = 'public' AND indexname = 'memory_units_embedding_hnsw'`).Scan(&indexDef); err != nil {
+		t.Fatalf("hnsw index definition: %v", err)
+	}
+	// Inserting row by row into a live HNSW index takes minutes; one transaction drops the index, loads the
+	// rows and rebuilds it from its own catalog definition (a rollback restores it), which takes seconds.
 	stmts := []string{
+		`SET LOCAL maintenance_work_mem = '512MB'`,
+		`SET LOCAL max_parallel_maintenance_workers = 4`,
 		`INSERT INTO banks (tenant_id, id) VALUES ('t1', 'small'), ('t1', 'big'), ('t2', 'small'), ('t2', 'big')`,
+		`DROP INDEX memory_units_embedding_hnsw`,
 		// The subquery references g (in WHERE), so it runs once per row (an uncorrelated one would give every row
 		// the same vector).
 		`INSERT INTO memory_units (tenant_id, bank_id, fact_type, text, seq, embedding)
@@ -43,12 +54,21 @@ func loadAcceptFixture(t *testing.T, pool *pgxpool.Pool) map[port.UnitID]bool {
 		        'world', 'unit ' || g, 1,
 		        (SELECT array_agg(random() - 0.5) FROM generate_series(1, 768) WHERE g > 0)::vector
 		 FROM generate_series(1, 50000) g`,
-		`ANALYZE memory_units`,
+		indexDef,
 	}
-	for _, s := range stmts {
-		if _, err := pool.Exec(ctx, s); err != nil {
-			t.Fatalf("load fixture: %v\n%s", err, s)
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		for _, s := range stmts {
+			if _, err := tx.Exec(ctx, s); err != nil {
+				return fmt.Errorf("%w\n%s", err, s)
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `ANALYZE memory_units`); err != nil {
+		t.Fatalf("analyze: %v", err)
 	}
 	t.Logf("loaded %d units in %s", acceptUnits, time.Since(start).Round(time.Millisecond))
 	rows, err := pool.Query(ctx, `SELECT id::text FROM memory_units WHERE tenant_id = 't1' AND bank_id = 'small'`)
@@ -87,17 +107,17 @@ func explainVector(ctx context.Context, t *testing.T, pool *pgxpool.Pool, q []fl
 		if _, err := tx.Exec(ctx, `SELECT set_config('hnsw.ef_search', '200', true),
 			set_config('hnsw.iterative_scan', $1, true), set_config('hnsw.max_scan_tuples', '100000', true)`,
 			iterative); err != nil {
-			return err
+			return fmt.Errorf("explain query: %w", err)
 		}
 		rows, err := tx.Query(ctx, `EXPLAIN SELECT id, 1 - dist AS score FROM (SELECT id, embedding <=> $1::vector
 			AS dist FROM memory_units WHERE embedding IS NOT NULL AND tenant_id = $2::text AND bank_id = $3::text
 			ORDER BY embedding <=> $1::vector LIMIT $4::int) s ORDER BY dist, id`,
 			pgvector.NewVector(q), acceptSmall.Tenant, acceptSmall.Bank, 10)
 		if err != nil {
-			return err
+			return fmt.Errorf("explain query: %w", err)
 		}
 		plan, err = pgx.CollectRows(rows, pgx.RowTo[string])
-		return err
+		return fmt.Errorf("explain query: %w", err)
 	})
 	if err != nil {
 		t.Fatalf("explain: %v", err)
@@ -177,7 +197,7 @@ func countWithoutIterativeScan(t *testing.T, pool *pgxpool.Pool, q []float32) in
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT set_config('hnsw.ef_search', '200', true),
 			set_config('hnsw.iterative_scan', 'off', true)`); err != nil {
-			return err
+			return fmt.Errorf("explain query: %w", err)
 		}
 		return tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT id FROM memory_units WHERE embedding IS NOT NULL
 			AND tenant_id = $2::text AND bank_id = $3::text ORDER BY embedding <=> $1::vector LIMIT 10) s`,

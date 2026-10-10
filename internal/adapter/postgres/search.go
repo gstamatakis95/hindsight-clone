@@ -122,7 +122,7 @@ func queryHits(ctx context.Context, conn db.DBTX, what, sql string, args []any) 
 		var id uuid.UUID
 		var score float64
 		err := row.Scan(&id, &score)
-		return port.Hit{ID: idOf[port.UnitID](id), Score: score}, err
+		return port.Hit{ID: idOf[port.UnitID](id), Score: score}, mapErr("scan hit", err)
 	})
 	if err != nil {
 		return nil, mapErr(what, err)

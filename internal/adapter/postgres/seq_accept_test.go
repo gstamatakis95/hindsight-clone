@@ -8,6 +8,7 @@ import (
 	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -99,7 +100,7 @@ func writeOneSeq(ctx context.Context, s *postgres.Store, bank port.BankRef, writ
 		}
 		u := domain.Unit{
 			ID: domain.UnitID(uuid.NewString()), Bank: bank, Type: domain.FactTypeWorld,
-			Text: "writer", Seq: seq, Metadata: map[string]string{"writer": string(rune('a' + writer))},
+			Text: "writer", Seq: seq, Metadata: map[string]string{"writer": strconv.Itoa(writer)},
 		}
 		if err := tx.Units().Insert(ctx, []domain.Unit{u}); err != nil {
 			return err
@@ -107,7 +108,10 @@ func writeOneSeq(ctx context.Context, s *postgres.Store, bank port.BankRef, writ
 		time.Sleep(time.Duration(2000+rand.IntN(2000)) * time.Microsecond) //nolint:gosec // test jitter
 		return nil
 	})
-	return seq, err
+	if err != nil {
+		return 0, fmt.Errorf("writer %d: %w", writer, err)
+	}
+	return seq, nil
 }
 
 // checkSeqPrefix loops until stop: it reads BankSeq S through the Reader, then counts the bank's units with
@@ -126,7 +130,7 @@ func checkSeqPrefix(
 			`SELECT count(*) FROM memory_units WHERE tenant_id = $1 AND bank_id = $2 AND seq <= $3`,
 			bank.Tenant, bank.Bank, seq).Scan(&n)
 		if err != nil {
-			return err
+			return fmt.Errorf("count units: %w", err)
 		}
 		if n != seq {
 			return fmt.Errorf("reader saw BankSeq %d but %d units at or below it", seq, n)
