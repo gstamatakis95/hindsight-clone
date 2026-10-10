@@ -29,18 +29,22 @@ func (c *curator) Update(ctx context.Context, req UpdateMemoryRequest) (domain.U
 	if err := validateUpdate(req); err != nil {
 		return domain.Unit{}, "", err
 	}
+	names, err := c.snapshotNames(ctx, req)
+	if err != nil {
+		return domain.Unit{}, "", err
+	}
 	var (
 		out domain.Unit
 		op  port.OperationID
 	)
-	err := c.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = c.d.Store.InTx(ctx, func(tx port.Tx) error {
 		out, op = domain.Unit{}, ""
 		var err error
 		if req.State == domain.MemoryStateInvalidated {
 			out, err = c.invalidate(ctx, tx, req)
 			return err
 		}
-		out, op, err = c.restoreOrEdit(ctx, tx, req)
+		out, op, err = c.restoreOrEdit(ctx, tx, req, names)
 		return err
 	})
 	if err != nil {
@@ -164,9 +168,10 @@ func (c *curator) refreshCiting(ctx context.Context, tx port.Tx, b port.BankRef,
 }
 
 // restoreOrEdit restores an archived unit when asked (State valid), applies any edits and enqueues the
-// rederive. State valid on a live unit is no state change; with no edits either, nothing is written.
+// rederive. State valid on a live unit is no state change; with no edits either, nothing is written. names
+// are the archived unit's snapshot entity names; a restore without new entities re-resolves them.
 func (c *curator) restoreOrEdit(
-	ctx context.Context, tx port.Tx, req UpdateMemoryRequest,
+	ctx context.Context, tx port.Tx, req UpdateMemoryRequest, names []string,
 ) (domain.Unit, port.OperationID, error) {
 	seq, err := tx.Seq(ctx, req.Bank)
 	if err != nil {
@@ -191,7 +196,11 @@ func (c *curator) restoreOrEdit(
 			return domain.Unit{}, "", err
 		}
 	}
-	op, err := enqueueRederive(ctx, tx, u, req)
+	entities := req.Entities
+	if entities == nil && restored {
+		entities = names
+	}
+	op, err := enqueueRederive(ctx, tx, u, req, entities)
 	if err != nil {
 		return domain.Unit{}, "", err
 	}
@@ -202,6 +211,27 @@ func (c *curator) restoreOrEdit(
 		return domain.Unit{}, "", err
 	}
 	return u, op, nil
+}
+
+// snapshotNames reads the entity names of the archived unit a restore brings back, before the restore. Graph
+// maintenance may have pruned those entities while the unit was archived (Restore then skips them), so the
+// rederive re-resolves the names and re-creates them. It returns nil when no restore is asked for, new
+// entities are given, no reader is wired or the unit is not archived.
+func (c *curator) snapshotNames(ctx context.Context, req UpdateMemoryRequest) ([]string, error) {
+	if req.State != domain.MemoryStateValid || req.Entities != nil || c.d.Archived == nil {
+		return nil, nil
+	}
+	u, err := c.d.Archived.GetUnit(ctx, req.Bank, req.ID)
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read archived unit %s: %w", req.ID, err)
+	}
+	if u.State != domain.MemoryStateInvalidated || len(u.Entities) == 0 {
+		return nil, nil
+	}
+	return slices.Clone(u.Entities), nil
 }
 
 // restoreIfArchived moves an archived unit back; a unit that is not archived reports false (the caller

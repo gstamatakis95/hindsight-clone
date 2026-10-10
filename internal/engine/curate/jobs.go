@@ -46,12 +46,13 @@ func rederiveKey(u domain.Unit) string {
 	return "doc:" + string(u.DocumentID)
 }
 
-// enqueueRederive enqueues rederive_memory for u in tx (DedupeNone, request overrides on the job).
+// enqueueRederive enqueues rederive_memory for u in tx (DedupeNone, request overrides on the job); entities
+// go into the payload (nil = re-resolve the unit's current names).
 func enqueueRederive(
-	ctx context.Context, tx port.Tx, u domain.Unit, req UpdateMemoryRequest,
+	ctx context.Context, tx port.Tx, u domain.Unit, req UpdateMemoryRequest, entities []string,
 ) (port.OperationID, error) {
 	payload, err := json.Marshal(RederivePayload{
-		UnitID: u.ID, Entities: req.Entities, ResolveEntities: req.ResolveEntities,
+		UnitID: u.ID, Entities: entities, ResolveEntities: req.ResolveEntities,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode rederive payload: %w", err)

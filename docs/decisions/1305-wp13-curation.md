@@ -68,3 +68,11 @@ when a rederive must not write, and how ClearObservations counts what it deleted
 ## Spec lines involved
 SPEC "Curation" table and bullets, "Behavioural rules" (no hard deletes), "Jobs" (rederive_memory serial key
 `doc:{unit's document}`), decision 1301.
+
+## Addendum: restore after graph maintenance pruned the unit's entities
+Invalidate enqueues graph_maintenance, which usually runs before any restore. `Archive` queued the unit's
+entities in entity_maintenance, so an entity only the archived unit referenced is pruned, and `Restore` then
+skips it. To keep the round trip whole, a restore without new entities first reads the archived unit's
+snapshot entity names through `CuratorDeps.Archived` (`UnitGetter`, i.e. `Reader.GetUnit` from CCR WP-13-1,
+whose contract now says archived units return their snapshot names) and puts them in the rederive payload,
+so the rederive re-resolves (re-creates) them. Test: `TestRestoreAfterEntityPruneKeepsEntities`.

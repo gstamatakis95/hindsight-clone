@@ -61,6 +61,14 @@ type RefreshQueuer interface {
 	QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
 }
 
+// UnitGetter reads one unit, live or archived. It is UnitSource.GetUnit (the port.Reader method proposed in
+// CCR WP-13-1); for an archived unit, Entities are the names in its archive snapshot, even when the entity
+// rows were pruned since.
+type UnitGetter interface {
+	// GetUnit returns one unit of b, live or archived; unknown = domain.ErrNotFound.
+	GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+}
+
 // CuratorDeps are the Curator's dependencies.
 type CuratorDeps struct {
 	// Store opens the RPC's transaction.
@@ -71,4 +79,7 @@ type CuratorDeps struct {
 	Citing CitingModels
 	// Refresh enqueues those refreshes in the invalidate's transaction.
 	Refresh RefreshQueuer
+	// Archived reads an archived unit's snapshot entity names before a restore, so the rederive re-creates
+	// entities graph maintenance pruned meanwhile; nil = rely on the entities Restore reattaches.
+	Archived UnitGetter
 }

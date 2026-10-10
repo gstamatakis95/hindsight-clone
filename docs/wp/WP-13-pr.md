@@ -34,7 +34,7 @@ Gates: `make gen` (no diff), `make lint BREAKING_AGAINST=contracts-v1` (0 issues
 | Accept | Test | Result |
 |---|---|---|
 | Invalidate: recall stops returning the citing observations immediately; citing models get a refresh queued | `curate.TestInvalidateRemovesCitingObservationsAndQueuesRefresh` | pass |
-| Restore round-trip | `curate.TestRestoreRoundTrip` | pass |
+| Restore round-trip | `curate.TestRestoreRoundTrip`, `curate.TestRestoreAfterEntityPruneKeepsEntities` (graph maintenance pruned the entity while archived) | pass |
 | Bank delete: queued jobs never resurrect data, writes fail during the delete, a write afterwards creates a fresh bank | `bank.TestBankDeleteLifecycle` | pass |
 | Retag no-op | `docs.TestRetagSetEqualIsNoop` | pass |
 | Graph maintenance resumes after its budget runs out | `maintenance.TestGraphMaintenanceResumesAfterBudget` | pass |
@@ -59,7 +59,7 @@ Supporting tests: bank `TestTombstoneIdempotent`, `TestDeleteRunSkipsPrefixWhenB
   `RefreshQueuer` / `Reprocessor`; 1304 graph maintenance; 1305 curation rules; 1306 bank engines; 1307 docs.
 
 ## For WP-14
-- Wire `store.Read()` as `UnitSource`, `CitingModels`, `ScopeSource`, `StatsSource`, `ModelSpecReader`,
+- Wire `store.Read()` as `UnitSource`, `curate.UnitGetter` (CuratorDeps.Archived), `CitingModels`, `ScopeSource`, `StatsSource`, `ModelSpecReader`,
   `DocumentSource` and `worker.ConsolidationCandidates` once CCR WP-13-1 lands.
 - Provide `RefreshQueuer` (WP-12) and `Reprocessor` (WP-08); `consolidate.Invalidator` as
   `curate.ObservationClearer`; `retain.EntityResolver` / `retain.Linker` for the rederiver and maintainer;
@@ -78,6 +78,9 @@ Supporting tests: bank `TestTombstoneIdempotent`, `TestDeleteRunSkipsPrefixWhenB
 - Narrow fencing window between the tombstone re-check and `Blob.DeletePrefix` (Alive doesn't check the
   worker id); a retain blob `Put` racing a tombstone can leave an orphan blob (retain should check the bank
   before its Put).
-- Rederive falls back to an entity match threshold of 0.6 when the effective config sets none.
+- Rederive falls back to an entity match threshold of 0.6 when the effective config sets none: server defaults
+  (internal/config/defaults.go) don't set `retain.entity_match_threshold` yet, so the default lives in curate.
+  WP-04/WP-14 should set it in ServerDefaults (and WP-08 should use the same value).
+- The restore keeps pruned entities only when `CuratorDeps.Archived` is wired (CCR WP-13-1 `GetUnit`).
 - Invalidate's direct refreshes are skipped when `Citing` / `Refresh` aren't wired; models then go stale only
   through the change sequence.
