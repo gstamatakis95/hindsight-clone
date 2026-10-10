@@ -107,3 +107,9 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   Complete skips the Alive gate on lost jobs. Third HIGH: shutdown releases spend the attempt cap. Ruling:
   documentation route plus a graceful drain before cancel, no CCR. Decisions 502 and 503 accepted. Fixes and
   MEDIUMs (heartbeat timeout and self-fencing, HasPending scope, Complete/Fail retry) sent back to the worker.
+- 2026-10-10 WP-04 handed in (f503f7a, rebased on dbc0eb3); reviewer spawned.
+- 2026-10-10 ruling CCR WP-04-1 APPROVED and applied on main: drop omitempty on the clearable BankConfig lists and
+  maps (entity_labels, consolidation_strategies, recall.strategy_boosts, recall.enabled_strategies,
+  reflect.enabled_tools, observation_scopes.custom). Without it an explicit clear was lost when saved to jsonb
+  and the tenant value came back (data loss). Checked: [] survives the round trip; nil stays nil.
+- 2026-10-10 note for WP-08/09: timex.TimeNormalizer methods take the resolved BankConfig (decision 400).

@@ -117,7 +117,7 @@ type ObservationScopes struct {
 	// Mode picks the fan-out rule.
 	Mode ScopeMode `json:"mode,omitempty"`
 	// Custom holds the scopes of ScopeModeCustom.
-	Custom []TagSet `json:"custom,omitempty"`
+	Custom []TagSet `json:"custom"`
 	// MaxCombinations caps ALL_COMBINATIONS (default 15); exceeding it fails Retain synchronously.
 	MaxCombinations *int `json:"max_combinations,omitempty"`
 }

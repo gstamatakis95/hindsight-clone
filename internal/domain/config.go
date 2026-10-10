@@ -169,9 +169,9 @@ type RecallConfig struct {
 	// BudgetHigh is the per-arm limit at BUDGET_HIGH (default 1000).
 	BudgetHigh *int `json:"budget_high,omitempty"`
 	// StrategyBoosts weights arms by name in fusion.
-	StrategyBoosts map[string]float64 `json:"strategy_boosts,omitempty"`
+	StrategyBoosts map[string]float64 `json:"strategy_boosts"`
 	// EnabledStrategies lists the arms to run; nil = all four.
-	EnabledStrategies []string `json:"enabled_strategies,omitempty"`
+	EnabledStrategies []string `json:"enabled_strategies"`
 	// RerankerMaxCandidates is how many fused candidates are reranked (default 300).
 	RerankerMaxCandidates *int `json:"reranker_max_candidates,omitempty"`
 	// Rerank toggles the cross-encoder.
@@ -203,7 +203,7 @@ type ReflectConfig struct {
 	// MaxIterations at BUDGET_MID (default 10); LOW halves, HIGH doubles.
 	MaxIterations *int `json:"max_iterations,omitempty"`
 	// EnabledTools lists the tools the agent may call; nil = all.
-	EnabledTools []string `json:"enabled_tools,omitempty"`
+	EnabledTools []string `json:"enabled_tools"`
 	// RequireEvidence forces at least one retrieval before done.
 	RequireEvidence *bool `json:"require_evidence,omitempty"`
 	// RecallBudget is the budget of the recall tool.
@@ -255,7 +255,7 @@ type BankConfig struct {
 	// CustomExtractionPrompt is used by the custom extraction mode.
 	CustomExtractionPrompt string `json:"custom_extraction_prompt,omitempty"`
 	// EntityLabels declares typed labels.
-	EntityLabels []EntityLabel `json:"entity_labels,omitempty"`
+	EntityLabels []EntityLabel `json:"entity_labels"`
 	// AutoConsolidation enqueues consolidation after retain.
 	AutoConsolidation *bool `json:"auto_consolidation,omitempty"`
 	// DedupThreshold is the cosine floor for near-duplicate observations (default 0.97).
@@ -265,7 +265,7 @@ type BankConfig struct {
 	// ConsolidationSourceFactsMaxTokens caps source facts per consolidation call.
 	ConsolidationSourceFactsMaxTokens *int `json:"consolidation_source_facts_max_tokens,omitempty"`
 	// ConsolidationStrategies are per-scope overrides; the first match wins.
-	ConsolidationStrategies []ConsolidationStrategy `json:"consolidation_strategies,omitempty"`
+	ConsolidationStrategies []ConsolidationStrategy `json:"consolidation_strategies"`
 	// Recall holds recall settings.
 	Recall *RecallConfig `json:"recall,omitempty"`
 	// Models binds slots to models; merged per slot across levels.
