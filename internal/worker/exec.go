@@ -21,12 +21,24 @@ const (
 
 // execute runs one job and settles its row. The deferred release runs on every exit, after the terminal
 // Complete or Fail, so the run is heartbeated until its handler has returned and been settled.
+//
+// With a TraceJob hook the run is wrapped in its span: the handler runs under the span's context and the
+// settle under the same values without the run's cancellation, so their Postgres and gateway spans nest
+// under the job's and their logs carry its trace id.
 func (r *Runner) execute(hctx, base context.Context, j port.Job, a *active) {
 	defer r.wg.Done()
 	defer r.release(j.ID, a)
+	var finish func(string, error)
+	if r.cfg.TraceJob != nil {
+		hctx, finish = r.cfg.TraceJob(hctx, j)
+		base = context.WithoutCancel(hctx)
+	}
 	hctx, rec := withRecorder(hctx)
 	err := r.invoke(hctx, j)
-	r.settle(base, j, err, context.Cause(hctx), rec)
+	outcome := r.settle(base, j, err, context.Cause(hctx), rec)
+	if finish != nil {
+		finish(outcome, err)
+	}
 }
 
 // invoke calls j's handler, turning a panic into an error (retried like any transient failure).
@@ -37,7 +49,7 @@ func (r *Runner) invoke(ctx context.Context, j port.Job) (err error) {
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			r.log.Error("job handler panicked", "op", j.ID, "kind", j.Kind, "panic", p,
+			r.log.ErrorContext(ctx, "job handler panicked", "op", j.ID, "kind", j.Kind, "panic", p,
 				"stack", string(debug.Stack()))
 			err = fmt.Errorf("handler panic: %v", p)
 		}
@@ -52,27 +64,35 @@ func (r *Runner) invoke(ctx context.Context, j port.Job) (err error) {
 //     interrupted handler returned. Fail with a retry time always charges an attempt, so the release is
 //     not outside the attempt cap; the shutdown grace keeps such releases rare;
 //   - otherwise: Fail with the retry policy's time, or nil once the policy gives up.
-func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec *recorder) {
+//
+// It returns the run's outcome (one of the Outcome* values) for the job's trace span.
+func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec *recorder) string {
 	ctx, cancel := context.WithTimeout(base, settleTimeout)
 	defer cancel()
 	switch {
 	case errors.Is(cause, errLost):
 		r.settleLost(ctx, j, err, rec)
+		return OutcomeLost
 	case err == nil:
 		r.complete(ctx, j, rec)
+		return OutcomeCompleted
 	case errors.Is(cause, errShutdown) && !errors.Is(err, ErrPermanent):
 		now := r.cfg.Clock.Now()
 		cause := fmt.Errorf("%w: %w", errShutdown, err)
 		r.fail(ctx, j, "release (shutdown)", cause, &now)
+		return OutcomeReleased
 	default:
 		at := r.retryAt(ctx, j, err)
+		outcome := OutcomeRetry
 		if at == nil {
-			r.log.Warn("job failed", "op", j.ID, "kind", j.Kind, "attempt", j.Attempt, "err", err)
+			outcome = OutcomeFailed
+			r.log.WarnContext(ctx, "job failed", "op", j.ID, "kind", j.Kind, "attempt", j.Attempt, "err", err)
 		} else {
-			r.log.Info("job failed, retrying", "op", j.ID, "kind", j.Kind, "attempt", j.Attempt, "at", *at,
-				"err", err)
+			r.log.InfoContext(ctx, "job failed, retrying", "op", j.ID, "kind", j.Kind, "attempt", j.Attempt,
+				"at", *at, "err", err)
 		}
 		r.fail(ctx, j, "fail", err, at)
+		return outcome
 	}
 }
 
@@ -84,7 +104,7 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 func (r *Runner) fail(ctx context.Context, j port.Job, what string, cause error, at *time.Time) {
 	call := func(c context.Context) error { return r.c.Fail(c, j.ID, cause, at) }
 	if at != nil && !at.After(r.cfg.Clock.Now().Add(settleTimeout)) {
-		r.report(j, what, call(ctx))
+		r.report(ctx, j, what, call(ctx))
 		return
 	}
 	r.persist(ctx, j, what, call)
@@ -107,9 +127,9 @@ func (r *Runner) settleLost(ctx context.Context, j port.Job, err error, rec *rec
 	alive, aerr := r.c.Alive(ctx, j.ID)
 	switch {
 	case aerr != nil:
-		r.log.Warn("lost job: Alive failed; leaving the row to reclaim", "op", j.ID, "err", aerr)
+		r.log.WarnContext(ctx, "lost job: Alive failed; leaving the row to reclaim", "op", j.ID, "err", aerr)
 	case alive:
-		r.log.Warn("lost job is running elsewhere; leaving its row alone", "op", j.ID, "kind", j.Kind)
+		r.log.WarnContext(ctx, "lost job is running elsewhere; leaving its row alone", "op", j.ID, "kind", j.Kind)
 	case err == nil:
 		r.complete(ctx, j, rec)
 	default:
@@ -162,14 +182,14 @@ func (r *Runner) persist(ctx context.Context, j port.Job, what string, call func
 	for {
 		err := call(ctx)
 		if err == nil || fenced(err) {
-			r.report(j, what, err)
+			r.report(ctx, j, what, err)
 			return
 		}
 		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			t.Stop()
-			r.report(j, what, err)
+			r.report(ctx, j, what, err)
 			return
 		case <-t.C:
 		}
@@ -188,18 +208,18 @@ func fenced(err error) bool {
 // row was cancel-requested and is now CANCELLED), ErrNotFound for delete_bank (its own row went with the
 // bank) and ErrFailedPrecondition/ErrNotFound (the worker no longer held the row). Any other error leaves
 // the row PROCESSING; it stops being heartbeated, so ReclaimStale re-queues it.
-func (r *Runner) report(j port.Job, what string, err error) {
+func (r *Runner) report(ctx context.Context, j port.Job, what string, err error) {
 	switch {
 	case err == nil:
 	case errors.Is(err, domain.ErrCancelled):
-		r.log.Info("operation cancelled", "op", j.ID, "kind", j.Kind)
+		r.log.InfoContext(ctx, "operation cancelled", "op", j.ID, "kind", j.Kind)
 	case errors.Is(err, domain.ErrNotFound) && j.Kind == domain.OperationKindDeleteBank:
-		r.log.Debug("delete_bank finished with its bank", "op", j.ID)
+		r.log.DebugContext(ctx, "delete_bank finished with its bank", "op", j.ID)
 	case errors.Is(err, domain.ErrFailedPrecondition), errors.Is(err, domain.ErrNotFound):
-		r.log.Warn("operation no longer held by this worker", "op", j.ID, "kind", j.Kind, "call", what,
+		r.log.WarnContext(ctx, "operation no longer held by this worker", "op", j.ID, "kind", j.Kind, "call", what,
 			"err", err)
 	default:
-		r.log.Error("could not settle operation; reclaim will retry it", "op", j.ID, "kind", j.Kind,
+		r.log.ErrorContext(ctx, "could not settle operation; reclaim will retry it", "op", j.ID, "kind", j.Kind,
 			"call", what, "err", err)
 	}
 }

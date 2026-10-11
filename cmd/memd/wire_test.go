@@ -7,6 +7,7 @@ import (
 	"memd/internal/adapter/gateway"
 	"memd/internal/config"
 	"memd/internal/fake"
+	"memd/internal/observability"
 	"memd/internal/port"
 	"memd/internal/server"
 	"memd/test/e2e/gatewayemu"
@@ -72,12 +73,20 @@ type wiredStack struct {
 // startWired builds the stack and runs the worker until the test ends.
 func startWired(t *testing.T) *wiredStack {
 	t.Helper()
+	return startWiredWith(t, nil)
+}
+
+// startWiredWith is startWired with tel's instrumentation (nil = Datadog off) on the gateway client, the
+// gRPC server and the worker, wired as buildDeps and runAPI wire them.
+func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
+	t.Helper()
 	_, ts := gatewayemu.Start(gatewayemu.Options{})
 	t.Cleanup(ts.Close)
 	g := &txGuard{}
 	store := fake.NewStore(systemClock{})
-	gw := gateway.NewClient(gateway.Config{BaseURL: ts.URL + gatewayemu.BasePath, EmbedModel: defaultEmbedModel},
-		&http.Client{Transport: guardTransport{g: g}})
+	gw := gateway.NewClient(gateway.Config{
+		BaseURL: ts.URL + gatewayemu.BasePath, EmbedModel: defaultEmbedModel, TraceCall: tel.GatewayHook(),
+	}, tel.HTTPClient(&http.Client{Transport: guardTransport{g: g}}))
 	env := map[string]string{}
 	for _, slot := range []string{
 		"extract", "time_parse", "consolidate", "dedup_check", "reflect", "structured_output",
@@ -101,8 +110,9 @@ func startWired(t *testing.T) *wiredStack {
 	p := ports{store: guardStore{Store: store, g: g}, claimer: store, blob: fake.NewBlob(), gw: gw}
 	d := wireEngines(cfg, p, tok, serverCfg, systemClock{}, log)
 	d.server.Probes = nil
+	d.tel = tel
 	lis := bufconn.Listen(1 << 20)
-	srv := server.New(d.server)
+	srv := newGRPCServer(d)
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.Stop)
 	conn, err := grpc.NewClient("passthrough:///bufnet", grpc.WithTransportCredentials(insecure.NewCredentials()),

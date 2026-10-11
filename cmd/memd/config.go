@@ -52,6 +52,8 @@ const (
 	envRPCDeadline         = "MEMD_RPC_DEADLINE"
 	envDBMaxConns          = "MEMD_DB_MAX_CONNS"
 	envLogLevel            = "MEMD_LOG_LEVEL"
+	envDatadogEnabled      = "MEMD_DATADOG_ENABLED"
+	envDatadogProfiler     = "MEMD_DATADOG_PROFILER"
 )
 
 // Defaults of the settings the spec fixes or leaves to the deployment.
@@ -129,6 +131,11 @@ type Config struct {
 	DBMaxConns int
 	// LogLevel is debug, info, warn or error.
 	LogLevel slog.Level
+	// DatadogEnabled turns on Datadog tracing, log correlation and runtime metrics (internal/observability);
+	// the agent address and the rest come from the standard DD_* variables. Off by default.
+	DatadogEnabled bool
+	// DatadogProfiler also starts the Datadog profiler; ignored unless DatadogEnabled.
+	DatadogProfiler bool
 	// Env is the environment lookup, kept for config.ServerDefaults (model bindings).
 	Env func(string) string
 }
@@ -215,6 +222,14 @@ var settings = []setting{
 		integer(func(c *Config) *int { return &c.DBMaxConns }),
 	},
 	{envLogLevel, "log level: debug, info, warn, error", "info", logLevel},
+	{
+		envDatadogEnabled, "Datadog tracing, log correlation and runtime metrics (agent from DD_* variables)",
+		"false", boolean(func(c *Config) *bool { return &c.DatadogEnabled }),
+	},
+	{
+		envDatadogProfiler, "Datadog continuous profiler (only with Datadog enabled)", "false",
+		boolean(func(c *Config) *bool { return &c.DatadogProfiler }),
+	},
 }
 
 // str sets a string field.

@@ -37,6 +37,30 @@ const (
 // Handler runs one job kind. Return ErrRetryAt to reschedule, ErrPermanent to fail with no retry.
 type Handler func(ctx context.Context, j port.Job) error
 
+// Job outcomes passed to a JobTraceFunc's finish func.
+const (
+	// OutcomeCompleted: the handler succeeded and the runner completed the row.
+	OutcomeCompleted = "completed"
+	// OutcomeRetry: the handler failed and the row was rescheduled.
+	OutcomeRetry = "retry"
+	// OutcomeFailed: the handler failed for good (permanent error or out of attempts).
+	OutcomeFailed = "failed"
+	// OutcomeReleased: the worker shut down mid-run and released the row for another worker.
+	OutcomeReleased = "released"
+	// OutcomeLost: the worker lost the job (cancel requested, reclaimed or not heartbeated in time).
+	OutcomeLost = "lost"
+)
+
+// JobTraceFunc starts a trace span around one run of j and returns ctx carrying it (the handler and the
+// terminal Complete/Fail run under it) and a finish func the runner calls exactly once, after the row is
+// settled, with one of the Outcome* values and the handler's error (nil on success). It is the worker's
+// only tracing hook; internal/observability provides a Datadog one, so this package stays vendor-free.
+type JobTraceFunc func(ctx context.Context, j port.Job) (context.Context, func(outcome string, err error))
+
+// TickTraceFunc starts a trace span around one maintenance tick and returns ctx carrying it and a finish
+// func called once with the tick's joined error (nil when every step succeeded).
+type TickTraceFunc func(ctx context.Context) (context.Context, func(err error))
+
 // JobRunner claims due jobs from the operations table and runs them.
 type JobRunner interface {
 	// Handle registers h for kind, replacing any earlier handler. Only registered kinds are claimed.
@@ -75,6 +99,9 @@ type RunnerConfig struct {
 	Pending PendingChecker
 	// Logger receives runner logs; nil = slog.Default().
 	Logger *slog.Logger
+	// TraceJob, when set, wraps every job run in a trace span (Datadog when MEMD_DATADOG_ENABLED); nil = no
+	// tracing and no extra work.
+	TraceJob JobTraceFunc
 }
 
 // Runner is the worker-mode job runner: it claims due jobs through port.Claimer, runs each in a slot,

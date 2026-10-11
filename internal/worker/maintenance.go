@@ -120,6 +120,9 @@ type MaintenanceDeps struct {
 	EventRetention time.Duration
 	// Logger receives maintenance logs; nil = slog.Default().
 	Logger *slog.Logger
+	// TraceTick, when set, wraps every tick in a trace span (Datadog when MEMD_DATADOG_ENABLED), so the
+	// steps' Postgres spans nest under it; nil = no tracing.
+	TraceTick TickTraceFunc
 }
 
 // withDefaults fills zero fields.
@@ -165,14 +168,25 @@ func RunMaintenance(ctx context.Context, d MaintenanceDeps) error {
 	t := time.NewTicker(d.Interval)
 	defer t.Stop()
 	for {
-		if err := maintenanceTick(ctx, d); err != nil && ctx.Err() == nil {
-			d.Logger.Warn("maintenance tick had errors", "err", err)
-		}
+		tickTraced(ctx, d)
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
 		}
+	}
+}
+
+// tickTraced runs one tick, inside d.TraceTick's span when set, and logs its errors.
+func tickTraced(ctx context.Context, d MaintenanceDeps) {
+	tctx, finish := ctx, func(error) {}
+	if d.TraceTick != nil {
+		tctx, finish = d.TraceTick(ctx)
+	}
+	err := maintenanceTick(tctx, d)
+	finish(err)
+	if err != nil && ctx.Err() == nil {
+		d.Logger.WarnContext(tctx, "maintenance tick had errors", "err", err)
 	}
 }
 
@@ -209,7 +223,7 @@ func maintenanceTick(ctx context.Context, d MaintenanceDeps) error {
 			continue
 		}
 		if n > 0 {
-			d.Logger.Info("maintenance", "step", s.name, "changed", n)
+			d.Logger.InfoContext(ctx, "maintenance", "step", s.name, "changed", n)
 		}
 	}
 	return errors.Join(errs...)

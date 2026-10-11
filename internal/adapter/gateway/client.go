@@ -65,6 +65,27 @@ type Config struct {
 	// OnUsage, when set, is called once per successful HTTP call with that call's token usage (chat,
 	// embeddings and rerank alike), e.g. for metrics. Structured and Chat also return their usage.
 	OnUsage func(ctx context.Context, u domain.Usage)
+	// TraceCall, when set, wraps every model call (chat, embeddings batch or rerank, with all its retries)
+	// in a trace span: it gets the slot, the requested model and the route, and returns ctx carrying the
+	// span and a finish func called once with the call's error. It never sees prompts or responses.
+	// internal/observability provides a Datadog one; nil = no tracing.
+	TraceCall CallTraceFunc
+}
+
+// CallTraceFunc starts a trace span for one gateway call; see Config.TraceCall.
+type CallTraceFunc func(ctx context.Context, slot domain.ModelSlot, model, path string) (context.Context, func(error))
+
+// traced runs fn (one call with its retries) inside cfg.TraceCall's span, if any.
+func (c *Client) traced(ctx context.Context, slot domain.ModelSlot, model, path string,
+	fn func(ctx context.Context) error,
+) error {
+	if c.cfg.TraceCall == nil {
+		return fn(ctx)
+	}
+	ctx, finish := c.cfg.TraceCall(ctx, slot, model, path)
+	err := fn(ctx)
+	finish(err)
+	return err
 }
 
 // withDefaults returns cfg with every zero field replaced by its default.

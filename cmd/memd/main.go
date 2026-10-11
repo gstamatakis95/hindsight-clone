@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"memd/internal/observability"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,9 +38,17 @@ func run(ctx context.Context, args []string, env func(string) string, logOut io.
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	log := slog.New(slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: cfg.LogLevel}))
+	base := slog.NewTextHandler(logOut, &slog.HandlerOptions{Level: cfg.LogLevel})
+	// Datadog is optional and off by default; disabled, tel is nil and installs nothing. It starts before
+	// the adapters so their instrumentation sees the running tracer, and its stop (deferred first, so run
+	// last) flushes after the pool closes.
+	tel, stopTel := observability.Start(observability.Config{
+		Enabled: cfg.DatadogEnabled, Profiler: cfg.DatadogProfiler, Logger: slog.New(base), Env: env,
+	})
+	defer stopTel()
+	log := slog.New(tel.LogHandler(base))
 	slog.SetDefault(log)
-	d, closer, err := buildDeps(ctx, cfg, log)
+	d, closer, err := buildDeps(ctx, cfg, log, tel)
 	if err != nil {
 		return err
 	}

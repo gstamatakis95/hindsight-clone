@@ -33,6 +33,8 @@ linters:
               desc: use port.LLM / port.Embedder / port.Reranker
             - pkg: "github.com/aws"
               desc: use port.Blob
+            - pkg: "github.com/DataDog"
+              desc: observability is wired in cmd/memd via internal/observability; engines stay vendor-free
         server:
           files: ["**/internal/server/**"]
           deny:
@@ -43,5 +45,12 @@ linters:
           deny:
             - pkg: "memd/internal"
               desc: domain imports nothing internal
+            - pkg: "github.com/DataDog"
+              desc: domain stays vendor-free
+        port:
+          files: ["**/internal/port/**"]
+          deny:
+            - pkg: "github.com/DataDog"
+              desc: ports stay vendor-free
 formatters:
   enable: [gofumpt, goimports]

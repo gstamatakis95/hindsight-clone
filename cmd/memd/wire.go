@@ -21,6 +21,7 @@ import (
 	"memd/internal/engine/retain"
 	"memd/internal/engine/routing"
 	"memd/internal/engine/timex"
+	"memd/internal/observability"
 	"memd/internal/port"
 	"memd/internal/server"
 	"memd/internal/worker"
@@ -32,6 +33,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -77,12 +79,16 @@ type deps struct {
 	claimer     port.Claimer
 	pending     worker.PendingChecker
 	clock       port.Clock
+	// tel is the optional Datadog instrumentation; nil (the default) installs nothing.
+	tel *observability.Telemetry
 }
 
 // buildDeps connects the adapters, checks the gateway's embedding dimension and builds every engine. The
-// returned closer releases the Postgres pool.
-func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (*deps, func(), error) {
-	p, closer, err := openAdapters(ctx, cfg)
+// returned closer releases the Postgres pool. tel (nil = Datadog off) instruments the adapters, the gRPC
+// server and the worker.
+func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observability.Telemetry,
+) (*deps, func(), error) {
+	p, closer, err := openAdapters(ctx, cfg, tel)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -101,16 +107,20 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (*deps, func()
 		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
 	d := wireEngines(cfg, p, tok, serverCfg, systemClock{}, log)
+	d.tel = tel
 	return d, closer, nil
 }
 
 // openAdapters opens the Postgres pool, the blob store and the gateway client, and narrows them to ports.
-func openAdapters(ctx context.Context, cfg Config) (ports, func(), error) {
+// tel's instrumentation (no-ops when nil) goes into each: the pgx query tracer, the S3 middleware, and the
+// gateway's call hook and HTTP client.
+func openAdapters(ctx context.Context, cfg Config, tel *observability.Telemetry) (ports, func(), error) {
 	pcfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
 		return ports{}, nil, fmt.Errorf("memd: %s: %w", envDSN, err)
 	}
 	pcfg.MaxConns = int32(poolSize(cfg)) //nolint:gosec // poolSize is small and positive
+	tel.TracePool(pcfg)
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
 		return ports{}, nil, fmt.Errorf("memd: postgres: %w", err)
@@ -123,7 +133,7 @@ func openAdapters(ctx context.Context, cfg Config) (ports, func(), error) {
 	}
 	blob, err := s3.NewBlob(ctx, s3.Config{
 		Endpoint: cfg.S3Endpoint, Region: cfg.S3Region, Bucket: cfg.S3Bucket, AccessKeyID: cfg.S3AccessKey,
-		SecretAccessKey: cfg.S3SecretKey, UsePathStyle: cfg.S3PathStyle,
+		SecretAccessKey: cfg.S3SecretKey, UsePathStyle: cfg.S3PathStyle, APIOptions: tel.S3APIOptions(),
 	})
 	if err != nil {
 		pool.Close()
@@ -132,7 +142,8 @@ func openAdapters(ctx context.Context, cfg Config) (ports, func(), error) {
 	gw := gateway.NewClient(gateway.Config{
 		BaseURL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey, EmbedModel: cfg.EmbedModel,
 		MaxConcurrent: cfg.GatewayMaxConcurrent, SlotConcurrency: cfg.SlotConcurrency, Timeout: cfg.GatewayTimeout,
-	}, nil)
+		TraceCall: tel.GatewayHook(),
+	}, tel.HTTPClient(nil))
 	store := postgres.New(pool)
 	return ports{
 		store: store, claimer: store, blob: blob, gw: gw, db: pool, stranded: store, batches: store,
@@ -336,7 +347,7 @@ func runAPI(ctx context.Context, d *deps) error {
 	if err != nil {
 		return fmt.Errorf("memd: listen %s: %w", d.cfg.GRPCAddr, err)
 	}
-	srv := server.New(d.server)
+	srv := newGRPCServer(d)
 	reflection.Register(srv) // lets grpcurl and similar tools discover the services
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(lis) }()
@@ -356,6 +367,11 @@ func runAPI(ctx context.Context, d *deps) error {
 	return nil
 }
 
+// newGRPCServer builds the gRPC server over d, traced when d.tel is enabled.
+func newGRPCServer(d *deps) *grpc.Server {
+	return server.New(d.server, d.tel.GRPCServerOptions(server.TenantFrom)...)
+}
+
 // runWorker runs the job runner and the maintenance tick until ctx is done. The runner's StaleAfter and
 // the maintenance reclaim's StaleAfter come from the one config value, so the runner's self-fence (3/4 of
 // it) always fires before another worker can reclaim the job. The worker id is "<MEMD_WORKER_ID or
@@ -366,8 +382,11 @@ func runWorker(ctx context.Context, d *deps) error {
 	r := worker.NewRunner(d.claimer, worker.RunnerConfig{
 		WorkerID: id, Clock: d.clock, Slots: d.cfg.WorkerSlots, PollInterval: d.cfg.PollInterval,
 		HeartbeatInterval: d.cfg.HeartbeatInterval, StaleAfter: d.cfg.StaleAfter, Pending: d.pending, Logger: d.log,
+		TraceJob: d.tel.JobHook(),
 	})
 	worker.Register(r, d.handlers)
+	maint := d.maintenance
+	maint.TraceTick = d.tel.TickHook()
 	var lis net.Listener
 	if d.cfg.WorkerHealthAddr != "" {
 		var err error
@@ -377,7 +396,7 @@ func runWorker(ctx context.Context, d *deps) error {
 	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return r.Run(gctx) })
-	g.Go(func() error { return worker.RunMaintenance(gctx, d.maintenance) })
+	g.Go(func() error { return worker.RunMaintenance(gctx, maint) })
 	if lis != nil {
 		g.Go(func() error { return serveHealth(gctx, lis, d.server.Probes) })
 		d.log.Info("memd worker health serving", "addr", lis.Addr().String())
