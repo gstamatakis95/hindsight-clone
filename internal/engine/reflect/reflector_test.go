@@ -124,9 +124,10 @@ func TestReflectModelWithoutToolCallsFails(t *testing.T) {
 	})
 }
 
-// errOverflow is a gateway error for a prompt over the context window.
+// errOverflow is a gateway error for a prompt over the context window, classified as the gateway does it
+// (domain.ErrContextOverflow, which wraps ErrUnavailable).
 var errOverflow = fmt.Errorf("%w: gateway: status 400: This model's maximum context length is 8192 tokens",
-	domain.ErrUnavailable)
+	domain.ErrContextOverflow)
 
 func TestReflectContextOverflowSynthesizes(t *testing.T) {
 	h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes green tea"))

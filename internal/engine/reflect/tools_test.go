@@ -7,7 +7,6 @@ import (
 	"memd/internal/engine/recall"
 	rf "memd/internal/engine/reflect"
 	mockreflect "memd/internal/mocks/engine/reflect"
-	mockport "memd/internal/mocks/port"
 	"memd/internal/port"
 	"slices"
 	"strings"
@@ -47,7 +46,7 @@ func TestToolsRecallAndObservations(t *testing.T) {
 		}
 		return recall.RecallResult{Results: []recall.Memory{{Unit: unit("u1", "Alice likes tea")}}}, nil
 	}
-	tools := rf.DefaultTools(rc, nil, nil, nil)
+	tools := rf.DefaultTools(rc, nil, nil)
 	if len(tools) != 2 {
 		t.Fatalf("tools = %d, want recall and search_observations only", len(tools))
 	}
@@ -117,7 +116,7 @@ func TestToolsMentalModels(t *testing.T) {
 			return out, nil
 		},
 	}
-	tools := rf.DefaultTools(nil, pages, nil, nil)
+	tools := rf.DefaultTools(nil, pages, nil)
 	st := newState(rf.ReflectRequest{
 		Tags:                  domain.TagFilter{Tags: []string{"team-a"}, Match: domain.TagsMatchAny},
 		ExcludeMentalModelIDs: []port.MentalModelID{"excluded"},
@@ -181,22 +180,35 @@ func TestToolExpand(t *testing.T) {
 	obs.Type, obs.SourceIDs = domain.FactTypeObservation, []port.UnitID{"f1"}
 	hidden := unit("h1", "Team B secret")
 	hidden.Tags = []string{"team-b"}
-	units := map[port.UnitID]domain.Unit{"f1": fact, "o1": obs, "h1": hidden}
-	reader := &mockport.Reader{}
-	reader.GetUnitsFunc = func(_ context.Context, _ port.BankRef, ids []port.UnitID) ([]domain.Unit, error) {
-		var out []domain.Unit
-		for _, id := range ids {
-			if u, ok := units[id]; ok {
-				out = append(out, u)
-			}
+	h := newHarness(t, domain.BankConfig{})
+	ctx := context.Background()
+	err := h.store.InTx(ctx, func(tx port.Tx) error {
+		seq, err := tx.Seq(ctx, bank)
+		if err != nil {
+			return err
 		}
-		return out, nil
+		if err := tx.Documents().Upsert(ctx, domain.Document{ID: "d1", Bank: bank}); err != nil {
+			return err
+		}
+		if err := tx.Chunks().Insert(ctx, []domain.Chunk{
+			{ID: "c1", Bank: bank, DocumentID: "d1", Text: "Chunk: Alice ordered green tea at noon."},
+		}); err != nil {
+			return err
+		}
+		fact.DocumentID, fact.Seq, hidden.Seq, obs.Seq = "d1", seq, seq, seq
+		if err := tx.Units().Insert(ctx, []domain.Unit{fact, hidden}); err != nil {
+			return err
+		}
+		obs.Tags = []string{"team-a"}
+		if err := tx.Units().UpsertObservation(ctx, obs); err != nil {
+			return err
+		}
+		return tx.Evidence().Add(ctx, "o1", []domain.Evidence{{Unit: "f1", Quote: fact.Text}})
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	chunks := &mockreflect.ChunkReader{}
-	chunks.GetChunksFunc = func(context.Context, port.BankRef, []port.ChunkID) ([]domain.Chunk, error) {
-		return []domain.Chunk{{ID: "c1", Text: "Chunk: Alice ordered green tea at noon.", DocumentID: "d1"}}, nil
-	}
-	tools := rf.DefaultTools(nil, nil, reader, chunks)
+	tools := rf.DefaultTools(nil, nil, h.store.Read())
 	st := newState(rf.ReflectRequest{Tags: domain.TagFilter{Tags: []string{"team-a"}, Match: domain.TagsMatchAny}})
 	res, err := toolByName(t, tools, rf.ToolExpand).Call(context.Background(), st,
 		json.RawMessage(`{"memory_ids":["o1","f1","h1"]}`))

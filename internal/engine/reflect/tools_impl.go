@@ -27,9 +27,9 @@ const (
 )
 
 // DefaultTools returns the retrieval tools: recall and search_observations over rc, the page tools over pages
-// and expand over r (with chunks when chunks is non-nil). A nil dependency leaves its tools out. The done tool
-// is part of the loop, not this list.
-func DefaultTools(rc Recaller, pages PageReader, r port.Reader, chunks ChunkReader) []Tool {
+// and expand over r (units, source facts and chunks). A nil dependency leaves its tools out. The done tool is
+// part of the loop, not this list.
+func DefaultTools(rc Recaller, pages PageReader, r port.Reader) []Tool {
 	var tools []Tool
 	if pages != nil {
 		tools = append(tools, &searchPagesTool{pages: pages}, &readPagesTool{pages: pages})
@@ -38,7 +38,7 @@ func DefaultTools(rc Recaller, pages PageReader, r port.Reader, chunks ChunkRead
 		tools = append(tools, &observationsTool{rc: rc}, &recallTool{rc: rc})
 	}
 	if r != nil {
-		tools = append(tools, &expandTool{r: r, chunks: chunks})
+		tools = append(tools, &expandTool{r: r})
 	}
 	return tools
 }

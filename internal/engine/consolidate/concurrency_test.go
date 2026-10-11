@@ -242,7 +242,7 @@ func TestRunItemScopesBeatOverrides(t *testing.T) {
 	e.tx(func(tx port.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
-			Overrides: &domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+			Overrides:         &domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
 			ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared},
 		})
 	})
@@ -298,7 +298,6 @@ func TestRunVersionsAndQuotesRecorded(t *testing.T) {
 		t.Fatalf("evidence written for %d observations, want 2", len(rec.evidence))
 	}
 }
-
 
 // TestScopeExpanderRejectsNonPositiveCap: max_combinations <= 0 is INVALID_ARGUMENT.
 func TestScopeExpanderRejectsNonPositiveCap(t *testing.T) {

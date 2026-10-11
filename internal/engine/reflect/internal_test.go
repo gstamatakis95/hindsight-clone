@@ -1,6 +1,8 @@
 package reflect
 
 import (
+	"errors"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -77,21 +79,21 @@ func TestDocumentMarkdown(t *testing.T) {
 	}
 }
 
+// TestIsContextOverflow: only errors wrapping domain.ErrContextOverflow (the gateway's classification) are
+// overflows; message text alone no longer counts, and plain UNAVAILABLE is not an overflow.
 func TestIsContextOverflow(t *testing.T) {
-	for msg, want := range map[string]bool{
-		"unavailable: gateway: status 400: This model's maximum context length is 8192 tokens": true,
-		"error code: context_length_exceeded":                                                  true,
-		"prompt is too long: 210000 tokens > 200000 maximum":                                   true,
-		"unavailable: gateway: status 429: too many tokens per minute":                         false,
-		"unavailable: gateway: status 503":                                                     false,
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{
+		{fmt.Errorf("gateway: status 400: %w", domain.ErrContextOverflow), true},
+		{fmt.Errorf("chat: %w", fmt.Errorf("gateway: %w", domain.ErrContextOverflow)), true},
+		{fmt.Errorf("%w: gateway: status 400: maximum context length is 8192 tokens", domain.ErrUnavailable), false},
+		{fmt.Errorf("%w: gateway: status 429: too many tokens per minute", domain.ErrUnavailable), false},
+		{errors.New("prompt is too long"), false},
 	} {
-		if got := isContextOverflow(errString(msg)); got != want {
-			t.Errorf("%q: got %v", msg, got)
+		if got := isContextOverflow(c.err); got != c.want {
+			t.Errorf("%v: got %v, want %v", c.err, got, c.want)
 		}
 	}
 }
-
-// errString is an error with a fixed message.
-type errString string
-
-func (e errString) Error() string { return string(e) }

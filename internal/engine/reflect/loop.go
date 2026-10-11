@@ -11,22 +11,10 @@ import (
 	"strings"
 )
 
-// overflowMarkers are the provider error texts that mean the prompt overflowed the context window
-// (Hindsight's _is_context_overflow list, minus the ambiguous resource_exhausted; decision 1101).
-var overflowMarkers = []string{
-	"context_length_exceeded", "context length exceeded", "maximum context length", "prompt_too_long",
-	"prompt is too long", "input is too long", "context window",
-}
-
-// isContextOverflow reports whether a chat error is a context-window overflow.
+// isContextOverflow reports whether a chat error is a context-window overflow: the gateway classifies
+// provider overflow replies as domain.ErrContextOverflow (CCR WP-11-1, decision 1101).
 func isContextOverflow(err error) bool {
-	msg := strings.ToLower(err.Error())
-	for _, m := range overflowMarkers {
-		if strings.Contains(msg, m) {
-			return true
-		}
-	}
-	return false
+	return errors.Is(err, domain.ErrContextOverflow)
 }
 
 // answer is the loop's outcome.
