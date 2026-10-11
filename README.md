@@ -8,9 +8,10 @@ observations and keep mental models (synthesized pages) fresh. All state lives i
 pg_search, pg_trgm) and object storage; LLMs, the reranker and the embedder sit behind an
 OpenAI-compatible AI gateway.
 
-> Status: integrated (WP-14b). `memd api`, `memd worker` and `memd all` run every engine; `make e2e`
-> exercises the whole service against Postgres, MinIO and an emulated gateway. The behaviour is specified in
-> `docs/SPEC.md`; `docs/rules.md` maps every behavioural rule to its tests.
+> Status: integrated and through the final review (fix-ups WP-18..21 merged). `memd api`, `memd worker`
+> and `memd all` run every engine; `make e2e` exercises the whole service against Postgres, MinIO and an
+> emulated gateway. The behaviour is specified in `docs/SPEC.md`; `docs/rules.md` maps every behavioural rule
+> to its tests; accepted gaps are listed in `docs/STATUS.md`.
 
 ## Architecture
 
@@ -50,7 +51,9 @@ make run       # memd all (api + worker in one process) on :50051; MEMD_DSN come
 
 `memd <api|worker|all>` reads its settings from `MEMD_*` environment variables or the matching flags
 (`MEMD_GRPC_ADDR` = `-grpc-addr`); run `go run ./cmd/memd` to list them all. At startup memd checks that the
-gateway's embedding model returns 768 dimensions. In production run `memd api` and `memd worker` as two
+gateway's embedding model returns 768 dimensions, that EXTRACT and REFLECT have a model, and that both S3
+keys are set. A worker's id is `<MEMD_WORKER_ID or hostname>-<uuid>`, unique per process; set
+`MEMD_WORKER_HEALTH_ADDR` to serve grpc.health from a worker. In production run `memd api` and `memd worker` as two
 Deployments over the same Postgres and bucket.
 
 ## grpcurl examples
