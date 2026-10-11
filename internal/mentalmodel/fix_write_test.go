@@ -24,13 +24,9 @@ func (h fwChatHookLLM) Chat(ctx context.Context, req ai.ChatRequest) (ai.ChatRes
 	return h.LLM.Chat(ctx, req) //nolint:wrapcheck // test pass-through
 }
 
-// fwSingleShotRunner is a runner whose single-shot synthesizer calls llm.
-func fwSingleShotRunner(e *env, llm ai.LLM) RefreshRunner {
-	md := ModelDeps{LLM: llm, Router: routingRouter(), Clock: e.clock}
-	return NewRefreshRunner(RefreshRunnerDeps{
-		Store: e.store, Config: e.config, Scope: e.reads, Clock: e.clock,
-		Synthesizers: []Synthesizer{NewSingleShotSynthesizer(e.rc, md)},
-	})
+// fwSingleShotRunner is a Service whose synthesizers call llm.
+func fwSingleShotRunner(e *env, llm ai.LLM) *Service {
+	return e.service(func(d *Deps) { d.LLM = llm })
 }
 
 // TestScopeEditDuringFirstBuildConflicts checks that an UpdateMentalModel changing the source query and tags
@@ -38,7 +34,7 @@ func fwSingleShotRunner(e *env, llm ai.LLM) RefreshRunner {
 // with ErrConflict: the new spec is kept and no old-scope content is committed.
 func TestScopeEditDuringFirstBuildConflicts(t *testing.T) {
 	e := newEnv(t)
-	_, adm := newTriggers(e)
+	adm := e.svc
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	e.scriptSynthesize("## Status\n\nAlice leads the project.")
@@ -51,7 +47,7 @@ func TestScopeEditDuringFirstBuildConflicts(t *testing.T) {
 		}
 	}
 	runner := fwSingleShotRunner(e, fwChatHookLLM{LLM: e.llm, once: &sync.Once{}, hook: edit})
-	_, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true})
+	_, err := runner.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true})
 	if !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("want conflict, got %v", err)
 	}
@@ -73,9 +69,9 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt,
 		opsJSON(map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob."}}))
-	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
+	rec := e.svc
 	e.clock.Advance(time.Minute)
-	e.reads.failed = []store.FailedRefresh{{
+	e.maint.failed = []store.FailedRefresh{{
 		Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: e.clock.Now(), Error: "boom",
 	}}
 	var once sync.Once
@@ -87,7 +83,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 		})
 	}
 	runner := fwSingleShotRunner(e, hookLLM{LLM: e.llm, hook: reconcile})
-	out, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: opID("op1")})
+	out, err := runner.refresh(e.ctx, e.bank, "status", refreshOptions{OperationID: opID("op1")})
 	if err != nil || out.VersionWritten != 2 {
 		t.Fatalf("run: version %d: %v", out.VersionWritten, err)
 	}
@@ -101,7 +97,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 	}
 
 	e.clock.Advance(time.Minute)
-	e.reads.failed = []store.FailedRefresh{{
+	e.maint.failed = []store.FailedRefresh{{
 		Bank: e.bank, ModelID: "status", OperationID: opID("op2"), FailedAt: e.clock.Now(), Error: "boom",
 	}}
 	var wg sync.WaitGroup
@@ -122,8 +118,8 @@ func TestReconcileSkipsFailureOfEarlierModel(t *testing.T) {
 	e := newEnv(t)
 	m := e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	failedAt := m.CreatedAt.Add(-time.Minute) // created_at is the database's time
-	e.reads.failed = []store.FailedRefresh{{Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: failedAt}}
-	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
+	e.maint.failed = []store.FailedRefresh{{Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: failedAt}}
+	rec := e.svc
 	if n, err := rec.ReconcileFailedRefreshes(e.ctx); err != nil || n != 0 {
 		t.Fatalf("paused %d: %v", n, err)
 	}
@@ -136,18 +132,18 @@ func TestReconcileSkipsFailureOfEarlierModel(t *testing.T) {
 // cleared content itself) adds no VERSION entry with empty previous content.
 func TestRebuildAfterClearAddsNoEmptyVersionEntry(t *testing.T) {
 	e := newEnv(t)
-	_, adm := newTriggers(e)
+	adm := e.svc
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	e.scriptSynthesize("## Status\n\nAlice leads the project.")
-	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true}); err != nil {
+	if _, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := adm.ClearMentalModel(e.ctx, e.bank, "status"); err != nil {
 		t.Fatal(err)
 	}
 	e.scriptSynthesize("## Status\n\nAlice still leads the project.")
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true})
 	if err != nil || out.VersionWritten != 2 {
 		t.Fatalf("rebuild: version %d: %v", out.VersionWritten, err)
 	}

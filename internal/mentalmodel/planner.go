@@ -13,23 +13,23 @@ import (
 	"strings"
 )
 
-// ModelDeps are what the synthesizers need to make their own LLM calls.
-type ModelDeps struct {
+// modelDeps are what the synthesizers need to make their own LLM calls.
+type modelDeps struct {
 	// LLM makes the synthesize and delta calls.
 	LLM ai.LLM
 	// Router resolves each slot's binding from the merged config.
 	Router *ai.Router
 	// Clock dates the prompts.
 	Clock clock.Clock
-	// Directives reads the bank's directives for synthesize, which applies those domain.SelectDirectives picks for
-	// the model's scope; nil = none.
-	Directives store.DB
+	// DB reads the bank's directives for synthesize, which applies those domain.SelectDirectives picks for the
+	// model's scope; nil = none.
+	DB store.DB
 }
 
 // deltaPlanner makes the delta call: edit ops over the current document's sections and
 // blocks, applied at once, with one retry that shows the model the rejected ops when none applied or when
 // any op named a section or block id the document does not have.
-type deltaPlanner struct{ d ModelDeps }
+type deltaPlanner struct{ d modelDeps }
 
 // deltaResponse is the delta response schema's shape.
 type deltaResponse struct {
@@ -38,7 +38,7 @@ type deltaResponse struct {
 }
 
 // plan asks for ops integrating facts (observations listed first) into m's document and applies them.
-// facts must be non-empty; the caller returns ErrNoNewFacts before calling it otherwise.
+// facts must be non-empty; the caller returns errNoNewFacts before calling it otherwise.
 func (p deltaPlanner) plan(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, facts []domain.Unit,
 ) (deltaDraft, error) {
@@ -81,7 +81,7 @@ func (p deltaPlanner) plan(
 		return first, nil
 	}
 	draft.ContentMD = m.ContentMD
-	return draft, fmt.Errorf("%w: %d ops after one retry", ErrAllOpsRejected, len(draft.Ops))
+	return draft, fmt.Errorf("%w: %d ops after one retry", errAllOpsRejected, len(draft.Ops))
 }
 
 // retryOps returns the skipped ops that earn the one retry: every op when none applied, else only the ops

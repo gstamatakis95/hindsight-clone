@@ -3,25 +3,12 @@ package mentalmodel
 import (
 	"context"
 	"fmt"
-	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
 	"time"
 )
 
-// RefreshScheduler decides whether an automatic trigger runs now, parks, or is skipped.
-//
-// A refresh_mental_model operation that ends FAILED (handler Fail(nil) or reclaim past max attempts) is
-// turned into auto_refresh_paused plus a REFRESH_FAILED history entry by an idempotent reconcile in
-// the maintenance tick (RefreshFailureReconciler), which finds models whose latest terminal refresh operation
-// failed and that are not yet paused or recorded (decision 012, R10'). The Claimer never touches
-// mental-model tables.
-type RefreshScheduler interface {
-	// Decide applies auto_refresh_paused, staleness, debounce and the interval floor to m at now.
-	Decide(ctx context.Context, m domain.MentalModel, now time.Time) (refreshDecision, error)
-}
-
-// decisionKind is what a RefreshScheduler decided.
+// decisionKind is what decide decided.
 type decisionKind string
 
 // Decision kinds.
@@ -36,13 +23,13 @@ const (
 
 // Skip reasons; a park's reason is domain.RefreshReasonDebounce or domain.RefreshReasonIntervalFloor.
 const (
-	// ReasonPaused: auto_refresh_paused is set; only a manual refresh runs.
-	ReasonPaused = "auto_refresh_paused"
-	// ReasonNotStale: nothing in scope changed and no source was retracted.
-	ReasonNotStale = "not_stale"
+	// reasonPaused: auto_refresh_paused is set; only a manual refresh runs.
+	reasonPaused = "auto_refresh_paused"
+	// reasonNotStale: nothing in scope changed and no source was retracted.
+	reasonNotStale = "not_stale"
 )
 
-// refreshDecision is a RefreshScheduler's verdict for one model.
+// refreshDecision is decide's verdict for one model.
 type refreshDecision struct {
 	// Kind is run now, park or skip.
 	Kind decisionKind
@@ -52,36 +39,23 @@ type refreshDecision struct {
 	Reason string
 }
 
-// scheduler is the RefreshScheduler.
-type scheduler struct {
-	detect ChangeDetector
-	config *config.Resolver
-}
-
-var _ RefreshScheduler = (*scheduler)(nil)
-
-// NewRefreshScheduler returns the RefreshScheduler. Call Decide outside any transaction (it reads config
-// and the change detector).
-func NewRefreshScheduler(d ChangeDetector, c *config.Resolver) RefreshScheduler {
-	return &scheduler{detect: d, config: c}
-}
-
-// Decide skips a paused or fresh model; otherwise the refresh is due at the later of now + debounce and
-// last_refreshed_at + the interval floor.
-func (s *scheduler) Decide(ctx context.Context, m domain.MentalModel, now time.Time) (refreshDecision, error) {
+// decide applies auto_refresh_paused, staleness, debounce and the interval floor to an automatic refresh of
+// m at now. It skips a paused or fresh model; otherwise the refresh is due at the later of now + debounce and
+// last_refreshed_at + the interval floor. Call it outside any transaction (it reads config and the store).
+func (s *Service) decide(ctx context.Context, m domain.MentalModel, now time.Time) (refreshDecision, error) {
 	if m.AutoRefreshPaused {
-		return refreshDecision{Kind: decisionSkip, Reason: ReasonPaused}, nil
+		return refreshDecision{Kind: decisionSkip, Reason: reasonPaused}, nil
 	}
-	stale, _, err := s.detect.NeedsRefresh(ctx, m)
+	cfg, err := s.modelConfig(ctx, m)
+	if err != nil {
+		return refreshDecision{}, err
+	}
+	stale, _, err := s.needsRefresh(ctx, m, cfg)
 	if err != nil {
 		return refreshDecision{}, fmt.Errorf("mentalmodel: staleness of %s: %w", m.Spec.ID, err)
 	}
 	if !stale {
-		return refreshDecision{Kind: decisionSkip, Reason: ReasonNotStale}, nil
-	}
-	cfg, err := s.config.Effective(ctx, m.Bank, configLevels(m, nil)...)
-	if err != nil {
-		return refreshDecision{}, fmt.Errorf("mentalmodel: config: %w", err)
+		return refreshDecision{Kind: decisionSkip, Reason: reasonNotStale}, nil
 	}
 	until, reason := domain.RefreshDueAt(m, cfg.MentalModels, now)
 	if !until.After(now) {

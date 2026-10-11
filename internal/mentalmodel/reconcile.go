@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"memd/internal/clock"
-	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
 	"memd/internal/store"
@@ -15,54 +13,35 @@ import (
 
 // Failure reasons recorded on REFRESH_FAILED history entries, derived from the failed operation's error.
 const (
-	// FailureDeltaOpsAllSkipped: every delta op was rejected, even after the retry.
-	FailureDeltaOpsAllSkipped = "delta_ops_all_skipped"
-	// FailureEmptyCandidate: the synthesizer returned an empty document.
-	FailureEmptyCandidate = "empty_candidate"
-	// FailureStructuredOutput: the structured-output projection failed.
-	FailureStructuredOutput = "structured_output_failed"
-	// FailureRetrieval: a retrieval or model call failed (reflect, recall, synthesize, delta).
-	FailureRetrieval = "retrieval_failed"
-	// FailureUnexpected: anything else.
-	FailureUnexpected = "unexpected_error"
+	// failureDeltaOpsAllSkipped: every delta op was rejected, even after the retry.
+	failureDeltaOpsAllSkipped = "delta_ops_all_skipped"
+	// failureEmptyCandidate: the synthesizer returned an empty document.
+	failureEmptyCandidate = "empty_candidate"
+	// failureStructuredOutput: the structured-output projection failed.
+	failureStructuredOutput = "structured_output_failed"
+	// failureRetrieval: a retrieval or model call failed (reflect, recall, synthesize, delta).
+	failureRetrieval = "retrieval_failed"
+	// failureUnexpected: anything else.
+	failureUnexpected = "unexpected_error"
 )
 
-// RefreshFailureReconciler turns failed refreshes into paused models; the maintenance tick runs it.
-type RefreshFailureReconciler interface {
-	// ReconcileFailedRefreshes looks, per model, at the latest terminal refresh operation. When it failed
-	// after the model's last completed refresh and is not recorded yet, it sets auto_refresh_paused and
-	// last_refresh_failed_at (= the failure time, which is the idempotence key) and appends one
-	// REFRESH_FAILED history entry and event. It returns how many models it paused.
-	ReconcileFailedRefreshes(ctx context.Context) (int, error)
-}
-
-// reconciler is the RefreshFailureReconciler.
-type reconciler struct {
-	src    FailureSource
-	store  store.DB
-	config *config.Resolver
-	clock  clock.Clock
-}
-
-var _ RefreshFailureReconciler = (*reconciler)(nil)
-
-// NewRefreshFailureReconciler returns the reconciler over the failed-refresh read (store.Maintenance.FailedRefreshes).
-func NewRefreshFailureReconciler(
-	src FailureSource, s store.DB, c *config.Resolver, clock clock.Clock,
-) RefreshFailureReconciler {
-	return &reconciler{src: src, store: s, config: c, clock: clock}
-}
-
-// ReconcileFailedRefreshes records every unrecorded failure, each in its own short transaction.
-func (r *reconciler) ReconcileFailedRefreshes(ctx context.Context) (int, error) {
-	failed, err := r.src.FailedRefreshes(ctx)
+// ReconcileFailedRefreshes is the maintenance tick's failed-refresh sweep. It looks, per model, at the latest
+// terminal refresh operation (store.Maintenance.FailedRefreshes). When that failed after the model's last
+// completed refresh and is not recorded yet, it sets auto_refresh_paused and last_refresh_failed_at (= the
+// failure time, which is the idempotence key) and appends one REFRESH_FAILED history entry and event, each model
+// in its own short transaction. It returns how many models it paused.
+func (s *Service) ReconcileFailedRefreshes(ctx context.Context) (int, error) {
+	if s.d.Maintenance == nil {
+		return 0, nil
+	}
+	failed, err := s.d.Maintenance.FailedRefreshes(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("mentalmodel: failed refreshes: %w", err)
 	}
 	n := 0
 	var errs []error
 	for _, f := range failed {
-		paused, err := r.record(ctx, f)
+		paused, err := s.record(ctx, f)
 		if err != nil && !errors.Is(err, domain.ErrNotFound) && !errors.Is(err, domain.ErrBankDeleting) {
 			errs = append(errs, fmt.Errorf("mentalmodel: reconcile %s: %w", f.ModelID, err))
 		}
@@ -77,13 +56,13 @@ func (r *reconciler) ReconcileFailedRefreshes(ctx context.Context) (int, error) 
 // first skips without taking the bank lock (so a paused model doesn't bump the seq every tick); then
 // tx.Seq locks the bank row, which serializes this with every other model-row write, and the check is
 // repeated on a fresh read.
-func (r *reconciler) record(ctx context.Context, f store.FailedRefresh) (bool, error) {
+func (s *Service) record(ctx context.Context, f store.FailedRefresh) (bool, error) {
 	keep := defaultHistoryMaxEntries
-	if cfg, err := r.config.Effective(ctx, f.Bank); err == nil {
+	if cfg, err := s.d.Config.Effective(ctx, f.Bank); err == nil {
 		keep = historyKeep(cfg)
 	}
 	paused := false
-	err := r.store.InTx(ctx, func(tx store.Tx) error {
+	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		paused = false
 		m, err := tx.MentalModels().Get(ctx, f.Bank, f.ModelID)
 		if err != nil || skipFailure(m, f) {
@@ -106,7 +85,7 @@ func (r *reconciler) record(ctx context.Context, f store.FailedRefresh) (bool, e
 			return err
 		}
 		if err := tx.Events().Append(ctx, domain.LifecycleEvent{
-			Seq: seq, Type: domain.EventTypeMentalModelRefreshFailed, Bank: f.Bank, At: r.clock.Now(),
+			Seq: seq, Type: domain.EventTypeMentalModelRefreshFailed, Bank: f.Bank, At: s.d.Clock.Now(),
 			OperationID: f.OperationID, SubjectID: string(f.ModelID),
 		}); err != nil {
 			return err
@@ -128,27 +107,48 @@ func skipFailure(m domain.MentalModel, f store.FailedRefresh) bool {
 // failureReason classifies a failed refresh's error text.
 func failureReason(msg string) string {
 	switch {
-	case strings.Contains(msg, ErrAllOpsRejected.Error()):
-		return FailureDeltaOpsAllSkipped
-	case strings.Contains(msg, FailureEmptyCandidate):
-		return FailureEmptyCandidate
-	case strings.Contains(msg, FailureStructuredOutput):
-		return FailureStructuredOutput
+	case strings.Contains(msg, errAllOpsRejected.Error()):
+		return failureDeltaOpsAllSkipped
+	case strings.Contains(msg, failureEmptyCandidate):
+		return failureEmptyCandidate
+	case strings.Contains(msg, failureStructuredOutput):
+		return failureStructuredOutput
 	case strings.Contains(msg, domain.ErrUnavailable.Error()):
-		return FailureRetrieval
+		return failureRetrieval
 	}
-	return FailureUnexpected
+	return failureUnexpected
 }
 
-// RunJob runs one refresh_mental_model job through r: it decodes the payload and passes the job's
-// overrides and operation id. A model (or bank) deleted before the job ran is done, not failed, so a job
-// that runs twice or after a delete is harmless. A malformed payload is domain.ErrInvalidArgument.
-func RunJob(ctx context.Context, r RefreshRunner, j store.Job) (RefreshOutcome, error) {
+// RunRefreshJob runs one refresh_mental_model job. It first reports the run's start (stage = the job kind, 0 of
+// 1 done): a cancelled job, or one whose bank is being deleted, stops there (domain.ErrCancelled) before any
+// model call. It then decodes the payload, refreshes with the payload's flags, the job's overrides and its
+// operation id, and records the outcome, version, effective mode and strategy, facts used and usage as the
+// result. A model (or bank) deleted before the job ran is done, not failed, so a job that runs twice or after a
+// delete is harmless. A malformed payload is domain.ErrInvalidArgument.
+func (s *Service) RunRefreshJob(ctx context.Context, run *jobs.Run) error {
+	p := domain.Progress{Stage: string(run.Job.Kind), At: s.d.Clock.Now(), Total: 1}
+	if err := run.Report(ctx, p); err != nil {
+		return fmt.Errorf("%s: checkpoint: %w", run.Job.Kind, err)
+	}
+	out, err := s.runJob(ctx, run.Job)
+	if err != nil {
+		return fmt.Errorf("refresh_mental_model: %w", err)
+	}
+	run.SetResult(map[string]any{
+		"outcome": out.Trace.Outcome, "version": out.VersionWritten, "effective_mode": out.Trace.EffectiveMode,
+		"effective_strategy": out.Trace.EffectiveStrategy, "facts_used": out.FactsUsed,
+	}, out.Trace.Usage...)
+	return nil
+}
+
+// runJob decodes j's payload and runs the refresh it asks for. A model or bank that is gone (ErrNotFound) is
+// done, not failed.
+func (s *Service) runJob(ctx context.Context, j store.Job) (RefreshOutcome, error) {
 	p, err := decodeRefreshPayload(j.Payload)
 	if err != nil {
 		return RefreshOutcome{}, err
 	}
-	out, err := r.Run(ctx, j.Bank, p.MentalModelID, RefreshOptions{
+	out, err := s.refresh(ctx, j.Bank, p.MentalModelID, refreshOptions{
 		Manual: p.Manual, ForceFull: p.ForceFull, Strategy: p.Strategy, Overrides: j.Overrides,
 		OperationID: j.ID,
 	})

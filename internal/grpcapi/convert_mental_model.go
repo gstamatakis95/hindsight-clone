@@ -2,7 +2,7 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/mentalmodel"
+	"memd/internal/mentalmodel"
 	"memd/internal/recall"
 
 	pb "memd/gen/memory/v1"

@@ -20,12 +20,12 @@ const (
 // written (0 = none). It takes tx.Seq first, so the bank row lock serializes it with every other
 // read-modify-write of the model row. A model changed since the run read it (cleared, its query or scope
 // edited, or another version written) is domain.ErrConflict and nothing is written; the job retries.
-func (r *runner) write(
-	ctx context.Context, p *refreshPlan, dr drafted, opts RefreshOptions, trace domain.RefreshTrace,
+func (s *Service) write(
+	ctx context.Context, p *refreshPlan, dr drafted, opts refreshOptions, trace domain.RefreshTrace,
 ) (int64, error) {
-	now := r.d.Clock.Now()
+	now := s.d.Clock.Now()
 	var version int64
-	err := r.d.Store.InTx(ctx, func(tx store.Tx) error {
+	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		version = 0
 		seq, err := tx.Seq(ctx, p.m.Bank)
 		if err != nil {
@@ -77,7 +77,7 @@ func unchangedSince(read, cur domain.MentalModel) error {
 // ranModel is cur after any successful run: last_refreshed_at set, the pause cleared by a manual run and
 // the trace kept when keep_trace.
 func ranModel(
-	cur domain.MentalModel, opts RefreshOptions, trace domain.RefreshTrace, now time.Time,
+	cur domain.MentalModel, opts refreshOptions, trace domain.RefreshTrace, now time.Time,
 ) domain.MentalModel {
 	next := cur
 	next.LastRefreshedAt = &now

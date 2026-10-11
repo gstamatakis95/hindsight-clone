@@ -52,7 +52,7 @@ func TestBothStrategiesProduceVersionThroughRunner(t *testing.T) {
 			e.addModel(spec)
 			e.scriptSynthesize("## Status\n\nAlice leads the project.")
 
-			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true, OperationID: opID("op1")})
+			out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true, OperationID: opID("op1")})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +80,7 @@ func assertSecondVersion(t *testing.T, e *env, first domain.MentalModel) {
 	t.Helper()
 	e.addUnit(domain.FactTypeWorld, "Bob joined the project", "proj")
 	e.scriptSynthesize("## Status\n\nAlice leads; Bob joined.")
-	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{}); err != nil {
+	if _, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	h := e.history("status", domain.HistoryKindVersion)
@@ -97,7 +97,7 @@ func TestNothingInScopeMeansNoLLMCall(t *testing.T) {
 			e := newEnv(t)
 			e.addUnit(domain.FactTypeWorld, "unrelated", "other")
 			e.addModel(deltaSpec("status", strategy))
-			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true})
+			out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,8 +105,8 @@ func TestNothingInScopeMeansNoLLMCall(t *testing.T) {
 			if out.Trace.Outcome != domain.RefreshOutcomeNoNewFacts || out.VersionWritten != 0 || m.Version != 0 {
 				t.Fatalf("outcome %s version %d", out.Trace.Outcome, m.Version)
 			}
-			if e.llmCalls() != 0 || len(e.rf.reqs)+len(e.rc.reqs) != 0 {
-				t.Fatalf("made %d llm calls, %d retrievals", e.llmCalls(), len(e.rf.reqs)+len(e.rc.reqs))
+			if e.llmCalls() != 0 || e.retrievals() != 0 {
+				t.Fatalf("made %d llm calls, %d retrievals", e.llmCalls(), e.retrievals())
 			}
 			if m.LastRefreshedAt == nil {
 				t.Fatal("last_refreshed_at not advanced")
@@ -148,28 +148,24 @@ func TestLateCommittingWriterPickedUpByNextRefresh(t *testing.T) {
 	first := e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	late := e.addUnit(domain.FactTypeWorld, "Bob took over the project", "proj")
 	st := &seqStore{DB: e.store, next: []int64{first.Seq}}
-	md := ModelDeps{LLM: e.llm, Router: routingRouter(), Clock: e.clock}
-	runner := NewRefreshRunner(RefreshRunnerDeps{
-		Store: st, Config: e.config, Scope: e.reads, Clock: e.clock,
-		Synthesizers: []Synthesizer{NewSingleShotSynthesizer(e.rc, md)},
-	})
+	runner := e.service(func(d *Deps) { d.DB = st })
 	e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	e.scriptSynthesize("## Status\n\nAlice leads the project.")
-	if _, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{}); err != nil {
+	if _, err := runner.refresh(e.ctx, e.bank, "status", refreshOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	m := e.model("status")
 	if m.LastSeqSeen != first.Seq || slices.Contains(m.SourceIDs, late.ID) {
 		t.Fatalf("watermark %d, sources %v", m.LastSeqSeen, m.SourceIDs)
 	}
-	stale, _, err := NewChangeDetector(e.store.Read(), e.reads, e.tags).NeedsRefresh(e.ctx, m)
+	stale, _, err := e.svc.needsRefresh(e.ctx, m, domain.BankConfig{})
 	if err != nil || !stale {
 		t.Fatalf("model not stale after a late writer: %v %v", stale, err)
 	}
 	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob took over."},
 	}))
-	out, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+	out, err := runner.refresh(e.ctx, e.bank, "status", refreshOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,8 +202,8 @@ func TestDeltaAllOpsRejectedKeepsDocument(t *testing.T) {
 			e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 				"kind": "append_block", "section_id": "no-such-section", "blocks_md": []string{"Bob joined."},
 			}))
-			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: opID("op1")})
-			if !errors.Is(err, ErrAllOpsRejected) || out.Trace.Outcome != domain.RefreshOutcomeFailed {
+			out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{OperationID: opID("op1")})
+			if !errors.Is(err, errAllOpsRejected) || out.Trace.Outcome != domain.RefreshOutcomeFailed {
 				t.Fatalf("err %v outcome %s", err, out.Trace.Outcome)
 			}
 			calls := e.llm.CallsFor(domain.ModelSlotMentalModel, deltaPrompt)
@@ -235,7 +231,7 @@ func TestDeltaRetrySucceedsAndSourcesAccumulate(t *testing.T) {
 	e.llm.Script(domain.ModelSlotMentalModel, deltaPrompt,
 		fakeJSON(opsJSON(map[string]any{"kind": "remove_block", "section_id": "status", "block_id": "bnope"})),
 		fakeJSON(opsJSON(map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob."}})))
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,12 +246,12 @@ func TestDeltaRetrySucceedsAndSourcesAccumulate(t *testing.T) {
 
 	e.archive(first.ID)
 	e.scriptSynthesize("## Status\n\nBob joined.")
-	out, err = e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+	out, err = e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	m = e.model("status")
-	if out.Trace.ModeFallbackReason != FallbackSourcesRetracted || !slices.Equal(m.SourceIDs, []domain.UnitID{second.ID}) {
+	if out.Trace.ModeFallbackReason != fallbackSourcesRetracted || !slices.Equal(m.SourceIDs, []domain.UnitID{second.ID}) {
 		t.Fatalf("fallback %q sources %v", out.Trace.ModeFallbackReason, m.SourceIDs)
 	}
 }
@@ -266,15 +262,15 @@ func TestModeFallbackReasons(t *testing.T) {
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	e.scriptSynthesize("## Status\n\nAlice.")
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
 	if err != nil || out.RequestedMode != domain.RefreshModeDelta || out.Trace.EffectiveMode != domain.RefreshModeFull ||
-		out.Trace.ModeFallbackReason != FallbackNoBaseline {
+		out.Trace.ModeFallbackReason != fallbackNoBaseline {
 		t.Fatalf("err %v requested %s effective %s reason %q", err, out.RequestedMode, out.Trace.EffectiveMode,
 			out.Trace.ModeFallbackReason)
 	}
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	out, err = e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{ForceFull: true})
-	if err != nil || out.Trace.ModeFallbackReason != FallbackForceFull || out.WindowAfterSeq != 0 {
+	out, err = e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{ForceFull: true})
+	if err != nil || out.Trace.ModeFallbackReason != fallbackForceFull || out.WindowAfterSeq != 0 {
 		t.Fatalf("err %v reason %q window after %d", err, out.Trace.ModeFallbackReason, out.WindowAfterSeq)
 	}
 }
@@ -288,7 +284,7 @@ func TestDryRunWritesNothing(t *testing.T) {
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob joined."},
 	}))
 	seq, _ := e.store.Read().BankSeq(e.ctx, e.bank)
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{DryRun: true})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,12 +334,8 @@ func TestRefreshConflictWhenModelChanged(t *testing.T) {
 			return tx.MentalModels().Update(e.ctx, m)
 		})
 	}
-	md := ModelDeps{LLM: hookLLM{LLM: e.llm, hook: clear}, Router: routingRouter(), Clock: e.clock}
-	runner := NewRefreshRunner(RefreshRunnerDeps{
-		Store: e.store, Config: e.config, Scope: e.reads, Clock: e.clock,
-		Synthesizers: []Synthesizer{NewSingleShotSynthesizer(e.rc, md)},
-	})
-	_, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+	runner := e.service(func(d *Deps) { d.LLM = hookLLM{LLM: e.llm, hook: clear} })
+	_, err := runner.refresh(e.ctx, e.bank, "status", refreshOptions{})
 	if !errors.Is(err, domain.ErrConflict) {
 		t.Fatalf("want conflict, got %v", err)
 	}

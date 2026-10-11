@@ -68,7 +68,7 @@ func TestQueueModelRefresh(t *testing.T) {
 func TestQueuerNeverBuiltIsLastRefreshedAtNil(t *testing.T) {
 	e := newEnv(t)
 	e.addModel(domain.MentalModelSpec{ID: "empty"})
-	if _, err := e.runner.Run(e.ctx, e.bank, "empty", RefreshOptions{Manual: true}); err != nil {
+	if _, err := e.svc.refresh(e.ctx, e.bank, "empty", refreshOptions{Manual: true}); err != nil {
 		t.Fatal(err)
 	}
 	if m := e.model("empty"); m.LastRefreshedAt == nil || m.Version != 0 || m.ContentMD != "" {
@@ -82,17 +82,17 @@ func TestQueuerNeverBuiltIsLastRefreshedAtNil(t *testing.T) {
 	}
 }
 
-// emptySynth is a full-only Synthesizer whose retrieval finds nothing.
+// emptySynth is a full-only synthesizer whose retrieval finds nothing.
 type emptySynth struct{}
 
 func (emptySynth) Strategy() domain.RefreshStrategy { return domain.RefreshStrategySingleShot }
 
 func (emptySynth) Full(context.Context, domain.MentalModel, domain.BankConfig, int64) (draft, error) {
-	return draft{}, ErrNoNewFacts
+	return draft{}, errNoNewFacts
 }
 
 func (emptySynth) Delta(_ context.Context, m domain.MentalModel, _ domain.BankConfig, _ int64) (deltaDraft, error) {
-	return deltaDraft{ContentMD: m.ContentMD}, ErrNoNewFacts
+	return deltaDraft{ContentMD: m.ContentMD}, errNoNewFacts
 }
 
 // TestFullWithNothingDraftedKeepsLiveSources checks that a full run that drafts nothing keeps the content
@@ -100,10 +100,9 @@ func (emptySynth) Delta(_ context.Context, m domain.MentalModel, _ domain.BankCo
 func TestFullWithNothingDraftedKeepsLiveSources(t *testing.T) {
 	e := newEnv(t)
 	_, u := builtModel(e, domain.RefreshStrategySingleShot)
-	runner := NewRefreshRunner(RefreshRunnerDeps{
-		Store: e.store, Config: e.config, Scope: e.reads, Clock: e.clock, Synthesizers: []Synthesizer{emptySynth{}},
-	})
-	if _, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{ForceFull: true}); err != nil {
+	runner := e.service(nil)
+	runner.synths[domain.RefreshStrategySingleShot] = emptySynth{}
+	if _, err := runner.refresh(e.ctx, e.bank, "status", refreshOptions{ForceFull: true}); err != nil {
 		t.Fatal(err)
 	}
 	if m := e.model("status"); !slices.Equal(m.SourceIDs, []domain.UnitID{u.ID}) || m.ContentMD == "" {
@@ -111,7 +110,7 @@ func TestFullWithNothingDraftedKeepsLiveSources(t *testing.T) {
 	}
 	e.addUnit(domain.FactTypeWorld, "still in scope", "proj")
 	e.archive(u.ID)
-	if _, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{ForceFull: true}); err != nil {
+	if _, err := runner.refresh(e.ctx, e.bank, "status", refreshOptions{ForceFull: true}); err != nil {
 		t.Fatal(err)
 	}
 	if m := e.model("status"); len(m.SourceIDs) != 0 || m.ContentMD == "" {
@@ -128,7 +127,7 @@ func TestFullWithNothingInScopeKeepsSourcesAndWatermark(t *testing.T) {
 	before.AutoRefreshPaused = true
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, before) })
 	e.archive(u.ID)
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true, ForceFull: true})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true, ForceFull: true})
 	if err != nil || out.Trace.Outcome != domain.RefreshOutcomeNoNewFacts || e.llmCalls() != 0 {
 		t.Fatalf("run: %v outcome %s llm calls %d", err, out.Trace.Outcome, e.llmCalls())
 	}

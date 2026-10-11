@@ -4,45 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"memd/internal/ai"
-	"memd/internal/clock"
-	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/reflect"
-	"memd/internal/store"
 )
 
-// ErrNoNewFacts is returned by a Synthesizer that retrieved nothing to write from. The runner turns it
+// errNoNewFacts is returned by a synthesizer that retrieved nothing to write from. The runner turns it
 // into REFRESH_OUTCOME_NO_NEW_FACTS: no version, the watermark and last_refreshed_at advance.
-var ErrNoNewFacts = errors.New("mentalmodel: nothing retrieved in scope")
+var errNoNewFacts = errors.New("mentalmodel: nothing retrieved in scope")
 
 // Mode fallback reasons recorded in RefreshTrace.ModeFallbackReason when delta was requested but the
 // refresh ran in full.
 const (
-	// FallbackForceFull: the request (or a joined request) asked for force_full.
-	FallbackForceFull = "force_full"
-	// FallbackNoBaseline: the model has no content to edit yet.
-	FallbackNoBaseline = "no_baseline_content"
-	// FallbackSourceQueryChanged: the source query or scope changed since the content was written.
-	FallbackSourceQueryChanged = "source_query_changed"
-	// FallbackSourcesRetracted: a source the document cites was invalidated or replaced.
-	FallbackSourcesRetracted = "sources_retracted"
-	// FallbackMaxDeltaRatio: the delta changed more of the document than max_delta_ratio allows.
-	FallbackMaxDeltaRatio = "max_delta_ratio_exceeded"
+	// fallbackForceFull: the request (or a joined request) asked for force_full.
+	fallbackForceFull = "force_full"
+	// fallbackNoBaseline: the model has no content to edit yet.
+	fallbackNoBaseline = "no_baseline_content"
+	// fallbackSourceQueryChanged: the source query or scope changed since the content was written.
+	fallbackSourceQueryChanged = "source_query_changed"
+	// fallbackSourcesRetracted: a source the document cites was invalidated or replaced.
+	fallbackSourcesRetracted = "sources_retracted"
+	// fallbackMaxDeltaRatio: the delta changed more of the document than max_delta_ratio allows.
+	fallbackMaxDeltaRatio = "max_delta_ratio_exceeded"
 )
 
-// RefreshRunner is the one pipeline behind refresh and dry run; DryRun writes nothing at all.
-// It picks the Synthesizer from the effective RefreshStrategy.
-type RefreshRunner interface {
-	// Run refreshes model id of bank b (or dry-runs it) and reports what happened. A failed run writes
-	// nothing and returns the error with Trace.Outcome = failed; the document stays as it was. Pausing and
-	// the REFRESH_FAILED history entry happen once the operation fails for good, in the maintenance
-	// reconcile (RefreshFailureReconciler), so job retries are not recorded as failures.
-	Run(ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts RefreshOptions) (RefreshOutcome, error)
-}
-
-// RefreshOptions are the knobs of one refresh run.
-type RefreshOptions struct {
+// refreshOptions are the knobs of one refresh run.
+type refreshOptions struct {
 	// Manual marks a user-requested refresh (RefreshMentalModel, first build); a manual success clears
 	// auto_refresh_paused.
 	Manual bool
@@ -59,7 +44,7 @@ type RefreshOptions struct {
 }
 
 // RefreshOutcome is the result of one refresh run (the struct; domain.RefreshOutcome is the enum held in
-// Trace.Outcome). It carries everything DryRunRefreshResponse reports.
+// Trace.Outcome). It carries everything a refresh preview reports.
 type RefreshOutcome struct {
 	// Trace explains the refresh, including its domain.RefreshOutcome.
 	Trace domain.RefreshTrace
@@ -98,20 +83,20 @@ type ResolvedScope struct {
 	FactTypes []domain.FactType
 }
 
-// Synthesizer drafts a model's content. Two implementations, picked by RefreshStrategy:
+// synthesizer drafts a model's content. Two implementations, picked by RefreshStrategy:
 //
 //   - agentic: the reflect loop, answering as a document (Hindsight's behaviour);
 //   - single-shot: one recall over the scope, then one synthesize (full) or delta call.
 //
-// Both return ErrNoNewFacts when retrieval finds nothing, before any LLM call they would otherwise make.
-type Synthesizer interface {
+// Both return errNoNewFacts when retrieval finds nothing, before any LLM call they would otherwise make.
+type synthesizer interface {
 	// Strategy is the refresh strategy the synthesizer implements.
 	Strategy() domain.RefreshStrategy
 	// Full writes the document from everything in scope with seq <= upTo.
 	Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (draft, error)
 	// Delta proposes edit ops for what changed in scope with LastSeqSeen < seq <= upTo and applies them
 	// to m.ContentMD (with the one reject-and-retry). When every op is rejected it returns the draft (for
-	// the trace) and an error wrapping ErrAllOpsRejected; the caller keeps the document.
+	// the trace) and an error wrapping errAllOpsRejected; the caller keeps the document.
 	Delta(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (deltaDraft, error)
 }
 
@@ -145,31 +130,4 @@ type deltaDraft struct {
 	ToolCalls []domain.ToolCallTrace
 	// FactsRetrieved counts the units retrieved in the window.
 	FactsRetrieved int
-}
-
-// Projector is the part of reflect.Agent the runner consumes to project a finished page onto the trigger's
-// response schema; reflect.Agent satisfies it.
-type Projector interface {
-	// Project makes one STRUCTURED_OUTPUT call and returns JSON valid against req.Schema.
-	Project(ctx context.Context, req reflect.ProjectRequest) (json.RawMessage, error)
-}
-
-// RefreshRunnerDeps are the RefreshRunner's dependencies.
-type RefreshRunnerDeps struct {
-	// Store reads the model and writes the version.
-	Store store.DB
-	// Config merges server < tenant < bank < model overrides < trigger < call overrides.
-	Config *config.Resolver
-	// Scope answers the no-LLM "anything in scope / in the window?" check.
-	Scope ScopeReader
-	// Synthesizers holds one Synthesizer per strategy.
-	Synthesizers []Synthesizer
-	// Projector projects the page onto trigger.response_schema_json; nil = a model with a schema fails.
-	Projector Projector
-	// Tags compiles fuzzy scope tags (recall.Engine); nil = a model with a fuzzy scope fails.
-	Tags TagCompiler
-	// Embedder embeds the page for SearchPages; nil = pages are stored without an embedding.
-	Embedder ai.Embedder
-	// Clock stamps last_refreshed_at, history and traces.
-	Clock clock.Clock
 }
