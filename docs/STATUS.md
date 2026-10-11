@@ -303,3 +303,16 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   stranded-fact reads (decision 1452), both Postgres store methods consumed via worker interfaces. ValidateOverrides
   RPC-name bug fixed. All gates incl. make e2e (9 scenarios + golden fixtures) pass on main. Phase 3 complete.
 - Next: Phase 4 final review (2 reviewers: A = platform/API sections, B = engines/jobs/rules), then fix-up WPs.
+- 2026-10-11 FINAL REVIEW B (engines/jobs/rules): 1 CRITICAL, 3 HIGH. Rulings:
+  - C1: consolidation→refresh payload key mismatch (every triggered refresh fails, then pauses) → WP-18 (with H2).
+  - H2: stamping without re-checking cited scopes after a co-source reset → WP-18.
+  - H1: retag strips per-unit label tags → CCR APPROVED: SetDocumentTags replaces only the document-derived tags
+    (tags = tags - oldDocTags ∪ newDocTags) on live and archived units → WP-19.
+  - H3: the maintenance tick ignores auto_consolidation=false / skip_consolidation (SPEC 908 vs 1953). Ruling: the
+    tick skips banks with auto_consolidation=false or enable_observations=false, and only reconciles units older
+    than a grace period (default 10 min, config knob), so skip_consolidation + manual Consolidate works → WP-20.
+  - delete_bank cap: the tick re-enqueues delete_bank for tombstoned banks with no active delete job → WP-20.
+  - GetBank on a deleting bank keeps returning deleting=true (the completion signal); recorded as an exception.
+    Reprocess op id on audit/archive rows: ACCEPTED GAP (rows are kept; no data loss).
+  - LOW bundle (blob Put after the bank check, tick graph_maintenance for dirty banks, manual consolidate retry,
+    progress checkpoints) → WP-20.
