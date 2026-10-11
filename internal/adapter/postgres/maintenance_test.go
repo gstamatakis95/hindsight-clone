@@ -80,19 +80,15 @@ func TestStalledBankDeletes(t *testing.T) {
 	if got, err := s.StalledBankDeletes(ctx); err != nil || !reflect.DeepEqual(got, []port.BankRef{fuBank}) {
 		t.Fatalf("tombstoned bank without a delete job: %v %v", got, err)
 	}
-	enqueueDelete := func() {
-		t.Helper()
-		if err := fuTx(t, s, func(tx port.Tx) error {
-			_, _, err := tx.Queue().Enqueue(ctx, port.Job{
-				Bank: fuBank, Kind: domain.OperationKindDeleteBank, SerialKey: "bank", Payload: []byte(`{}`),
-				Dedupe: port.DedupePendingOrRunning,
-			})
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
+	if err := fuTx(t, s, func(tx port.Tx) error {
+		_, _, err := tx.Queue().Enqueue(ctx, port.Job{
+			Bank: fuBank, Kind: domain.OperationKindDeleteBank, SerialKey: "bank", Payload: []byte(`{}`),
+			Dedupe: port.DedupePendingOrRunning,
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
-	enqueueDelete()
 	if got, _ := s.StalledBankDeletes(ctx); len(got) != 0 {
 		t.Fatalf("listed with a pending delete_bank: %v", got)
 	}

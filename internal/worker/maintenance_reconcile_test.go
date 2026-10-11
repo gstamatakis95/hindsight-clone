@@ -180,7 +180,8 @@ func TestMaintenanceEnqueuesGraphMaintenance(t *testing.T) {
 		Bank: bankB, Kind: domain.OperationKindGraphMaintenance, SerialKey: graphSerialKey,
 		Dedupe: port.DedupePendingOrRunning,
 	})
-	if js, _ := ops.Claim(context.Background(), "w", []port.JobKind{domain.OperationKindGraphMaintenance}, 1); len(js) != 1 {
+	graphKinds := []port.JobKind{domain.OperationKindGraphMaintenance}
+	if js, _ := ops.Claim(context.Background(), "w", graphKinds, 1); len(js) != 1 {
 		t.Fatal("setup claim")
 	}
 	deps := MaintenanceDeps{
