@@ -323,3 +323,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   - MEDIUM: duplicate MEMD_WORKER_ID defeats heartbeat fencing → append a per-process uuid; S3 keys unchecked →
     validate. Plus LOWs (CreateBank on a deleting bank, cancel of delete_bank, "."/".." ids, unbound-slot
     startup check, per-slot concurrency env, worker health, e2e blob-prefix assertion) → folded into WP-20.
+- 2026-10-11 WP-21 (config writes: per-slot models merge on implicit mask; validated whole-config writes) merged; gates pass.
