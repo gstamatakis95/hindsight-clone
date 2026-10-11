@@ -27,6 +27,8 @@
 //     WorkerCrashReclaim and BankDelete.
 //   - TestGoldenAgainstMemdAll runs every eval/golden fixture through the eval harness against `memd all`; every check
 //     must pass.
+//   - TestExamples builds every program under examples/ and runs each against `memd all` and the emulated gateway; an
+//     example exits non-zero when the behaviour it demonstrates does not hold.
 //
 // Scenarios wait for background work with the harness's two-quiet-polls barrier on
 // BankStats.pending_operations_by_kind, and inspect MinIO directly where blob state matters (bank delete). Design:

@@ -460,6 +460,13 @@ Prompts, model output, memory content, request bodies, metadata and SQL paramete
 metrics or Datadog tags. Span errors carry only the error class. See
 [decision 2400](docs/decisions/2400-datadog-optional.md).
 
+## Examples
+
+[examples/](examples/README.md) holds eight runnable scenarios written against the generated Go client, each with the
+same calls as grpcurl commands: a chat assistant, a model per step, several tenants, asynchronous ingestion, mental
+models, curation, directives with structured output, and recall filters. They run against `memd all` with the gateway
+emulator (`make examples`) and are smoke-tested by `make e2e`.
+
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) first: layout, rules and the `make gen && make lint && make test` gate.

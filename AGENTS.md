@@ -49,6 +49,12 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   (wire_maintenance.go runs last). config.go reads the environment (deployment, infrastructure and secrets only),
   configfile.go the server config file (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
+- examples/: runnable scenarios written against the generated client only (never internal/); examples/internal/exampleutil
+  is their shared helper. Keep each short, and make it exit non-zero when the behaviour it shows does not hold:
+  test/e2e TestExamples runs them all.
+- examples/: runnable scenarios written against the generated client only (never internal/); examples/internal/exampleutil
+  is their shared helper. Keep each short, and make it exit non-zero when the behaviour it shows does not hold:
+  test/e2e TestExamples runs them all.
 
 ## Rules
 - Interfaces exist only at I/O boundaries (store, graph, ai, blob, clock, jobs.Claimer, grpcapi.ReadinessProbe) and
@@ -96,6 +102,8 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - make up       # docker compose: postgres, minio
 - make migrate  # alembic upgrade head, then dump schema/schema.sql
 - make run      # memd all
+- make examples # build and run every example against a running memd (ADDR=, TENANT=)
+- make examples # build and run every example against a running memd (ADDR=, TENANT=)
 
 ## Before you finish
 - make gen && make lint && make test pass, with no diff left in gen/, schema/ or internal/mocks/.
