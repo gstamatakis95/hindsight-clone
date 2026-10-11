@@ -289,3 +289,5 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   uses the split ReflectData tool flags (WP-11 x WP-13).
 - Next: WP-16 engine follow-ups (swap stubs for the batch's port methods + carried items), WP-14a e2e harness
   (in parallel), then WP-14b integration, then the final review.
+- 2026-10-11 WP-14a (emulated gateway + e2e harness) merged as a28bc05; gates pass. No separate review: test
+  infrastructure that WP-14b exercises end to end and the final review covers. memd env contract in decision 1411.
