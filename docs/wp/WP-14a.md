@@ -8,8 +8,8 @@ Branch `wp/WP-14a-e2e-harness`. Owns `test/e2e/**`, the `e2e` target of the root
 | Area | Files |
 |---|---|
 | Emulator | test/e2e/gatewayemu/{doc,server,faults,chat,structured,reflect,prompttext,schemagen,vectors}.go |
-| Emulator tests (untagged, run in `make test`) | test/e2e/gatewayemu/{smoke,prompttext,server}_test.go |
-| Harness | test/e2e/harness/{doc,compose,memd,client,root}.go, test/e2e/harness/compose.e2e.yml |
+| Emulator tests (untagged, run in `make test`) | test/e2e/gatewayemu/{smoke,prompttext,server,helpers}_test.go |
+| Harness | test/e2e/harness/{doc,compose,memd,client}.go, test/e2e/harness/compose.e2e.yml |
 | E2E tests (`-tags e2e`) | test/e2e/stack_test.go |
 | Package doc | test/e2e/doc.go |
 | Makefile | the `e2e` target only |
