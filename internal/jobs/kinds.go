@@ -447,20 +447,24 @@ func modelRefreshConfig(ctx context.Context, tx store.Tx, m domain.MentalModel) 
 	return &out, nil
 }
 
+// requeueJob builds the continuation row of claimed job j: same kind and payload ({} when empty), serial key
+// key, DedupePending, due at at.
+func requeueJob(j store.Job, key string, at time.Time) store.Job {
+	payload := j.Payload
+	if len(payload) == 0 {
+		payload = emptyPayload
+	}
+	return store.Job{Bank: j.Bank, Kind: j.Kind, SerialKey: key, Payload: payload, RunAt: at, Dedupe: store.DedupePending}
+}
+
 // Requeue enqueues a continuation of claimed job j (same kind and payload, serial key key, DedupePending)
 // due at at (zero = now), in its own short transaction. DedupePending joins a continuation already queued
 // (a delete parks one while another job of the bank is still running). It takes no seq. A continuation for
 // a bank that is gone is not needed: ErrNotFound, and ErrBankDeleting for any kind but delete_bank, return
 // nil.
 func Requeue(ctx context.Context, db store.DB, j store.Job, key string, at time.Time) error {
-	payload := j.Payload
-	if len(payload) == 0 {
-		payload = emptyPayload
-	}
 	err := db.InTx(ctx, func(tx store.Tx) error {
-		_, _, err := tx.Queue().Enqueue(ctx, store.Job{
-			Bank: j.Bank, Kind: j.Kind, SerialKey: key, Payload: payload, RunAt: at, Dedupe: store.DedupePending,
-		})
+		_, _, err := enqueue(ctx, tx, requeueJob(j, key, at))
 		return err
 	})
 	gone := errors.Is(err, domain.ErrNotFound) ||

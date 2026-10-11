@@ -91,6 +91,13 @@ func TestCatalogueRows(t *testing.T) {
 			Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: "bank", Payload: []byte(`{}`), RunAt: now,
 			Dedupe: store.DedupePending,
 		}},
+		{"continuation (Requeue)", requeueJob(store.Job{
+			ID: "op", Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: "bank", Attempt: 2,
+			Dedupe: store.DedupePendingOrRunning,
+		}, "bank", now), store.Job{
+			Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: "bank", Payload: []byte(`{}`), RunAt: now,
+			Dedupe: store.DedupePending,
+		}},
 		{
 			"refresh (automatic, parked)", must(refreshJob(RefreshRequest{Bank: b, ID: "m1", RunAt: now.Add(time.Minute)}, now)),
 			store.Job{
