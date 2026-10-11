@@ -63,12 +63,13 @@ type Config struct {
 	// RetryBackoff is the wait before the first retry, doubled per retry; negative means no wait.
 	RetryBackoff time.Duration
 	// OnUsage, when set, is called once per successful HTTP call with that call's token usage (chat,
-	// embeddings and rerank alike), e.g. for metrics. Structured and Chat also return their usage.
+	// embeddings and rerank alike), e.g. for the Datadog token counters. Structured and Chat also return
+	// their usage.
 	OnUsage func(ctx context.Context, u domain.Usage)
 	// TraceCall, when set, wraps every model call (chat, embeddings batch or rerank, with all its retries)
 	// in a trace span: it gets the slot, the requested model and the route, and returns ctx carrying the
 	// span and a finish func called once with the call's error. It never sees prompts or responses.
-	// internal/observability provides a Datadog one; nil = no tracing.
+	// internal/observability provides a Datadog one (span and call metrics); nil = no tracing.
 	TraceCall CallTraceFunc
 }
 

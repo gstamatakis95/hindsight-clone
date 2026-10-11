@@ -57,6 +57,8 @@ type infra struct {
 	blob    blob.Store
 	gw      modelGateway
 	ping    func(ctx context.Context) error
+	// poolStat reads the Postgres pool's statistics for the Datadog metrics; nil in tests.
+	poolStat func() *pgxpool.Stat
 }
 
 // jobHandlers are the worker's job handlers by kind: every service's RunXJob and maintenance's graph job, which
@@ -84,6 +86,8 @@ type deps struct {
 	recallArms []string
 	// tel is the optional Datadog instrumentation; nil (the default) installs nothing.
 	tel *observability.Telemetry
+	// samples are what tel's metrics sampler reads: the pool in every mode, the job queue in worker and all.
+	samples observability.Sources
 }
 
 // buildDeps connects the adapters, checks the gateway's embedding dimension and builds every service. The
@@ -109,6 +113,10 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observabi
 		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
 	d := wireServices(cfg, in, tok, serverCfg, clock.System{}, log, tel)
+	d.samples.Pool = in.poolStat
+	if cfg.Mode != modeAPI {
+		d.samples.Queue = in.maint
+	}
 	if err := config.CheckArms(serverCfg, d.recallArms); err != nil {
 		closer()
 		return nil, nil, fmt.Errorf("memd: config file: defaults: %w", err)
@@ -118,7 +126,7 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observabi
 
 // openInfra opens the Postgres pool, the blob store and the gateway client, which embeds with embedModel. tel's
 // instrumentation (no-ops when nil) goes into each: the pgx query tracer, the S3 middleware, and the gateway's call
-// hook and HTTP client.
+// and usage hooks and HTTP client. infra.poolStat feeds the pool metrics.
 func openInfra(ctx context.Context, cfg Config, embedModel string, tel *observability.Telemetry,
 ) (infra, func(), error) {
 	pcfg, err := pgxpool.ParseConfig(cfg.DSN)
@@ -146,10 +154,12 @@ func openInfra(ctx context.Context, cfg Config, embedModel string, tel *observab
 		BaseURL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey, EmbedModel: embedModel,
 		MaxConcurrent: cfg.File.Gateway.MaxConcurrent, SlotConcurrency: cfg.File.Gateway.SlotConcurrency,
 		Timeout:   time.Duration(cfg.File.Gateway.Timeout),
-		TraceCall: tel.GatewayHook(),
+		TraceCall: tel.GatewayHook(), OnUsage: tel.UsageHook(),
 	}, tel.HTTPClient(nil))
 	pg := postgres.New(pool)
-	return infra{db: pg, graph: pg.Graph(), claimer: pg, maint: pg, blob: bs, gw: gw, ping: pool.Ping}, pool.Close, nil
+	return infra{
+		db: pg, graph: pg.Graph(), claimer: pg, maint: pg, blob: bs, gw: gw, ping: pool.Ping, poolStat: pool.Stat,
+	}, pool.Close, nil
 }
 
 // openBlob builds the blob.Store adapter MEMD_BLOB_PROVIDER selects (Config.Validate has already rejected an

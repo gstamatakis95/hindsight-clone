@@ -54,11 +54,11 @@ memd has two kinds of settings:
 
 - **Environment variables** (or the matching flags, `MEMD_GRPC_ADDR` = `-grpc-addr`) hold only deployment,
   infrastructure and secrets: the DSN, listen addresses, gateway URL and key, blob storage, worker id and
-  slots, log level and Datadog. Run `go run ./cmd/memd` to list them all.
+  slots, log level and format, and Datadog. Run `go run ./cmd/memd` to list them all.
 - **The server config file** holds the models and every behaviour and operator setting. memd reads
   `MEMD_CONFIG`, or `./memd.yaml` when that is unset. Its `defaults:` block is the server level of the config
-  hierarchy, written like the API's `BankConfig`; the `gateway`, `worker`, `retention` and `api` sections hold
-  operator settings. [memd.example.yaml](memd.example.yaml) documents every key; unknown keys fail startup.
+  hierarchy, written like the API's `BankConfig`; the `gateway`, `worker`, `retention`, `api` and `observability`
+  sections hold operator settings. [memd.example.yaml](memd.example.yaml) documents every key; unknown keys fail startup.
 
 At startup memd checks the config file, that the embedding model returns 768 dimensions, that the extract and
 reflect steps have a model, and that the blob storage is configured. A worker's id is
@@ -239,28 +239,37 @@ grpcurl -plaintext -H 'x-tenant-id: acme' \
 
 The bank's `models.default` beats a step the server file binds by name, so the first call moves every chat step
 of `b1` to `claude-sonnet`; the second changes only the reflect step of one call.
+
 ## Datadog (optional)
 
-memd can send traces, runtime metrics and (separately) profiles to a Datadog agent. It uses dd-trace-go v2
-directly, with no OpenTelemetry. **It is off by default.** When off, no tracer starts, no instrumentation is
-installed and no agent is contacted.
+memd can send traces, metrics, logs and (separately) profiles to Datadog through a Datadog agent. It uses
+Datadog's own clients directly: dd-trace-go v2 for traces and profiles, and datadog-go v5 (DogStatsD) for
+metrics. There is no OpenTelemetry. **It is off by default.** When off, no tracer or metrics client starts, no
+instrumentation is installed, no agent is contacted, and logs stay in the text format on stderr.
 
-| Setting (env / flag) | Default | Effect |
+| Setting | Default | Effect |
 |---|---|---|
-| `MEMD_DATADOG_ENABLED` / `-datadog-enabled=true` | `false` | Turns on tracing, trace ids in logs, and runtime metrics. |
+| `MEMD_DATADOG_ENABLED` / `-datadog-enabled=true` | `false` | Turns on tracing, memd's metrics, runtime metrics, JSON logs on stdout, and trace ids in logs. |
+| `MEMD_DATADOG_METRICS` / `-datadog-metrics=false` | `true` | Set it to `false` to skip memd's own metrics. Tracing and runtime metrics stay on. Ignored unless Datadog is enabled. |
 | `MEMD_DATADOG_PROFILER` / `-datadog-profiler=true` | `false` | Also starts the continuous profiler. Ignored unless Datadog is enabled. |
+| `MEMD_LOG_FORMAT` / `-log-format=json` | unset | `text` or `json`. When unset, it is `json` with Datadog enabled and `text` otherwise. An explicit value always wins. |
+| `observability.metrics_interval` (server config file) | `15s` | How often the Postgres pool and job queue gauges are sampled. |
 
-When enabled, the library reads the standard Datadog variables:
+When enabled, the libraries read the standard Datadog variables:
 
-- **Agent address:** `DD_AGENT_HOST` / `DD_TRACE_AGENT_PORT`, or `DD_TRACE_AGENT_URL`. The default is `localhost:8126`.
-- **Unified service tagging:** `DD_ENV`, `DD_VERSION`, and `DD_SERVICE` (default `memd`).
+- **Trace agent:** `DD_AGENT_HOST` / `DD_TRACE_AGENT_PORT`, or `DD_TRACE_AGENT_URL`. The default is `localhost:8126`.
+- **DogStatsD:** `DD_DOGSTATSD_URL` (`udp://host:port` or `unix:///path`), or `DD_AGENT_HOST` with
+  `DD_DOGSTATSD_PORT`. The default is `localhost:8125`.
+- **Unified service tagging:** `DD_ENV`, `DD_VERSION`, and `DD_SERVICE` (default `memd`). These tag every
+  span, metric and log line.
 - **Tags:** `DD_TAGS`.
 - **Sampling:** `DD_TRACE_SAMPLE_RATE` / `DD_TRACE_SAMPLING_RULES`.
-- **Runtime metrics:** `DD_RUNTIME_METRICS_ENABLED` (default on with Datadog) and `DD_DOGSTATSD_PORT`.
+- **Runtime metrics:** `DD_RUNTIME_METRICS_ENABLED` (default on with Datadog).
 
-An unreachable agent never fails startup or a request: payloads are dropped and the tracer keeps retrying.
+An unreachable agent never fails startup or a request. Traces are dropped while the tracer keeps retrying.
+Metrics are fire-and-forget UDP datagrams. If a client can't start, memd logs it and runs without that part.
 
-What gets traced:
+### Traces
 
 - **gRPC:** one `grpc.server` span per RPC, with resource = the full method. It is tagged `memd.tenant` and `memd.bank`.
 - **Worker jobs:** one `memd.job` span per run, with resource = the kind. It carries the operation id, attempt and outcome.
@@ -268,12 +277,63 @@ What gets traced:
 - **Postgres:** one `postgres.query` span per statement, recorded only inside a request, job or tick.
 - **AI gateway:** one `memd.gateway.call` span per call, tagged with model slot and name, with `http.request` spans under it.
 - **S3:** one `S3.request` span per call.
-- **Logs:** records logged with a span in context get `dd.trace_id` and `dd.span_id`.
 
-Prompts, model output, memory content, request bodies, metadata and SQL parameters are never recorded. Span
-errors carry only the error class. See [decision 2400](docs/decisions/2400-datadog-optional.md).
+### Metrics
 
-To run an agent next to the local stack, add this to `docker-compose.yml` or an override file:
+Every metric name starts with `memd.`. Counts are counters. Durations are distributions in milliseconds, so
+Datadog computes percentiles across hosts. Sampled values are gauges.
+
+| Metric | Type | Tags | What |
+|---|---|---|---|
+| `memd.grpc.requests` | count | `method`, `code` | Unary RPCs, including ones the tenant check rejects. Health checks and reflection are excluded. |
+| `memd.grpc.latency` | distribution (ms) | `method`, `code` | RPC duration. |
+| `memd.job.started` | count | `kind` | Job runs started by a worker. |
+| `memd.job.completed`, `.retried`, `.failed`, `.released`, `.lost` | count | `kind` | How each run ended: done, rescheduled, failed for good, released by a shutdown, or lost (cancel requested, or reclaimed). |
+| `memd.job.duration` | distribution (ms) | `kind`, `outcome` | Run duration, including the final status write. |
+| `memd.gateway.calls` | count | `slot`, `model`, `route` | Model calls. Each call counts once, however many retries it took. |
+| `memd.gateway.latency` | distribution (ms) | `slot`, `model`, `route` | Call duration, including retries. |
+| `memd.gateway.errors` | count | `slot`, `model`, `route`, `error` | Failed calls. `error` is the class: `unavailable`, `deadline_exceeded`, `resource_exhausted`, `invalid_argument`, `canceled`, ..., or `other`. |
+| `memd.gateway.tokens.input`, `memd.gateway.tokens.output` | count | `slot`, `model` | Tokens the gateway reported for each successful HTTP call. |
+| `memd.queue.depth` | gauge | `kind`, `status` | Pending and processing jobs. `retain_batch` parents are excluded. |
+| `memd.queue.oldest_pending_age_seconds` | gauge | `kind` | How long the oldest due pending job has waited past its run time. Parked retries don't count. |
+| `memd.postgres.pool.acquired`, `.idle`, `.total`, `.max` | gauge | | Postgres pool connections. |
+| `memd.postgres.pool.acquires`, `.empty_acquires`, `.canceled_acquires`, `.empty_acquire_wait_ms` | count | | Acquire activity since the last sample. `empty_acquires` is acquires that had to wait for a free connection. |
+
+Every metric also carries `service`, plus `env` and `version` when `DD_ENV` and `DD_VERSION` are set. Tags are kept low-cardinality on purpose. A metric
+never carries a tenant, bank, document or operation id, query text or content; spans carry the ids instead.
+
+The queue gauges come from worker and `all` processes only. Every worker reports the same global numbers, so
+graph them with `max by {kind,status}`, not `sum`. A series that empties reads 0 instead of disappearing.
+
+memd does not report counts of memories created or updated. Retain and consolidation don't expose them in a form
+the metrics layer can read.
+
+### Logs
+
+With Datadog enabled, memd writes JSON logs to stdout, one object per line. Each line uses Datadog's reserved
+attributes: `timestamp`, `status` (`debug`, `info`, `warn` or `error`), `message`, and `logger.name` for the
+tracer's own messages. The agent parses these without a pipeline. Every line also carries `dd.service`, plus
+`dd.env` and `dd.version` when set. Lines logged during a request, job or tick add `dd.trace_id` and
+`dd.span_id`, which link the line to its trace. `MEMD_LOG_FORMAT=json` gives the same JSON with Datadog off, but
+on stderr (where memd always logs without Datadog) and without the `dd.*` attributes.
+
+The agent collects logs from the container's output; memd doesn't ship them over HTTP itself. To collect them:
+
+1. Set `DD_LOGS_ENABLED=true` on the agent.
+2. Give the agent access to container logs (on Docker, mount the Docker socket).
+3. Label the memd container so its logs are tagged as Go logs from service `memd`:
+   - **Docker:** the label `com.datadoghq.ad.logs: '[{"source":"go","service":"memd"}]'`.
+   - **Kubernetes:** the pod annotation `ad.datadoghq.com/memd.logs: '[{"source":"go","service":"memd"}]'`,
+     where `memd` is the container name.
+
+   Alternatively, set `DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true` on the agent to collect every container.
+
+This only applies when memd runs in a container. Under `go run`, the logs go to your terminal.
+
+### Running an agent locally
+
+Add this to `docker-compose.yml` or an override file. It takes traces on 8126, metrics on 8125/udp, and the logs
+of labelled containers:
 
 ```yaml
   datadog-agent:
@@ -284,16 +344,41 @@ To run an agent next to the local stack, add this to `docker-compose.yml` or an 
       DD_APM_ENABLED: "true"
       DD_APM_NON_LOCAL_TRAFFIC: "true"
       DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
+      DD_LOGS_ENABLED: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
     ports: ["8126:8126", "8125:8125/udp"]
 ```
 
-Then start memd:
+Then start memd on the host:
 
 ```sh
 MEMD_DATADOG_ENABLED=true DD_ENV=dev DD_VERSION=$(git rev-parse --short HEAD) go run ./cmd/memd all
 ```
 
-In Kubernetes, set `DD_AGENT_HOST` from the node IP (`status.hostIP`) to reach the agent DaemonSet.
+When memd runs as a container next to the agent, point it at the agent and label it for log collection. The
+repository ships no image, so use your own build:
+
+```yaml
+  memd:
+    image: your-registry/memd
+    command: ["all"]
+    environment:
+      MEMD_DATADOG_ENABLED: "true"
+      DD_AGENT_HOST: datadog-agent
+      DD_ENV: dev
+    labels:
+      com.datadoghq.ad.logs: '[{"source":"go","service":"memd"}]'
+```
+
+In Kubernetes, set `DD_AGENT_HOST` from the node IP (`status.hostIP`) to reach the agent DaemonSet. That
+variable covers both traces and DogStatsD.
+
+Prompts, model output, memory content, request bodies, metadata and SQL parameters are never recorded in spans,
+metrics or Datadog tags. Span errors carry only the error class. See
+[decision 2400](docs/decisions/2400-datadog-optional.md).
 
 ## Contributing
 

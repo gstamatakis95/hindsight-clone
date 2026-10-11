@@ -3,9 +3,8 @@ package observability
 import (
 	"log/slog"
 	"os"
-	"strings"
 
-	slogtrace "github.com/DataDog/dd-trace-go/contrib/log/slog/v2"
+	"github.com/DataDog/datadog-go/v5/statsd"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/DataDog/dd-trace-go/v2/profiler"
 )
@@ -47,10 +46,15 @@ const (
 	TagModelName = "memd.model.name"
 )
 
-// Environment variables Start reads itself; every other DD_* variable is read by dd-trace-go.
+// Environment variables Start reads itself; every other DD_* variable is read by dd-trace-go or datadog-go.
 const (
 	envService        = "DD_SERVICE"
+	envEnv            = "DD_ENV"
+	envVersion        = "DD_VERSION"
 	envRuntimeMetrics = "DD_RUNTIME_METRICS_ENABLED"
+	envAgentHost      = "DD_AGENT_HOST"
+	envStatsdURL      = "DD_DOGSTATSD_URL"
+	envStatsdPort     = "DD_DOGSTATSD_PORT"
 )
 
 // Config switches Datadog on. The zero value is off.
@@ -59,28 +63,40 @@ type Config struct {
 	Enabled bool
 	// Profiler also starts the continuous profiler (MEMD_DATADOG_PROFILER); ignored unless Enabled.
 	Profiler bool
+	// Metrics also sends memd's own metrics to DogStatsD (MEMD_DATADOG_METRICS, which cmd/memd defaults to
+	// true); ignored unless Enabled.
+	Metrics bool
 	// Logger receives memd's and the tracer's own messages; nil = slog.Default().
 	Logger *slog.Logger
-	// Env looks up environment variables (DD_SERVICE, DD_RUNTIME_METRICS_ENABLED); nil = os.Getenv.
+	// Env looks up environment variables (DD_SERVICE, DD_ENV, DD_VERSION, DD_RUNTIME_METRICS_ENABLED and the
+	// DogStatsD address); nil = os.Getenv.
 	Env func(string) string
 }
 
 // Telemetry hands out the instrumentation for each layer. A nil *Telemetry is the disabled state: every
 // method is safe on it and returns "install nothing" (nil options, nil hooks, the input unchanged), so the
-// composition root calls the same methods either way.
+// composition root calls the same methods either way. An enabled one traces, sends metrics, or both: a
+// tracer that failed to start leaves metrics on, and a metrics client that failed leaves tracing on.
 type Telemetry struct {
 	// log receives instrumentation warnings.
 	log *slog.Logger
+	// tracing is set when the tracer runs; the tracing helpers install nothing without it.
+	tracing bool
+	// logAttrs are the dd.service, dd.env and dd.version attributes LogHandler adds when tracing.
+	logAttrs []slog.Attr
+	// stats sends memd's metrics; nil = metrics off.
+	stats statsd.ClientInterface
 }
 
-// Start starts Datadog per cfg and returns the Telemetry to wire with and a stop func that flushes and
-// stops the tracer and profiler (call it once, at exit). Disabled, it starts nothing, contacts nothing
-// and returns (nil, no-op).
+// Start starts Datadog per cfg and returns the Telemetry to wire with and a stop func that closes the
+// metrics client (flushing it) and flushes and stops the tracer and profiler (call it once, at exit).
+// Disabled, it starts nothing, contacts nothing and returns (nil, no-op).
 //
 // Enabled, it starts the dd-trace-go tracer (service DefaultService unless DD_SERVICE is set, runtime
 // metrics on unless DD_RUNTIME_METRICS_ENABLED is set; the agent address, DD_ENV, DD_VERSION and sampling
-// come from the standard DD_* variables) and, with cfg.Profiler, the profiler. Neither ever fails startup:
-// a start error is logged and memd runs untraced; an unreachable agent only costs dropped payloads.
+// come from the standard DD_* variables), with cfg.Profiler the profiler, and with cfg.Metrics the DogStatsD
+// client (see newStatsClient). None of them ever fails startup: a start error is logged and memd runs without
+// that part; an unreachable agent only costs dropped payloads.
 func Start(cfg Config) (*Telemetry, func()) {
 	if !cfg.Enabled {
 		return nil, func() {}
@@ -93,7 +109,27 @@ func Start(cfg Config) (*Telemetry, func()) {
 	if env == nil {
 		env = os.Getenv
 	}
-	opts := []tracer.StartOption{tracer.WithLogger(ddLogger{log: log})}
+	t := &Telemetry{log: log, logAttrs: logAttrs(env)}
+	stopTracer := t.startTracer(cfg.Profiler, env)
+	if cfg.Metrics {
+		t.stats = newStatsClient(env, log)
+	}
+	if !t.tracing && t.stats == nil {
+		return nil, func() {}
+	}
+	log.Info("datadog enabled", "tracing", t.tracing, "profiler", t.tracing && cfg.Profiler, "metrics", t.stats != nil)
+	return t, func() {
+		if t.stats != nil {
+			_ = t.stats.Close()
+		}
+		stopTracer()
+	}
+}
+
+// startTracer starts the tracer and, with prof, the profiler, and returns the func that stops both. A tracer
+// start error is logged and leaves t.tracing unset (and the profiler off).
+func (t *Telemetry) startTracer(prof bool, env func(string) string) func() {
+	opts := []tracer.StartOption{tracer.WithLogger(ddLogger{log: t.log})}
 	if env(envService) == "" {
 		opts = append(opts, tracer.WithService(DefaultService))
 	}
@@ -101,15 +137,15 @@ func Start(cfg Config) (*Telemetry, func()) {
 		opts = append(opts, tracer.WithRuntimeMetrics())
 	}
 	if err := tracer.Start(opts...); err != nil {
-		log.Warn("datadog: tracer did not start; running without tracing", "err", err)
-		return nil, func() {}
+		t.log.Warn("datadog: tracer did not start; running without tracing", "err", err)
+		return func() {}
 	}
+	t.tracing = true
 	stopProfiler := func() {}
-	if cfg.Profiler {
-		stopProfiler = startProfiler(env, log)
+	if prof {
+		stopProfiler = startProfiler(env, t.log)
 	}
-	log.Info("datadog tracing enabled", "profiler", cfg.Profiler)
-	return New(log), func() {
+	return func() {
 		stopProfiler()
 		tracer.Stop()
 	}
@@ -129,41 +165,29 @@ func startProfiler(env func(string) string, log *slog.Logger) func() {
 	return profiler.Stop
 }
 
-// New returns an enabled Telemetry over whatever global tracer is running, without starting one: Start
-// uses it after tracer.Start, and tests use it after mocktracer.Start. log nil = slog.Default().
+// New returns a tracing Telemetry over whatever global tracer is running, without starting one and without
+// metrics: tests use it after mocktracer.Start. log nil = slog.Default().
 func New(log *slog.Logger) *Telemetry {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Telemetry{log: log}
+	return &Telemetry{log: log, tracing: true, logAttrs: logAttrs(os.Getenv)}
+}
+
+// NewMetrics returns a metrics-only Telemetry (no tracing) that sends through c: tests use it with a fake
+// client. log nil = slog.Default().
+func NewMetrics(log *slog.Logger, c statsd.ClientInterface) *Telemetry {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Telemetry{log: log, stats: c}
 }
 
 // Enabled reports whether t installs instrumentation (false for nil).
 func (t *Telemetry) Enabled() bool { return t != nil }
 
-// LogHandler adds dd.trace_id and dd.span_id to every record logged with a context that carries a span
-// (slog's *Context methods), so logs and traces correlate in Datadog. Disabled, it returns h unchanged.
-func (t *Telemetry) LogHandler(h slog.Handler) slog.Handler {
-	if t == nil {
-		return h
-	}
-	return slogtrace.WrapHandler(h)
-}
+// traces reports whether t's tracing helpers install anything.
+func (t *Telemetry) traces() bool { return t != nil && t.tracing }
 
-// ddLogger routes the tracer's and profiler's own messages into slog.
-type ddLogger struct {
-	// log receives the messages.
-	log *slog.Logger
-}
-
-var _ tracer.Logger = ddLogger{}
-
-// Log writes msg at warn when the tracer marks it as an error, else at info.
-func (l ddLogger) Log(msg string) {
-	msg = strings.TrimSpace(msg)
-	if strings.Contains(msg, "ERROR:") || strings.Contains(msg, "WARN:") {
-		l.log.Warn(msg, "component", "datadog")
-		return
-	}
-	l.log.Info(msg, "component", "datadog")
-}
+// metered reports whether t sends metrics.
+func (t *Telemetry) metered() bool { return t != nil && t.stats != nil }

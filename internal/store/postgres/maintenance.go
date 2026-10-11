@@ -97,3 +97,20 @@ func (s *DB) FailedRefreshes(ctx context.Context) ([]store.FailedRefresh, error)
 	}
 	return out, nil
 }
+
+// QueueStats returns the pending and processing operations by kind and status (retain_batch parents excluded),
+// ordered by (kind, status), each pending entry with the age of its kind's oldest due job by the database clock.
+func (s *DB) QueueStats(ctx context.Context) ([]store.QueueStat, error) {
+	rows, err := db.New(s.pool).QueueStats(ctx)
+	if err != nil {
+		return nil, mapErr("queue stats", err)
+	}
+	out := make([]store.QueueStat, len(rows))
+	for i, row := range rows {
+		out[i] = store.QueueStat{
+			Kind: domain.OperationKind(row.Kind), Status: domain.OperationStatus(row.Status), Jobs: int(row.Jobs),
+			OldestDue: time.Duration(row.OldestDueSeconds * float64(time.Second)),
+		}
+	}
+	return out, nil
+}

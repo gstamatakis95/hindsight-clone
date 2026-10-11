@@ -129,7 +129,10 @@
 // DB implements store.Maintenance, the cross-bank scans of the maintenance tick: [DB.StrandedFacts] (facts left
 // without an embedding by a failed rederive), [DB.SettleRetainBatches] (ends retain_batch parents whose children are
 // all terminal), [DB.UnconsolidatedBanks], [DB.StalledBankDeletes], [DB.BanksWithGraphWork], [DB.CronModels] and
-// [DB.FailedRefreshes].
+// [DB.FailedRefreshes]. [DB.QueueStats] is the one read outside the tick: the job queue's depth by kind and status
+// and the age of each kind's oldest due pending job, which the optional Datadog metrics sample every few seconds (an
+// index scan of the partial index over pending and processing rows, so the terminal rows kept for retention cost
+// nothing).
 //
 // # Errors
 //

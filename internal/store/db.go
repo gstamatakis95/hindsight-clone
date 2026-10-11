@@ -140,8 +140,9 @@ type Freshness interface {
 	ModelsCiting(ctx context.Context, b domain.BankRef, ids []domain.UnitID) ([]domain.MentalModelID, error)
 }
 
-// Maintenance holds the cross-bank scans the maintenance tick runs. Each runs as its own statement (or short
-// transaction) outside any InTx and skips tombstoned banks unless it says otherwise.
+// Maintenance holds the cross-bank scans the maintenance tick runs, plus the job queue read of the optional
+// metrics sampler (QueueStats). Each runs as its own statement (or short transaction) outside any InTx and skips
+// tombstoned banks unless it says otherwise.
 type Maintenance interface {
 	// UnconsolidatedBanks returns every bank that is not tombstoned and has at least one live fact with an
 	// embedding, consolidated_at and consolidation_failed_at unset, created before before, with the created_at of
@@ -169,4 +170,8 @@ type Maintenance interface {
 	// FailedRefreshes returns, per existing model on a bank that is not tombstoned, its latest terminal
 	// refresh_mental_model operation when that operation is FAILED.
 	FailedRefreshes(ctx context.Context) ([]FailedRefresh, error)
+	// QueueStats returns the job queue's depth: one entry per kind and status with at least one pending or
+	// processing operation (retain_batch parents excluded), each with the age of the kind's oldest due pending
+	// job. It is a single read for metrics, cheap enough to run every few seconds.
+	QueueStats(ctx context.Context) ([]QueueStat, error)
 }

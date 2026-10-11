@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/ext"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/mocktracer"
@@ -29,8 +30,8 @@ import (
 
 // These tests swap the global tracer, so none of them runs in parallel.
 
-// TestDisabledStartsAndInstallsNothing checks that a disabled Start contacts no agent and that every helper
-// of the nil Telemetry installs nothing.
+// TestDisabledStartsAndInstallsNothing checks that a disabled Start contacts no agent (trace or DogStatsD)
+// and that every helper of the nil Telemetry installs nothing.
 func TestDisabledStartsAndInstallsNothing(t *testing.T) {
 	var hits atomic.Int64
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -39,10 +40,15 @@ func TestDisabledStartsAndInstallsNothing(t *testing.T) {
 	}))
 	defer agent.Close()
 	t.Setenv("DD_TRACE_AGENT_URL", agent.URL)
-	tel, stop := Start(Config{Profiler: true})
+	dogstatsd := listenUDP(t)
+	tel, stop := Start(Config{Profiler: true, Metrics: true})
 	if tel != nil || tel.Enabled() {
 		t.Fatal("disabled Start returned an enabled Telemetry")
 	}
+	if tel.UsageHook() != nil {
+		t.Fatal("disabled Telemetry returned a usage hook")
+	}
+	tel.StartSampler(t.Context(), time.Millisecond, Sources{Pool: func() *pgxpool.Stat { panic("sampled") }})()
 	h := slog.NewTextHandler(&bytes.Buffer{}, nil)
 	hc := &http.Client{}
 	pcfg, err := pgxpool.ParseConfig("postgres://u@localhost/db")
@@ -62,6 +68,9 @@ func TestDisabledStartsAndInstallsNothing(t *testing.T) {
 	stop()
 	if n := hits.Load(); n != 0 {
 		t.Fatalf("disabled Start contacted the agent %d times", n)
+	}
+	if got := dogstatsd.read(100 * time.Millisecond); got != "" {
+		t.Fatalf("disabled Start sent metrics: %q", got)
 	}
 }
 
@@ -182,22 +191,4 @@ func TestS3Spans(t *testing.T) {
 		}
 	}
 	t.Fatalf("no S3.PutObject span under the parent: %v", mt.FinishedSpans())
-}
-
-// TestLogHandlerAddsTraceIDs checks log correlation: a record logged with a span in its context carries
-// dd.trace_id and dd.span_id; one without does not.
-func TestLogHandlerAddsTraceIDs(t *testing.T) {
-	mt := mocktracer.Start()
-	defer mt.Stop()
-	var buf bytes.Buffer
-	log := slog.New(New(nil).LogHandler(slog.NewTextHandler(&buf, nil)))
-	span, ctx := tracer.StartSpanFromContext(context.Background(), "op")
-	log.InfoContext(ctx, "with span")
-	span.Finish()
-	log.Info("without span")
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != 2 || !strings.Contains(lines[0], ext.LogKeyTraceID+"=") ||
-		!strings.Contains(lines[0], ext.LogKeySpanID+"=") || strings.Contains(lines[1], ext.LogKeyTraceID) {
-		t.Fatalf("log lines:\n%s", buf.String())
-	}
 }

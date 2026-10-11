@@ -36,3 +36,16 @@ WHERE b.deleting_at IS NULL AND (
     OR EXISTS (SELECT 1 FROM entity_maintenance e WHERE e.tenant_id = b.tenant_id AND e.bank_id = b.id)
 )
 ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C";
+
+-- QueueStats returns the job queue's depth by kind and status (pending and processing only), with the age in
+-- seconds of the oldest due pending job of each kind (run_at <= now(); 0 when none is due; parked retries and
+-- debounced jobs are not waiting yet). retain_batch parents are left out: they are never claimed and stay pending
+-- until their children settle. Both statuses are covered by the partial index operations_active_serial_key_idx.
+-- name: QueueStats :many
+SELECT kind, status, count(*)::bigint AS jobs,
+    COALESCE(EXTRACT(EPOCH FROM now() - min(run_at) FILTER (WHERE status = 'pending' AND run_at <= now())), 0)::float8
+        AS oldest_due_seconds
+FROM operations
+WHERE status IN ('pending', 'processing') AND kind <> 'retain_batch'
+GROUP BY kind, status
+ORDER BY kind, status;

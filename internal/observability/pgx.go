@@ -14,12 +14,12 @@ import (
 // db.system and the rows affected; bind parameters are never recorded. Only statements whose context
 // already carries a span are traced (an RPC, a job, a maintenance tick), so the worker's claim polls and
 // heartbeats, which run several times a second outside any request, don't each become a root trace.
-// Disabled, it leaves cfg untouched.
+// Without tracing (disabled, or metrics only), it leaves cfg untouched.
 //
 // memd uses this small tracer instead of dd-trace-go's contrib/jackc/pgx.v5, which traces every statement,
 // connect and acquire as its own trace when there is no parent (decision 2400).
 func (t *Telemetry) TracePool(cfg *pgxpool.Config) {
-	if t == nil || cfg == nil {
+	if !t.traces() || cfg == nil {
 		return
 	}
 	cfg.ConnConfig.Tracer = pgxTracer{}

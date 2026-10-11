@@ -42,7 +42,7 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - internal/maintenance: the 60 s tick (ordered steps calling the services' sweeps) and the graph_maintenance job.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per proto service (holding only the services it
   calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes. No logic.
-- internal/observability: the optional Datadog instrumentation, wired in cmd/memd only.
+- internal/observability: the optional Datadog traces, metrics and JSON logs, wired in cmd/memd only.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
   service builds it, hands it to its gRPC handlers, registers its job handlers and sets its tick steps
   (wire_maintenance.go runs last). config.go reads the environment (deployment, infrastructure and secrets only),

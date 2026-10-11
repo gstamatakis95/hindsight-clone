@@ -22,8 +22,8 @@ github.com/DataDog/datadog-agent/pkg/trace/stats v0.82.0 h1:rh/E60HMZzzuSNkYhKKI
 github.com/DataDog/datadog-agent/pkg/trace/stats v0.82.0/go.mod h1:ewMjfw1fAMTSplgGzl4X7jr/K+0UtVQbp67UFbP8Gso=
 github.com/DataDog/datadog-agent/pkg/trace/traceutil v0.82.0 h1:7qQAboJOj+eAj9caXwRgpuQiALYcL+spsU/gawTBevo=
 github.com/DataDog/datadog-agent/pkg/trace/traceutil v0.82.0/go.mod h1:yZZL4wCytoVXUayJuNXznHduZ0INjSA8rw9E/98hhVM=
-github.com/DataDog/datadog-go/v5 v5.9.0 h1:0rhs5wBov9Iz+xLXLk4maaReHvOANM1ijSm2IKWtKFs=
-github.com/DataDog/datadog-go/v5 v5.9.0/go.mod h1:2SBt8zJu6r7sRQHZFMQ8oCukWTKj0ymwulmNgQzJ1JM=
+github.com/DataDog/datadog-go/v5 v5.9.1 h1:jOxw/TaxGWok8RIxbpqn2p3RzSnQr/m3Q6TgaHqqOU0=
+github.com/DataDog/datadog-go/v5 v5.9.1/go.mod h1:2SBt8zJu6r7sRQHZFMQ8oCukWTKj0ymwulmNgQzJ1JM=
 github.com/DataDog/dd-trace-go/contrib/aws/aws-sdk-go-v2/v2 v2.10.1 h1:mhEDaAuWAo8Wxo2xen5VQFjxwuJz163zDWUGkiYurpQ=
 github.com/DataDog/dd-trace-go/contrib/aws/aws-sdk-go-v2/v2 v2.10.1/go.mod h1:VMnQaVR/zqWTE+w9xytV0reRtLLhsVt8cboHL7yPVNc=
 github.com/DataDog/dd-trace-go/contrib/google.golang.org/grpc/v2 v2.10.1 h1:vI5+/s3IH18QoTGzdiE5KemwZA/0+v960zccWgjFAv8=

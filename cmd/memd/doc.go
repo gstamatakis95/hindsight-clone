@@ -27,7 +27,8 @@
 //     the reclaim threshold, so a bad deployment fails before anything connects. A missing or unknown mode prints
 //     the usage and exits 2; a bad flag or value, an unknown key in the file, extra arguments or a failed
 //     validation prints the error and exits 1.
-//  2. Optional Datadog instrumentation starts (internal/observability); disabled, it installs nothing.
+//  2. The logger is built (text on stderr; with Datadog enabled JSON on stdout, see MEMD_LOG_FORMAT) and the
+//     optional Datadog instrumentation starts (internal/observability); disabled, it installs nothing.
 //  3. The adapters open: Postgres (pinged within 30 s), blob storage and the gateway. The embedding model
 //     (defaults.models.embed, default nomic-embed-text-v1.5) must return 768 dimensions (memory_units.embedding is
 //     vector(768)), else startup fails.
@@ -64,13 +65,22 @@
 //	MEMD_WORKER_HEALTH_ADDR   ""         where the worker serves grpc.health.v1; empty = nowhere
 //	MEMD_DB_MAX_CONNS         0          Postgres pool size; 0 = max(2 x worker slots + 16, 32)
 //	MEMD_LOG_LEVEL            "info"     debug, info, warn or error
-//	MEMD_DATADOG_ENABLED      false      Datadog tracing, log correlation and runtime metrics
+//	MEMD_LOG_FORMAT           ""         text or json; empty = json with Datadog enabled, else text
+//	MEMD_DATADOG_ENABLED      false      Datadog tracing, metrics, runtime metrics and log correlation
 //	MEMD_DATADOG_PROFILER     false      Datadog continuous profiler; only with Datadog enabled
+//	MEMD_DATADOG_METRICS      true       memd's own metrics over DogStatsD; only with Datadog enabled
 //
-// With MEMD_DATADOG_ENABLED the standard Datadog variables apply, read by dd-trace-go or
-// internal/observability: DD_AGENT_HOST, DD_TRACE_AGENT_PORT or DD_TRACE_AGENT_URL, DD_SERVICE (default
-// "memd"), DD_ENV, DD_VERSION, DD_TAGS, DD_RUNTIME_METRICS_ENABLED (default on), sampling settings and so on.
-// An unreachable agent never fails startup. The usage text (memd with no mode) lists the same settings.
+// Logs go to stderr, except with MEMD_DATADOG_ENABLED, when they go to stdout (the stream the Datadog agent
+// collects without marking lines as errors). The json format (observability.NewJSONHandler) writes one object per
+// line with Datadog's reserved attributes (timestamp, status, message, logger.name), so the agent parses it without
+// a pipeline; an explicit MEMD_LOG_FORMAT wins either way, and with Datadog off the default is the text format on
+// stderr, as before.
+//
+// With MEMD_DATADOG_ENABLED the standard Datadog variables apply, read by dd-trace-go, datadog-go or
+// internal/observability: DD_AGENT_HOST, DD_TRACE_AGENT_PORT or DD_TRACE_AGENT_URL (traces), DD_DOGSTATSD_URL or
+// DD_AGENT_HOST with DD_DOGSTATSD_PORT (metrics; default localhost:8125), DD_SERVICE (default "memd"), DD_ENV,
+// DD_VERSION, DD_TAGS, DD_RUNTIME_METRICS_ENABLED (default on), sampling settings and so on. An unreachable agent
+// never fails startup. The usage text (memd with no mode) lists the same settings.
 //
 // # Server config file
 //
@@ -84,6 +94,7 @@
 //	worker:      poll_interval (500ms), heartbeat_interval (15s), stale_after (2m), maintenance_interval (60s)
 //	retention:   operations (168h), events (720h)
 //	api:         rpc_deadline (120s; 0s = none)
+//	observability: metrics_interval (15s): how often the Datadog pool and queue gauges are sampled
 //
 // # Wiring details
 //
@@ -94,6 +105,10 @@
 //     postgres.DB implements.
 //   - With Datadog on, the pgx pool, S3 client, gateway client, gRPC server, job runs (jobs.Config.TraceJob)
 //     and maintenance ticks (maintenance.Deps.TraceTick) are traced; gRPC and job spans carry the tenant as a tag.
+//     The same gRPC interceptor, job hook and gateway hooks (TraceCall, OnUsage) send the metrics, whose tags
+//     never name a tenant, bank or operation. run starts the gauge sampler (observability.Telemetry.StartSampler)
+//     after buildDeps and stops it before the pool closes: the pool's statistics in every mode, the job queue
+//     (store.Maintenance.QueueStats) in worker and all modes only, since the queue is global.
 //
 // # Tests
 //
@@ -103,7 +118,8 @@
 // worker over a pgtest database, an in-memory blob store and the gateway emulator, on bufconn. On it,
 // wire_test.go checks that no model call happens inside a store transaction, and api_test.go checks the API's
 // behaviour through the real services (every RPC wired, config and spec-override validation, document retags,
-// reflect's based_on); and observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest, an
-// unreachable agent still serves). End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a
+// reflect's based_on); and observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest,
+// a retain emits the gRPC, gateway and job metrics with bounded tags, an unreachable agent still serves) and the
+// log format and stream switch. End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a
 // gateway emulator using these variable names. SPEC "Process model", "Model routing" and "File structure".
 package main

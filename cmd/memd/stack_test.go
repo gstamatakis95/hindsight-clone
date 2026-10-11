@@ -102,6 +102,7 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	db := pgtest.NewStore(t)
 	gw := gateway.NewClient(gateway.Config{
 		BaseURL: ts.URL + gatewayemu.BasePath, EmbedModel: config.DefaultEmbedModel, TraceCall: tel.GatewayHook(),
+		OnUsage: tel.UsageHook(),
 	}, tel.HTTPClient(&http.Client{Transport: guardTransport{g: g}}))
 	models := &domain.ModelBindings{}
 	for _, slot := range append(append([]domain.ModelSlot{}, domain.LLMSlots...), domain.ModelSlotRerank) {

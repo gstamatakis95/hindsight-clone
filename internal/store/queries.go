@@ -113,6 +113,19 @@ type UnconsolidatedBank struct {
 	Oldest time.Time
 }
 
+// QueueStat is the job queue's depth for one kind and status, as the metrics sampler sees it.
+type QueueStat struct {
+	// Kind is the job kind.
+	Kind domain.OperationKind
+	// Status is pending or processing.
+	Status domain.OperationStatus
+	// Jobs is how many operations of Kind are in Status.
+	Jobs int
+	// OldestDue is, on a pending entry, how long the kind's oldest due pending job (run_at in the past) has
+	// waited past its run_at; 0 when none is due, and always 0 on a processing entry.
+	OldestDue time.Duration
+}
+
 // CronModel is a model with a refresh_cron schedule, as the cron sweep sees it.
 type CronModel struct {
 	// Model is the model.

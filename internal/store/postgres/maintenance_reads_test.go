@@ -26,9 +26,9 @@ var (
 // mtCron is the refresh_cron of the cron models.
 const mtCron = "0 * * * *"
 
-// TestMaintenanceReads covers the cross-bank maintenance reads CronModels, FailedRefreshes and
-// UnconsolidatedBanks, plus UnitRepo.Unconsolidated's embedding filter (decision 1500). Refresh operations
-// reach terminal states through the Claimer.
+// TestMaintenanceReads covers the cross-bank maintenance reads CronModels, FailedRefreshes,
+// UnconsolidatedBanks and QueueStats, plus UnitRepo.Unconsolidated's embedding filter (decision 1500).
+// Refresh operations reach terminal states through the Claimer.
 func TestMaintenanceReads(t *testing.T) {
 	t.Parallel()
 	runQueueCases(t, []queueCase{
@@ -37,6 +37,7 @@ func TestMaintenanceReads(t *testing.T) {
 		{"unconsolidated_banks", testMtUnconsolidatedBanks},
 		{"unconsolidated_skips_unembedded", testMtUnconsolidatedSkipsUnembedded},
 		{"cross_bank_tenants", testMtCrossBankTenants},
+		{"queue_stats", testMtQueueStats},
 	})
 }
 
@@ -430,4 +431,37 @@ func testMtCrossBankTenants(t *testing.T, q queueEnv) {
 		map[string]domain.OperationID{mine: failed}, map[string]string{mine: "boom-tenant-1"})
 	wantSeq(t, "UnconsolidatedBanks", mtBankKeys(mtUnconsolidatedBanks(t, q.s)),
 		mtBankKeys([]domain.BankRef{bankA, bankOtherTenant}))
+}
+
+// testMtQueueStats: QueueStats counts pending and processing jobs by kind and status across banks, leaves out
+// terminal rows and retain_batch parents, and ages only due pending jobs: a parked job counts but never ages.
+func testMtQueueStats(t *testing.T, q queueEnv) {
+	ensureBanks(t, q.s, bankA, bankOtherTenant)
+	q.add(t, job(bankA, domain.OperationKindRetainBatch, "", `{"documents":2}`))
+	done := q.add(t, doc("d0"))
+	q.claimOne(t, done)
+	q.complete(t, done)
+	q.claimOne(t, q.add(t, doc("d1")))
+	parked := doc("d2")
+	parked.RunAt = future()
+	q.add(t, parked)
+	overdue := job(bankOtherTenant, domain.OperationKindRetainDocument, "doc:d3", `{"document_id":"d3"}`)
+	overdue.RunAt = past()
+	q.add(t, overdue)
+
+	stats, err := mtMaintenance(t, q.s).QueueStats(t.Context())
+	if err != nil {
+		t.Fatalf("QueueStats: %v", err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("QueueStats = %+v, want retain_document pending and processing only", stats)
+	}
+	pending, processing := stats[0], stats[1]
+	if pending.Kind != domain.OperationKindRetainDocument || pending.Status != domain.OperationStatusPending ||
+		pending.Jobs != 2 || pending.OldestDue < farAhead-time.Minute || pending.OldestDue > farAhead+time.Minute {
+		t.Fatalf("pending entry = %+v, want 2 jobs, the oldest due about %s ago", pending, farAhead)
+	}
+	if processing.Status != domain.OperationStatusProcessing || processing.Jobs != 1 || processing.OldestDue != 0 {
+		t.Fatalf("processing entry = %+v, want 1 job and no age", processing)
+	}
 }

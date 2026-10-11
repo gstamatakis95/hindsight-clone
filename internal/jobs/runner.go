@@ -58,7 +58,8 @@ const (
 // TraceFunc starts a trace span around one run of j and returns ctx carrying it (the handler and the
 // terminal Complete/Fail run under it) and a finish func the runner calls exactly once, after the row is
 // settled, with one of the Outcome* values and the handler's error (nil on success). It is the runner's
-// only tracing hook; internal/observability provides a Datadog one, so this package stays vendor-free.
+// only tracing and metrics hook; internal/observability provides a Datadog one, so this package stays
+// vendor-free.
 type TraceFunc func(ctx context.Context, j store.Job) (context.Context, func(outcome string, err error))
 
 // Config tunes a Runner; zero fields take the defaults.
@@ -88,8 +89,8 @@ type Config struct {
 	DB store.DB
 	// Logger receives runner logs; nil = slog.Default().
 	Logger *slog.Logger
-	// TraceJob, when set, wraps every job run in a trace span (Datadog when MEMD_DATADOG_ENABLED); nil = no
-	// tracing and no extra work.
+	// TraceJob, when set, wraps every job run in a trace span and records its metrics (Datadog when
+	// MEMD_DATADOG_ENABLED); nil = no tracing and no extra work.
 	TraceJob TraceFunc
 }
 
