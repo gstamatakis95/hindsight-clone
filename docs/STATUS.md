@@ -15,12 +15,13 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-05 | Worker runtime | merged (08d057d) | wp/WP-05-worker-runtime | 7afa08e | — | — | H3 attempt-charge gap; LOWs in log |
 | WP-06 | Server shell | merged | wp/WP-06-server-shell | 0f2815d | — | — | jsonToStruct non-object (LOW) |
 | WP-07 | Eval harness | merged (f5da652 + follow-up) | wp/WP-07-eval | 7865932 | — | WP-07-1 approved + applied | 1 LOW accepted (see log) |
-| WP-08 | Retain engine | in progress | wp/WP-08-retain | — | — | — | — |
-| WP-09 | Recall engine | in progress | wp/WP-09-recall | — | — | — | — |
-| WP-10 | Consolidation engine | in progress | wp/WP-10-consolidate | — | — | — | — |
-| WP-11 | Reflect engine | in progress | wp/WP-11-reflect | — | — | — | — |
-| WP-12 | Mental model engine | in progress | wp/WP-12-mentalmodel | — | — | — | — |
-| WP-13 | Bank, curation, documents, maintenance | in progress | wp/WP-13-bank-curate-docs-maint | — | — | — | — |
+| WP-08 | Retain engine | merged (ada201a) | wp/WP-08-retain | — | — | — | — |
+| WP-09 | Recall engine | merged (d790947) | wp/WP-09-recall | — | — | — | — |
+| WP-10 | Consolidation engine | merged (fa25d70) | wp/WP-10-consolidate | — | — | — | — |
+| WP-11 | Reflect engine | merged (3330af6) | wp/WP-11-reflect | — | — | — | — |
+| WP-12 | Mental model engine | merged (dbfa13f) | wp/WP-12-mentalmodel | — | — | — | — |
+| WP-13 | Bank, curation, documents, maintenance | merged (fffcf5b) | wp/WP-13-bank-curate-docs-maint | — | — | — | — |
+| WP-15 | Port extension (CCR batch) | merged (b5d9e2d) | wp/WP-15-port-extension | 9f9451e | — | batch applied | coverage gap: CitingScopes/IDsByDocument on unknown/tombstoned bank |
 | WP-14 | Integration | waiting | — | — | all | — | — |
 
 ## Environment notes
@@ -279,3 +280,12 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-10 WP-15 handed in (61 files staged, unsigned; patch backup at scratchpad/wp15-foundation.patch);
   reviewer spawned. Follow-ups: ListScopes pagers pass "0" after a page ending at the shared scope; WP-11 uses
   errors.Is(err, ErrContextOverflow); WP-14 passes the blob store as DeleterConfig.Blobs.
+- 2026-10-11 Commit signing restored, then failing again intermittently; per the user, commits use --no-verify
+  (and -c commit.gpgsign=false where 1Password fails). User rules: at most 2 concurrent agents; run to
+  completion without check-ins.
+- 2026-10-11 WP-15 review: MERGE (areas a/b/c clean; coverage review found one HIGH test gap, deferred to
+  follow-ups). Merged WP-09, WP-11, WP-08, WP-10, WP-12, WP-13 and then WP-15 into main; the full gates (gen,
+  lint, go test -race -count=1 incl. Postgres) pass after each. Integration fix 7351751: bank prompt preview
+  uses the split ReflectData tool flags (WP-11 x WP-13).
+- Next: WP-16 engine follow-ups (swap stubs for the batch's port methods + carried items), WP-14a e2e harness
+  (in parallel), then WP-14b integration, then the final review.
