@@ -87,8 +87,16 @@ fmt: ## apply gofumpt + goimports and ruff format
 test: ## go test -race ./...
 	go test -race ./...
 
-e2e: ## opt-in end-to-end tests against the compose stack
-	go test -race -count=1 -tags e2e ./test/e2e/...
+# Each test removes its own compose project; the sweep afterwards catches projects of this run left by a
+# panic or timeout (names memd-e2e-<run>-*, decision 1412).
+e2e: venv ## opt-in end-to-end tests (compose stack + emulated gateway), then sweep this run's projects
+	run=$$(date +%s)$$$$; status=0; \
+	MEMD_E2E_RUN=$$run go test -race -count=1 -tags e2e -timeout $${E2E_TIMEOUT:-30m} ./test/e2e/... || status=$$?; \
+	{ docker compose ls -a -q --filter name=memd-e2e-$$run- 2>/dev/null || true; } | while read -r p; do \
+		echo "e2e: removing leftover compose project $$p"; \
+		docker compose -p "$$p" down -v --remove-orphans --timeout 5 >/dev/null 2>&1 || true; \
+	done; \
+	exit $$status
 
 # ---------- local stack & schema ----------
 

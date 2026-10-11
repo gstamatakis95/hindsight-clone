@@ -1,0 +1,12 @@
+# Overlay applied on top of the root docker-compose.yml by the e2e harness (decision 1412): data lives in
+# tmpfs instead of the named volumes, so a run leaves no volumes behind and Postgres starts faster. Host ports
+# come from MEMD_PG_PORT / MEMD_MINIO_PORT / MEMD_MINIO_CONSOLE_PORT, set per run by the harness.
+services:
+  postgres:
+    volumes:
+      - type: tmpfs
+        target: /var/lib/postgresql/data
+  minio:
+    volumes:
+      - type: tmpfs
+        target: /data
