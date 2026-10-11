@@ -233,7 +233,9 @@ func (c *Client) send(ctx context.Context, path string, payload []byte) ([]byte,
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, &statusError{code: resp.StatusCode, body: snippet(raw)}
+		return nil, &statusError{
+			code: resp.StatusCode, body: snippet(raw), overflow: contextOverflow(resp.StatusCode, raw),
+		}
 	}
 	return raw, nil
 }
@@ -244,6 +246,8 @@ type statusError struct {
 	code int
 	// body is the start of the response body.
 	body string
+	// overflow reports that the full (capped) body says the prompt overflowed the context window.
+	overflow bool
 }
 
 // Error implements error.
@@ -276,7 +280,7 @@ func classify(ctx, actx context.Context, a attempt, err error) error {
 	}
 	var se *statusError
 	if errors.As(err, &se) && !se.retryable() {
-		if se.contextOverflow() {
+		if se.overflow {
 			return fmt.Errorf("%w: gateway %s: %w", domain.ErrContextOverflow, a.path, err)
 		}
 		return fmt.Errorf("%w: gateway %s: %w", domain.ErrUnavailable, a.path, err)
@@ -289,13 +293,14 @@ var overflowMarkers = []string{
 	"context_length_exceeded", "maximum context length", "prompt is too long", "input is too long",
 }
 
-// contextOverflow reports whether the response is a 400 or 413 whose body says the prompt did not fit the
+// contextOverflow reports whether a response with status code and body raw (the whole body read, capped at
+// maxResponseBytes, not the 512-byte message snippet) is a 400 or 413 saying the prompt did not fit the
 // model's context window (CCR WP-11-1).
-func (e *statusError) contextOverflow() bool {
-	if e.code != http.StatusBadRequest && e.code != http.StatusRequestEntityTooLarge {
+func contextOverflow(code int, raw []byte) bool {
+	if code != http.StatusBadRequest && code != http.StatusRequestEntityTooLarge {
 		return false
 	}
-	body := strings.ToLower(e.body)
+	body := strings.ToLower(string(raw))
 	for _, m := range overflowMarkers {
 		if strings.Contains(body, m) {
 			return true

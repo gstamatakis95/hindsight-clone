@@ -84,4 +84,3 @@ type PageReader interface {
 	// ReadPages returns the pages with the given ids, in order; unknown ids are skipped.
 	ReadPages(ctx context.Context, b port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error)
 }
-
