@@ -134,50 +134,47 @@ func patchRPCs() []configRPC {
 		return &fieldmaskpb.FieldMask{Paths: w.mask}
 	}
 	return []configRPC{
-		{"UpdateBankConfig",
-			func(t *testing.T, h *harness, p *patchStore, w modelsWrite) []domain.SlotBinding {
-				_, err := pb.NewBankServiceClient(h.conn).UpdateBankConfig(tenantCtx(t), &pb.UpdateBankConfigRequest{
-					BankId: "b", Config: &pb.BankConfig{Models: w.models}, UpdateMask: cfgMask(w),
+		{name: "UpdateBankConfig", call: func(t *testing.T, h *harness, p *patchStore, w modelsWrite) []domain.SlotBinding {
+			_, err := pb.NewBankServiceClient(h.conn).UpdateBankConfig(tenantCtx(t), &pb.UpdateBankConfigRequest{
+				BankId: "b", Config: &pb.BankConfig{Models: w.models}, UpdateMask: cfgMask(w),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, _ := p.results()
+			return c.Models
+		}},
+		{name: "UpdateTenantConfig", call: func(t *testing.T, h *harness, p *patchStore, w modelsWrite) []domain.SlotBinding {
+			_, err := pb.NewTenantServiceClient(h.conn).UpdateTenantConfig(tenantCtx(t),
+				&pb.UpdateTenantConfigRequest{Config: &pb.BankConfig{Models: w.models}, UpdateMask: cfgMask(w)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, _ := p.results()
+			return c.Models
+		}},
+		{name: "UpdateMentalModel", call: func(t *testing.T, h *harness, p *patchStore, w modelsWrite) []domain.SlotBinding {
+			var m *fieldmaskpb.FieldMask
+			if w.mask != nil {
+				m = &fieldmaskpb.FieldMask{}
+				for _, path := range w.mask {
+					m.Paths = append(m.Paths, "overrides."+path)
+				}
+			}
+			_, err := pb.NewMentalModelServiceClient(h.conn).UpdateMentalModel(tenantCtx(t),
+				&pb.UpdateMentalModelRequest{
+					BankId: "b", MentalModelId: "m",
+					Spec: &pb.MentalModelSpec{Overrides: &pb.BankConfig{Models: w.models}}, UpdateMask: m,
 				})
-				if err != nil {
-					t.Fatal(err)
-				}
-				c, _ := p.results()
-				return c.Models
-			}},
-		{"UpdateTenantConfig",
-			func(t *testing.T, h *harness, p *patchStore, w modelsWrite) []domain.SlotBinding {
-				_, err := pb.NewTenantServiceClient(h.conn).UpdateTenantConfig(tenantCtx(t),
-					&pb.UpdateTenantConfigRequest{Config: &pb.BankConfig{Models: w.models}, UpdateMask: cfgMask(w)})
-				if err != nil {
-					t.Fatal(err)
-				}
-				c, _ := p.results()
-				return c.Models
-			}},
-		{"UpdateMentalModel",
-			func(t *testing.T, h *harness, p *patchStore, w modelsWrite) []domain.SlotBinding {
-				var m *fieldmaskpb.FieldMask
-				if w.mask != nil {
-					m = &fieldmaskpb.FieldMask{}
-					for _, path := range w.mask {
-						m.Paths = append(m.Paths, "overrides."+path)
-					}
-				}
-				_, err := pb.NewMentalModelServiceClient(h.conn).UpdateMentalModel(tenantCtx(t),
-					&pb.UpdateMentalModelRequest{
-						BankId: "b", MentalModelId: "m",
-						Spec: &pb.MentalModelSpec{Overrides: &pb.BankConfig{Models: w.models}}, UpdateMask: m,
-					})
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, s := p.results()
-				if s.Overrides == nil {
-					return nil
-				}
-				return s.Overrides.Models
-			}},
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, s := p.results()
+			if s.Overrides == nil {
+				return nil
+			}
+			return s.Overrides.Models
+		}},
 	}
 }
 
@@ -241,7 +238,8 @@ func TestConfigWriteModelsExplicitMask(t *testing.T) {
 		want map[domain.ModelSlot]string
 	}{
 		{
-			"replace", modelsWrite{models: []*pb.SlotBinding{sb(pb.ModelSlot_MODEL_SLOT_REFLECT, "big")}, mask: []string{"models"}},
+			"replace",
+			modelsWrite{models: []*pb.SlotBinding{sb(pb.ModelSlot_MODEL_SLOT_REFLECT, "big")}, mask: []string{"models"}},
 			map[domain.ModelSlot]string{domain.ModelSlotReflect: "big"},
 		},
 		{"clear", modelsWrite{mask: []string{"models"}}, map[domain.ModelSlot]string{}},
@@ -276,36 +274,36 @@ func invalidConfigs() map[string]*pb.BankConfig {
 
 // configWriters sends one whole config through CreateBank, UpdateBankConfig (no mask and a models
 // mask), UpdateTenantConfig and CreateBankFromTemplate.
-func configWriters() map[string]func(context.Context, *harness, *pb.BankConfig) error {
+func configWriters() map[string]func(context.Context, *harness, *pb.BankConfig) *status.Status {
 	whole := &fieldmaskpb.FieldMask{Paths: []string{
 		"models", "disposition", "consolidation_strategies",
 	}}
-	return map[string]func(context.Context, *harness, *pb.BankConfig) error{
-		"CreateBank": func(ctx context.Context, h *harness, c *pb.BankConfig) error {
+	return map[string]func(context.Context, *harness, *pb.BankConfig) *status.Status{
+		"CreateBank": func(ctx context.Context, h *harness, c *pb.BankConfig) *status.Status {
 			_, err := pb.NewBankServiceClient(h.conn).CreateBank(ctx, &pb.CreateBankRequest{BankId: "b", Config: c})
-			return err
+			return status.Convert(err)
 		},
-		"UpdateBankConfig": func(ctx context.Context, h *harness, c *pb.BankConfig) error {
+		"UpdateBankConfig": func(ctx context.Context, h *harness, c *pb.BankConfig) *status.Status {
 			_, err := pb.NewBankServiceClient(h.conn).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
 				BankId: "b", Config: c,
 			})
-			return err
+			return status.Convert(err)
 		},
-		"UpdateBankConfig/masked": func(ctx context.Context, h *harness, c *pb.BankConfig) error {
+		"UpdateBankConfig/masked": func(ctx context.Context, h *harness, c *pb.BankConfig) *status.Status {
 			_, err := pb.NewBankServiceClient(h.conn).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
 				BankId: "b", Config: c, UpdateMask: whole,
 			})
-			return err
+			return status.Convert(err)
 		},
-		"UpdateTenantConfig": func(ctx context.Context, h *harness, c *pb.BankConfig) error {
+		"UpdateTenantConfig": func(ctx context.Context, h *harness, c *pb.BankConfig) *status.Status {
 			_, err := pb.NewTenantServiceClient(h.conn).UpdateTenantConfig(ctx, &pb.UpdateTenantConfigRequest{Config: c})
-			return err
+			return status.Convert(err)
 		},
-		"CreateBankFromTemplate": func(ctx context.Context, h *harness, c *pb.BankConfig) error {
+		"CreateBankFromTemplate": func(ctx context.Context, h *harness, c *pb.BankConfig) *status.Status {
 			_, err := pb.NewBankServiceClient(h.conn).CreateBankFromTemplate(ctx, &pb.CreateBankFromTemplateRequest{
 				BankId: "b", Template: &pb.BankTemplate{Config: c},
 			})
-			return err
+			return status.Convert(err)
 		},
 	}
 }
@@ -318,9 +316,9 @@ func TestConfigWritesValidated(t *testing.T) {
 			t.Run(rpc+"/"+name, func(t *testing.T) {
 				p := &patchStore{cfg: domain.BankConfig{Models: []domain.SlotBinding{dsb(domain.ModelSlotExtract, "s")}}}
 				h := newHarness(t, p.wire)
-				err := send(tenantCtx(t), h, c)
-				if status.Code(err) != codes.InvalidArgument {
-					t.Fatalf("err = %v, want INVALID_ARGUMENT", err)
+				st := send(tenantCtx(t), h, c)
+				if st.Code() != codes.InvalidArgument {
+					t.Fatalf("status = %v, want INVALID_ARGUMENT", st)
 				}
 				p.mu.Lock()
 				created := p.created
@@ -340,8 +338,8 @@ func TestConfigWritesValidated(t *testing.T) {
 					Name: "s", Models: []*pb.SlotBinding{sb(pb.ModelSlot_MODEL_SLOT_CONSOLIDATE, "m")},
 				}},
 			}
-			if err := send(tenantCtx(t), h, valid); err != nil {
-				t.Fatalf("valid config: %v", err)
+			if st := send(tenantCtx(t), h, valid); st.Code() != codes.OK {
+				t.Fatalf("valid config: %v", st)
 			}
 		})
 	}
