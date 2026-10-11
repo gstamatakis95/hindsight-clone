@@ -126,3 +126,6 @@ __pycache__/
 
 # Claude Code agent worktrees
 .claude/
+
+# Built binary
+/memd
