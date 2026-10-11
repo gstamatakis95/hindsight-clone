@@ -15,7 +15,7 @@ These rules add to the root AGENTS.md.
 
 ## No business logic
 - Adapters translate; they never decide. Scoring, budgets, config merging, model choice and what to enqueue belong
-  in the engines.
+  in the services and libraries.
 
 ## Errors
 - Map driver and transport errors to domain errors before returning (missing → ErrNotFound, unique →
@@ -26,8 +26,8 @@ These rules add to the root AGENTS.md.
 - Adapters return concrete types (`*postgres.DB` implements store.DB, store.Maintenance and jobs.Claimer;
   `*s3.Store`; `*gateway.Client`). cmd/memd is the only place they are built and narrowed to their interfaces.
 - Assert each interface at compile time next to the implementation: `var _ store.DB = (*DB)(nil)`.
-- An adapter imports its own boundary package, internal/domain (and internal/jsonschema for the gateway), never an
-  engine, the server, jobs or maintenance. `*postgres.DB` satisfies jobs.Claimer structurally; the
+- An adapter imports its own boundary package, internal/domain (and internal/jsonschema for the gateway), never a
+  service, library, grpcapi, jobs or maintenance. `*postgres.DB` satisfies jobs.Claimer structurally; the
   compile-time assertion sits in a test file.
 
 ## Transactions

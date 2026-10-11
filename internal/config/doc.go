@@ -3,10 +3,10 @@
 //
 // # Where it sits
 //
-// config imports domain, store and ai only and never an adapter, server, jobs or engine package. It owns
+// config imports domain, store and ai only and never an adapter, grpcapi, jobs, library or service. It owns
 // consolidation strategy matching ([MatchStrategy]), which the resolver and the strategy preview share. cmd/memd
 // builds the server level with [ServerDefaults] from the server config file and the resolver with [NewResolver];
-// engines and libraries take the concrete *[Resolver]; the server validates every
+// services and libraries take the concrete *[Resolver]; grpcapi validates every
 // config it is given with [Validate] and patches stored levels with [ApplyPaths] and [ResetPaths]; memory's
 // Retain uses [Merge] to combine a request's and an item's overrides.
 //
@@ -54,7 +54,7 @@
 //     min_refresh_interval_seconds 0, history_max_entries 50;
 //   - models: embed = [DefaultEmbedModel]; nothing else.
 //
-// Knobs whose default the spec leaves open stay unset; the engine that reads a knob owns its default. A chat
+// Knobs whose default the spec leaves open stay unset; the package that reads a knob owns its default. A chat
 // slot the file binds neither by name nor through models.default stays unbound, and ai.Router rejects calls
 // on it (cmd/memd refuses to start unless EXTRACT and REFLECT are bound). Without models.rerank,
 // recall.rerank defaults to false so recall skips the cross-encoder instead of failing; the file asking for

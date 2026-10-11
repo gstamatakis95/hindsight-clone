@@ -11,7 +11,7 @@ const DefaultEmbedModel = "nomic-embed-text-v1.5"
 
 // ServerDefaults is the server level of the config hierarchy: every default the spec states, with the server
 // config file's defaults block (file) merged over them. Knobs whose default the spec leaves open stay unset;
-// the engine that reads them owns that default. Models come only from file: a chat-model slot with neither its
+// the package that reads them owns that default. Models come only from file: a chat-model slot with neither its
 // own binding nor models.default stays unbound, and ai.Router rejects calls on it. EMBED defaults to
 // DefaultEmbedModel. Without a RERANK binding recall.rerank defaults to false (recall skips the cross-encoder);
 // file setting recall.rerank true without one is an error. The result is checked with ValidateServer.

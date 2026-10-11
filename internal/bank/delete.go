@@ -257,11 +257,11 @@ func otherJobsProcessing(ctx context.Context, tx store.Tx, b domain.BankRef) (bo
 	}
 }
 
-// deleteBlobs deletes the bank's blobs page by page: it lists one page under the bank prefix and deletes each
-// listed key (DeletePrefix of the full key: every listed key lies under the bank prefix being emptied, so nothing
-// outside it is touched), checking the fence before every page after the first. A short page is the last one, so
-// no List is spent learning that nothing is left. ok=false means a fence check found the bank gone or no longer
-// tombstoned, so the delete stops there with nothing left to do.
+// deleteBlobs deletes the bank's blobs page by page: it lists one page under the bank prefix and deletes each listed
+// key (DeletePrefix of the full key: every listed key lies under the bank prefix being emptied, so nothing outside it
+// is touched), checking the fence before every page after the first. blob.Store.List returns a short page only when
+// nothing is left, so a short page is the last one and no List is spent learning that. ok=false means a fence check
+// found the bank gone or no longer tombstoned, so the delete stops there with nothing left to do.
 func (s *Service) deleteBlobs(ctx context.Context, run *jobs.Run) (bool, error) {
 	prefix := blob.BankPrefix(run.Job.Bank)
 	size := s.d.Delete.BlobPageSize

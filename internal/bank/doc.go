@@ -83,13 +83,13 @@
 //
 // # Blob delete
 //
-// The blobs go page by page with the fence checked before every page after the first: List one page of keys
-// under the bank prefix, then DeletePrefix each listed key (every listed key lies under the bank prefix being
-// emptied, so nothing outside it is touched). A page shorter than BlobPageSize is the last one, so the delete
-// ends without another List. blob.Store keeps exactly four operations, and its DeletePrefix takes no limit: one
-// DeletePrefix of the whole bank prefix would put the entire delete inside one fence window, so the deleter stays
-// per key. On S3 a per-key DeletePrefix costs a list and a delete request; a bounded delete would need a fifth
-// blob.Store operation.
+// The blobs go page by page with the fence checked before every page after the first: List one page of keys under the
+// bank prefix, then DeletePrefix each listed key (every listed key lies under the bank prefix being emptied, so nothing
+// outside it is touched). blob.Store.List returns a short page only when nothing is left, so a page shorter than
+// BlobPageSize is the last one and the delete ends without another List. blob.Store keeps exactly four operations, and
+// its DeletePrefix takes no limit: one DeletePrefix of the whole bank prefix would put the entire delete inside one
+// fence window, so the deleter stays per key. On S3 a per-key DeletePrefix costs a list and a delete request; a bounded
+// delete would need a fifth blob.Store operation.
 //
 // # Transactions
 //

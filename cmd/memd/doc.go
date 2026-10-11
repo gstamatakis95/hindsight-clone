@@ -87,11 +87,8 @@
 //
 // # Wiring details
 //
-//   - operationReader serves GetOperation, ListOperations and ListEvents in short read-only transactions; an
-//     unknown or tombstoned bank is NOT_FOUND. ListEvents with limit 0 returns at most 100 events, and any
-//     limit is capped at 1000 (the store's own List treats 0 as unlimited).
 //   - Readiness probes: Postgres is pinged; the gateway is reachable when a GET of its base URL gets any HTTP
-//     response (no model call; the result is cached for 10 s).
+//     response (no model call; the result is cached for 10 s on the injected clock).
 //   - The maintenance tick's cross-bank scans (unconsolidated banks, stalled deletes, banks with graph work,
 //     stranded facts, retain_batch settlement, cron models, failed refreshes) are store.Maintenance, which
 //     postgres.DB implements.
@@ -106,7 +103,7 @@
 // worker over a pgtest database, an in-memory blob store and the gateway emulator, on bufconn. On it,
 // wire_test.go checks that no model call happens inside a store transaction, and api_test.go checks the API's
 // behaviour through the real services (every RPC wired, config and spec-override validation, document retags,
-// reflect's based_on); and observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest, an unreachable agent
-// still serves). End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a gateway
-// emulator using these variable names. SPEC "Process model", "Model routing" and "File structure".
+// reflect's based_on); and observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest, an
+// unreachable agent still serves). End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a
+// gateway emulator using these variable names. SPEC "Process model", "Model routing" and "File structure".
 package main

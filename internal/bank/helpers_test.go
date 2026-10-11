@@ -58,8 +58,11 @@ func (e env) ensure(t *testing.T, b domain.BankRef) {
 // getOp reads one operation.
 func (e env) getOp(t *testing.T, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	t.Helper()
-	var op domain.Operation
-	err := e.store.InTx(e.ctx, func(tx store.Tx) error {
+	var (
+		op domain.Operation
+		db store.DB = e.store
+	)
+	err := db.InTx(e.ctx, func(tx store.Tx) error {
 		var err error
 		op, err = tx.Queue().Get(e.ctx, b, id)
 		return err

@@ -209,7 +209,8 @@ func testListPaging(t *testing.T, b blob.Store) {
 	}
 }
 
-// testListManyKeys: one List with a limit above one provider page (1,000 keys on S3) returns every key in order.
+// testListManyKeys: one List with a limit above one provider page (1,000 keys on S3) returns every key in order, and
+// a limit that crosses a provider page returns a full page: a short page means nothing is left.
 func testListManyKeys(t *testing.T, b blob.Store) {
 	key := func(i int) string { return fmt.Sprintf("t/many/docs/d%04d/h", i) }
 	for i := range manyKeys {
@@ -224,6 +225,9 @@ func testListManyKeys(t *testing.T, b blob.Store) {
 		if k != key(i) {
 			t.Fatalf("List[%d] = %q, want %q", i, k, key(i))
 		}
+	}
+	if keys := list(t, b, "t/many/", "", manyKeys-1); len(keys) != manyKeys-1 {
+		t.Errorf("List limit %d over %d keys returned %d, want a full page", manyKeys-1, manyKeys, len(keys))
 	}
 	want := []string{key(1000), key(1001), key(1002)}
 	if keys := list(t, b, "t/many/", key(999), 3); fmt.Sprint(keys) != fmt.Sprint(want) {

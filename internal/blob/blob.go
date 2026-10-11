@@ -17,8 +17,9 @@ type Store interface {
 	// Get opens the object under key; a missing key returns domain.ErrNotFound. The caller closes the reader.
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	// List returns up to limit (> 0) keys that start with prefix and sort strictly after after ("" = from the start),
-	// in ascending byte order. An empty result means no key is left. An empty prefix or a limit <= 0 is
-	// domain.ErrInvalidArgument, so a computed prefix can never list the whole store.
+	// in ascending byte order. It returns fewer than limit keys only when no key is left after the last one returned
+	// (so a short page, and an empty one, means the listing is done), however the provider pages internally. An empty
+	// prefix or a limit <= 0 is domain.ErrInvalidArgument, so a computed prefix can never list the whole store.
 	List(ctx context.Context, prefix, after string, limit int) ([]string, error)
 	// DeletePrefix removes every object whose key starts with prefix and returns how many it removed; a prefix that
 	// matches nothing is not an error. A failure part-way returns the count removed so far, and a rerun removes the

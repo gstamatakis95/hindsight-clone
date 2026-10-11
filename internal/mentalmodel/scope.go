@@ -30,7 +30,7 @@ func resolveScope(m domain.MentalModel) ResolvedScope {
 	return s
 }
 
-// tagFilter is the scope as the recall and reflect engines take it.
+// tagFilter is the scope as the recall and reflect libraries take it.
 func (s ResolvedScope) tagFilter() domain.TagFilter {
 	if len(s.TagGroups) > 0 {
 		return domain.TagFilter{Groups: slices.Clone(s.TagGroups)}
