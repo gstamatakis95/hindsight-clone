@@ -48,12 +48,9 @@ func newEnv(t *testing.T) *env {
 	clock := clock.NewManual(time.Now().Add(time.Hour).UTC().Truncate(time.Second))
 	db := pgtest.New(t)
 	pg := db.Store()
-	server, err := config.ServerDefaults(func(k string) string {
-		if k == ai.EnvModel {
-			return "test-model"
-		}
-		return ""
-	})
+	server, err := config.ServerDefaults(domain.BankConfig{Models: &domain.ModelBindings{
+		Default: &domain.ModelBinding{Model: "test-model"},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,9 +166,9 @@ func (e *env) history(id domain.MentalModelID, kind domain.HistoryKind) []domain
 // llmCalls counts the LLM calls made so far.
 func (e *env) llmCalls() int { return len(e.llm.Calls()) }
 
-// scriptSynthesize scripts the SYNTHESIZE reply.
+// scriptSynthesize scripts the synthesize reply.
 func (e *env) scriptSynthesize(content string) {
-	e.llm.RespondChat(domain.ModelSlotSynthesize, "synthesize_system",
+	e.llm.RespondChat(domain.ModelSlotMentalModel, "synthesize_system",
 		ai.ChatResponse{Message: ai.ChatMessage{Content: content}})
 }
 

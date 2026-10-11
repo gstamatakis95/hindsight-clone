@@ -3,6 +3,7 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -34,8 +35,8 @@ const (
 	ModeAll = "all"
 )
 
-// Environment the harness passes to memd (decision 1411). cmd/memd (WP-14b) reads these names; changing one
-// means changing it here and there together.
+// Environment the harness passes to memd. cmd/memd reads these names; changing one means changing it here and
+// there together.
 const (
 	// EnvDSN is the Postgres URL.
 	EnvDSN = "MEMD_DSN"
@@ -57,15 +58,12 @@ const (
 	EnvS3Region = "MEMD_S3_REGION"
 	// EnvS3PathStyle selects path-style addressing ("true" for MinIO).
 	EnvS3PathStyle = "MEMD_S3_PATH_STYLE"
-	// EnvModelPrefix + upper-case slot binds a slot's model (ai.EnvModelPrefix).
-	EnvModelPrefix = "MEMD_MODEL_"
+	// EnvConfig is the server config file (models, behaviour and operator settings).
+	EnvConfig = "MEMD_CONFIG"
 )
 
 // Slots is every bindable slot (domain.ModelSlot values); the harness binds each to gatewayemu.ModelFor(slot).
-var Slots = []string{
-	"extract", "time_parse", "consolidate", "dedup_check", "reflect", "structured_output", "mental_model_delta",
-	"synthesize", "rerank",
-}
+var Slots = gatewayemu.Slots
 
 // placeholderMarker is what the cmd/memd placeholder prints before exiting 1.
 const placeholderMarker = "not implemented"
@@ -114,7 +112,7 @@ func build(root string) (bin, skip string, err error) {
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/memd") //nolint:gosec // bin is our temp dir
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Sprintf("harness: memd can't be built yet (cmd/memd lands in WP-14b): %v\n%s", err, out), nil
+		return "", fmt.Sprintf("harness: memd can't be built: %v\n%s", err, out), nil
 	}
 	pctx, pcancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer pcancel()
@@ -126,7 +124,7 @@ func build(root string) (bin, skip string, err error) {
 	}
 	out, _ := probe.CombinedOutput()
 	if bytes.Contains(out, []byte(placeholderMarker)) {
-		return "", "harness: cmd/memd is still the placeholder (WP-14b wires it): " + strings.TrimSpace(string(out)), nil
+		return "", "harness: cmd/memd is a placeholder: " + strings.TrimSpace(string(out)), nil
 	}
 	return bin, "", nil
 }
@@ -139,18 +137,41 @@ func StartEmulator(t testing.TB, opts gatewayemu.Options) (*gatewayemu.Server, *
 	return emu, ts
 }
 
-// MemdEnv is the environment memd needs for this stack and a gateway at gatewayURL (base URL with /v1): DSN,
-// S3, gateway and every slot bound to its emulator model.
+// MemdEnv is the environment memd needs for this stack and a gateway at gatewayURL (base URL with /v1): DSN, S3
+// and gateway. StartMemd adds MEMD_CONFIG.
 func (s *Stack) MemdEnv(gatewayURL string) map[string]string {
-	env := map[string]string{
+	return map[string]string{
 		EnvDSN: s.DSN, EnvGatewayURL: gatewayURL, EnvGatewayAPIKey: "e2e",
 		EnvS3Endpoint: s.S3Endpoint, EnvS3Bucket: S3Bucket, EnvS3AccessKey: S3AccessKey, EnvS3SecretKey: S3SecretKey,
 		EnvS3Region: S3Region, EnvS3PathStyle: "true",
 	}
+}
+
+// MemdConfig is the server config file memd runs with: every slot in Slots bound to its emulator model under
+// defaults.models, with extra's top-level sections added (a section in extra replaces the same one here).
+func MemdConfig(extra map[string]any) map[string]any {
+	models := map[string]any{}
 	for _, slot := range Slots {
-		env[EnvModelPrefix+strings.ToUpper(slot)] = gatewayemu.ModelFor(slot)
+		models[slot] = map[string]any{"model": gatewayemu.ModelFor(slot)}
 	}
-	return env
+	cfg := map[string]any{"defaults": map[string]any{"models": models}}
+	maps.Copy(cfg, extra)
+	return cfg
+}
+
+// writeConfig writes cfg as the server config file in a temporary directory and returns its path. JSON is
+// valid YAML, so the file is written as JSON.
+func writeConfig(t testing.TB, cfg map[string]any) string {
+	t.Helper()
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		t.Fatalf("harness: config file: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "memd.yaml")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatalf("harness: config file: %v", err)
+	}
+	return path
 }
 
 // MemdOptions configures one memd process.
@@ -161,6 +182,8 @@ type MemdOptions struct {
 	GatewayURL string
 	// Env adds to or overrides MemdEnv.
 	Env map[string]string
+	// Config adds top-level sections to the server config file (see MemdConfig), e.g. fast worker timings.
+	Config map[string]any
 	// Args follow the mode on the command line.
 	Args []string
 }
@@ -192,6 +215,7 @@ func (s *Stack) StartMemd(t testing.TB, bin string, o MemdOptions) *Proc {
 		o.Mode = ModeAll
 	}
 	env := s.MemdEnv(o.GatewayURL)
+	env[EnvConfig] = writeConfig(t, MemdConfig(o.Config))
 	p := &Proc{Mode: o.Mode, t: t, bin: bin, args: append([]string{o.Mode}, o.Args...)}
 	if o.Mode != ModeWorker {
 		ports, err := freePorts(1)
@@ -253,7 +277,7 @@ func (p *Proc) earlyExit(err error) {
 	p.t.Helper()
 	logs := p.Logs()
 	if strings.Contains(logs, placeholderMarker) {
-		p.t.Skipf("harness: cmd/memd is still the placeholder (WP-14b wires it): %s", strings.TrimSpace(logs))
+		p.t.Skipf("harness: cmd/memd is a placeholder: %s", strings.TrimSpace(logs))
 	}
 	p.t.Fatalf("harness: memd %s not ready: %v\n--- memd log ---\n%s", p.Mode, err, logs)
 }

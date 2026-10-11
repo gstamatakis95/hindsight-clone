@@ -24,7 +24,8 @@ const (
 	// DefaultEventRetention is how long lifecycle events are kept before pruning.
 	DefaultEventRetention = 30 * 24 * time.Hour
 	// DefaultConsolidationGrace is how old an unconsolidated unit must be before the tick consolidates its
-	// bank, so skip_consolidation followed by a manual Consolidate is not pre-empted (decision 2000).
+	// bank when its config sets no observations.reconcile_grace_seconds, so skip_consolidation followed by a
+	// manual Consolidate is not pre-empted (decision 2000).
 	DefaultConsolidationGrace = 10 * time.Minute
 	// DefaultStrandedRetryAfter is how long after a rederive ended the tick may queue another one for the
 	// same unit, so a fact whose rederive keeps failing is retried every few minutes, not every tick.
@@ -50,9 +51,6 @@ type Config struct {
 	OperationRetention time.Duration
 	// EventRetention keeps lifecycle events this long (default DefaultEventRetention).
 	EventRetention time.Duration
-	// ConsolidationGrace is how old an unconsolidated unit must be before the tick consolidates its bank
-	// (default DefaultConsolidationGrace).
-	ConsolidationGrace time.Duration
 	// StrandedRetryAfter is how long after a unit's last rederive ended the tick may queue another one
 	// (default DefaultStrandedRetryAfter).
 	StrandedRetryAfter time.Duration
@@ -71,7 +69,6 @@ func (c Config) withDefaults() Config {
 	def(&c.StaleAfter, jobs.DefaultStaleAfter)
 	def(&c.OperationRetention, DefaultOperationRetention)
 	def(&c.EventRetention, DefaultEventRetention)
-	def(&c.ConsolidationGrace, DefaultConsolidationGrace)
 	def(&c.StrandedRetryAfter, DefaultStrandedRetryAfter)
 	def(&c.GraphBudget, DefaultGraphBudget)
 	return c
@@ -86,8 +83,9 @@ type Deps struct {
 	Store store.DB
 	// Clock dates the cut-offs, cron checks and the graph budget; nil = the system clock.
 	Clock clock.Clock
-	// Resolver resolves each consolidation candidate's effective config: banks with auto_consolidation or
-	// enable_observations false are skipped. nil = no filtering.
+	// Resolver resolves each consolidation candidate's effective config: its reconcile grace, and banks with
+	// observations.auto_consolidation or observations.enabled false are skipped. nil = no filtering and the
+	// default grace.
 	Resolver config.Resolver
 	// Consolidation lists banks for the consolidation reconcile (UnconsolidatedBanks).
 	Consolidation store.Maintenance
@@ -235,48 +233,58 @@ func (s *Service) enqueueCronRefreshes(ctx context.Context) (int, error) {
 }
 
 // reconcileConsolidation enqueues an automatic consolidate for every bank with a unit left unconsolidated for
-// longer than the grace, unless the bank's effective config turns automatic consolidation or observations
-// off (decision 2000). One short transaction per bank. jobs.EnqueueAutoConsolidate joins the bank's queued or
-// running automatic consolidate (a running one re-enqueues itself while units remain), so concurrent ticks
-// insert at most one, and a tick never queues a job that would make a failing running consolidate skip its
-// retry. A bank being deleted (or already gone) is skipped; other errors don't stop the remaining banks. It
-// returns how many jobs it inserted.
+// longer than the bank's reconcile grace, unless the bank's effective config turns automatic consolidation or
+// observations off (decision 2000). One short transaction per bank. jobs.EnqueueAutoConsolidate joins the
+// bank's queued or running automatic consolidate (a running one re-enqueues itself while units remain), so
+// concurrent ticks insert at most one, and a tick never queues a job that would make a failing running
+// consolidate skip its retry. A bank being deleted (or already gone) is skipped; other errors don't stop the
+// remaining banks. It returns how many jobs it inserted.
 func (s *Service) reconcileConsolidation(ctx context.Context) (int, error) {
 	if s.d.Consolidation == nil {
 		return 0, nil
 	}
-	banks, err := s.d.Consolidation.UnconsolidatedBanks(ctx, s.d.Clock.Now().Add(-s.d.Config.ConsolidationGrace))
+	now := s.d.Clock.Now()
+	banks, err := s.d.Consolidation.UnconsolidatedBanks(ctx, now)
 	if err != nil {
 		return 0, fmt.Errorf("list banks to consolidate: %w", err)
 	}
 	var keep []domain.BankRef
 	var errs []error
 	for _, b := range banks {
-		ok, err := autoConsolidates(ctx, s.d.Resolver, b)
+		ok, err := autoConsolidates(ctx, s.d.Resolver, b, now)
 		switch {
 		case gone(err):
 		case err != nil:
-			errs = append(errs, fmt.Errorf("bank %s/%s: config: %w", b.Tenant, b.Bank, err))
+			errs = append(errs, fmt.Errorf("bank %s/%s: config: %w", b.Bank.Tenant, b.Bank.Bank, err))
 		case ok:
-			keep = append(keep, b)
+			keep = append(keep, b.Bank)
 		}
 	}
 	n, err := s.enqueueEach(ctx, keep, jobs.EnqueueAutoConsolidate)
 	return n, errors.Join(append(errs, err)...)
 }
 
-// autoConsolidates reports whether b's effective config lets the tick consolidate it: auto_consolidation and
-// enable_observations both unset or true. A nil resolver lets every bank through.
-func autoConsolidates(ctx context.Context, r config.Resolver, b domain.BankRef) (bool, error) {
-	if r == nil {
-		return true, nil
+// autoConsolidates reports whether the tick consolidates b now: its effective observations.auto_consolidation
+// and observations.enabled are both unset or true, and its oldest waiting fact is older than its
+// observations.reconcile_grace_seconds (unset = DefaultConsolidationGrace). A nil resolver applies the default
+// grace to every bank.
+func autoConsolidates(ctx context.Context, r config.Resolver, b store.UnconsolidatedBank, now time.Time) (bool, error) {
+	grace := DefaultConsolidationGrace
+	if r != nil {
+		cfg, err := r.Effective(ctx, b.Bank)
+		if err != nil {
+			return false, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
+		}
+		obs := cfg.GetObservations()
+		on := func(p *bool) bool { return p == nil || *p }
+		if !on(obs.AutoConsolidation) || !on(obs.Enabled) {
+			return false, nil
+		}
+		if g := obs.ReconcileGraceSeconds; g != nil {
+			grace = time.Duration(*g) * time.Second
+		}
 	}
-	cfg, err := r.Effective(ctx, b)
-	if err != nil {
-		return false, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
-	}
-	on := func(p *bool) bool { return p == nil || *p }
-	return on(cfg.AutoConsolidation) && on(cfg.EnableObservations), nil
+	return b.Oldest.Before(now.Add(-grace)), nil
 }
 
 // resumeBankDeletes re-enqueues delete_bank for every tombstoned bank whose delete stopped (decision 2001):

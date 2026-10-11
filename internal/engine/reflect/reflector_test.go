@@ -491,12 +491,16 @@ func TestReflectStructuredOutputError(t *testing.T) {
 }
 
 func TestReflectPromptUsesEffectiveConfig(t *testing.T) {
-	bankCfg := domain.BankConfig{ReflectMission: "Bank mission.", Disposition: &domain.Disposition{Skepticism: 1}}
+	bankCfg := domain.BankConfig{
+		Reflect: &domain.ReflectConfig{Mission: "Bank mission.", Disposition: &domain.Disposition{Skepticism: 1}},
+	}
 	h := newHarness(t, bankCfg, unit("u1", "Alice likes tea"))
 	h.turns(recallCall(), doneCall("tea", "u1"))
 	_, err := h.reflect(func(r *rf.ReflectRequest) {
 		r.Overrides = &domain.BankConfig{
-			ReflectMission: "Request mission.", Disposition: &domain.Disposition{Skepticism: 5, Literalism: 3, Empathy: 3},
+			Reflect: &domain.ReflectConfig{
+				Mission: "Request mission.", Disposition: &domain.Disposition{Skepticism: 5, Literalism: 3, Empathy: 3},
+			},
 		}
 		r.QueryTime = ptr(time.Date(2020, 5, 1, 12, 30, 0, 0, time.UTC))
 	})

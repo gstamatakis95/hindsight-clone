@@ -2,12 +2,8 @@ package server_test
 
 import (
 	"errors"
-	"fmt"
-	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
-	"memd/internal/server"
-	"slices"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -41,18 +37,9 @@ func TestUpdateDocumentTags(t *testing.T) {
 // TestSpecOverridesValidated checks UpdateMentalModel (inside the patch) and CreateBankFromTemplate (per
 // template spec) validate spec overrides the way CreateMentalModel does.
 func TestSpecOverridesValidated(t *testing.T) {
-	var rpcs []string
-	h := newHarness(t, func(d *server.Deps) {
-		d.ValidateOverrides = func(rpc string, o domain.BankConfig) error {
-			rpcs = append(rpcs, rpc)
-			if o.RetainMission != "" {
-				return fmt.Errorf("%w: retain_mission on %s", domain.ErrInvalidArgument, rpc)
-			}
-			return nil
-		}
-	})
+	h := newHarness(t)
 	ctx := tenantCtx(t)
-	bad := &pb.BankConfig{RetainMission: "no"}
+	bad := &pb.RefreshOverrides{Reflect: &pb.ReflectConfig{Disposition: &pb.Disposition{Empathy: 9}}}
 	_, err := pb.NewBankServiceClient(h.conn).CreateBankFromTemplate(ctx, &pb.CreateBankFromTemplateRequest{
 		BankId: "x", Template: &pb.BankTemplate{MentalModels: []*pb.MentalModelSpec{{Id: "m", Overrides: bad}}},
 	})
@@ -72,9 +59,6 @@ func TestSpecOverridesValidated(t *testing.T) {
 	_, err = args[2].(mentalmodel.SpecPatch)(domain.MentalModelSpec{ID: "m"})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("patched spec with invalid overrides: err = %v, want ErrInvalidArgument", err)
-	}
-	if !slices.Contains(rpcs, config.RPCMentalModelSpec) {
-		t.Errorf("validator saw %v, want %s", rpcs, config.RPCMentalModelSpec)
 	}
 }
 

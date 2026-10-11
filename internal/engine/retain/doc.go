@@ -65,7 +65,7 @@
 //  6. Complete in a final transaction: tx.Seq, the ownership check, the replacement if no batch did it (blank
 //     text has no chunks), Documents().Complete (content hash, no-op hash, extracted_at), a
 //     RETAIN_COMPLETED event, and the bank's consolidate job ({}, serial key "consolidate", DedupePending)
-//     unless skip_consolidation is set or enable_observations / auto_consolidation is false.
+//     unless skip_consolidation is set or observations.enabled / observations.auto_consolidation is false.
 //
 // Before each batch the run reports progress through its jobs.Run (stage "retain_chunks"); a cancelled job or
 // context stops it with domain.ErrCancelled. A sync retain runs under jobs.Inline, which reports nothing.
@@ -122,9 +122,10 @@
 //
 // # Config knobs and defaults
 //
-// The run reads, from the effective BankConfig: extraction_mode, custom_extraction_prompt, retain_mission,
-// entity_labels, entities_allow_free_form (default true), default_observation_scopes, enable_observations
-// and auto_consolidation (default true), the EXTRACT and TIME_PARSE bindings, and RetainTuning. Engine
+// The run reads, from the effective BankConfig: the retain group (extraction_mode, custom_extraction_prompt,
+// mission, entity_labels, entities_allow_free_form (default true), default_observation_scopes and the chunking
+// and linking knobs), observations.enabled and observations.auto_consolidation (default true), and the EXTRACT
+// and TIME_PARSE bindings. Engine
 // defaults where the server level leaves a knob unset: chunk_max_tokens [DefaultChunkMaxTokens] (750),
 // chunk_overlap_tokens 0, structured_chunk_max_tokens = chunk_max_tokens, entity_match_threshold
 // [DefaultEntityMatchThreshold] (0.6), temporal_link_window_hours [DefaultTemporalLinkWindowHours] (24),

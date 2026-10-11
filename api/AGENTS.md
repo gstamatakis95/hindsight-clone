@@ -15,7 +15,7 @@ The file has six parts, in this order:
    `// ---- <Rpc> ----` subsection per RPC in RPC order, holding its request, response and helper messages, then
    a `// ---- Resources ----` subsection with the service's resource messages (Memory, Document, Operation, ...).
 4. Shared types: messages used by more than one service and owned by none.
-5. Configuration: `BankConfig` and its sub-messages, then the model bindings.
+5. Configuration: `BankConfig` and its phase groups, the model bindings, then the per-RPC `*Overrides` messages.
 6. Shared enums.
 
 Where a new type goes:
@@ -33,9 +33,12 @@ Where a new type goes:
 - **Field numbers.** Until the first release, fields may be renamed and renumbered. After it, never renumber or
   reuse a field number: when you remove a field or enum value, add `reserved` for both its number and its name,
   and never change a field's type, label or name in place.
-- **New config goes in `BankConfig`.** Every new behaviour knob must be overridable per request (every
-  request that does work takes `BankConfig overrides`) unless the spec says otherwise. Use `optional` for scalars
-  whose unset value must differ from zero. Document the default in the field comment.
+- **New config goes in `BankConfig`,** in its phase group (`RetainConfig`, `ObservationConfig`, `RecallConfig`,
+  `ReflectConfig`, `MentalModelConfig`, `ModelBindings`). Every request that does work takes its own overrides
+  message (`RetainOverrides`, `RecallOverrides`, ...) holding only what that RPC may change; add the knob there
+  too when the RPC should be able to set it, and map it in `internal/server/convert_overrides.go`. A model
+  binding is atomic (one FieldMask path). Use `optional` for scalars whose unset value must differ from zero.
+  Document the default in the field comment.
 - **Keep the naming rules.** Every RPC gets its own `<Rpc>Request` / `<Rpc>Response`. Every enum value is
   prefixed with its enum name, and value 0 is `*_UNSPECIFIED`. List RPCs page with `page_size` + `page_token` /
   `next_page_token`. Patch RPCs take a `google.protobuf.FieldMask update_mask`.

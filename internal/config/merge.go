@@ -5,24 +5,42 @@ import (
 	"reflect"
 )
 
-// One reflection walker serves Merge and the override path checks, so "is set" means the same
-// thing everywhere (decision 010): a pointer, slice or map is set when non-nil (a non-nil empty list is
-// an explicit clear), a plain string or number when non-zero. A pointer to a struct is a nested message
-// that merges field by field; BankConfig.Models merges per slot; every other field is a leaf.
+// One reflection walker serves Merge and the FieldMask paths, so "is set" means the same thing
+// everywhere: a pointer, slice or map is set when non-nil (a non-nil empty list is an explicit clear), a
+// plain string or number when non-zero. A pointer to a struct is a nested message that merges field by
+// field, except a *domain.ModelBinding, which is an atomic leaf; every other field is a leaf.
 
-var slotBindingsType = reflect.TypeFor[[]domain.SlotBinding]()
+var modelBindingType = reflect.TypeFor[*domain.ModelBinding]()
 
 // Merge combines levels from least to most specific (server, tenant, bank, strategy, request, item):
-// a set field replaces the field below it, nested messages merge field by field, models merge per slot
-// (the most specific level that binds a slot supplies its whole binding) and other lists and maps are
-// replaced, never appended. The result shares no memory with the inputs, which are left untouched.
+// a set field replaces the field below it, nested messages merge field by field, a model binding is
+// replaced whole, and lists and maps are replaced, never appended. Each level's models are flattened
+// first (every chat-model slot the level leaves unset takes the level's default), so for each slot the
+// most specific level that yields a binding, its own or its default, wins. The result shares no memory
+// with the inputs, which are left untouched.
 func Merge(levels ...domain.BankConfig) domain.BankConfig {
 	var out domain.BankConfig
 	dst := reflect.ValueOf(&out).Elem()
 	for i := range levels {
-		mergeStruct(dst, reflect.ValueOf(levels[i]))
+		mergeStruct(dst, reflect.ValueOf(flatten(levels[i])))
 	}
 	return out
+}
+
+// flatten returns c with each chat-model slot its models leave unset bound to its models' default (a
+// shallow copy; mergeStruct copies what it keeps).
+func flatten(c domain.BankConfig) domain.BankConfig {
+	if c.Models == nil || c.Models.Default == nil {
+		return c
+	}
+	m := *c.Models
+	for _, s := range domain.LLMSlots {
+		if f := m.Slot(s); *f == nil {
+			*f = m.Default
+		}
+	}
+	c.Models = &m
+	return c
 }
 
 // mergeStruct merges every field of src into dst (both of the same struct type).
@@ -30,8 +48,6 @@ func mergeStruct(dst, src reflect.Value) {
 	for i := range src.NumField() {
 		d, s := dst.Field(i), src.Field(i)
 		switch {
-		case s.Type() == slotBindingsType:
-			mergeModels(d, s)
 		case isMessage(s.Type()):
 			if s.IsNil() {
 				continue
@@ -46,36 +62,10 @@ func mergeStruct(dst, src reflect.Value) {
 	}
 }
 
-// mergeModels replaces dst's binding for every slot src binds and appends slots dst lacks.
-func mergeModels(dst, src reflect.Value) {
-	if src.IsNil() {
-		return
-	}
-	out, _ := dst.Interface().([]domain.SlotBinding)
-	if out == nil {
-		out = []domain.SlotBinding{}
-	}
-	for _, sb := range src.Interface().([]domain.SlotBinding) {
-		cp, _ := deepCopy(reflect.ValueOf(sb)).Interface().(domain.SlotBinding)
-		out = upsertSlot(out, cp)
-	}
-	dst.Set(reflect.ValueOf(out))
-}
-
-// upsertSlot replaces the binding of sb.Slot in list, or appends it.
-func upsertSlot(list []domain.SlotBinding, sb domain.SlotBinding) []domain.SlotBinding {
-	for i := range list {
-		if list[i].Slot == sb.Slot {
-			list[i] = sb
-			return list
-		}
-	}
-	return append(list, sb)
-}
-
-// isMessage reports whether t is a nested config message (a pointer to a struct).
+// isMessage reports whether t is a nested config message: a pointer to a struct other than a model
+// binding, which is atomic.
 func isMessage(t reflect.Type) bool {
-	return t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct
+	return t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct && t != modelBindingType
 }
 
 // isSet reports whether a leaf value is set.

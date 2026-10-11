@@ -32,11 +32,11 @@ func (s *memoryServer) Retain(ctx context.Context, req *pb.RetainRequest) (*pb.R
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	if err := s.d.validate("Retain", in.Overrides); err != nil {
+	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	for i := range in.Items {
-		if err := s.d.validate("Retain", in.Items[i].Overrides); err != nil {
+		if err := validate(in.Items[i].Overrides); err != nil {
 			return nil, toStatus(err)
 		}
 	}
@@ -61,7 +61,7 @@ func (s *memoryServer) Recall(ctx context.Context, req *pb.RecallRequest) (*pb.R
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	if err := s.d.validate("Recall", in.Overrides); err != nil {
+	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	out, err := s.d.Recaller.Recall(ctx, in)
@@ -85,7 +85,7 @@ func (s *memoryServer) Reflect(ctx context.Context, req *pb.ReflectRequest) (*pb
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	if err := s.d.validate("Reflect", in.Overrides); err != nil {
+	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	out, err := s.d.Reflector.Reflect(ctx, in)

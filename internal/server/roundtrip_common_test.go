@@ -51,12 +51,12 @@ func init() {
 		return reflectTraceToProto(reflectTraceFromProto(m)), nil
 	}, nil)
 	addRT(func(m *pb.ModelBinding) (*pb.ModelBinding, error) {
-		return modelBindingToProto(modelBindingFromProto(m)), nil
+		return bindingPtrToProto(bindingPtrFromProto(m)), nil
 	}, nil)
-	addRT(func(m *pb.SlotBinding) (*pb.SlotBinding, error) {
-		var d decoder
-		return slotBindingsToProto(d.slotBindings([]*pb.SlotBinding{m}))[0], d.err
+	addRT(func(m *pb.ModelBindings) (*pb.ModelBindings, error) {
+		return modelBindingsToProto(modelBindingsFromProto(m)), nil
 	}, nil)
+	overrideRoundTrips()
 	addRT(func(m *pb.BankConfig) (*pb.BankConfig, error) {
 		var d decoder
 		return configValueToProto(d.config(m)), d.err
@@ -82,8 +82,13 @@ func init() {
 		var d decoder
 		return strategyToProto(d.strategy(m)), d.err
 	}, nil)
-	addRT(func(m *pb.RetainTuning) (*pb.RetainTuning, error) {
-		return retainTuningToProto(retainTuningFromProto(m)), nil
+	addRT(func(m *pb.RetainConfig) (*pb.RetainConfig, error) {
+		var d decoder
+		return retainConfigToProto(d.retainConfig(m)), d.err
+	}, nil)
+	addRT(func(m *pb.ObservationConfig) (*pb.ObservationConfig, error) {
+		var d decoder
+		return observationConfigToProto(d.observationConfig(m)), d.err
 	}, nil)
 	addRT(func(m *pb.RecallConfig) (*pb.RecallConfig, error) {
 		var d decoder
@@ -104,5 +109,32 @@ func init() {
 	addRT(func(m *pb.RefreshTrigger) (*pb.RefreshTrigger, error) {
 		var d decoder
 		return triggerToProto(d.trigger(m)), d.err
+	}, nil)
+}
+
+// overrideRoundTrips registers the per-RPC override messages: each converts to its config level and back.
+func overrideRoundTrips() {
+	addRT(func(m *pb.RetainOverrides) (*pb.RetainOverrides, error) {
+		var d decoder
+		return retainOverridesToProto(d.retainOverrides(m)), d.err
+	}, nil)
+	addRT(func(m *pb.RecallOverrides) (*pb.RecallOverrides, error) {
+		var d decoder
+		return recallOverridesToProto(d.recallOverrides(m)), d.err
+	}, nil)
+	addRT(func(m *pb.ReflectOverrides) (*pb.ReflectOverrides, error) {
+		var d decoder
+		return reflectOverridesToProto(d.reflectOverrides(m)), d.err
+	}, nil)
+	addRT(func(m *pb.ConsolidateOverrides) (*pb.ConsolidateOverrides, error) {
+		var d decoder
+		return consolidateOverridesToProto(d.consolidateOverrides(m)), d.err
+	}, nil)
+	addRT(func(m *pb.RederiveOverrides) (*pb.RederiveOverrides, error) {
+		return rederiveOverridesToProto(rederiveOverrides(m)), nil
+	}, nil)
+	addRT(func(m *pb.RefreshOverrides) (*pb.RefreshOverrides, error) {
+		var d decoder
+		return refreshOverridesToProto(d.refreshOverrides(m)), d.err
 	}, nil)
 }

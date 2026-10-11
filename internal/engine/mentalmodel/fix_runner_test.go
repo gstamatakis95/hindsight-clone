@@ -60,7 +60,7 @@ func TestAgenticRefreshSetsContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.addUnit(domain.FactTypeWorld, "Bob joins the project", "proj")
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON())
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON())
 	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -86,14 +86,14 @@ func TestDeltaPreCheckReadsUntaggedUnits(t *testing.T) {
 	m.Spec.Trigger.TagsMatch = domain.TagsMatchAny
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Carol reviews the project")
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Carol reviews."},
 	}))
 	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls := e.llm.CallsFor(domain.ModelSlotMentalModelDelta, deltaPrompt)
+	calls := e.llm.CallsFor(domain.ModelSlotMentalModel, deltaPrompt)
 	if out.Trace.EffectiveMode != domain.RefreshModeDelta || len(calls) != 1 ||
 		out.Trace.Outcome != domain.RefreshOutcomeContentWritten {
 		t.Fatalf("mode %s outcome %s delta calls %d", out.Trace.EffectiveMode, out.Trace.Outcome, len(calls))
@@ -225,7 +225,7 @@ func TestFloorSkewTolerance(t *testing.T) {
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	e.clock.Set(last.Add(time.Minute - 3*time.Second))
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob joined."},
 	}))
 	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})

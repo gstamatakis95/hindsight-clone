@@ -29,7 +29,9 @@ func (k *killAt) Report(context.Context, domain.Progress) error {
 // TestRunReplayAfterKillAtThirdScope: a unit in 3 scopes (per_tag), killed after scope 2, then replayed:
 // no duplicate observations, and it is stamped once (by the replay, in its last scope's transaction).
 func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}})
+	e := newEnv(t, domain.BankConfig{
+		Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+	})
 	e.fact("f1", "Alice moved to Paris in May", "a", "b", "c")
 	e.script(e.createEach("f1"))
 	kill := &killAt{n: 3}
@@ -92,7 +94,7 @@ func (e *env) wantBatches(want ...[]string) {
 // batch a health probe succeeds, the unit fails again when retried alone, and only then is it parked.
 // Every other unit is stamped.
 func TestRunHalvesDownToPoisonUnit(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(4)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{LLMBatchSize: ptr(4)}})
 	e.fact("f1", "Alpha ships on Monday", "x")
 	e.fact("f2", "Beta ships on Tuesday", "x")
 	e.fact("f3", "Poison fact", "x")
@@ -121,7 +123,7 @@ func TestRunHalvesDownToPoisonUnit(t *testing.T) {
 // TestRunPoisonLastLeafParkedByProbe: a poison unit that fails alone as the last call of the run is parked
 // once the health probe (a CONSOLIDATE call with no facts) succeeds.
 func TestRunPoisonLastLeafParkedByProbe(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(2)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{LLMBatchSize: ptr(2)}})
 	e.fact("f1", "Alpha ships", "x")
 	e.fact("f2", "Poison fact", "x")
 	e.script(fail(), e.createEach("f1"), fail(), ok(reply(nil, nil)), fail())
@@ -160,7 +162,7 @@ func TestRunPoisonAloneInScopeDoesNotBlockOthers(t *testing.T) {
 // TestRunOutageDoesNotPark: when the gateway fails from the first call, nothing is parked; the run fails
 // with UNAVAILABLE so the job retries.
 func TestRunOutageDoesNotPark(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(2)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{LLMBatchSize: ptr(2)}})
 	e.fact("f1", "One", "x")
 	e.fact("f2", "Two", "x")
 	e.script(fail())
@@ -199,7 +201,7 @@ func TestRunOutageMidRunDoesNotPark(t *testing.T) {
 // TestRunContinuationAtCap: a run stops at consolidation_max_units_per_run, enqueues its continuation
 // (deduplicated) and reports More; the continuation finishes the rest.
 func TestRunContinuationAtCap(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{ConsolidationMaxUnitsPerRun: ptr(2)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{MaxUnitsPerRun: ptr(2)}})
 	for i, text := range []string{"One fact", "Two fact", "Three fact", "Four fact", "Five fact"} {
 		e.fact("f"+string(rune('1'+i)), text, "x")
 	}
@@ -232,16 +234,14 @@ func TestRunContinuationAtCap(t *testing.T) {
 // TestRunStrategyOverridesBankNotRequest: the matching strategy's mission and CONSOLIDATE binding replace
 // the bank's for its scopes only, and a request override (manual Consolidate) beats the strategy.
 func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
-	cfg := domain.BankConfig{
-		ObservationsMission: "BANK-MISSION",
-		Models:              consolidateModel("bank-model"),
-		ConsolidationStrategies: []domain.ConsolidationStrategy{{
-			Name:                "team",
-			Scopes:              []domain.ScopePattern{{Tags: []string{"team"}}},
-			ObservationsMission: "STRATEGY-MISSION",
-			Models:              consolidateModel("strategy-model"),
+	cfg := domain.BankConfig{Observations: &domain.ObservationConfig{
+		Mission: "BANK-MISSION", Strategies: []domain.ConsolidationStrategy{{
+			Name:             "team",
+			Scopes:           []domain.ScopePattern{{Tags: []string{"team"}}},
+			Mission:          "STRATEGY-MISSION",
+			ConsolidateModel: consolidateModel("strategy-model"),
 		}},
-	}
+	}, Models: &domain.ModelBindings{Consolidate: consolidateModel("bank-model")}}
 	e := newEnv(t, cfg)
 	e.fact("f1", "The team meets on Monday", "team")
 	e.fact("f2", "The other group meets on Friday", "other")
@@ -257,8 +257,8 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 
 	e.fact("f3", "The team ships on Friday", "team")
 	j := newJob(nil, &domain.BankConfig{
-		ObservationsMission: "REQUEST-MISSION",
-		Models:              consolidateModel("request-model"),
+		Observations: &domain.ObservationConfig{Mission: "REQUEST-MISSION"},
+		Models:       &domain.ModelBindings{Consolidate: consolidateModel("request-model")},
 	})
 	j.ID = pgtest.ID[domain.OperationID]("op-manual")
 	e.run(j)
@@ -284,7 +284,7 @@ func missionOf(user string) string {
 // calls a duplicate is folded into the twin: merged text, new version, the new fact as evidence, and no
 // new observation.
 func TestRunDedupMerge(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{DedupThreshold: ptr(0.5)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.5)}})
 	e.fact("f0", "Alice lives in Paris", "x")
 	e.observation("obs-twin", "Alice lives in Paris", []string{"x"}, "f0")
 	e.fact("f1", "Alice lives in Paris France", "x")
@@ -314,7 +314,7 @@ func TestRunDedupMerge(t *testing.T) {
 
 // TestRunDedupKeep: DEDUP_CHECK keep leaves the twin alone and creates the new observation.
 func TestRunDedupKeep(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{DedupThreshold: ptr(0.5)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.5)}})
 	e.fact("f0", "Alice owns 3 cats", "x")
 	e.observation("obs-twin", "Alice owns 3 cats", []string{"x"}, "f0")
 	e.fact("f1", "Alice owns 4 cats", "x")

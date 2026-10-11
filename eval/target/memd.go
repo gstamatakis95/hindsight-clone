@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	memoryv1 "memd/gen/memory/v1"
@@ -133,9 +134,12 @@ func (m *Memd) Models(ctx context.Context, bank string) (map[string]string, erro
 		return nil, fmt.Errorf("memd: bank config %s: %w", bank, err)
 	}
 	models := map[string]string{}
-	for _, b := range resp.GetResolved().GetModels() {
-		models[strings.TrimPrefix(b.GetSlot().String(), "MODEL_SLOT_")] = b.GetBinding().GetModel()
-	}
+	resp.GetResolved().GetModels().ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		if b, ok := v.Message().Interface().(*memoryv1.ModelBinding); ok && fd.Name() != "default" {
+			models[strings.ToUpper(string(fd.Name()))] = b.GetModel()
+		}
+		return true
+	})
 	return models, nil
 }
 

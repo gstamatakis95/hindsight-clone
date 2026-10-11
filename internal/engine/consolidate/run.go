@@ -49,7 +49,7 @@ type scopeWork struct {
 // unconsolidated units (filtered by the job's scopes), each unit's scopes, and which of those already
 // cite it (a replayed run skips them).
 func (r *run) plan(ctx context.Context) error {
-	limit := orDefault(r.cfg.ConsolidationMaxUnitsPerRun, defaultMaxUnitsPerRun)
+	limit := orDefault(r.cfg.GetObservations().MaxUnitsPerRun, defaultMaxUnitsPerRun)
 	var units []domain.Unit
 	var pending, cited map[domain.UnitID][]domain.ScopeKey
 	err := r.c.d.Store.InTx(ctx, func(tx store.Tx) error {
@@ -144,8 +144,8 @@ func (r *run) unitMode(
 			return *m, nil
 		}
 	}
-	if r.cfg.DefaultObservationScopes != nil {
-		return *r.cfg.DefaultObservationScopes, nil
+	if r.cfg.GetRetain().DefaultObservationScopes != nil {
+		return *r.cfg.GetRetain().DefaultObservationScopes, nil
 	}
 	return domain.ObservationScopes{Mode: domain.ScopeModeCombined}, nil
 }
@@ -162,7 +162,7 @@ func (r *run) docMode(ctx context.Context, tx store.Tx, doc domain.DocumentID) (
 	case d.ObservationScopes != nil:
 		return d.ObservationScopes, nil
 	case d.Overrides != nil:
-		return d.Overrides.DefaultObservationScopes, nil
+		return d.Overrides.GetRetain().DefaultObservationScopes, nil
 	}
 	return nil, nil
 }
@@ -176,7 +176,7 @@ func (r *run) scope(ctx context.Context, i int) error {
 	if err != nil {
 		return fmt.Errorf("consolidate: config for scope %q: %w", w.key.String(), err)
 	}
-	size := orDefault(cfg.ConsolidationLLMBatchSize, defaultBatchSize)
+	size := orDefault(cfg.GetObservations().LLMBatchSize, defaultBatchSize)
 	for start := 0; start < len(w.units); start += size {
 		if err := r.checkpoint(ctx, "scope "+w.key.String()); err != nil {
 			return err

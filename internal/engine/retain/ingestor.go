@@ -206,7 +206,8 @@ func (i *ingestor) plan(
 	if err != nil {
 		return nil, err
 	}
-	if cfg.ExtractionMode == domain.ExtractionModeCustom && strings.TrimSpace(cfg.CustomExtractionPrompt) == "" {
+	if r := cfg.GetRetain(); r.ExtractionMode == domain.ExtractionModeCustom &&
+		strings.TrimSpace(r.CustomExtractionPrompt) == "" {
 		return nil, fmt.Errorf("%w: extraction mode custom needs custom_extraction_prompt", domain.ErrInvalidArgument)
 	}
 	tags := domain.NormalizeTags(append(slices.Clone(it.Tags), req.DocumentTags...))

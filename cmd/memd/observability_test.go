@@ -132,7 +132,7 @@ func checkJobSpans(t *testing.T, spans []*mocktracer.Span) {
 // TestDatadogSettings checks the Datadog switches: off by default, on from the environment, and a flag
 // wins over the environment.
 func TestDatadogSettings(t *testing.T) {
-	env := baseEnv()
+	env := baseEnv(t, baseFile)
 	cfg, err := loadValidate([]string{"all"}, env)
 	if err != nil || cfg.DatadogEnabled || cfg.DatadogProfiler {
 		t.Fatalf("defaults: %+v %v", cfg, err)

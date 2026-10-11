@@ -95,7 +95,7 @@ func (r *chatRequest) op() string {
 	switch modelSlot(r.Model) {
 	case "reflect":
 		return OpReflectFinal
-	case "synthesize":
+	case "mental_model":
 		return OpSynthesize
 	default:
 		return OpChat
@@ -247,7 +247,7 @@ func quoteAnswer(items []Item) string {
 	return strings.Join(lines, "\n")
 }
 
-// synthesizePage is a SYNTHESIZE page: the topic as a heading and every source item quoted.
+// synthesizePage is a synthesize page: the topic as a heading and every source item quoted.
 func synthesizePage(user string) string {
 	topic := sectionLine(user, "Topic")
 	if topic == "" {

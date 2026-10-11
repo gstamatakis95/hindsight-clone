@@ -49,29 +49,33 @@ func ensureBank(t *testing.T, s store.DB, b domain.BankRef) (domain.Bank, error)
 // ModelBinding.Extra (numbers would come back as float64) and empty non-nil slices (omitempty drops them).
 func richConfig() domain.BankConfig {
 	return domain.BankConfig{
-		RetainMission:     "remember recipes",
-		ReflectMission:    "answer briefly",
-		Disposition:       &domain.Disposition{Skepticism: 4, Empathy: 2},
-		ExtractionMode:    domain.ExtractionModeVerbose,
-		AutoConsolidation: ptr(false),
-		DedupThreshold:    ptr(0.95),
-		EntityLabels: []domain.EntityLabel{{
-			Key: "cuisine", Type: domain.LabelTypeValue, Optional: ptr(true),
-			Values: []domain.LabelValue{{Value: "thai"}, {Value: "greek", Description: "Greek food"}},
-		}},
+		Retain: &domain.RetainConfig{
+			Mission: "remember recipes", ExtractionMode: domain.ExtractionModeVerbose,
+			EntityLabels: []domain.EntityLabel{{
+				Key: "cuisine", Type: domain.LabelTypeValue, Optional: ptr(true),
+				Values: []domain.LabelValue{{Value: "thai"}, {Value: "greek", Description: "Greek food"}},
+			}},
+			DefaultObservationScopes: &domain.ObservationScopes{
+				Mode: domain.ScopeModeCustom, Custom: []domain.TagSet{{Tags: []string{"a", "b"}}},
+			},
+		},
+		Observations: &domain.ObservationConfig{
+			AutoConsolidation: ptr(false), DedupThreshold: ptr(0.95),
+			MaxUnitsPerRun: ptr(50),
+		},
 		Recall: &domain.RecallConfig{
 			BudgetFunction: domain.BudgetFunctionAdaptive, BudgetMid: ptr(250), Rerank: ptr(true),
 			StrategyBoosts: map[string]float64{"semantic": 1.5, "graph": 0.5}, RecencyAlpha: ptr(0.3),
 		},
-		Models: []domain.SlotBinding{
-			{Slot: domain.ModelSlotExtract, Binding: domain.ModelBinding{Model: "gpt-x", Temperature: ptr(0.2)}},
-			{Slot: domain.ModelSlotReflect, Binding: domain.ModelBinding{Model: "claude-y", MaxOutputTokens: ptr(2048)}},
+		Reflect: &domain.ReflectConfig{
+			Mission:     "answer briefly",
+			Disposition: &domain.Disposition{Skepticism: 4, Empathy: 2},
 		},
 		MentalModels: &domain.MentalModelConfig{DefaultMode: domain.RefreshModeDelta, HistoryMaxEntries: ptr(7)},
-		DefaultObservationScopes: &domain.ObservationScopes{
-			Mode: domain.ScopeModeCustom, Custom: []domain.TagSet{{Tags: []string{"a", "b"}}},
+		Models: &domain.ModelBindings{
+			Default: &domain.ModelBinding{Model: "gpt-x", Temperature: ptr(0.2)},
+			Reflect: &domain.ModelBinding{Model: "claude-y", MaxOutputTokens: ptr(2048)},
 		},
-		ConsolidationMaxUnitsPerRun: ptr(50),
 	}
 }
 
@@ -113,7 +117,9 @@ func testBankEnsure(t *testing.T, s store.DB) {
 
 // testBankCreate: Create stores name and config; a second Create is ErrAlreadyExists; Ensure keeps them.
 func testBankCreate(t *testing.T, s store.DB) {
-	bank := domain.Bank{Ref: bankA, Name: "Research", Config: domain.BankConfig{RetainMission: "papers"}}
+	bank := domain.Bank{
+		Ref: bankA, Name: "Research", Config: domain.BankConfig{Retain: &domain.RetainConfig{Mission: "papers"}},
+	}
 	inTx(t, s, func(tx store.Tx) error { return tx.Banks().Create(t.Context(), bank) })
 	got := mustBank(t, s, bankA)
 	if got.Name != "Research" || got.ChangeSeq != 0 {
@@ -141,7 +147,7 @@ func testBankSetConfig(t *testing.T, s store.DB) {
 	cfg := richConfig()
 	inTx(t, s, func(tx store.Tx) error { return tx.Banks().SetConfig(t.Context(), bankA, cfg) })
 	wantJSON(t, "config after SetConfig", mustBank(t, s, bankA).Config, cfg)
-	small := domain.BankConfig{ObservationsMission: "only this"}
+	small := domain.BankConfig{Observations: &domain.ObservationConfig{Mission: "only this"}}
 	inTx(t, s, func(tx store.Tx) error { return tx.Banks().SetConfig(t.Context(), bankA, small) })
 	wantJSON(t, "config after second SetConfig", mustBank(t, s, bankA).Config, small)
 }
@@ -205,7 +211,7 @@ func testTenantConfig(t *testing.T, s store.DB) {
 	inTx(t, s, func(tx store.Tx) error { return tx.Banks().SetTenantConfig(t.Context(), "tenant-1", cfg) })
 	wantJSON(t, "TenantConfig after set", tenantConfig(t, s, "tenant-1"), cfg)
 	wantJSON(t, "TenantConfig(other tenant)", tenantConfig(t, s, "tenant-2"), domain.BankConfig{})
-	small := domain.BankConfig{RetainMission: "tenant default"}
+	small := domain.BankConfig{Retain: &domain.RetainConfig{Mission: "tenant default"}}
 	inTx(t, s, func(tx store.Tx) error { return tx.Banks().SetTenantConfig(t.Context(), "tenant-1", small) })
 	wantJSON(t, "TenantConfig after replace", tenantConfig(t, s, "tenant-1"), small)
 }
@@ -227,7 +233,9 @@ func tenantRMW(
 		}
 		once.Do(func() { close(locked) })
 		<-release
-		cur.RetainMission += mission
+		retGrp := cur.GetRetain()
+		retGrp.Mission += mission
+		cur.Retain = &retGrp
 		return tx.Banks().SetTenantConfig(t.Context(), tenant, cur)
 	})
 }
@@ -258,7 +266,7 @@ func testTenantConfigLock(t *testing.T, s store.DB) {
 	if err := waitFor(t, "tx B's commit", doneB); err != nil {
 		t.Fatalf("tx B: %v", err)
 	}
-	if got := tenantConfig(t, s, tenant).RetainMission; got != "AB" {
+	if got := tenantConfig(t, s, tenant).GetRetain().Mission; got != "AB" {
 		t.Errorf("RetainMission after two locked read-modify-writes = %q, want %q", got, "AB")
 	}
 }
@@ -278,7 +286,9 @@ func sampleModel(b domain.BankRef, id domain.MentalModelID) domain.MentalModel {
 				TagsMatch: domain.TagsMatchAllStrict, FactTypes: []domain.FactType{domain.FactTypeWorld},
 				IncludeChunks: ptr(false), Budget: domain.BudgetHigh, KeepTrace: true,
 			},
-			Overrides: &domain.BankConfig{ReflectMission: "be brief", Recall: &domain.RecallConfig{BudgetLow: ptr(10)}},
+			Overrides: &domain.BankConfig{
+				Recall: &domain.RecallConfig{BudgetLow: ptr(10)}, Reflect: &domain.ReflectConfig{Mission: "be brief"},
+			},
 		},
 		ContentMD:   "# Team\n\n- Alice\n",
 		Version:     1,

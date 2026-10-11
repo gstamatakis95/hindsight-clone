@@ -104,7 +104,7 @@ func (s *memoryUnitServer) UpdateMemory(
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	if err := s.d.validate("UpdateMemory", in.Overrides); err != nil {
+	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	u, op, err := s.d.Curator.Update(ctx, in)

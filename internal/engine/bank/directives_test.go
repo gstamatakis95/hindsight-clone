@@ -97,14 +97,16 @@ func TestTenantAdmin(t *testing.T) {
 	e := newEnv(t)
 	tenants := NewTenantAdmin(e.store)
 	cfg, err := tenants.TenantConfig(e.ctx, "t")
-	if err != nil || cfg.RetainMission != "" {
+	if err != nil || cfg.GetRetain().Mission != "" {
 		t.Fatalf("unset tenant config = %+v %v", cfg, err)
 	}
 	cfg, err = tenants.UpdateTenantConfig(e.ctx, "t", func(cur domain.BankConfig) (domain.BankConfig, error) {
-		cur.RetainMission = "tenant mission"
+		retGrp := cur.GetRetain()
+		retGrp.Mission = "tenant mission"
+		cur.Retain = &retGrp
 		return cur, nil
 	})
-	if err != nil || cfg.RetainMission != "tenant mission" {
+	if err != nil || cfg.GetRetain().Mission != "tenant mission" {
 		t.Fatalf("patched tenant config = %+v %v", cfg, err)
 	}
 	boom := errors.New("boom")
@@ -120,8 +122,10 @@ func TestBankAdmin(t *testing.T) {
 	e := newEnv(t)
 	banks := NewBankAdmin(e.store)
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
-	created, err := banks.CreateBank(e.ctx, domain.Bank{Ref: b, Name: "B", Config: domain.BankConfig{ReflectMission: "m"}})
-	if err != nil || created.Name != "B" || created.Config.ReflectMission != "m" {
+	created, err := banks.CreateBank(e.ctx, domain.Bank{
+		Ref: b, Name: "B", Config: domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "m"}},
+	})
+	if err != nil || created.Name != "B" || created.Config.GetReflect().Mission != "m" {
 		t.Fatalf("created = %+v %v", created, err)
 	}
 	if _, err := banks.CreateBank(e.ctx, domain.Bank{Ref: b}); !errors.Is(err, domain.ErrAlreadyExists) {
@@ -129,10 +133,12 @@ func TestBankAdmin(t *testing.T) {
 	}
 	fresh := domain.BankRef{Tenant: "t", Bank: "fresh"}
 	updated, err := banks.UpdateBankConfig(e.ctx, fresh, func(cur domain.BankConfig) (domain.BankConfig, error) {
-		cur.ObservationsMission = "obs"
+		obsGrp := cur.GetObservations()
+		obsGrp.Mission = "obs"
+		cur.Observations = &obsGrp
 		return cur, nil
 	})
-	if err != nil || updated.Config.ObservationsMission != "obs" {
+	if err != nil || updated.Config.GetObservations().Mission != "obs" {
 		t.Fatalf("update creates the bank: %+v %v", updated, err)
 	}
 	if _, err := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{}).Tombstone(e.ctx, fresh); err != nil {

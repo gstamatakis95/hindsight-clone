@@ -20,7 +20,7 @@ type Reflector interface {
 
 // agentic is the REFRESH_STRATEGY_AGENTIC Synthesizer: the reflect loop answering as a document over the
 // model's scope and window. A delta runs the loop over the window only and integrates the evidence it
-// cites into the current document with MENTAL_MODEL_DELTA (the loop's own draft is not shown, as in
+// cites into the current document with the delta call (the loop's own draft is not shown, as in
 // Hindsight #5272).
 type agentic struct {
 	rf      Reflector
@@ -29,7 +29,7 @@ type agentic struct {
 
 var _ Synthesizer = (*agentic)(nil)
 
-// NewAgenticSynthesizer returns the agentic Synthesizer; d makes the delta's MENTAL_MODEL_DELTA call.
+// NewAgenticSynthesizer returns the agentic Synthesizer; d makes the delta call.
 func NewAgenticSynthesizer(rf Reflector, d ModelDeps) Synthesizer {
 	return &agentic{rf: rf, planner: deltaPlanner{d: d}}
 }

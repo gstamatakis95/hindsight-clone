@@ -150,10 +150,10 @@ func interleave(a, b []store.Hit, limit int) []domain.UnitID {
 
 // capacity returns how many observations scope s may still create, or nil when uncapped.
 func (c *consolidator) capacity(ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig) (*int, error) {
-	if cfg.MaxObservationsPerScope == nil || *cfg.MaxObservationsPerScope < 0 {
+	if cfg.GetObservations().MaxObservationsPerScope == nil || *cfg.GetObservations().MaxObservationsPerScope < 0 {
 		return nil, nil
 	}
-	limit := *cfg.MaxObservationsPerScope
+	limit := *cfg.GetObservations().MaxObservationsPerScope
 	if limit == 0 {
 		return &limit, nil
 	}
@@ -173,9 +173,11 @@ func (c *consolidator) consolidateRequest(
 	if err != nil {
 		return ai.StructuredRequest{}, err
 	}
-	data := prompts.ConsolidateData{Mission: cfg.ObservationsMission, Observations: observations}
+	data := prompts.ConsolidateData{Mission: cfg.GetObservations().Mission, Observations: observations}
 	if remaining != nil {
-		data.Capacity = &prompts.ConsolidateCapacity{Max: *cfg.MaxObservationsPerScope, Remaining: *remaining}
+		data.Capacity = &prompts.ConsolidateCapacity{
+			Max: *cfg.GetObservations().MaxObservationsPerScope, Remaining: *remaining,
+		}
 	}
 	ids := make([]string, 0, len(facts))
 	for _, f := range facts {
@@ -226,10 +228,10 @@ func (c *consolidator) promptObservations(
 			sources[u.ID] = u
 		}
 	}
-	perObs := orDefault(cfg.ConsolidationSourceTokensPerObs, defaultSourceTokensPerO)
+	perObs := orDefault(cfg.GetObservations().SourceFactsMaxTokensPerObservation, defaultSourceTokensPerO)
 	budget := -1
-	if cfg.ConsolidationSourceFactsMaxTokens != nil {
-		budget = *cfg.ConsolidationSourceFactsMaxTokens
+	if cfg.GetObservations().SourceFactsMaxTokens != nil {
+		budget = *cfg.GetObservations().SourceFactsMaxTokens
 	}
 	out := make([]prompts.ConsolidateObservation, 0, len(shown))
 	for _, o := range shown {

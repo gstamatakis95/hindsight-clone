@@ -100,7 +100,7 @@ func TestWeakerJoinerKeepsUpgrade(t *testing.T) {
 	}
 	op, joined, err := adm.RefreshMentalModel(e.ctx, RefreshRequest{
 		Bank: e.bank, ID: "status", ForceFull: true, Strategy: domain.RefreshStrategyAgentic,
-		Overrides: &domain.BankConfig{ReflectMission: "be brief"},
+		Overrides: &domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "be brief"}},
 	})
 	if err != nil || !joined {
 		t.Fatalf("manual force_full joined=%v err=%v", joined, err)
@@ -152,7 +152,7 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 	payload, _ := json.Marshal(jobs.RefreshPayload{
 		MentalModelID: "status", ForceFull: true, Manual: true, Strategy: domain.RefreshStrategyAgentic,
 	})
-	over := &domain.BankConfig{ReflectMission: "be brief"}
+	over := &domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "be brief"}}
 	job := store.Job{ID: opID("op7"), Bank: e.bank, Payload: payload, Overrides: over}
 	if _, err := RunJob(e.ctx, r, job); err != nil {
 		t.Fatal(err)

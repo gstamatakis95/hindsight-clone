@@ -1,22 +1,22 @@
 package config
 
 import (
-	"memd/internal/ai"
+	"errors"
 	"memd/internal/domain"
 	"testing"
 )
 
 func TestServerDefaults(t *testing.T) {
-	env := map[string]string{
-		ai.EnvModel:                   "gpt-default",
-		ai.EnvModelPrefix + "REFLECT": "gpt-reflect",
-		ai.EnvModelPrefix + "RERANK":  "reranker",
+	file := domain.BankConfig{
+		Models:       bindings("gpt-default", map[domain.ModelSlot]string{domain.ModelSlotReflect: "gpt-reflect"}),
+		Observations: &domain.ObservationConfig{ReconcileGraceSeconds: ptr(60)},
 	}
-	cfg, err := ServerDefaults(func(k string) string { return env[k] })
+	file.Models.Rerank = &domain.ModelBinding{Model: "reranker"}
+	cfg, err := ServerDefaults(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range llmSlots {
+	for _, s := range domain.LLMSlots {
 		want := "gpt-default"
 		if s == domain.ModelSlotReflect {
 			want = "gpt-reflect"
@@ -25,18 +25,15 @@ func TestServerDefaults(t *testing.T) {
 			t.Errorf("slot %s = %q, want %q", s, got, want)
 		}
 	}
-	if got := modelOf(t, cfg, domain.ModelSlotRerank); got != "reranker" {
-		t.Errorf("rerank = %q", got)
-	}
-	if _, ok := cfg.Binding(domain.ModelSlotEmbed); ok {
-		t.Error("EMBED bound in BankConfig")
-	}
 	checks := map[string]bool{
-		"dedup 0.97":            *cfg.DedupThreshold == 0.97,
-		"batch 8":               *cfg.ConsolidationLLMBatchSize == 8,
-		"per-obs 256":           *cfg.ConsolidationSourceTokensPerObs == 256,
-		"units per run 100":     *cfg.ConsolidationMaxUnitsPerRun == 100,
-		"disposition 3":         *cfg.Disposition == domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3},
+		"rerank bound":          modelOf(t, cfg, domain.ModelSlotRerank) == "reranker",
+		"embed default":         cfg.Models.Embed != nil && cfg.Models.Embed.Model == DefaultEmbedModel,
+		"file wins":             *cfg.Observations.ReconcileGraceSeconds == 60,
+		"dedup 0.97":            *cfg.Observations.DedupThreshold == 0.97,
+		"batch 8":               *cfg.Observations.LLMBatchSize == 8,
+		"per-obs 256":           *cfg.Observations.SourceFactsMaxTokensPerObservation == 256,
+		"units per run 100":     *cfg.Observations.MaxUnitsPerRun == 100,
+		"disposition 3":         *cfg.Reflect.Disposition == domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3},
 		"temporal link cap 20":  *cfg.Retain.TemporalLinkCap == 20,
 		"entity match 0.6":      *cfg.Retain.EntityMatchThreshold == 0.6,
 		"budget mid 300":        *cfg.Recall.BudgetMid == 300,
@@ -48,7 +45,7 @@ func TestServerDefaults(t *testing.T) {
 		"debounce 30":           *cfg.MentalModels.RefreshDebounceSeconds == 30,
 		"history 50":            *cfg.MentalModels.HistoryMaxEntries == 50,
 		"agentic":               cfg.MentalModels.DefaultStrategy == domain.RefreshStrategyAgentic,
-		"max combinations 15":   *cfg.DefaultObservationScopes.MaxCombinations == 15,
+		"max combinations 15":   *cfg.Retain.DefaultObservationScopes.MaxCombinations == 15,
 	}
 	for name, ok := range checks {
 		if !ok {
@@ -57,18 +54,27 @@ func TestServerDefaults(t *testing.T) {
 	}
 }
 
-func TestServerDefaultsNoModels(t *testing.T) {
-	cfg, err := ServerDefaults(func(string) string { return "" })
+// TestServerDefaultsRerank: without a rerank binding recall.rerank defaults to false (recall skips the
+// cross-encoder instead of failing); asking for rerank without a binding is an error.
+func TestServerDefaultsRerank(t *testing.T) {
+	cfg, err := ServerDefaults(domain.BankConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Models) != 0 {
-		t.Fatalf("models = %+v, want none without env", cfg.Models)
-	}
-	if _, ok := cfg.Binding(domain.ModelSlotRerank); ok {
-		t.Fatal("rerank bound without MEMD_MODEL_RERANK")
+	if modelOf(t, cfg, domain.ModelSlotExtract) != "" || modelOf(t, cfg, domain.ModelSlotRerank) != "" {
+		t.Fatal("models bound without a defaults.models block")
 	}
 	if cfg.Recall.Rerank == nil || *cfg.Recall.Rerank {
 		t.Fatal("recall.rerank must default to false when RERANK is unbound")
+	}
+	_, err = ServerDefaults(domain.BankConfig{Recall: &domain.RecallConfig{Rerank: ptr(true)}})
+	if err == nil {
+		t.Fatal("recall.rerank true without models.rerank accepted")
+	}
+	_, err = ServerDefaults(domain.BankConfig{Reflect: &domain.ReflectConfig{
+		Disposition: &domain.Disposition{Empathy: 9},
+	}})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("bad disposition: err = %v, want InvalidArgument", err)
 	}
 }

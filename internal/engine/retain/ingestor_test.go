@@ -17,7 +17,11 @@ import (
 func TestIngestUnchangedMakesNoLLMCall(t *testing.T) {
 	e := newEnv(t, 0)
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("Alice likes tea")))
-	item := IngestItem{DocumentID: "d1", Content: "Alice likes tea.", Overrides: &domain.BankConfig{RetainMission: "m"}}
+	item := IngestItem{
+		DocumentID: "d1", Content: "Alice likes tea.", Overrides: &domain.BankConfig{
+			Retain: &domain.RetainConfig{Mission: "m"},
+		},
+	}
 	e.ingest(IngestRequest{Items: []IngestItem{item}})
 	before := e.document("d1")
 	seq, _ := e.store.Read().BankSeq(e.ctx, testBank)
@@ -50,7 +54,7 @@ func TestIngestUnchangedMakesNoLLMCall(t *testing.T) {
 		t.Error("force_reextract reported unchanged")
 	}
 	changed := item
-	changed.Overrides = &domain.BankConfig{RetainMission: "other"}
+	changed.Overrides = &domain.BankConfig{Retain: &domain.RetainConfig{Mission: "other"}}
 	if res := e.ingest(IngestRequest{Items: []IngestItem{changed}}); res.Documents[0].Unchanged {
 		t.Error("changed overrides reported unchanged")
 	}
@@ -135,12 +139,14 @@ func TestIngestAsyncEnqueuesChildrenUnderBatch(t *testing.T) {
 	e := newEnv(t, 0)
 	ts := e.clock.Now().Add(-48 * time.Hour)
 	res := e.ingest(IngestRequest{
-		RunAsync: true, DocumentTags: []string{"Team"}, Overrides: &domain.BankConfig{RetainMission: "req"},
+		RunAsync: true, DocumentTags: []string{"Team"}, Overrides: &domain.BankConfig{
+			Retain: &domain.RetainConfig{Mission: "req"},
+		},
 		Items: []IngestItem{
 			{
 				DocumentID: "d1", Content: "one", Tags: []string{"x"}, Timestamp: &ts, Context: "chat",
 				Entities:  []domain.EntityHint{{Text: "Alice", Type: "person"}},
-				Overrides: &domain.BankConfig{ExtractionMode: domain.ExtractionModeVerbose},
+				Overrides: &domain.BankConfig{Retain: &domain.RetainConfig{ExtractionMode: domain.ExtractionModeVerbose}},
 			},
 			{Content: "two", Timeless: true},
 		},
@@ -167,7 +173,7 @@ func checkFirstChild(e *env, j store.Job, res IngestResult, ts time.Time) {
 		t.Errorf("job = %+v", j)
 	}
 	o := j.Overrides
-	if o == nil || o.RetainMission != "req" || o.ExtractionMode != domain.ExtractionModeVerbose {
+	if o == nil || o.GetRetain().Mission != "req" || o.GetRetain().ExtractionMode != domain.ExtractionModeVerbose {
 		t.Errorf("job overrides = %+v, want request < item merged", o)
 	}
 	checkPayload(e, j, ts)
@@ -195,7 +201,7 @@ func checkPayload(e *env, j store.Job, ts time.Time) {
 // TestIngestValidation: bad requests fail with INVALID_ARGUMENT before anything is stored.
 func TestIngestValidation(t *testing.T) {
 	e := newEnv(t, 0)
-	custom := &domain.BankConfig{ExtractionMode: domain.ExtractionModeCustom}
+	custom := &domain.BankConfig{Retain: &domain.RetainConfig{ExtractionMode: domain.ExtractionModeCustom}}
 	cases := map[string]IngestRequest{
 		"no items": {Bank: testBank},
 		"no bank":  {Items: []IngestItem{{Content: "x"}}},

@@ -31,7 +31,7 @@ func retainRequestFromProto(r *pb.RetainRequest) (retain.IngestRequest, error) {
 		Bank:              domain.BankRef{Bank: r.GetBankId()},
 		Items:             d.retainItems(r.GetItems()),
 		DocumentTags:      r.GetDocumentTags(),
-		Overrides:         d.configPtr(r.GetOverrides()),
+		Overrides:         d.retainOverrides(r.GetOverrides()),
 		SkipConsolidation: r.GetSkipConsolidation(),
 		RunAsync:          r.GetRunAsync(),
 	}
@@ -44,7 +44,7 @@ func retainRequestToProto(r retain.IngestRequest) *pb.RetainRequest {
 		BankId:            r.Bank.Bank,
 		Items:             retainItemsToProto(r.Items),
 		DocumentTags:      r.DocumentTags,
-		Overrides:         configToProto(r.Overrides),
+		Overrides:         retainOverridesToProto(r.Overrides),
 		SkipConsolidation: r.SkipConsolidation,
 		RunAsync:          r.RunAsync,
 	}
@@ -63,7 +63,7 @@ func (d *decoder) retainItem(it *pb.RetainItem) retain.IngestItem {
 		Metadata:          it.GetMetadata(),
 		Entities:          entityHintsFromProto(it.GetEntities()),
 		ResolveEntities:   optCopy(it.ResolveEntities),
-		Overrides:         d.configPtr(it.GetOverrides()),
+		Overrides:         d.retainOverrides(it.GetOverrides()),
 		ForceReextract:    it.GetForceReextract(),
 	}
 }
@@ -81,7 +81,7 @@ func retainItemToProto(it retain.IngestItem) *pb.RetainItem {
 		Metadata:          it.Metadata,
 		Entities:          entityHintsToProto(it.Entities),
 		ResolveEntities:   optCopy(it.ResolveEntities),
-		Overrides:         configToProto(it.Overrides),
+		Overrides:         retainOverridesToProto(it.Overrides),
 		ForceReextract:    it.ForceReextract,
 	}
 }
@@ -177,7 +177,7 @@ func recallRequestFromProto(r *pb.RecallRequest) (recall.RecallRequest, error) {
 		MinScores:          minScoresFromProto(r.GetMinScores()),
 		Include:            recallIncludeFromProto(r.GetInclude()),
 		Trace:              r.GetTrace(),
-		Overrides:          d.configPtr(r.GetOverrides()),
+		Overrides:          d.recallOverrides(r.GetOverrides()),
 	}
 	return out, d.err
 }
@@ -206,7 +206,7 @@ func recallRequestToProto(r recall.RecallRequest) *pb.RecallRequest {
 		MinScores:          minScoresToProto(r.MinScores),
 		Include:            recallIncludeToProto(r.Include),
 		Trace:              r.Trace,
-		Overrides:          configToProto(r.Overrides),
+		Overrides:          recallOverridesToProto(r.Overrides),
 	}
 	if r.Window != nil {
 		out.TimeWindowStart = tsToProto(r.Window.Start)
@@ -352,7 +352,7 @@ func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.ReflectRequest, e
 		ExtraDirectives:    directivesFromProto(r.GetExtraDirectives()),
 		Include:            reflectIncludeFromProto(r.GetInclude()),
 		QueryTime:          d.tsPtr(r.GetQueryTime()),
-		Overrides:          d.configPtr(r.GetOverrides()),
+		Overrides:          d.reflectOverrides(r.GetOverrides()),
 	}
 	return out, d.err
 }
@@ -372,7 +372,7 @@ func reflectRequestToProto(r reflecteng.ReflectRequest) *pb.ReflectRequest {
 		ExtraDirectives:    directivesToProto(r.ExtraDirectives),
 		Include:            reflectIncludeToProto(r.Include),
 		QueryTime:          tsPtrToProto(r.QueryTime),
-		Overrides:          configToProto(r.Overrides),
+		Overrides:          reflectOverridesToProto(r.Overrides),
 	}
 }
 

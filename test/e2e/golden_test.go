@@ -29,7 +29,7 @@ func TestGoldenAgainstMemdAll(t *testing.T) {
 	s := e2eharness.StartStack(t)
 	_, gw := e2eharness.StartEmulator(t, gatewayemu.Options{})
 	all := s.StartMemd(t, bin, e2eharness.MemdOptions{
-		GatewayURL: gw.URL + gatewayemu.BasePath, Env: fastWorker, Mode: e2eharness.ModeAll,
+		GatewayURL: gw.URL + gatewayemu.BasePath, Config: fastWorker, Mode: e2eharness.ModeAll,
 	})
 	conn, err := grpc.NewClient(all.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

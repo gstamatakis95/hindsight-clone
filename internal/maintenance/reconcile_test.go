@@ -26,16 +26,24 @@ func (c bankConfigs) ForScope(context.Context, domain.ScopeKey, *domain.BankConf
 	panic("not used")
 }
 
-// cutoffBanks is a store.Maintenance whose UnconsolidatedBanks records the cut-off it was asked for.
-type cutoffBanks struct {
+// waitingBanks is a store.Maintenance whose UnconsolidatedBanks returns fixed banks with their oldest waiting
+// fact.
+type waitingBanks struct {
 	store.Maintenance
-	banks  []domain.BankRef
-	before []time.Time
+	banks []store.UnconsolidatedBank
 }
 
-func (c *cutoffBanks) UnconsolidatedBanks(_ context.Context, before time.Time) ([]domain.BankRef, error) {
-	c.before = append(c.before, before)
-	return c.banks, nil
+func (w waitingBanks) UnconsolidatedBanks(context.Context, time.Time) ([]store.UnconsolidatedBank, error) {
+	return w.banks, nil
+}
+
+// waiting lists banks whose oldest fact has waited since the zero time (longer than any grace).
+func waiting(bs ...domain.BankRef) waitingBanks {
+	var w waitingBanks
+	for _, b := range bs {
+		w.banks = append(w.banks, store.UnconsolidatedBank{Bank: b})
+	}
+	return w
 }
 
 // graphBanks is a store.Maintenance whose BanksWithGraphWork returns fixed banks.
@@ -56,11 +64,11 @@ func TestConsolidationReconcileSkipsDisabledBanks(t *testing.T) {
 	bankD := domain.BankRef{Tenant: "t3", Bank: "gone"}
 	deps := New(Deps{
 		Claimer: ops, Store: ops, Clock: clock, Logger: quiet,
-		Consolidation: &cutoffBanks{banks: []domain.BankRef{bankA, bankB, bankC, bankD}},
+		Consolidation: waiting(bankA, bankB, bankC, bankD),
 		Resolver: bankConfigs{
-			bankA: {AutoConsolidation: ptrBool(true), EnableObservations: ptrBool(true)},
-			bankB: {AutoConsolidation: ptrBool(false), EnableObservations: ptrBool(true)},
-			bankC: {AutoConsolidation: ptrBool(true), EnableObservations: ptrBool(false)},
+			bankA: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(true), Enabled: ptrBool(true)}),
+			bankB: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(false), Enabled: ptrBool(true)}),
+			bankC: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(true), Enabled: ptrBool(false)}),
 		},
 	})
 	n, err := deps.reconcileConsolidation(context.Background())
@@ -74,34 +82,42 @@ func TestConsolidationReconcileSkipsDisabledBanks(t *testing.T) {
 	}
 }
 
-// The tick asks only for units older than the grace (default 10 min, configurable),
-// so a skip_consolidation retain followed by a manual Consolidate within the grace is not pre-empted.
+// The tick consolidates a bank only once its oldest waiting fact is older than the bank's own
+// observations.reconcile_grace_seconds (default 10 min), so a skip_consolidation retain followed by a manual
+// Consolidate within the grace is not pre-empted.
 func TestConsolidationReconcileGrace(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		grace time.Duration
-		want  time.Duration
-	}{
-		{"default", 0, DefaultConsolidationGrace},
-		{"configured", 3 * time.Minute, 3 * time.Minute},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			clock := newClock()
-			ops := newOps(t)
-			src := &cutoffBanks{}
-			deps := New(Deps{
-				Claimer: ops, Store: ops, Clock: clock, Logger: quiet, Consolidation: src,
-				Config: Config{ConsolidationGrace: tc.grace},
-			})
-			if _, err := deps.reconcileConsolidation(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if len(src.before) != 1 || !src.before[0].Equal(clock.Now().Add(-tc.want)) {
-				t.Fatalf("cut-off %v, want now - %v", src.before, tc.want)
-			}
-		})
+	clock := newClock()
+	ops := newOps(t)
+	fiveMinutesAgo := clock.Now().Add(-5 * time.Minute)
+	src := waitingBanks{banks: []store.UnconsolidatedBank{
+		{Bank: bankA, Oldest: fiveMinutesAgo},
+		{Bank: bankB, Oldest: fiveMinutesAgo},
+		{Bank: bankC, Oldest: fiveMinutesAgo},
+	}}
+	deps := New(Deps{
+		Claimer: ops, Store: ops, Clock: clock, Logger: quiet, Consolidation: src,
+		Resolver: bankConfigs{
+			bankA: observations(domain.ObservationConfig{ReconcileGraceSeconds: ptrInt(180)}),
+			bankB: {},
+			bankC: observations(domain.ObservationConfig{ReconcileGraceSeconds: ptrInt(600)}),
+		},
+	})
+	if _, err := deps.reconcileConsolidation(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for b, want := range map[domain.BankRef]int{bankA: 1, bankB: 0, bankC: 0} {
+		if got := ops.countBank(b, domain.OperationKindConsolidate, ""); got != want {
+			t.Errorf("bank %v: %d consolidate jobs, want %d", b, got, want)
+		}
 	}
 }
+
+// observations is a config with only the observations group set.
+func observations(o domain.ObservationConfig) domain.BankConfig {
+	return domain.BankConfig{Observations: &o}
+}
+
+func ptrInt(v int) *int { return &v }
 
 // A delete_bank that ReclaimStale fails at its attempt cap is re-enqueued by the
 // same tick's resume step, and later ticks join that row instead of adding more.

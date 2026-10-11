@@ -77,7 +77,7 @@ v1 matches Hindsight's memory engine except agent tooling, mounts, security scan
 
 ## Model routing
 
-Every LLM-backed operation has its own slot, and each slot binds to any gateway model with its own parameters. Bindings merge per slot across server < tenant < bank < strategy < request: the most specific level that sets a slot wins, and setting one slot never clears the others.
+Every model-backed step has its own slot, and each slot binds to any gateway model with its own parameters. `BankConfig.models` (ModelBindings) holds `default` plus one optional binding per slot at every level: server (the server config file's `defaults` block) < tenant < bank < strategy < request. For each slot the most specific level that yields a binding wins, where a level yields its own binding for the slot, else its `default` (chat slots only). So `models.default` on a bank swaps every chat step of that bank, and `models.extract` on a request changes one step. The winning binding is used whole. RERANK and EMBED are bound by name only, never by a default.
 
 | Slot | Used by | Request override |
 |---|---|---|
@@ -87,10 +87,9 @@ Every LLM-backed operation has its own slot, and each slot binds to any gateway 
 | DEDUP_CHECK | Merge-or-keep check for near-duplicate observations | Consolidate request, strategy |
 | REFLECT | Tool-calling turns of the reflect loop and of agentic refresh | ReflectRequest, RefreshMentalModel |
 | STRUCTURED_OUTPUT | Second pass projecting prose into a JSON Schema | ReflectRequest |
-| SYNTHESIZE | Single-shot mental-model refresh (full) | RefreshMentalModel, stored on the model |
-| MENTAL_MODEL_DELTA | Edit ops for incremental page refresh | RefreshMentalModel, stored on the model |
+| MENTAL_MODEL | Single-shot mental-model refresh: the full page and the delta edit ops | RefreshMentalModel, stored on the model |
 | RERANK | Cross-encoder scores in recall | RecallRequest |
-| EMBED | Units, observations, queries, page search | None: server-wide nomic-embed-text-v1.5, 768 dims |
+| EMBED | Units, observations, queries, page search | None: server config file only (default nomic-embed-text-v1.5, 768 dims) |
 
 - **Binding fields:** model name, temperature, max output tokens, reasoning effort, plus a free-form `extra` object passed through to the OpenAI-compatible request body.
 - **Embedding is global:** one model for the deployment, nomic-embed-text-v1.5 at 768 dimensions, so `memory_units.embedding` is `vector(768)` with one HNSW index. The adapter adds nomic's `search_document:` / `search_query:` prefixes, which the model needs for good retrieval. Changing the model means re-embedding everything (not in v1).
@@ -893,17 +892,17 @@ message ListEventsRequest { string bank_id = 1; int64 after_seq = 2; int32 limit
 message ListEventsResponse { repeated LifecycleEvent events = 1; int64 last_seq = 2; }
 ```
 
-**Per-request overrides.** Every request that does work takes a full `BankConfig overrides`, merged as server < tenant < bank < strategy < request (< item, for retain). Fields the RPC can't use are rejected with `INVALID_ARGUMENT`, never silently ignored. A request can never change the embedding model (server-wide) or remove the bank's stored directives (a reflect call can add `extra_directiv``es`).
+**Per-request overrides.** Every request that does work takes its own overrides message, holding only what that RPC can change; the server converts it into a `BankConfig` level merged as server < tenant < bank < strategy < request (< item, for retain). A request can never change the embedding model (server-wide) or remove the bank's stored directives (a reflect call can add `extra_directiv``es`).
 
 | Request | What the override reaches | Where it is kept |
 |---|---|---|
-| Retain (request + per item) | extraction mode and prompt, retain mission, labels, retain tuning, EXTRACT / TIME_PARSE models | Stored on the document (its hash is part of the no-op check), so ReprocessDocument replays it unless given new overrides |
-| Recall | every RecallConfig field, TIME_PARSE / RERANK models, explicit time window | Request only |
-| Reflect | missions, disposition, ReflectConfig, nested recall config, REFLECT / STRUCTURED_OUTPUT / RERANK models, extra directives | Request only |
-| Consolidate | observations mission, caps, dedup threshold, strategies, CONSOLIDATE / DEDUP_CHECK models | On its operation row; applies to that run only |
-| ReprocessDocument | same as retain | Replaces the document's stored overrides |
-| UpdateMemory | entity resolution, EXTRACT / TIME_PARSE models used when re-deriving | On the rederive operation row |
-| RefreshMentalModel / MentalModelSpec.overrides | reflect and mental-model config, refresh strategy, REFLECT / SYNTHESIZE / MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models | Per call (on the operation), or stored on the model for every refresh |
+| Retain (request + per item): RetainOverrides | the retain group (mission, extraction mode and prompt, labels, default scopes, chunking and linking), EXTRACT / TIME_PARSE models | Stored on the document (its hash is part of the no-op check), so ReprocessDocument replays it unless given new overrides |
+| Recall: RecallOverrides | every RecallConfig field, TIME_PARSE / RERANK models (plus the request's explicit time window) | Request only |
+| Reflect: ReflectOverrides | the reflect group (mission, disposition, loop), recall config, REFLECT / STRUCTURED_OUTPUT / RERANK models (extra directives come on the request) | Request only |
+| Consolidate: ConsolidateOverrides | observations mission, caps, batch size, units per run, dedup threshold, strategies, CONSOLIDATE / DEDUP_CHECK models | On its operation row; applies to that run only |
+| ReprocessDocument: RetainOverrides | same as retain | Replaces the document's stored overrides |
+| UpdateMemory: RederiveOverrides | entity match threshold, EXTRACT / TIME_PARSE models used when re-deriving | On the rederive operation row |
+| RefreshMentalModel / MentalModelSpec.overrides: RefreshOverrides | the reflect group, max_delta_ratio, REFLECT / MENTAL_MODEL / STRUCTURED_OUTPUT models | Per call (on the operation), or stored on the model for every refresh |
 
 Automatic consolidation after a retain does not inherit that retain's overrides: a bank's consolidation mixes facts from many requests, so it uses bank config plus any matching strategy. Use `skip_consolidation` and a manual Consolidate call when a batch needs its own settings. A job that carries overrides is never merged into another queued job: it runs as its own pass, after the bank's running consolidation finishes. Every operation records `effective_overrides`, so you can see what a run actually used.
 

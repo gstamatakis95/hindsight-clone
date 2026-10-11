@@ -20,12 +20,9 @@ import (
 
 // Fast worker timings for the scenarios: a crashed worker's job is reclaimed within seconds instead of the
 // production 2 minutes (one value feeds the runner and the reclaim, as in production).
-var fastWorker = map[string]string{
-	"MEMD_POLL_INTERVAL":        "100ms",
-	"MEMD_HEARTBEAT_INTERVAL":   "1s",
-	"MEMD_STALE_AFTER":          "6s",
-	"MEMD_MAINTENANCE_INTERVAL": "2s",
-}
+var fastWorker = map[string]any{"worker": map[string]any{
+	"poll_interval": "100ms", "heartbeat_interval": "1s", "stale_after": "6s", "maintenance_interval": "2s",
+}}
 
 // env is one running memd (api and worker as separate processes) over one compose stack and the emulator.
 type env struct {
@@ -42,7 +39,7 @@ func startEnv(t *testing.T) *env {
 	bin := harness.BuildMemd(t)
 	s := harness.StartStack(t)
 	emu, gw := harness.StartEmulator(t, gatewayemu.Options{})
-	opts := harness.MemdOptions{GatewayURL: gw.URL + gatewayemu.BasePath, Env: fastWorker, Mode: harness.ModeAPI}
+	opts := harness.MemdOptions{GatewayURL: gw.URL + gatewayemu.BasePath, Config: fastWorker, Mode: harness.ModeAPI}
 	api := s.StartMemd(t, bin, opts)
 	opts.Mode = harness.ModeWorker
 	w := s.StartMemd(t, bin, opts)

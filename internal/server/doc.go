@@ -29,7 +29,7 @@
 //     non-empty value is required, else INVALID_ARGUMENT. The tenant is never read from the request body
 //     (auth is out of scope). Health checks need no tenant. [TenantFrom] / [WithTenant] read and set it.
 //   - [DeadlineInterceptor] gives a call without a deadline the default one (Deps.DefaultDeadline, from
-//     MEMD_RPC_DEADLINE in cmd/memd); 0 = none.
+//     api.rpc_deadline in the server config file); 0 = none.
 //   - The paging interceptor rejects a negative page_size or limit field with INVALID_ARGUMENT; 0 keeps
 //     meaning "the server default".
 //
@@ -38,12 +38,14 @@
 //
 // # Request overrides
 //
-// Every RPC that takes a BankConfig runs Deps.ValidateOverrides (config.ValidateOverrides) with its method
-// name before calling the engine, so a field the RPC cannot use is INVALID_ARGUMENT instead of being silently
-// ignored (SPEC "gRPC surface", Per-request overrides). Retain checks the request and every item's
-// overrides; mental-model specs are checked as config.RPCMentalModelSpec; whole-level writes (CreateBank,
-// CreateBankFromTemplate, UpdateBankConfig, UpdateTenantConfig) are checked as config.RPCBankConfig, against
-// the patched level inside the patch. ResetBankConfig is not checked: it only unsets fields.
+// Each RPC that does work takes its own overrides message (RetainOverrides, RecallOverrides, ReflectOverrides,
+// ConsolidateOverrides, RederiveOverrides, RefreshOverrides), so the schema says what it can change;
+// convert_overrides.go turns each into the BankConfig level the engines merge, and reads stored levels back (a
+// document's retain_overrides, a model's spec overrides). PreviewPrompt takes one of them, matching its
+// operation. Every config the server is given passes config.Validate before the engine sees it: request and
+// item overrides, mental-model specs, and whole levels (CreateBank, CreateBankFromTemplate, UpdateBankConfig,
+// UpdateTenantConfig), the latter against the patched level inside the patch. ResetBankConfig is not checked:
+// it only unsets fields; it needs at least one path, and "*" resets everything.
 //
 // # FieldMask patches
 //

@@ -39,7 +39,7 @@ func mtEnsure(t *testing.T, s *postgres.DB, bs ...domain.BankRef) {
 }
 
 // TestUnconsolidatedBanks checks the consolidation reconcile's read: only units created before the cut-off
-// count, consolidated units and tombstoned banks never do.
+// count, consolidated units and tombstoned banks never do, and each bank comes with its oldest waiting fact.
 func TestUnconsolidatedBanks(t *testing.T) {
 	t.Parallel()
 	s := pgtest.NewStore(t)
@@ -53,18 +53,28 @@ func TestUnconsolidatedBanks(t *testing.T) {
 	stamped.ConsolidatedAt = &now
 	fuInsert(t, s, stamped)
 
-	got, err := s.UnconsolidatedBanks(ctx, now.Add(-10*time.Minute))
-	if want := []domain.BankRef{fuBank}; err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("before the grace cut-off: %v %v, want %v", got, err, want)
+	list := func(before time.Time) []string {
+		t.Helper()
+		got, err := s.UnconsolidatedBanks(ctx, before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, b := range got {
+			out = append(out, b.Bank.Bank+"@"+b.Oldest.UTC().Format(time.RFC3339))
+		}
+		return out
 	}
-	got, err = s.UnconsolidatedBanks(ctx, now)
-	if want := []domain.BankRef{fuBank, fuOther}; err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("cut-off now: %v %v, want %v", got, err, want)
+	at := func(b domain.BankRef, ts time.Time) string { return b.Bank + "@" + ts.Format(time.RFC3339) }
+	if got, want := list(now.Add(-10*time.Minute)), []string{at(fuBank, old)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("before the grace cut-off: %v, want %v", got, want)
+	}
+	if got, want := list(now), []string{at(fuBank, old), at(fuOther, fresh)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("cut-off now: %v, want %v", got, want)
 	}
 	fuMarkDeleting(t, s, fuBank)
-	got, err = s.UnconsolidatedBanks(ctx, now)
-	if want := []domain.BankRef{fuOther}; err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("tombstoned bank listed: %v %v, want %v", got, err, want)
+	if got, want := list(now), []string{at(fuOther, fresh)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tombstoned bank listed: %v, want %v", got, want)
 	}
 }
 

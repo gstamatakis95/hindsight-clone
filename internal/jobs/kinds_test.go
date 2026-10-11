@@ -14,7 +14,7 @@ import (
 func TestCatalogueRows(t *testing.T) {
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	ov := &domain.BankConfig{RetainMission: "m"}
+	ov := &domain.BankConfig{Retain: &domain.RetainConfig{Mission: "m"}}
 	must := func(j store.Job, err error) store.Job {
 		t.Helper()
 		if err != nil {

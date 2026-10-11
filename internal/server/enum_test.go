@@ -10,8 +10,9 @@ import (
 
 // TestUnknownEnumRejected checks an undefined enum number is INVALID_ARGUMENT.
 func TestUnknownEnumRejected(t *testing.T) {
-	_, err := configFromProto(&pb.BankConfig{ExtractionMode: pb.ExtractionMode(99)})
-	if err == nil || !errors.Is(err, domain.ErrInvalidArgument) {
+	var d decoder
+	d.config(&pb.BankConfig{Retain: &pb.RetainConfig{ExtractionMode: pb.ExtractionMode(99)}})
+	if err := d.err; err == nil || !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want ErrInvalidArgument", err)
 	}
 	if got := toEnum[pb.FactType](domain.FactType("bogus")); got != pb.FactType_FACT_TYPE_UNSPECIFIED {

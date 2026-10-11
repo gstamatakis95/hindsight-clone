@@ -21,7 +21,7 @@ func deltaSpec(id string, strategy domain.RefreshStrategy) domain.MentalModelSpe
 	}
 }
 
-// opsJSON renders delta ops as the MENTAL_MODEL_DELTA response.
+// opsJSON renders delta ops as the delta response.
 func opsJSON(ops ...map[string]any) string {
 	full := make([]map[string]any, len(ops))
 	for i, op := range ops {
@@ -166,14 +166,14 @@ func TestLateCommittingWriterPickedUpByNextRefresh(t *testing.T) {
 	if err != nil || !stale {
 		t.Fatalf("model not stale after a late writer: %v %v", stale, err)
 	}
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob took over."},
 	}))
 	out, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls := e.llm.CallsFor(domain.ModelSlotMentalModelDelta, deltaPrompt)
+	calls := e.llm.CallsFor(domain.ModelSlotMentalModel, deltaPrompt)
 	if out.Trace.EffectiveMode != domain.RefreshModeDelta || len(calls) != 1 ||
 		!strings.Contains(calls[0].Structured.User, "Bob took over the project") {
 		t.Fatalf("mode %s, delta calls %d", out.Trace.EffectiveMode, len(calls))
@@ -203,14 +203,14 @@ func TestDeltaAllOpsRejectedKeepsDocument(t *testing.T) {
 			e := newEnv(t)
 			before, _ := builtModel(e, strategy)
 			e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-			e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
+			e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 				"kind": "append_block", "section_id": "no-such-section", "blocks_md": []string{"Bob joined."},
 			}))
 			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: opID("op1")})
 			if !errors.Is(err, ErrAllOpsRejected) || out.Trace.Outcome != domain.RefreshOutcomeFailed {
 				t.Fatalf("err %v outcome %s", err, out.Trace.Outcome)
 			}
-			calls := e.llm.CallsFor(domain.ModelSlotMentalModelDelta, deltaPrompt)
+			calls := e.llm.CallsFor(domain.ModelSlotMentalModel, deltaPrompt)
 			if len(calls) != 2 || !strings.Contains(calls[1].Structured.User, "Previous attempt rejected") ||
 				!strings.Contains(calls[1].Structured.User, "unknown section_id") {
 				t.Fatalf("want one retry showing the rejected op, got %d calls", len(calls))
@@ -232,7 +232,7 @@ func TestDeltaRetrySucceedsAndSourcesAccumulate(t *testing.T) {
 	e := newEnv(t)
 	_, first := builtModel(e, domain.RefreshStrategySingleShot)
 	second := e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	e.llm.Script(domain.ModelSlotMentalModelDelta, deltaPrompt,
+	e.llm.Script(domain.ModelSlotMentalModel, deltaPrompt,
 		fakeJSON(opsJSON(map[string]any{"kind": "remove_block", "section_id": "status", "block_id": "bnope"})),
 		fakeJSON(opsJSON(map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob."}})))
 	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
@@ -284,7 +284,7 @@ func TestDryRunWritesNothing(t *testing.T) {
 	e := newEnv(t)
 	before, _ := builtModel(e, domain.RefreshStrategySingleShot)
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob joined."},
 	}))
 	seq, _ := e.store.Read().BankSeq(e.ctx, e.bank)
@@ -326,7 +326,7 @@ func TestRefreshConflictWhenModelChanged(t *testing.T) {
 	e := newEnv(t)
 	builtModel(e, domain.RefreshStrategySingleShot)
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt,
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt,
 		opsJSON(map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob."}}))
 	clear := func() {
 		e.tx(func(tx store.Tx) error {

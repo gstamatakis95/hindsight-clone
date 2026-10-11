@@ -1,14 +1,18 @@
 -- UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
--- with an embedding created before @before (decision 2000): the §0 predicate as in ScopeUnconsolidated plus the
--- grace cut-off, over the partial index (tenant_id, bank_id, created_at).
+-- with an embedding created before @before, each with its oldest such fact's created_at (the caller compares it
+-- with the bank's own reconcile grace): the §0 predicate as in ScopeUnconsolidated, over the partial index
+-- (tenant_id, bank_id, created_at).
 -- name: UnconsolidatedBanks :many
-SELECT b.tenant_id, b.id FROM banks b
-WHERE b.deleting_at IS NULL AND EXISTS (
-    SELECT 1 FROM memory_units u
+SELECT b.tenant_id, b.id, o.created_at AS oldest FROM banks b
+CROSS JOIN LATERAL (
+    SELECT u.created_at FROM memory_units u
     WHERE u.tenant_id = b.tenant_id AND u.bank_id = b.id
       AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
       AND u.embedding IS NOT NULL AND u.created_at < @before::timestamptz
-)
+    ORDER BY u.created_at
+    LIMIT 1
+) o
+WHERE b.deleting_at IS NULL
 ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C";
 
 -- StalledBankDeletes returns, in byte order, the tombstoned banks with no pending or processing delete_bank

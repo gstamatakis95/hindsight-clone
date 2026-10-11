@@ -342,7 +342,9 @@ func TestRetainStampsSeqAndEnqueuesConsolidate(t *testing.T) {
 	}
 	off := false
 	if err := e2.store.InTx(e2.ctx, func(tx store.Tx) error {
-		return tx.Banks().SetConfig(e2.ctx, testBank, domain.BankConfig{EnableObservations: &off})
+		return tx.Banks().SetConfig(e2.ctx, testBank, domain.BankConfig{
+			Observations: &domain.ObservationConfig{Enabled: &off},
+		})
 	}); err != nil {
 		t.Fatal(err)
 	}

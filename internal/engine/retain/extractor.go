@@ -63,7 +63,7 @@ func NewExtractor(llm ai.LLM, router *ai.Router, modes ...ExtractionStrategy) Ex
 
 // Extract implements Extractor. An unset mode is concise; an unknown one is domain.ErrInvalidArgument.
 func (e *extractor) Extract(ctx context.Context, in extractInput) ([]domain.ExtractedFact, []domain.Usage, error) {
-	mode := in.Config.ExtractionMode
+	mode := in.Config.GetRetain().ExtractionMode
 	if mode == domain.ExtractionModeUnspecified {
 		mode = domain.ExtractionModeConcise
 	}
@@ -91,7 +91,7 @@ func (e *extractor) Extract(ctx context.Context, in extractInput) ([]domain.Extr
 	}
 	pc := parseConfig{
 		verbatim: s.KeepsChunkText(), chunk: in.Text, causal: tuningOf(in.Config).causal,
-		freeForm: boolOr(in.Config.EntitiesAllowFreeForm, true),
+		freeForm: boolOr(in.Config.GetRetain().EntitiesAllowFreeForm, true),
 	}
 	return parseFacts(resp.Facts, pc), []domain.Usage{usage}, nil
 }

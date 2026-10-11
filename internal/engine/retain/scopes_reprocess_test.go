@@ -95,7 +95,7 @@ func checkReprocessPayload(t *testing.T, j store.Job, p jobs.RetainPayload) {
 	if p.ContentHash != ContentHash("some text") {
 		t.Errorf("payload content hash %q, want the stored text's", p.ContentHash)
 	}
-	if j.Overrides == nil || j.Overrides.RetainMission != "stored" {
+	if j.Overrides == nil || j.Overrides.GetRetain().Mission != "stored" {
 		t.Errorf("job overrides = %+v, want the stored ones replayed", j.Overrides)
 	}
 }
@@ -109,7 +109,9 @@ func TestReprocessCarriesScopesAndOverrides(t *testing.T) {
 	e.ingest(IngestRequest{Items: []IngestItem{{
 		DocumentID: "d1", Content: "some text", Tags: []string{"a"}, Context: "chat", Timestamp: &reprocessAt,
 		ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag},
-		Metadata:          map[string]string{"k": "v"}, Overrides: &domain.BankConfig{RetainMission: "stored"},
+		Metadata:          map[string]string{"k": "v"}, Overrides: &domain.BankConfig{
+			Retain: &domain.RetainConfig{Mission: "stored"},
+		},
 	}}})
 	rp := NewReprocessor(e.store)
 
@@ -144,12 +146,14 @@ func TestReprocessCarriesScopesAndOverrides(t *testing.T) {
 // and the job, and the item scopes stay.
 func checkReprocessNewOverrides(t *testing.T, e *env, rp Reprocessor) {
 	t.Helper()
-	if _, err := rp.Reprocess(e.ctx, testBank, "d1", &domain.BankConfig{RetainMission: "new"}); err != nil {
+	if _, err := rp.Reprocess(e.ctx, testBank, "d1", &domain.BankConfig{
+		Retain: &domain.RetainConfig{Mission: "new"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	j, _ := e.reprocessJob()
 	d := e.document("d1")
-	if d.Overrides == nil || d.Overrides.RetainMission != "new" || j.Overrides.RetainMission != "new" ||
+	if d.Overrides == nil || d.Overrides.GetRetain().Mission != "new" || j.Overrides.GetRetain().Mission != "new" ||
 		d.ObservationScopes == nil {
 		t.Errorf("new overrides: document %+v, job overrides %+v", d, j.Overrides)
 	}

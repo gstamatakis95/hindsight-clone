@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"memd/internal/ai"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/server"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,12 +22,32 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// baseEnv is a valid environment.
-func baseEnv() map[string]string {
+// baseFile is a valid server config file: every chat step on one model, fast worker timings.
+const baseFile = `
+defaults:
+  models:
+    default: {model: m}
+worker:
+  stale_after: 8s
+  heartbeat_interval: 1s
+`
+
+// writeConfig writes a server config file into a temporary directory and returns its path.
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "memd.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// baseEnv is a valid environment over a server config file holding body.
+func baseEnv(t *testing.T, body string) map[string]string {
+	t.Helper()
 	return map[string]string{
 		envDSN: "postgres://x", envGatewayURL: "http://gw/v1", envS3Bucket: "memd", envS3PathStyle: "true",
-		envS3AccessKey: "ak", envS3SecretKey: "sk", envStaleAfter: "8s", envHeartbeatInterval: "1s",
-		ai.EnvModel: "m",
+		envS3AccessKey: "ak", envS3SecretKey: "sk", envConfig: writeConfig(t, body),
 	}
 }
 
@@ -68,7 +90,7 @@ func TestEffectiveWorkerID(t *testing.T) {
 // TestValidateS3Keys: both static S3 keys are required.
 func TestValidateS3Keys(t *testing.T) {
 	for _, drop := range [][]string{{envS3AccessKey}, {envS3SecretKey}, {envS3AccessKey, envS3SecretKey}} {
-		env := baseEnv()
+		env := baseEnv(t, baseFile)
 		for _, k := range drop {
 			delete(env, k)
 		}
@@ -76,51 +98,126 @@ func TestValidateS3Keys(t *testing.T) {
 			t.Errorf("without %v: %v, want the S3 key error", drop, err)
 		}
 	}
-	if _, err := loadValidate([]string{"api"}, baseEnv()); err != nil {
+	if _, err := loadValidate([]string{"api"}, baseEnv(t, baseFile)); err != nil {
 		t.Fatalf("both keys: %v", err)
 	}
 }
 
-// TestRequiredSlots: startup fails when EXTRACT or REFLECT has no model.
-func TestRequiredSlots(t *testing.T) {
-	env := baseEnv()
-	delete(env, ai.EnvModel)
-	_, err := loadValidate([]string{"all"}, env)
-	for _, slot := range []string{"EXTRACT", "REFLECT"} {
-		if err == nil || !strings.Contains(err.Error(), ai.EnvModelPrefix+slot) {
-			t.Errorf("no models: %v, want a %s error", err, slot)
-		}
-	}
-	env[ai.EnvModelPrefix+"EXTRACT"] = "x"
-	if _, err := loadValidate([]string{"all"}, env); err == nil || !strings.Contains(err.Error(), "REFLECT") {
-		t.Errorf("only EXTRACT bound: %v, want a REFLECT error", err)
-	}
-	env[ai.EnvModelPrefix+"REFLECT"] = "r"
-	if _, err := loadValidate([]string{"all"}, env); err != nil {
-		t.Errorf("EXTRACT and REFLECT bound: %v", err)
-	}
-}
-
-// TestSlotConcurrencyEnv: MEMD_GATEWAY_MAX_CONCURRENT_<SLOT> reaches Config.SlotConcurrency
-// (and from there gateway.Config.SlotConcurrency); bad values are rejected.
-func TestSlotConcurrencyEnv(t *testing.T) {
-	env := baseEnv()
-	env[envGatewayConcurrency+"_EXTRACT"] = "3"
-	env[envGatewayConcurrency+"_EMBED"] = " 7 "
-	cfg, err := loadValidate([]string{"worker"}, env)
+// TestServerFile checks the server config file: its defaults block is the server level (models included), its
+// operator sections reach Config, unset sections take their defaults, and a bad file fails with a message
+// naming the key.
+func TestServerFile(t *testing.T) {
+	cfg, err := loadValidate([]string{"worker"}, baseEnv(t, `
+defaults:
+  models:
+    default: {model: cheap}
+    reflect: {model: strong, temperature: 0.2}
+    rerank: {model: reranker}
+  observations: {reconcile_grace_seconds: 60}
+gateway:
+  max_concurrent: 8
+  timeout: 30s
+  slot_concurrency: {extract: 3, embed: 7}
+retention: {operations: 24h}
+api: {rpc_deadline: 0s}
+`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[domain.ModelSlot]int{domain.ModelSlotExtract: 3, domain.ModelSlotEmbed: 7}
-	if !maps.Equal(cfg.SlotConcurrency, want) {
-		t.Fatalf("SlotConcurrency = %v, want %v", cfg.SlotConcurrency, want)
+	server, err := cfg.File.validate()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, bad := range []string{"x", "0", "-1"} {
-		env[envGatewayConcurrency+"_RERANK"] = bad
-		if _, err := loadValidate([]string{"worker"}, env); err == nil {
-			t.Errorf("%s_RERANK=%q accepted", envGatewayConcurrency, bad)
+	f := cfg.File
+	checks := map[string]bool{
+		"default model":   modelOf(server, domain.ModelSlotExtract) == "cheap",
+		"slot model":      modelOf(server, domain.ModelSlotReflect) == "strong",
+		"rerank":          modelOf(server, domain.ModelSlotRerank) == "reranker",
+		"embed default":   server.Models.Embed.Model == config.DefaultEmbedModel,
+		"grace":           *server.Observations.ReconcileGraceSeconds == 60,
+		"max concurrent":  f.Gateway.MaxConcurrent == 8,
+		"timeout":         time.Duration(f.Gateway.Timeout) == 30*time.Second,
+		"slot caps":       maps.Equal(f.Gateway.SlotConcurrency, map[domain.ModelSlot]int{"extract": 3, "embed": 7}),
+		"retention":       time.Duration(f.Retention.Operations) == 24*time.Hour,
+		"event default":   time.Duration(f.Retention.Events) == defaultEventKeep,
+		"poll default":    time.Duration(f.Worker.PollInterval) == defaultPollInterval,
+		"no rpc deadline": *f.API.RPCDeadline == 0,
+	}
+	for name, ok := range checks {
+		if !ok {
+			t.Errorf("%s: %+v", name, f)
 		}
 	}
+	for name, tc := range map[string]struct{ body, want string }{
+		"no models":         {"worker: {poll_interval: 1s}", "defaults.models.default or defaults.models.extract"},
+		"only extract":      {"defaults: {models: {extract: {model: x}}}", "defaults.models.reflect"},
+		"unknown key":       {baseFile + "gateway: {max_concurent: 3}", "max_concurent"},
+		"unknown group key": {"defaults: {retain: {mision: x}}", "mision"},
+		"bad duration":      {baseFile + "retention: {events: soon}", "soon"},
+		"unknown slot cap":  {baseFile + "gateway: {slot_concurrency: {synthesize: 2}}", "synthesize"},
+		"zero slot cap":     {baseFile + "gateway: {slot_concurrency: {extract: 0}}", "extract"},
+		"slow heartbeat": {
+			"defaults: {models: {default: {model: m}}}\nworker: {stale_after: 8s, heartbeat_interval: 6s}",
+			"heartbeat_interval",
+		},
+		"bad disposition": {
+			"defaults: {models: {default: {model: m}}, reflect: {disposition: {empathy: 9}}}",
+			"disposition",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadValidate([]string{"worker"}, baseEnv(t, tc.body))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one naming %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestExampleConfig: the shipped memd.example.yaml loads, validates and means what its comments say.
+func TestExampleConfig(t *testing.T) {
+	env := baseEnv(t, "")
+	env[envConfig] = filepath.Join("..", "..", "memd.example.yaml")
+	cfg, err := loadValidate([]string{"all"}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := cfg.File.validate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if modelOf(server, domain.ModelSlotExtract) != "gpt-4o-mini" || modelOf(server, domain.ModelSlotReflect) != "gpt-4o" ||
+		modelOf(server, domain.ModelSlotRerank) != "" || *server.Recall.Rerank ||
+		server.Retain.ExtractionMode != domain.ExtractionModeConcise ||
+		time.Duration(cfg.File.Worker.StaleAfter) != defaultStaleAfter {
+		t.Fatalf("example config read as %+v / %+v", server, cfg.File)
+	}
+}
+
+// TestServerFilePath: the default ./memd.yaml may be absent, an explicit MEMD_CONFIG must exist.
+func TestServerFilePath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	env := baseEnv(t, baseFile)
+	delete(env, envConfig)
+	if _, err := LoadConfig([]string{"api"}, func(k string) string { return env[k] }); err != nil {
+		t.Fatalf("no ./memd.yaml: %v", err)
+	}
+	if err := os.WriteFile(defaultConfigPath, []byte(baseFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadValidate([]string{"api"}, env); err != nil {
+		t.Fatalf("./memd.yaml: %v", err)
+	}
+	env[envConfig] = filepath.Join(t.TempDir(), "missing.yaml")
+	if _, err := LoadConfig([]string{"api"}, func(k string) string { return env[k] }); err == nil {
+		t.Fatal("missing explicit config file accepted")
+	}
+}
+
+// modelOf is the model cfg yields for slot, or "".
+func modelOf(cfg domain.BankConfig, slot domain.ModelSlot) string {
+	b, _ := cfg.Binding(slot)
+	return b.Model
 }
 
 // failingProbe is a readiness probe that fails while fail is set.
@@ -177,9 +274,9 @@ func TestWorkerHealthServer(t *testing.T) {
 }
 
 // TestLoadConfigEnvAndFlags checks defaults, environment values, flags winning over the environment, and
-// the e2e harness's variable names (decision 1411).
+// the e2e harness's variable names.
 func TestLoadConfigEnvAndFlags(t *testing.T) {
-	env := baseEnv()
+	env := baseEnv(t, baseFile)
 	cfg, err := LoadConfig([]string{"all", "-grpc-addr", "127.0.0.1:9", "-worker-slots=4"},
 		func(k string) string { return env[k] })
 	if err != nil {
@@ -189,15 +286,13 @@ func TestLoadConfigEnvAndFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks := map[string]bool{
-		"mode":         cfg.Mode == modeAll,
-		"dsn":          cfg.DSN == "postgres://x",
-		"flag wins":    cfg.GRPCAddr == "127.0.0.1:9",
-		"slots flag":   cfg.WorkerSlots == 4,
-		"path style":   cfg.S3PathStyle,
-		"stale env":    cfg.StaleAfter == 8*time.Second,
-		"default poll": cfg.PollInterval == defaultPollInterval,
-		"embed model":  cfg.EmbedModel == defaultEmbedModel,
-		"env kept":     cfg.Env(envDSN) == "postgres://x",
+		"mode":       cfg.Mode == modeAll,
+		"dsn":        cfg.DSN == "postgres://x",
+		"flag wins":  cfg.GRPCAddr == "127.0.0.1:9",
+		"slots flag": cfg.WorkerSlots == 4,
+		"path style": cfg.S3PathStyle,
+		"file read":  time.Duration(cfg.File.Worker.StaleAfter) == 8*time.Second,
+		"region":     cfg.S3Region == defaultS3Region,
 	}
 	for name, ok := range checks {
 		if !ok {
@@ -231,15 +326,11 @@ func TestValidateRejects(t *testing.T) {
 			env[envBlobProvider] = "gcs"
 			return []string{"api"}
 		},
-		"heartbeat too slow": func(env map[string]string) []string {
-			env[envHeartbeatInterval] = "6s"
-			return []string{"worker"}
-		},
 		"zero slots": func(env map[string]string) []string { env[envWorkerSlots] = "0"; return []string{"all"} },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			env := baseEnv()
+			env := baseEnv(t, baseFile)
 			args := mutate(env)
 			cfg, err := LoadConfig(args, func(k string) string { return env[k] })
 			if err == nil {

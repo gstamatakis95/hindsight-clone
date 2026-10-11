@@ -13,9 +13,10 @@ import (
 
 // extractCfg binds EXTRACT and sets the mode.
 func extractCfg(mode domain.ExtractionMode) domain.BankConfig {
-	return domain.BankConfig{ExtractionMode: mode, Models: []domain.SlotBinding{
-		{Slot: domain.ModelSlotExtract, Binding: domain.ModelBinding{Model: "m"}},
-	}}
+	return domain.BankConfig{
+		Retain: &domain.RetainConfig{ExtractionMode: mode},
+		Models: &domain.ModelBindings{Extract: &domain.ModelBinding{Model: "m"}},
+	}
 }
 
 func TestExtractorChunksModeNoCall(t *testing.T) {
@@ -142,7 +143,9 @@ func TestExtractorCustomAndErrors(t *testing.T) {
 	llm := fake.NewLLM()
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractCustom, factsBody(t, fact("x")))
 	cfg := extractCfg(domain.ExtractionModeCustom)
-	cfg.CustomExtractionPrompt = "Only extract recipes."
+	retGrp := cfg.GetRetain()
+	retGrp.CustomExtractionPrompt = "Only extract recipes."
+	cfg.Retain = &retGrp
 	ex := NewExtractor(llm, ai.NewRouter())
 	if _, _, err := ex.Extract(t.Context(), extractInput{Text: "x", Config: cfg}); err != nil {
 		t.Fatal(err)
@@ -164,7 +167,9 @@ func TestExtractorCustomBlankPromptUsesConcise(t *testing.T) {
 	llm := fake.NewLLM()
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
 	cfg := extractCfg(domain.ExtractionModeCustom)
-	cfg.CustomExtractionPrompt = "  \n\t "
+	retGrp := cfg.GetRetain()
+	retGrp.CustomExtractionPrompt = "  \n\t "
+	cfg.Retain = &retGrp
 	facts, _, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{Text: "x", Config: cfg})
 	if err != nil || len(facts) != 1 {
 		t.Fatalf("facts = %+v, %v", facts, err)

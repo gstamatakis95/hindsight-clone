@@ -40,24 +40,30 @@ same one).
 make up        # Postgres + MinIO (docker compose), creates the memd bucket
 make migrate   # schema
 
-# memd's models: MEMD_MODEL binds every LLM slot (EXTRACT, TIME_PARSE, CONSOLIDATE, DEDUP_CHECK, REFLECT,
-# STRUCTURED_OUTPUT, MENTAL_MODEL_DELTA, SYNTHESIZE); MEMD_MODEL_<SLOT> overrides one slot. RERANK is bound
-# only by MEMD_MODEL_RERANK (without it recall skips the cross-encoder). The embedding model must return 768
-# dimensions; memd checks this at startup.
+# memd's models live in its server config file (./memd.yaml; memd.example.yaml documents every key).
+# models.default binds every chat step, models.<slot> one step (extract, time_parse, consolidate, dedup_check,
+# reflect, structured_output, mental_model); rerank is bound only by name (without it recall skips the
+# cross-encoder). The embedding model must return 768 dimensions; memd checks this at startup.
+cat > memd.yaml <<'EOF'
+defaults:
+  models:
+    default: {model: gemini-2.5-flash-lite}
+    rerank: {model: <your reranker>}
+    embed: {model: nomic-embed-text-v1.5}
+gateway:
+  max_concurrent: 32
+EOF
 export MEMD_GATEWAY_URL=https://gateway.example/v1 MEMD_GATEWAY_API_KEY=... \
-  MEMD_MODEL=gemini-2.5-flash-lite \
-  MEMD_MODEL_RERANK=<your reranker> MEMD_EMBED_MODEL=nomic-embed-text-v1.5 \
-  MEMD_GATEWAY_MAX_CONCURRENT=32 \
   MEMD_S3_ENDPOINT=http://localhost:59000 MEMD_S3_BUCKET=memd MEMD_S3_ACCESS_KEY=memd \
   MEMD_S3_SECRET_KEY=memd-secret MEMD_S3_PATH_STYLE=true
-make run       # memd all on :50051 (go run ./cmd/memd lists every setting)
+make run       # memd all on :50051 (go run ./cmd/memd lists the environment settings)
 
 # In another shell: the eval's answer and judge models. Keys come only from the environment.
 export MEMD_EVAL_JUDGE_API_KEY=...            # MEMD_EVAL_ANSWER_API_KEY too, if the answer model needs another
 make bench CONFIG=eval/configs/locomo.yaml    # set judge.url, judge.model and answer.model in the file first
 ```
 
-Lower `MEMD_GATEWAY_MAX_CONCURRENT` (or one slot's `MEMD_GATEWAY_MAX_CONCURRENT_<SLOT>`) if the gateway rate-limits.
+Lower `gateway.max_concurrent` (or one slot's cap under `gateway.slot_concurrency`) in `memd.yaml` if the gateway rate-limits.
 The first run downloads `locomo10.json` into `~/.cache/memd-eval/locomo/` (`data_dir` / `-data-dir` to change it).
 A full run is 10 conversations, 272 sessions and 1540 questions.
 

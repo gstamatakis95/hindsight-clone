@@ -14,12 +14,12 @@ func notWired(dep string) error {
 	return status.Errorf(codes.Unimplemented, "%s is not wired", dep)
 }
 
-// validate runs Deps.ValidateOverrides for rpc on request overrides o; nil o or no validator passes.
-func (d Deps) validate(rpc string, o *domain.BankConfig) error {
-	if o == nil || d.ValidateOverrides == nil {
+// validate checks a request's or a stored spec's overrides with config.Validate; nil passes.
+func validate(o *domain.BankConfig) error {
+	if o == nil {
 		return nil
 	}
-	return d.ValidateOverrides(rpc, *o)
+	return config.Validate(*o) //nolint:wrapcheck // config errors are already domain error classes
 }
 
 // validatedSpec wraps patch so the patched spec's overrides pass the same check as CreateMentalModel. It
@@ -30,7 +30,7 @@ func (d Deps) validatedSpec(patch mentalmodel.SpecPatch) mentalmodel.SpecPatch {
 		if err != nil {
 			return domain.MentalModelSpec{}, err
 		}
-		if err := d.validate(config.RPCMentalModelSpec, out.Overrides); err != nil {
+		if err := validate(out.Overrides); err != nil {
 			return domain.MentalModelSpec{}, err
 		}
 		return out, nil

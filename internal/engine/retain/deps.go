@@ -56,7 +56,7 @@ type tuning struct {
 
 // tuningOf resolves cfg.Retain against the engine defaults.
 func tuningOf(cfg domain.BankConfig) tuning {
-	r := domain.RetainTuning{}
+	r := domain.RetainConfig{}
 	if cfg.Retain != nil {
 		r = *cfg.Retain
 	}

@@ -117,7 +117,7 @@ func (c *consolidator) Run(ctx context.Context, job *jobs.Run) (ConsolidationRes
 	if err != nil {
 		return ConsolidationResult{}, fmt.Errorf("consolidate: config: %w", err)
 	}
-	if cfg.EnableObservations != nil && !*cfg.EnableObservations {
+	if cfg.GetObservations().Enabled != nil && !*cfg.GetObservations().Enabled {
 		return ConsolidationResult{}, nil
 	}
 	r := &run{c: c, job: j, check: job, cfg: cfg, payload: p, filter: payloadScopes(j.Bank, p)}

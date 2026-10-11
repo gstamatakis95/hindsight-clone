@@ -13,7 +13,7 @@ import (
 )
 
 // DirectiveSelector is the part of bank.DirectiveSelector the single-shot synthesizer consumes to put the
-// bank's directives into SYNTHESIZE; bank.DirectiveSelector satisfies it (same signature).
+// bank's directives into synthesize; bank.DirectiveSelector satisfies it (same signature).
 type DirectiveSelector interface {
 	// Select returns bank b's active directives that are global or match tags; all = every active
 	// directive regardless of tags.
@@ -22,22 +22,22 @@ type DirectiveSelector interface {
 
 // ModelDeps are what the synthesizers need to make their own LLM calls.
 type ModelDeps struct {
-	// LLM makes the SYNTHESIZE and MENTAL_MODEL_DELTA calls.
+	// LLM makes the synthesize and delta calls.
 	LLM ai.LLM
 	// Router resolves each slot's binding from the merged config.
 	Router *ai.Router
 	// Clock dates the prompts.
 	Clock clock.Clock
-	// Directives selects the directives for SYNTHESIZE; nil = none.
+	// Directives selects the directives for synthesize; nil = none.
 	Directives DirectiveSelector
 }
 
-// deltaPlanner makes the MENTAL_MODEL_DELTA call: edit ops over the current document's sections and
+// deltaPlanner makes the delta call: edit ops over the current document's sections and
 // blocks, applied at once, with one retry that shows the model the rejected ops when none applied or when
 // any op named a section or block id the document does not have.
 type deltaPlanner struct{ d ModelDeps }
 
-// deltaResponse is the MENTAL_MODEL_DELTA response schema's shape.
+// deltaResponse is the delta response schema's shape.
 type deltaResponse struct {
 	// Operations are the proposed ops.
 	Operations []domain.DeltaOp `json:"operations"`
@@ -48,7 +48,7 @@ type deltaResponse struct {
 func (p deltaPlanner) plan(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, facts []domain.Unit,
 ) (deltaDraft, error) {
-	binding, err := p.d.Router.Resolve(cfg, domain.ModelSlotMentalModelDelta)
+	binding, err := p.d.Router.Resolve(cfg, domain.ModelSlotMentalModel)
 	if err != nil {
 		return deltaDraft{}, fmt.Errorf("mentalmodel: delta model: %w", err)
 	}
@@ -110,7 +110,7 @@ func isBadReference(reason string) bool {
 		strings.Contains(reason, " belongs to section ")
 }
 
-// call renders the delta prompts with data and makes one structured MENTAL_MODEL_DELTA call.
+// call renders the delta prompts with data and makes one structured delta call.
 func (p deltaPlanner) call(
 	ctx context.Context, binding domain.ModelBinding, data prompts.DeltaData,
 ) ([]domain.DeltaOp, domain.Usage, error) {
@@ -128,7 +128,7 @@ func (p deltaPlanner) call(
 	}
 	var resp deltaResponse
 	usage, err := p.d.LLM.Structured(ctx, ai.StructuredRequest{
-		Slot: domain.ModelSlotMentalModelDelta, Binding: binding, Name: prompts.MentalModelStructuredDeltaSystem,
+		Slot: domain.ModelSlotMentalModel, Binding: binding, Name: prompts.MentalModelStructuredDeltaSystem,
 		System: system, User: user, Schema: schema,
 	}, &resp)
 	if err != nil {

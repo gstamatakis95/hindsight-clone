@@ -11,7 +11,9 @@ import (
 // seedTemplateSource creates src with a config and two directives.
 func seedTemplateSource(t *testing.T, e env, src domain.BankRef) {
 	t.Helper()
-	cfg := domain.BankConfig{RetainMission: "remember tea", ReflectMission: "be brief"}
+	cfg := domain.BankConfig{
+		Retain: &domain.RetainConfig{Mission: "remember tea"}, Reflect: &domain.ReflectConfig{Mission: "be brief"},
+	}
 	e.tx(t, func(tx store.Tx) error {
 		if err := tx.Banks().Create(e.ctx, domain.Bank{Ref: src, Name: "Source", Config: cfg}); err != nil {
 			return err
@@ -31,7 +33,7 @@ func seedTemplateSource(t *testing.T, e env, src domain.BankRef) {
 // checkExport checks an export carries config, directives without identity and the model specs.
 func checkExport(t *testing.T, tmpl domain.BankTemplate) {
 	t.Helper()
-	if tmpl.Config.RetainMission != "remember tea" || len(tmpl.Directives) != 2 || len(tmpl.MentalModels) != 2 {
+	if tmpl.Config.GetRetain().Mission != "remember tea" || len(tmpl.Directives) != 2 || len(tmpl.MentalModels) != 2 {
 		t.Fatalf("export = %+v", tmpl)
 	}
 	for _, d := range tmpl.Directives {
@@ -83,7 +85,7 @@ func TestTemplateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bank.Name != "Copy" || bank.Config.ReflectMission != "be brief" {
+	if bank.Name != "Copy" || bank.Config.GetReflect().Mission != "be brief" {
 		t.Errorf("created bank = %+v", bank)
 	}
 	checkBuilds(t, ops, dst, 2)

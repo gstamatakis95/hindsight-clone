@@ -125,7 +125,7 @@ func TestJoiningQueuedRefreshWithForceFullUpgrades(t *testing.T) {
 	if _, _, ok := claimRefresh(e); ok {
 		t.Fatal("parked refresh claimable before the debounce")
 	}
-	over := &domain.BankConfig{ReflectMission: "be brief"}
+	over := &domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "be brief"}}
 	op, joined, err := adm.RefreshMentalModel(e.ctx, RefreshRequest{
 		Bank: e.bank, ID: "status", ForceFull: true, Overrides: over, Strategy: domain.RefreshStrategyAgentic,
 	})
@@ -147,7 +147,7 @@ func assertUpgraded(t *testing.T, e *env, op domain.OperationID) {
 		t.Fatalf("manual join did not release the parked refresh (claimed %v)", ok)
 	}
 	if !p.ForceFull || !p.Manual || p.Strategy != domain.RefreshStrategyAgentic || job.Overrides == nil ||
-		job.Overrides.ReflectMission != "be brief" {
+		job.Overrides.GetReflect().Mission != "be brief" {
 		t.Fatalf("not upgraded: %+v overrides %+v", p, job.Overrides)
 	}
 }

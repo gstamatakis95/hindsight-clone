@@ -69,12 +69,9 @@ func newHarness(t *testing.T, cfg domain.BankConfig, units ...domain.Unit) *harn
 
 // build (re)creates the reflector over the harness's current dependencies.
 func (h *harness) build() {
-	server, err := config.ServerDefaults(func(k string) string {
-		if k == ai.EnvModel {
-			return "test-model"
-		}
-		return ""
-	})
+	server, err := config.ServerDefaults(domain.BankConfig{Models: &domain.ModelBindings{
+		Default: &domain.ModelBinding{Model: "test-model"},
+	}})
 	if err != nil {
 		h.t.Fatal(err)
 	}

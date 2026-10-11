@@ -35,18 +35,35 @@ const (
 	OpReflectLoop = "reflect_loop"
 	// OpReflectFinal is the tool-less reflect final-answer chat (model ModelFor("reflect")).
 	OpReflectFinal = "reflect_final"
-	// OpSynthesize is the single-shot SYNTHESIZE chat (model ModelFor("synthesize")).
+	// OpSynthesize is the single-shot full mental-model page chat (model ModelFor("mental_model")).
 	OpSynthesize = "synthesize"
 	// OpChat is a plain chat whose model names no known slot; it gets a quoting answer.
 	OpChat = "chat"
 )
 
-// ModelPrefix prefixes every slot model name the harness binds (MEMD_MODEL_<SLOT>=emu-<slot>).
+// ModelPrefix prefixes every slot model name memd is bound to (defaults.models.<slot> = emu-<slot>).
 const ModelPrefix = "emu-"
 
-// ModelFor returns the gateway model name the harness binds slot to, e.g. "emu-synthesize" for "synthesize".
-// The slot names are domain.ModelSlot values.
+// Slots is every model slot memd binds to the emulator (domain.ModelSlot values; the embedding model needs no
+// binding, any name is answered).
+var Slots = []string{
+	"extract", "time_parse", "consolidate", "dedup_check", "reflect", "structured_output", "mental_model", "rerank",
+}
+
+// ModelFor returns the gateway model name memd binds slot to, e.g. "emu-reflect" for "reflect". The slot names
+// are domain.ModelSlot values.
 func ModelFor(slot string) string { return ModelPrefix + slot }
+
+// ServerConfig is a memd server config file (YAML) binding every slot in Slots to its emulator model.
+func ServerConfig() string {
+	var b strings.Builder
+	b.WriteString("# memd server config for the gateway emulator: every model slot bound to emu-<slot>.\n" +
+		"defaults:\n  models:\n")
+	for _, slot := range Slots {
+		fmt.Fprintf(&b, "    %s: {model: %s}\n", slot, ModelFor(slot))
+	}
+	return b.String()
+}
 
 // Call is one request the emulator answered.
 type Call struct {
@@ -175,7 +192,7 @@ func totalLen(texts []string) int {
 	return n
 }
 
-// modelSlot returns the slot a model name binds ("emu-synthesize" -> "synthesize"), or "" for other models.
+// modelSlot returns the slot a model name binds ("emu-reflect" -> "reflect"), or "" for other models.
 func modelSlot(model string) string {
 	slot, ok := strings.CutPrefix(model, ModelPrefix)
 	if !ok {

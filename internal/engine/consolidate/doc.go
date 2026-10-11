@@ -29,9 +29,9 @@
 // [Consolidator.Run](ctx, run) takes a jobs.ConsolidatePayload ({} = automatic: every scope, bank config; with scopes =
 // a manual run over units tagged with one of those tag sets) and the job's overrides:
 //
-//  1. Resolve the effective config; with enable_observations false the run does nothing. List the bank's
+//  1. Resolve the effective config; with observations.enabled false the run does nothing. List the bank's
 //     unpaused mental models with refresh_after_consolidation, outside any transaction.
-//  2. Plan in one read transaction: up to consolidation_max_units_per_run of the oldest unconsolidated
+//  2. Plan in one read transaction: up to observations.max_units_per_run of the oldest unconsolidated
 //     facts (consolidated_at and consolidation_failed_at unset), their scopes, and which scopes already cite
 //     each fact (those are skipped, so a replayed run is safe). Scopes are processed in a fixed order.
 //  3. Per scope, resolve the scope's config with ForScope (the matching consolidation strategy sits between
@@ -96,10 +96,10 @@
 //
 // # Config knobs and defaults
 //
-// enable_observations (true), consolidation_max_units_per_run (100), consolidation_llm_batch_size (8),
-// consolidation_source_facts_max_tokens_per_observation (256), consolidation_source_facts_max_tokens (unset
-// = no cap), max_observations_per_scope (unset or negative = uncapped; 0 = no creates), dedup_threshold
-// (0.97), observations_mission, default_observation_scopes, consolidation_strategies, the CONSOLIDATE and
+// The observations group: enabled (true), max_units_per_run (100), llm_batch_size (8),
+// source_facts_max_tokens_per_observation (256), source_facts_max_tokens (unset = no cap),
+// max_observations_per_scope (unset or negative = uncapped; 0 = no creates), dedup_threshold (0.97), mission and
+// strategies; retain.default_observation_scopes; the CONSOLIDATE and
 // DEDUP_CHECK bindings (overridable only by a Consolidate request or a matching strategy, never by the
 // retain that triggered the job) and mental_models refresh_debounce_seconds / min_refresh_interval_seconds.
 //

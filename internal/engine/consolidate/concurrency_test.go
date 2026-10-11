@@ -14,7 +14,9 @@ import (
 
 // perTag is a bank config fanning units out one scope per tag.
 func perTag() domain.BankConfig {
-	return domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}}
+	return domain.BankConfig{
+		Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+	}
 }
 
 // TestRunEditBetweenScopesIsNotStamped: a fact edited (Paris -> Rome) after its first scope committed is
@@ -169,7 +171,7 @@ func TestRunRecheckCitedScopesBeforeStamp(t *testing.T) {
 // TestRunScopedContinuationNeverJoins: a manual run's continuation carries its scopes and is never
 // deduplicated (it doesn't join the queued automatic consolidate).
 func TestRunScopedContinuationNeverJoins(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{ConsolidationMaxUnitsPerRun: ptr(1)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{MaxUnitsPerRun: ptr(1)}})
 	e.fact("f1", "One", "a")
 	e.fact("f2", "Two", "a")
 	e.tx(func(tx store.Tx) error {
@@ -239,7 +241,7 @@ func TestRunItemScopesBeatOverrides(t *testing.T) {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
 			Overrides: &domain.BankConfig{
-				DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag},
+				Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
 			},
 			ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared},
 		})

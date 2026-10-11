@@ -202,7 +202,11 @@ func mtUnconsolidatedBanks(t *testing.T, s store.DB) []domain.BankRef {
 	if err != nil {
 		t.Fatalf("UnconsolidatedBanks: %v", err)
 	}
-	return bs
+	out := make([]domain.BankRef, len(bs))
+	for i, b := range bs {
+		out[i] = b.Bank
+	}
+	return out
 }
 
 // mtModelKey names a model of a bank as "tenant/bank/model".

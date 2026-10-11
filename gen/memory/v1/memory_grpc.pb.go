@@ -14,13 +14,13 @@
 // Banks. A bank is an isolated memory store within a tenant. A write to an unknown bank creates it with
 // tenant defaults, and every read of an unknown bank returns NOT_FOUND.
 //
-// Configuration. BankConfig is the one config shape used at every level: server < tenant < bank < strategy <
-// request (< item, for retain; strategies only apply to consolidation). Scalars: a set value replaces an
-// unset one. models: merged per slot, where the most specific level that sets a slot supplies its whole
-// ModelBinding (unset binding fields mean the gateway / adapter default, not the less specific level's
-// value). Other lists: a set list replaces the inherited one (no append). Patch RPCs take a FieldMask, which
-// is also how a list is cleared. Every request that does work takes a full BankConfig as overrides; fields
-// the RPC cannot use are rejected with INVALID_ARGUMENT, never silently ignored.
+// Configuration. BankConfig is the one config shape used at every stored level: server (the defaults block of
+// the server config file) < tenant < bank, then a consolidation strategy and the request (< item, for retain).
+// It is grouped by phase: retain, observations, recall, reflect, mental_models, models. Scalars: a set value
+// replaces an unset one. Groups merge field by field. A ModelBinding is atomic. Lists: a set list replaces the
+// inherited one (no append). Patch RPCs take a FieldMask, which is also how a list is cleared. Each request
+// that does work takes its own *Overrides message holding only what that RPC can change; the server turns it
+// into a BankConfig level. Model routing: see ModelBindings.
 //
 // Async work. Background work runs as operations. An RPC whose requested work runs in the background returns
 // its Operation (or operation id), and OperationService reports its status and progress; follow-up jobs an RPC

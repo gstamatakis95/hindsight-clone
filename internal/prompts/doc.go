@@ -5,7 +5,7 @@
 //
 // prompts is a leaf package imported by the engines that call models: retain (extraction), consolidate
 // (CONSOLIDATE, DEDUP_CHECK), reflect (the tool loop, final answer, structured output), mentalmodel
-// (SYNTHESIZE, the delta prompts, the agentic refresh context), timex (TIME_PARSE) and bank (prompt
+// (synthesize, the delta prompts, the agentic refresh context), timex (TIME_PARSE) and bank (prompt
 // preview). It imports only the standard library and domain. Everything is read from an embed.FS, so the
 // binary carries its prompts and no file system access happens at run time.
 //
