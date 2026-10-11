@@ -1026,7 +1026,7 @@ Every component is an interface owned by its package, every implementation prove
 - Constructors take interfaces. Engine constructors return their package's interface. Adapters return concrete types, because one Postgres `Store` implements several ports (`port.Store`, `port.Claimer`); `cmd/memd/wire.go`, the only composition root, narrows each to the port it is used as.
 - Import boundaries are enforced by `depguard`: `engine/` cannot import `adapter/`, `server/`, `worker/`, `gen/`, pgx, net/http or the AWS SDK; `server/` cannot import `adapter/`; `domain/` imports nothing internal. A package that needs another engine declares the small interface it consumes (mentalmodel declares the `Reflector` it calls), so engines never import each other in a cycle.
 - Store code (the Postgres adapter and every engine, worker and wiring test that touches the store) is tested against real Postgres: `internal/adapter/postgres/pgtest` gives each test its own database cloned from a migrated template on one shared server. There is no in-memory store; fakes exist only for the LLM, embedder, reranker, blob and clock.
-- Mocks for every interface are generated with mockery; hand-written mocks are not allowed.
+- Mocks are generated with mockery for the interfaces tests stub (listed in `.mockery.yaml`); hand-written mocks are not allowed.
 
 **Go lint gates** (golangci-lint, fail on any finding)
 

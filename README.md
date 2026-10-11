@@ -101,7 +101,8 @@ removed when it ends. Environment:
 - `MEMD_TEST_DATABASE_URL` (or `DATABASE_URL`): use an existing server instead of a container, e.g.
   `MEMD_TEST_DATABASE_URL=postgres://memd:memd@localhost:55432/memd make test` after `make up`. The user must
   be allowed to create databases; templates are named `memd_tpl_<migrations hash>`, test databases
-  `memd_t_<random>` (dropped after each test).
+  `memd_t_<random>` (dropped after each test). The HNSW acceptance test builds its index in parallel when the
+  server has enough shared memory (compose sets `shm_size: 1g`) and serially, slower, otherwise.
 - `MEMD_REQUIRE_DOCKER=1`: fail, rather than skip, the database tests when neither Docker nor a URL is
   available (CI sets it).
 - `MEMD_ALEMBIC`: the alembic binary that migrates the template (default `.venv/bin/alembic`, built by
