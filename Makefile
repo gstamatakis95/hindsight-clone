@@ -19,12 +19,13 @@ PYTHON  ?= python3.12
 ALEMBIC := $(VENV)/bin/alembic
 RUFF    := $(VENV)/bin/ruff
 MOCKERY := $(ROOT)/.bin/mockery
+TXCHECK := $(ROOT)/.bin/txcheck
 COMPOSE := docker compose -f $(ROOT)/docker-compose.yml
 
 export MEMD_PG_PORT ?= 55432
 export MEMD_DSN ?= postgresql+psycopg://memd:memd@localhost:$(MEMD_PG_PORT)/memd
 
-.PHONY: help gen gen-proto gen-sqlc gen-mocks lint lint-go lint-ifacedoc lint-proto lint-py ruff fmt test e2e \
+.PHONY: help gen gen-proto gen-sqlc gen-mocks lint lint-go lint-ifacedoc lint-txcheck lint-proto lint-py ruff fmt test e2e \
 	up down migrate migrate-check downgrade run tools venv bench bench-resume bench-compare bench-list
 
 help: ## list targets
@@ -51,13 +52,19 @@ tools: $(MOCKERY) venv ## build mockery and the alembic venv
 
 # ---------- lint ----------
 
-lint: lint-go lint-ifacedoc lint-proto lint-py ## golangci-lint, ifacedoc, buf lint, ruff
+lint: lint-go lint-ifacedoc lint-txcheck lint-proto lint-py ## golangci-lint, ifacedoc, txcheck, buf lint, ruff
 
 lint-go:
 	golangci-lint run ./...
 
 lint-ifacedoc:
 	go run ./tools/ifacedoc .
+
+$(TXCHECK): $(wildcard tools/txcheck/*.go tools/txcheck/analyzer/*.go) tools/txcheck/go.mod tools/txcheck/go.sum
+	go -C tools/txcheck build -o $(TXCHECK) .
+
+lint-txcheck: $(TXCHECK) ## no model calls or Enqueue-before-Seq inside InTx literals
+	$(TXCHECK) ./...
 
 # The API may change freely until the first release, so only buf lint runs here. The first release tag
 # becomes the buf breaking baseline: add `buf breaking --against '.git#tag=<that tag>'` to this target then.

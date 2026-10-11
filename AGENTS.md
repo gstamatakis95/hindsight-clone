@@ -33,11 +33,13 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - No per-memory delete API. Invalidate archives a unit; upsert and reprocess replace a document's units.
 - Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim.
 - Never call an LLM, embedder or reranker inside DB.InTx. Call first, then write in a short tx.
+  tools/txcheck enforces the lexical case (a model call written inside the InTx literal).
 - Any tx that changes memory content calls tx.Seq(bank) and stamps the rows it writes with it.
+  tools/txcheck flags an Enqueue before tx.Seq in the same InTx literal.
 
 ## Commands
 - make gen      # buf generate, sqlc, mockery
-- make lint     # golangci-lint, ifacedoc, buf lint, ruff
+- make lint     # golangci-lint, ifacedoc, txcheck, buf lint, ruff
 - make test     # go test -race ./... (needs Docker, or MEMD_TEST_DATABASE_URL; see internal/store/postgres/pgtest)
 - make up       # docker compose: postgres, minio
 - make migrate  # alembic upgrade head, then dump schema/schema.sql
