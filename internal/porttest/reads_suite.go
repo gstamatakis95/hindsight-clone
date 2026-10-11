@@ -842,10 +842,11 @@ func rdSeededLookups(t *testing.T, s port.Store, b port.BankRef, ids []port.Unit
 	}
 }
 
-// testRdErrorRegimes: on an unknown bank and on a tombstoned bank, the id-keyed lookups (GetChunks,
+// testRdErrorRegimes: on an unknown bank and on a tombstoned empty bank, the id-keyed lookups (GetChunks,
 // EntityStates, StaleScopes, CountObservations, NewestSeqInScope, ModelsCiting, and the repositories'
-// IDsByDocument and CitingScopes) return empty with no error
-// and TagCounts is ErrNotFound; a tombstoned bank that still holds rows gives no lookup error either.
+// IDsByDocument and CitingScopes) return empty with no error, and TagCounts is ErrNotFound. On a tombstoned
+// bank that still holds rows, the Reader's id-keyed lookups, called with the ids of those rows, give no error
+// (decision 1500: whether they return the rows is unspecified), and TagCounts is ErrNotFound.
 func testRdErrorRegimes(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA, bankOtherTenant)
 	f, o := rdFact(bankOtherTenant, "pending", 1, "a"), rdObs(bankOtherTenant, "obs", 2, "a")

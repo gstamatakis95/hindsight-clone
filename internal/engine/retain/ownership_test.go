@@ -94,14 +94,20 @@ func (h *hookExtractor) Extract(ctx context.Context, in ExtractInput) ([]Extract
 	return facts, usage, wrap(err)
 }
 
-// hookedRetainer is e's retainer with an extractor that runs hook before its at-th call.
+// hookedRetainer is e's retainer (3 chunks per batch) with an extractor that runs hook before its at-th call.
 func (e *env) hookedRetainer(at int, hook func()) Retainer {
+	return e.hookedRetainerBatch(3, at, hook)
+}
+
+// hookedRetainerBatch is e's retainer committing batch chunks per transaction, with an extractor that runs
+// hook before its at-th call.
+func (e *env) hookedRetainerBatch(batch, at int, hook func()) Retainer {
 	router := routing.NewRouter()
 	return NewRetainer(RetainerDeps{
 		Store: e.store, Blob: e.blob, Config: e.cfg,
 		Extractor: &hookExtractor{inner: NewExtractor(e.llm, router), at: at, hook: hook}, Embedder: e.emb,
 		Entities: NewEntityResolver(ResolverConfig{}), Labels: NewLabelResolver(), Linker: NewLinker(),
-		Clock: e.clock, BatchChunks: 3,
+		Clock: e.clock, BatchChunks: batch,
 	})
 }
 

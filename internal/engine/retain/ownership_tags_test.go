@@ -8,8 +8,9 @@ import (
 )
 
 // TestRetainOlderRunCannotOverwriteNewerTags: an older run of the same content (forced, so the no-op check
-// does not stop it) that resumes after a newer retain changed the document's tags stops as superseded and
-// leaves the newer tags on the units.
+// does not stop it) that resumes after a newer retain changed only the document's tags still owns the
+// document (same blob key and overrides), so it runs to completion. But it adopts the newer tags (decision
+// 1700), so every unit carries the newer tags and none the older ones.
 func TestRetainOlderRunCannotOverwriteNewerTags(t *testing.T) {
 	e := newEnv(t, 1)
 	content := paragraphs(3, "one")
@@ -26,12 +27,13 @@ func TestRetainOlderRunCannotOverwriteNewerTags(t *testing.T) {
 		DocumentID: "d1", Content: content, Tags: []string{"new"}, Overrides: chunkTokens(12),
 	}}})
 
+	e.scriptChunks(3, false)
 	res, err := e.retainer.ProcessDocument(e.ctx, j)
-	if err != nil || !res.Superseded {
-		t.Fatalf("older run = %+v, %v; want superseded", res, err)
+	if err != nil || res.Superseded {
+		t.Fatalf("older run = %+v, %v; want it to complete under the adopted tags", res, err)
 	}
-	if d := e.document("d1"); d.UnitCount != 3 || !domain.SameTagSet(d.Tags, []string{"new"}) {
-		t.Errorf("document = %+v, want 3 units tagged new", d)
+	if d := e.document("d1"); d.UnitCount != 3 || d.ExtractedAt == nil || !domain.SameTagSet(d.Tags, []string{"new"}) {
+		t.Errorf("document = %+v, want 3 units tagged new, complete", d)
 	}
 	hits, err := e.store.Read().SearchText(e.ctx, port.TextQuery{Bank: testBank, Text: "fact", Limit: 100})
 	if err != nil || len(hits) != 3 {

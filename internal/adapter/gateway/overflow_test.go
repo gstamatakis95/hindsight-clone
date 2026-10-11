@@ -25,6 +25,11 @@ func TestContextOverflowClassified(t *testing.T) {
 		{"max context", http.StatusBadRequest, map[string]any{"error": "This model's Maximum Context Length is 8192"}, true},
 		{"anthropic", http.StatusBadRequest, map[string]any{"error": "prompt is too long: 210000 tokens"}, true},
 		{"413 input", http.StatusRequestEntityTooLarge, map[string]any{"error": "input is too long"}, true},
+		{"spaced marker", http.StatusBadRequest, map[string]any{"error": "Context length exceeded (9000 > 8192)"}, true},
+		{"prompt_too_long code", http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"type": "invalid_request_error", "code": "prompt_too_long",
+		}}, true},
+		{"context window", http.StatusBadRequest, map[string]any{"error": "Input exceeds the Context Window"}, true},
 		{"other 400", http.StatusBadRequest, map[string]any{"error": "bad request"}, false},
 		{"marker on 404", http.StatusNotFound, map[string]any{"error": "prompt is too long"}, false},
 		{"marker past the 512-byte snippet", http.StatusBadRequest, map[string]any{
