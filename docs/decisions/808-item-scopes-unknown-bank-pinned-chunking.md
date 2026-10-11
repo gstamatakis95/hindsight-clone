@@ -2,6 +2,10 @@
 
 Status: accepted (WP-08 review round 1: H5 and MEDIUMs)
 
+**Update (WP-16):** WP-15 landed `domain.Document.ObservationScopes`. The Ingestor now sets it on `Upsert`, and
+`DocumentScopesWriter` is gone. The no-op hash is unchanged. `Reprocessor` carries the scopes on its re-upsert
+(decision 1600).
+
 ## Decision
 - **Item observation scopes.** `RetainItem.observation_scopes` is carried in `DocumentPayload`. The Ingestor
   writes it, in the same transaction as `DocumentRepo.Upsert`, through the consumer-declared

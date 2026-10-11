@@ -150,48 +150,6 @@ func TestRetainOverlappingRetainsOfOneDocument(t *testing.T) {
 	}
 }
 
-// scopesStub records SetObservationScopes calls.
-type scopesStub struct {
-	got map[port.DocumentID]*domain.ObservationScopes
-}
-
-// SetObservationScopes implements DocumentScopesWriter.
-func (s *scopesStub) SetObservationScopes(
-	_ context.Context, _ port.Tx, _ port.BankRef, doc port.DocumentID, sc *domain.ObservationScopes,
-) error {
-	s.got[doc] = sc
-	return nil
-}
-
-// TestIngestStoresItemScopes: an item's observation_scopes ride in the job payload and are written on the
-// document; changing only the scopes is not a no-op.
-func TestIngestStoresItemScopes(t *testing.T) {
-	e := newEnv(t, 0)
-	stub := &scopesStub{got: map[port.DocumentID]*domain.ObservationScopes{}}
-	ing := NewIngestor(IngestorDeps{
-		Store: e.store, Blob: e.blob, Config: e.cfg, Retainer: e.retainer,
-		Merge: config.Merge, Clock: e.clock, ScopesWriter: stub,
-	})
-	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
-	all := &domain.ObservationScopes{Mode: domain.ScopeModeAllCombinations}
-	item := IngestItem{DocumentID: "d1", Content: "c", Tags: []string{"a", "b"}, ObservationScopes: all}
-	if _, err := ing.Ingest(e.ctx, IngestRequest{Bank: testBank, Items: []IngestItem{item}}); err != nil {
-		t.Fatal(err)
-	}
-	if s := stub.got["d1"]; s == nil || s.Mode != domain.ScopeModeAllCombinations {
-		t.Fatalf("stored scopes = %+v", s)
-	}
-	res, err := ing.Ingest(e.ctx, IngestRequest{Bank: testBank, Items: []IngestItem{item}})
-	if err != nil || !res.Documents[0].Unchanged {
-		t.Fatalf("same scopes: %+v %v, want unchanged", res, err)
-	}
-	item.ObservationScopes = &domain.ObservationScopes{Mode: domain.ScopeModePerTag}
-	res, err = ing.Ingest(e.ctx, IngestRequest{Bank: testBank, Items: []IngestItem{item}})
-	if err != nil || res.Documents[0].Unchanged || stub.got["d1"].Mode != domain.ScopeModePerTag {
-		t.Errorf("changed scopes: %+v %v, want re-retained and stored", res, err)
-	}
-}
-
 // TestIngestFanOutRejectionUnknownBankCreatesNothing: validation runs before the bank is created.
 func TestIngestFanOutRejectionUnknownBankCreatesNothing(t *testing.T) {
 	e := newEnv(t, 0)
