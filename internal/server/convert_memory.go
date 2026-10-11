@@ -17,7 +17,7 @@ import (
 // ---------- retain ----------
 
 // retainResult is the server-side counterpart of RetainResponse: the engine's IngestResult plus the token
-// usage of a synchronous retain (approved CCR WP-07-1), which IngestResult does not carry yet.
+// usage of a synchronous retain (approved CCR WP-07-1); the handler copies IngestResult.Usage into Usage.
 type retainResult struct {
 	// IngestResult is the engine's per-document outcome.
 	retain.IngestResult

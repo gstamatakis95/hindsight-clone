@@ -55,8 +55,7 @@ func (s *memoryServer) Retain(ctx context.Context, req *pb.RetainRequest) (*pb.R
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	// TODO(WP-08): copy out.Usage once IngestResult carries it.
-	return retainResultToProto(retainResult{IngestResult: out}), nil
+	return retainResultToProto(retainResult{IngestResult: out, Usage: out.Usage}), nil
 }
 
 // Recall retrieves memories for a query.

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"memd/internal/config"
 	"memd/internal/domain"
 
 	"google.golang.org/grpc/codes"
@@ -28,7 +29,7 @@ func (d Deps) validatedSpec(patch SpecPatch) SpecPatch {
 		if err != nil {
 			return domain.MentalModelSpec{}, err
 		}
-		if err := d.validate("CreateMentalModel", out.Overrides); err != nil {
+		if err := d.validate(config.RPCMentalModelSpec, out.Overrides); err != nil {
 			return domain.MentalModelSpec{}, err
 		}
 		return out, nil

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/port"
 
@@ -181,7 +182,7 @@ func (s *bankServer) PreviewPrompt(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	if err := s.d.validate("PreviewPrompt", overrides); err != nil {
+	if err := s.d.validate(config.PreviewRPC(op), overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	var o domain.BankConfig
@@ -245,17 +246,19 @@ func (s *bankServer) CreateBankFromTemplate(
 		return nil, toStatus(err)
 	}
 	for i := range t.MentalModels {
-		if err := s.d.validate("CreateMentalModel", t.MentalModels[i].Overrides); err != nil {
+		if err := s.d.validate(config.RPCMentalModelSpec, t.MentalModels[i].Overrides); err != nil {
 			return nil, toStatus(err)
 		}
 	}
-	// Known gap: TemplateCodec.Create takes no name, so req.name is not stored, and it returns only the
-	// bank, so mental_model_builds stays empty although Create enqueues a first build of every model.
-	out, err := s.d.Templates.Create(ctx, b, t)
+	out, builds, err := s.d.Templates.CreateNamed(ctx, b, req.GetName(), t)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.CreateBankFromTemplateResponse{Bank: bankToProto(out)}, nil
+	resp := &pb.CreateBankFromTemplateResponse{Bank: bankToProto(out)}
+	for _, op := range builds {
+		resp.MentalModelBuilds = append(resp.MentalModelBuilds, operationToProto(op))
+	}
+	return resp, nil
 }
 
 // UpsertDirective creates or replaces a directive.

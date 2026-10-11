@@ -37,6 +37,7 @@ func TestServerDefaults(t *testing.T) {
 		"units per run 100":     *cfg.ConsolidationMaxUnitsPerRun == 100,
 		"disposition 3":         *cfg.Disposition == domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3},
 		"temporal link cap 20":  *cfg.Retain.TemporalLinkCap == 20,
+		"entity match 0.6":      *cfg.Retain.EntityMatchThreshold == 0.6,
 		"budget mid 300":        *cfg.Recall.BudgetMid == 300,
 		"rrf 60":                *cfg.Recall.RRFK == 60,
 		"rerank on when bound":  *cfg.Recall.Rerank,

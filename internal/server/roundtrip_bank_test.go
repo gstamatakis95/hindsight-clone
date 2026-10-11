@@ -77,7 +77,7 @@ func bankRoundTrips() {
 		t, err := bankTemplateFromProto(m.GetTemplate())
 		return &pb.CreateBankFromTemplateRequest{BankId: m.GetBankId(), Template: bankTemplateToProto(t)}, err
 	}, func(m *pb.CreateBankFromTemplateRequest) {
-		// Known gap: TemplateCodec.Create takes no name, so the handler drops it.
+		// The converter covers the template only; the handler passes name to CreateNamed itself.
 		m.Name = ""
 		if m.Template == nil {
 			m.Template = &pb.BankTemplate{}

@@ -80,12 +80,13 @@ type ReadinessProbe interface {
 	Ready(ctx context.Context) error
 }
 
-// ConfigPatch computes a new config from the current one. It must be pure: implementations run it inside
-// their write transaction (and may run it again on a retry), so a concurrent patch is never lost.
-type ConfigPatch func(cur domain.BankConfig) (domain.BankConfig, error)
+// ConfigPatch computes a new config from the current one; it must be pure.
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type ConfigPatch = bank.ConfigPatch
 
-// SpecPatch computes a new mental-model spec from the current one; pure, like ConfigPatch.
-type SpecPatch func(cur domain.MentalModelSpec) (domain.MentalModelSpec, error)
+// SpecPatch computes a new mental-model spec from the current one; it must be pure.
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type SpecPatch = mentalmodel.SpecPatch
 
 // TenantAdmin reads and patches the tenant-level config.
 type TenantAdmin interface {
@@ -121,42 +122,16 @@ type DirectiveAdmin interface {
 }
 
 // ListDocumentsRequest mirrors memory.v1.ListDocumentsRequest.
-type ListDocumentsRequest struct {
-	// Bank is the bank listed.
-	Bank port.BankRef
-	// Q is a case-insensitive substring filter on the document id; empty = none.
-	Q string
-	// Tags filters by document tags; empty = none.
-	Tags []string
-	// TagsMatch is how Tags compare.
-	TagsMatch domain.TagsMatch
-	// Start is the inclusive lower bound on TimeField; nil = unbounded.
-	Start *time.Time
-	// End is the exclusive upper bound on TimeField; nil = unbounded.
-	End *time.Time
-	// TimeField is the timestamp Start and End filter on; unspecified = created_at.
-	TimeField domain.DocTimeField
-	// PageSize caps the page; 0 = the RPC default.
-	PageSize int
-	// PageToken continues a previous listing; empty = first page.
-	PageToken string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type ListDocumentsRequest = docs.ListDocumentsRequest
 
 // DocumentPage is one page of documents.
-type DocumentPage struct {
-	// Items are the page's documents.
-	Items []domain.Document
-	// NextPageToken continues the listing; empty = last page.
-	NextPageToken string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type DocumentPage = docs.DocumentPage
 
 // DocumentView is a document as GetDocument returns it.
-type DocumentView struct {
-	// Document is the stored document.
-	Document domain.Document
-	// OriginalText is the retained text from the blob store; empty unless asked for.
-	OriginalText string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type DocumentView = docs.DocumentView
 
 // DocumentAdmin lists, reads and reprocesses documents.
 type DocumentAdmin interface {
@@ -173,20 +148,12 @@ type DocumentAdmin interface {
 }
 
 // ScopePage is one page of observation scopes.
-type ScopePage struct {
-	// Items are the page's scopes.
-	Items []domain.ScopeInfo
-	// NextPageToken continues the listing; empty = last page.
-	NextPageToken string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type ScopePage = curate.ScopePage
 
 // ClearResult reports what a clear removed and the consolidation it queued.
-type ClearResult struct {
-	// Deleted counts the observations removed.
-	Deleted int64
-	// Operation is the queued consolidation; nil when reconsolidate was false.
-	Operation *domain.Operation
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type ClearResult = curate.ClearResult
 
 // ObservationAdmin runs and clears consolidation.
 type ObservationAdmin interface {
@@ -210,66 +177,24 @@ type ObservationAdmin interface {
 }
 
 // ListMentalModelsRequest mirrors memory.v1.ListMentalModelsRequest.
-type ListMentalModelsRequest struct {
-	// Bank is the bank listed.
-	Bank port.BankRef
-	// FolderPrefix limits models to a folder subtree; empty = all.
-	FolderPrefix string
-	// Detail is how much of each model to load (the server trims to it as well).
-	Detail domain.Detail
-	// Tags filters by model tags; empty = none.
-	Tags []string
-	// TagsMatch is how Tags compare.
-	TagsMatch domain.TagsMatch
-	// PageSize caps the page; 0 = the RPC default.
-	PageSize int
-	// PageToken continues a previous listing; empty = first page.
-	PageToken string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type ListMentalModelsRequest = mentalmodel.ListRequest
 
 // MentalModelPage is one page of mental models.
-type MentalModelPage struct {
-	// Items are the page's models.
-	Items []domain.MentalModel
-	// NextPageToken continues the listing; empty = last page.
-	NextPageToken string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type MentalModelPage = mentalmodel.ModelPage
 
 // RefreshRequest mirrors memory.v1.RefreshMentalModelRequest.
-type RefreshRequest struct {
-	// Bank owns the model.
-	Bank port.BankRef
-	// ID is the model refreshed.
-	ID port.MentalModelID
-	// ForceFull rewrites in full even when delta mode would apply.
-	ForceFull bool
-	// Overrides are per-call overrides; nil = none.
-	Overrides *domain.BankConfig
-	// Strategy overrides the refresh strategy for this call; unspecified = the model's.
-	Strategy domain.RefreshStrategy
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type RefreshRequest = mentalmodel.RefreshRequest
 
 // HistoryRequest mirrors memory.v1.GetMentalModelHistoryRequest.
-type HistoryRequest struct {
-	// Bank owns the model.
-	Bank port.BankRef
-	// ID is the model.
-	ID port.MentalModelID
-	// Kind limits entries to one kind; unspecified = all.
-	Kind domain.HistoryKind
-	// PageSize caps the page; 0 = the RPC default.
-	PageSize int
-	// PageToken continues a previous listing; empty = first page.
-	PageToken string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type HistoryRequest = mentalmodel.HistoryRequest
 
 // HistoryPage is one page of a mental model's history, newest first.
-type HistoryPage struct {
-	// Items are the page's entries.
-	Items []domain.MentalModelHistoryEntry
-	// NextPageToken continues the listing; empty = last page.
-	NextPageToken string
-}
+// Alias of the engine type, so the engine implementation satisfies the server interface (decisions 1205, 1302).
+type HistoryPage = mentalmodel.HistoryPage
 
 // MentalModelAdmin manages mental models; DryRunRefresh and SearchPages go to their engines directly.
 type MentalModelAdmin interface {
@@ -310,3 +235,13 @@ type OperationReader interface {
 		ctx context.Context, b port.BankRef, afterSeq int64, limit int, types []domain.EventType,
 	) ([]domain.LifecycleEvent, int64, error)
 }
+
+// The engine implementations satisfy the server's admin interfaces directly (decisions 1205, 1302).
+var (
+	_ TenantAdmin      = bank.TenantAdmin(nil)
+	_ BankAdmin        = bank.BankAdmin(nil)
+	_ DirectiveAdmin   = bank.DirectiveAdmin(nil)
+	_ DocumentAdmin    = docs.DocumentAdmin(nil)
+	_ ObservationAdmin = curate.ObservationAdmin(nil)
+	_ MentalModelAdmin = mentalmodel.Admin(nil)
+)
