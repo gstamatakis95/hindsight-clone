@@ -17,9 +17,11 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   internal/prompts: templates.
 - internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
   kind's payload, serial key and Enqueue helper. internal/maintenance: the 60 s tick and the graph_maintenance job.
-- internal/engine/*: business logic over the boundaries; internal/server: gRPC handlers.
+- internal/engine/*: business logic over the boundaries.
+- internal/grpcapi: thin gRPC handlers, one file and handler struct per service (holding only the engines it
+  calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
-  area builds its engines and server dependencies; handlers.go adapts the engines to job handlers. config.go reads
+  area builds its engines and gRPC handlers; handlers.go adapts the engines to job handlers. config.go reads
   the environment (deployment, infrastructure and secrets only), configfile.go the server config file
   (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
@@ -27,7 +29,7 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 ## Rules
 - The boundaries (store, ai, blob, clock) are interfaces; put `var _ Iface = (*impl)(nil)` next to each
   implementation. ai.Router, ai.Tokenizer and clock.System are concrete.
-- Engines never import adapters, server, maintenance, gen, pgx, net/http or the S3 SDK (depguard enforces this).
+- Engines never import adapters, grpcapi, maintenance, gen, pgx, net/http or the S3 SDK (depguard enforces this).
 - Enqueue jobs only through the jobs.Enqueue* helpers (jobs/kinds.go), inside the transaction of the change. The
   helpers never call tx.Seq: call tx.Seq(bank) first yourself when the transaction changes memory content.
 - Inject clock.Clock; never call time.Now for logic. Every LLM call resolves its binding with ai.Router.
@@ -58,6 +60,8 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - make gen && make lint && make test pass, with no diff left in gen/, schema/ or internal/mocks/.
 - Store code is tested against real Postgres: pgtest.NewStore(t) gives each test its own migrated database.
   Fakes (internal/fake) exist only for the LLM, embedder, reranker and blob; tests use clock.Manual for time.
+- API behaviour through the real engines is tested in cmd/memd on the wired stack (stack_test.go: pgtest, the
+  gateway emulator, the worker), not with engine mocks.
 - A proto change comments every new element.
 
 ## API changes

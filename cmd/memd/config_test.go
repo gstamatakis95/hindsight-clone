@@ -7,19 +7,13 @@ import (
 	"maps"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/server"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 // baseFile is a valid server config file: every chat step on one model, fast worker timings.
@@ -218,59 +212,6 @@ func TestServerFilePath(t *testing.T) {
 func modelOf(cfg domain.BankConfig, slot domain.ModelSlot) string {
 	b, _ := cfg.Binding(slot)
 	return b.Model
-}
-
-// failingProbe is a readiness probe that fails while fail is set.
-type failingProbe struct{ fail atomic.Bool }
-
-func (p *failingProbe) Ready(context.Context) error {
-	if p.fail.Load() {
-		return errors.New("postgres down")
-	}
-	return nil
-}
-
-// TestWorkerHealthServer: the worker's health endpoint answers Check from the probes and
-// stops when its context ends.
-func TestWorkerHealthServer(t *testing.T) {
-	probe := &failingProbe{}
-	lis, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- serveHealth(ctx, lis, []server.ReadinessProbe{probe}) }()
-	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = conn.Close() }()
-	hc := healthpb.NewHealthClient(conn)
-	check := func() healthpb.HealthCheckResponse_ServingStatus {
-		t.Helper()
-		resp, err := hc.Check(t.Context(), &healthpb.HealthCheckRequest{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return resp.GetStatus()
-	}
-	if s := check(); s != healthpb.HealthCheckResponse_SERVING {
-		t.Fatalf("healthy: %v", s)
-	}
-	probe.fail.Store(true)
-	if s := check(); s != healthpb.HealthCheckResponse_NOT_SERVING {
-		t.Fatalf("probe failing: %v", s)
-	}
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("serveHealth: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("serveHealth did not stop")
-	}
 }
 
 // TestLoadConfigEnvAndFlags checks defaults, environment values, flags winning over the environment, and

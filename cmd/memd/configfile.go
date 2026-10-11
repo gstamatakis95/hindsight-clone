@@ -8,7 +8,7 @@ import (
 	"io/fs"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/server"
+	"memd/internal/grpcapi"
 	"os"
 	"strings"
 	"time"
@@ -163,7 +163,7 @@ func decodeYAML(raw []byte, f *ServerFile) error {
 	if err := protojson.Unmarshal(file.Defaults, &msg); err != nil {
 		return fmt.Errorf("defaults: %w", err)
 	}
-	if f.Defaults, err = server.BankConfigFromProto(&msg); err != nil {
+	if f.Defaults, err = grpcapi.BankConfigFromProto(&msg); err != nil {
 		return fmt.Errorf("defaults: %w", err)
 	}
 	return nil

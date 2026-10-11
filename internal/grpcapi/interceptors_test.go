@@ -1,0 +1,157 @@
+package grpcapi
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+
+	pb "memd/gen/memory/v1"
+)
+
+// TestTenantInterceptor checks header handling: exactly one valid x-tenant-id, health exempt.
+func TestTenantInterceptor(t *testing.T) {
+	icpt := TenantInterceptor()
+	tests := []struct {
+		name   string
+		method string
+		md     metadata.MD
+		want   codes.Code
+		tenant string
+	}{
+		{"ok", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, "acme"), codes.OK, "acme"},
+		{"missing", "/memory.v1.MemoryService/Recall", nil, codes.InvalidArgument, ""},
+		{"empty", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, ""), codes.InvalidArgument, ""},
+		{
+			"repeated", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, "a", TenantHeader, "b"), codes.InvalidArgument, "",
+		},
+		{"slash", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, "a/b"), codes.InvalidArgument, ""},
+		{
+			"control char", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, "a\nb"), codes.InvalidArgument, "",
+		},
+		{"DEL", "/memory.v1.MemoryService/Recall", metadata.Pairs(TenantHeader, "a\x7fb"), codes.InvalidArgument, ""},
+		{
+			"exactly 256 bytes", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, strings.Repeat("x", 256)), codes.OK, strings.Repeat("x", 256),
+		},
+		{
+			"too long", "/memory.v1.MemoryService/Recall",
+			metadata.Pairs(TenantHeader, strings.Repeat("x", 257)), codes.InvalidArgument, "",
+		},
+		{"health needs none", "/grpc.health.v1.Health/Check", nil, codes.OK, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.md != nil {
+				ctx = metadata.NewIncomingContext(ctx, tt.md)
+			}
+			var seen string
+			_, err := icpt(ctx, nil, &grpc.UnaryServerInfo{FullMethod: tt.method},
+				func(ctx context.Context, _ any) (any, error) {
+					seen = TenantFrom(ctx)
+					return nil, nil
+				})
+			if got := status.Code(err); got != tt.want {
+				t.Fatalf("code = %v, want %v (%v)", got, tt.want, err)
+			}
+			if seen != tt.tenant {
+				t.Fatalf("tenant = %q, want %q", seen, tt.tenant)
+			}
+		})
+	}
+}
+
+// TestDeadlineInterceptor checks the default applies only to calls without a deadline.
+func TestDeadlineInterceptor(t *testing.T) {
+	info := &grpc.UnaryServerInfo{FullMethod: "/memory.v1.MemoryService/Recall"}
+	remaining := func(ctx context.Context, def time.Duration) (time.Duration, bool) {
+		var left time.Duration
+		var has bool
+		_, _ = DeadlineInterceptor(def)(ctx, nil, info, func(ctx context.Context, _ any) (any, error) {
+			var dl time.Time
+			dl, has = ctx.Deadline()
+			left = time.Until(dl)
+			return nil, nil
+		})
+		return left, has
+	}
+	if left, ok := remaining(context.Background(), time.Minute); !ok || left > time.Minute || left < 50*time.Second {
+		t.Fatalf("default not applied: %v %v", left, ok)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	if left, ok := remaining(ctx, time.Minute); !ok || left < 59*time.Minute {
+		t.Fatalf("caller deadline replaced: %v %v", left, ok)
+	}
+	if _, ok := remaining(context.Background(), 0); ok {
+		t.Fatal("zero default must not set a deadline")
+	}
+}
+
+// TestPagingInterceptor checks a negative page_size or limit is INVALID_ARGUMENT and 0 (the server default) passes.
+func TestPagingInterceptor(t *testing.T) {
+	info := &grpc.UnaryServerInfo{FullMethod: "/memory.v1.X/Y"}
+	tests := []struct {
+		req  proto.Message
+		want codes.Code
+	}{
+		{&pb.ListScopesRequest{PageSize: -1}, codes.InvalidArgument},
+		{&pb.ListEventsRequest{Limit: -1}, codes.InvalidArgument},
+		{&pb.ListScopesRequest{}, codes.OK},
+		{&pb.ListEventsRequest{Limit: 5}, codes.OK},
+	}
+	for _, tc := range tests {
+		_, err := pagingInterceptor()(context.Background(), tc.req, info,
+			func(context.Context, any) (any, error) { return nil, nil })
+		if got := status.Code(err); got != tc.want {
+			t.Errorf("%v: code = %v, want %v", tc.req, got, tc.want)
+		}
+	}
+}
+
+// TestBankRef checks the bank id rules.
+func TestBankRef(t *testing.T) {
+	ctx := WithTenant(context.Background(), "acme")
+	if b, err := bankRef(ctx, "main"); err != nil || b.Tenant != "acme" || b.Bank != "main" {
+		t.Fatalf("bankRef = %v, %v", b, err)
+	}
+	for _, id := range []string{"", "a/b", "a\x00", "a\x7f", strings.Repeat("b", 257)} {
+		if _, err := bankRef(ctx, id); status.Code(toStatus(err)) != codes.InvalidArgument {
+			t.Fatalf("bank %q: err = %v, want INVALID_ARGUMENT", id, err)
+		}
+	}
+	if _, err := bankRef(context.Background(), "main"); status.Code(toStatus(err)) != codes.InvalidArgument {
+		t.Fatalf("no tenant: err = %v", err)
+	}
+}
+
+// TestCheckNameRejectsDotIDs: "." and ".." are rejected as tenant (header) and bank ids;
+// names that merely contain dots are fine.
+func TestCheckNameRejectsDotIDs(t *testing.T) {
+	acme := WithTenant(context.Background(), "acme")
+	for _, id := range []string{".", ".."} {
+		if _, err := bankRef(acme, id); status.Code(toStatus(err)) != codes.InvalidArgument {
+			t.Errorf("bank %q: err = %v, want INVALID_ARGUMENT", id, err)
+		}
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TenantHeader, id))
+		_, err := TenantInterceptor()(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/memory.v1.X/Y"},
+			func(context.Context, any) (any, error) { return nil, nil })
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("tenant header %q: err = %v, want INVALID_ARGUMENT", id, err)
+		}
+	}
+	for _, id := range []string{"...", ".a", "a.b", "a.."} {
+		if _, err := bankRef(acme, id); err != nil {
+			t.Errorf("bank %q rejected: %v", id, err)
+		}
+	}
+}

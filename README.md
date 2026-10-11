@@ -117,7 +117,10 @@ make e2e       # compose stack + emulated gateway + memd api/worker processes: e
 
 Every test that touches the store gets its own database, cloned from a migrated template
 (`internal/store/postgres/pgtest`). One ParadeDB container serves the whole `go test ./...` run and is
-removed when it ends. Environment:
+removed when it ends. The gRPC API is tested through the real engines, with only model calls and blob storage
+stubbed, on a wired in-process stack (`cmd/memd/stack_test.go`: pgtest, the gateway emulator in
+`test/e2e/gatewayemu`, the worker, bufconn), and `internal/grpcapi` keeps only database-free tests (conversion
+goldens, interceptors, status mapping, FieldMask patches, health). Environment:
 
 - `MEMD_TEST_DATABASE_URL` (or `DATABASE_URL`): use an existing server instead of a container, e.g.
   `MEMD_TEST_DATABASE_URL=postgres://memd:memd@localhost:55432/memd make test` after `make up`. The user must

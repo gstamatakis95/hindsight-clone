@@ -7,7 +7,7 @@
 // # Architecture
 //
 // The package is the adapter of internal/store. It imports internal/store, internal/domain, its own db subpackage, pgx
-// and pgvector, and never internal/engine, internal/server or internal/jobs. It holds no business logic: scoring,
+// and pgvector, and never internal/engine, internal/grpcapi or internal/jobs. It holds no business logic: scoring,
 // budgets, config merging and deciding what to enqueue belong to the engines (internal/store/AGENTS.md). Alembic owns
 // the schema (migrations/, dumped to schema/schema.sql); this package never runs DDL.
 //
