@@ -293,3 +293,8 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   infrastructure that WP-14b exercises end to end and the final review covers. memd env contract in decision 1411.
 - 2026-10-11 WP-16 (engine follow-ups + Reprocessor) merged as 988a886; gates pass. A focused review runs in parallel with WP-14b.
 - 2026-10-11 WP-14b (integration) started; a focused WP-16 review runs in parallel (2 agents, no helpers).
+- 2026-10-11 WP-16 focused review: FIX-NEEDED. HIGH (predates WP-16, now also reachable via Reprocessor): a
+  retag mid-run makes the retain/reprocess job supersede itself after deleting the old units, losing facts.
+  WP-17 fix-up launched: adopt tag-only changes instead of superseding; add 3 gateway overflow markers.
+  Accepted gap: the ChangeDetector uses the default 0.45 fuzzy floor (needs a ConfigResolver; deferred to avoid
+  a constructor change under WP-14b).
