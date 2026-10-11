@@ -196,7 +196,10 @@ API keys come only from `MEMD_EVAL_JUDGE_API_KEY`, `MEMD_EVAL_ANSWER_API_KEY` (f
 | `recall.budget`, `recall.max_tokens`, `recall.chunk_tokens` | `-recall-budget`, `-recall-max-tokens`, `-recall-chunk-tokens` | server defaults (locomo: high, 32768, 16384) |
 | `bank_prefix`, `out_dir` | `-bank-prefix`, `-out-dir` | `eval-<unix time>-`, `eval-results` |
 
-Use a judge model other than the one memd runs on: a model grading its own answers mostly agrees with itself.
+Choosing the judge: a model grading answers from its own family tends to agree with itself. To compare with
+Hindsight's published LoCoMo numbers, use its models anyway: its CI runs the server under test on
+`gemini-2.5-flash-lite`, and AMB's judge defaults to the same model. For your own comparisons, such as memd
+before and after a change, prefer a judge from a different family than memd's models.
 
 ## Reading the report
 

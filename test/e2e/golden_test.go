@@ -18,8 +18,8 @@ import (
 )
 
 // TestGoldenAgainstMemdAll runs every eval/golden fixture through the eval harness (sync retain, the
-// BankStats barrier, recall mode, substring judge) against `memd all` with the emulated gateway, as the
-// card's golden-fixture item asks. Every check must pass.
+// BankStats barrier, recall mode, substring judge) against `memd all` with the emulated gateway. Every
+// check must pass.
 func TestGoldenAgainstMemdAll(t *testing.T) {
 	bin := e2eharness.BuildMemd(t)
 	convs, err := golden.Load("")

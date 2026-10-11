@@ -16,8 +16,9 @@ memd:
   tenant: eval
 
 # The eval's own models, through any OpenAI-compatible gateway (it can be the one memd uses). Hindsight's
-# published runs answer and judge with Gemini models (judge: gemini-2.5-flash-lite); use the same models to
-# compare numbers. Use a judge model other than the one memd is configured with.
+# published runs answer and judge with Gemini models (judge: gemini-2.5-flash-lite, the same model its server
+# runs on); keep these to compare with those numbers. For memd-vs-memd comparisons, prefer a judge from a
+# different model family than memd's.
 judge:
   kind: llm
   url: http://localhost:4000/v1
