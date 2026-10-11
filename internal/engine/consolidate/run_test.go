@@ -267,14 +267,17 @@ func TestRunTriggersRefreshes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, j := range jobs {
-		var p RefreshPayload
-		if err := json.Unmarshal(j.Payload, &p); err != nil {
+		// The wire shape is the refresh handler's (mentalmodel.RefreshPayload): exactly the key
+		// mental_model_id (decision 1800). Decoded by hand so a drift in this package's type is caught.
+		var keys map[string]string
+		if err := json.Unmarshal(j.Payload, &keys); err != nil {
 			t.Fatal(err)
 		}
-		if j.SerialKey != "mm:"+string(p.ModelID) || j.Overrides != nil {
-			t.Errorf("refresh job %+v", j)
+		id := keys["mental_model_id"]
+		if len(keys) != 1 || id == "" || j.SerialKey != "mm:"+id || j.Overrides != nil {
+			t.Errorf("refresh job %+v payload %s", j, j.Payload)
 		}
-		got[string(p.ModelID)] = j.RunAt
+		got[id] = j.RunAt
 	}
 	want := map[string]time.Time{
 		"tagged": now.Add(30 * time.Second), "untagged": now.Add(30 * time.Second), "floor": last.Add(120 * time.Second),

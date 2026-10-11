@@ -30,6 +30,7 @@ func TestScenarios(t *testing.T) {
 	t.Run("RetainAsync", e.retainAsync)
 	t.Run("ConsolidationRecallReflect", e.consolidationRecallReflect)
 	t.Run("MentalModelBothStrategies", e.mentalModels)
+	t.Run("ConsolidationTriggersRefresh", e.consolidationTriggersRefresh)
 	t.Run("InvalidateRestore", e.invalidateRestore)
 	t.Run("RetagReprocess", e.retagReprocess)
 	t.Run("CancelRetry", e.cancelRetry)
@@ -153,6 +154,64 @@ func (e *env) mentalModels(t *testing.T) {
 	if !strings.Contains(op.GetResult().String(), "single_shot") {
 		t.Fatalf("refresh result %v, want strategy single_shot", op.GetResult())
 	}
+}
+
+// consolidationTriggersRefresh (final review B, C1): a model with refresh_after_consolidation is refreshed
+// by the consolidation a later retain causes. The build completes first, so the triggered refresh is its
+// own row (not joined to the build's payload). The version advances, no refresh fails and, after a
+// maintenance tick has reconciled failures, the model is not paused.
+func (e *env) consolidationTriggersRefresh(t *testing.T) {
+	const bank = "sc-mm-after-consolidation"
+	debounce := int32(1)
+	_, err := e.c.Banks.CreateBank(e.ctx(t), &pb.CreateBankRequest{BankId: bank, Config: &pb.BankConfig{
+		MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.retain(t, bank, aliceDoc, aliceText)
+	e.idle(t, bank)
+	created, err := e.c.MentalModels.CreateMentalModel(e.ctx(t), &pb.CreateMentalModelRequest{
+		BankId: bank, Spec: &pb.MentalModelSpec{
+			Id: "alice", Name: "Alice", SourceQuery: "What do we know about Alice?",
+			Trigger: &pb.RefreshTrigger{
+				Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT, RefreshAfterConsolidation: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.waitOp(t, bank, created.GetBuild().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	built := e.model(t, bank, "alice").GetVersion()
+	e.retain(t, bank, "doc-alice-2", "Alice adopted a cat named Miso. Alice plays the violin on weekends.")
+	e.idle(t, bank)
+	if failed := e.refreshOps(t, bank, pb.OperationStatus_OPERATION_STATUS_FAILED); len(failed) != 0 {
+		t.Fatalf("%d refreshes failed, first: %s", len(failed), failed[0].GetError())
+	}
+	done := e.refreshOps(t, bank, pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	if len(done) < 2 {
+		t.Fatalf("%d completed refreshes, want the build and the one consolidation triggered", len(done))
+	}
+	if v := e.model(t, bank, "alice").GetVersion(); v <= built {
+		t.Fatalf("version %d after the triggered refresh, want above the build's %d; refreshes: %v", v, built, done)
+	}
+	time.Sleep(3 * time.Second) // one maintenance interval (2 s), so a failure would have been reconciled
+	if m := e.model(t, bank, "alice"); m.GetAutoRefreshPaused() {
+		t.Fatalf("model paused after a consolidation-triggered refresh: %+v", m)
+	}
+}
+
+// refreshOps lists the bank's refresh_mental_model operations in status.
+func (e *env) refreshOps(t *testing.T, bank string, status pb.OperationStatus) []*pb.Operation {
+	t.Helper()
+	resp, err := e.c.Operations.ListOperations(e.ctx(t), &pb.ListOperationsRequest{
+		BankId: bank, Status: status, Kind: pb.OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL, PageSize: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.GetOperations()
 }
 
 // model reads a mental model at full detail.

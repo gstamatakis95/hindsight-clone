@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"slices"
 )
 
 // batchError marks a failed CONSOLIDATE call: the batch is halved, and a unit that fails alone is
@@ -80,7 +81,21 @@ func (r *run) attempt(ctx context.Context, i int, cfg domain.BankConfig, ids []p
 	if out.wrote {
 		r.changed[w.key.String()] = w.key
 	}
+	r.recordCited(w.key, out.cited)
 	return nil, nil
+}
+
+// recordCited adds scope s to the cited scopes of each of ids, the facts an observation this run wrote in s
+// cites, so later stamps re-check that s still cites them (decision 1801).
+func (r *run) recordCited(s port.ScopeKey, ids []port.UnitID) {
+	for _, id := range ids {
+		if _, planned := r.units[id]; !planned {
+			continue
+		}
+		if !slices.ContainsFunc(r.cited[id], func(k port.ScopeKey) bool { return k.String() == s.String() }) {
+			r.cited[id] = append(r.cited[id], s)
+		}
+	}
 }
 
 // settle resolves the units deferred by scope i's last top-level batch, with that scope's config and so

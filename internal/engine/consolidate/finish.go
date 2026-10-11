@@ -18,10 +18,12 @@ const (
 )
 
 // RefreshPayload is the payload of the refresh_mental_model jobs consolidation triggers: the model only,
-// no flags (decision 1004).
+// no flags (decision 1004). It marshals to the mentalmodel package's payload shape,
+// {"mental_model_id": ...}, which the refresh handler decodes (decision 1800). Nothing imports
+// mentalmodel, so the shape is mirrored here rather than shared.
 type RefreshPayload struct {
 	// ModelID is the mental model to refresh.
-	ModelID port.MentalModelID `json:"model_id"`
+	ModelID port.MentalModelID `json:"mental_model_id"`
 }
 
 // finish runs the final transaction: stamps the planned units that had no scope left to decide (still
