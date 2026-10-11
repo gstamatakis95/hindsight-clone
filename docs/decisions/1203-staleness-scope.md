@@ -6,6 +6,16 @@ SPEC: "a model is stale if a unit or observation with seq above `last_seq_seen` 
 reads untagged memories." Tags default to `all_strict` for a tagged model; tag groups override flat tags.
 Fuzzy tag leaves need a trigram lookup against the bank's tags (recall's TagFilterCompiler, WP-09).
 
+**Update (WP-16):** the follow-up below is done. Fuzzy leaves are no longer dropped.
+- `scopeQuery` resolves a scope that has a fuzzy leaf against the bank's tags. It reads them with
+  `ScopeReader.TagCounts` (port.Reader) and compiles them with recall's `TagFilterCompiler`, so staleness and
+  the pre-check see exactly the units recall retrieves.
+- The trigram floor is `recall.FuzzyTagMinSimilarity`. The runner's pre-check uses the model's effective
+  config. The `ChangeDetector`, which has no config, uses recall's default (0.45).
+- Cost: one `TagCounts` read per check of a fuzzy-scoped model. The bullet below on dropping the tag
+  predicate, and its over-triggering cost, are superseded.
+- Test: `TestFuzzyScopeResolvesBankTags`.
+
 ## Decision
 - The scope compiles to a `port.SQLPredicate` in the engine (`ResolvedScope.predicate`). For staleness
   (`ChangeDetector.NeedsRefresh`, also the re-check an automatic run makes when it starts) a scoped model's

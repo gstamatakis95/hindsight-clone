@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/engine/recall"
 	"memd/internal/engine/reflect"
 	"memd/internal/port"
 	"slices"
@@ -186,7 +187,11 @@ func (r *runner) draft(ctx context.Context, p *refreshPlan) (drafted, error) {
 	if fresh {
 		return drafted{content: p.m.ContentMD, noNewFacts: true, fresh: true}, nil
 	}
-	newest, err := r.d.Scope.NewestSeq(ctx, scopeQuery(p.m, p.window, false))
+	q, err := scopeQuery(ctx, r.d.Scope, p.m, p.window, false, recall.FuzzyTagMinSimilarity(p.cfg))
+	if err != nil {
+		return drafted{content: p.m.ContentMD}, err
+	}
+	newest, err := r.d.Scope.NewestSeqInScope(ctx, q)
 	if err != nil {
 		return drafted{content: p.m.ContentMD}, fmt.Errorf("mentalmodel: scope seq: %w", err)
 	}

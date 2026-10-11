@@ -208,7 +208,7 @@ func listAll(ctx context.Context, l ModelLister, q ModelQuery) ([]domain.MentalM
 	var out []domain.MentalModel
 	q.PageToken = ""
 	for {
-		page, next, err := l.ListModels(ctx, q)
+		page, next, err := l.ListMentalModels(ctx, q)
 		if err != nil {
 			return nil, fmt.Errorf("mentalmodel: list models: %w", err)
 		}

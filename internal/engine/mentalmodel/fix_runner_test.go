@@ -22,16 +22,21 @@ func fuzzySpec() domain.MentalModelSpec {
 	}}
 }
 
-// TestFuzzyScopeDropsTagPredicate checks that a scope with a fuzzy leaf is not compiled as exact names:
-// a tagged unit that only the fuzzy resolution would match stales the model and reaches recall, while an
-// untagged unit still never stales it.
-func TestFuzzyScopeDropsTagPredicate(t *testing.T) {
+// TestFuzzyScopeResolvesBankTags checks decision 1203 after WP-16: a fuzzy leaf resolves against the bank's
+// tags (the fake's Reader.TagCounts) before the scope compiles. An off-tag unit no longer stales the model,
+// the misspelt leaf matches the real tag, an untagged unit still never stales it, and the runner's pre-check
+// lets the refresh retrieve.
+func TestFuzzyScopeResolvesBankTags(t *testing.T) {
 	e := newEnv(t)
 	m := e.addModel(fuzzySpec())
 	detector := NewChangeDetector(e.store.Read(), e.reads)
 	e.addUnit(domain.FactTypeWorld, "untagged note")
 	if stale, _, err := detector.NeedsRefresh(e.ctx, m); err != nil || stale {
 		t.Fatalf("untagged unit staled a tag-grouped model: %v %v", stale, err)
+	}
+	e.addUnit(domain.FactTypeWorld, "Budget meeting moved", "marketing")
+	if stale, _, err := detector.NeedsRefresh(e.ctx, m); err != nil || stale {
+		t.Fatalf("an off-tag unit staled a fuzzy scope (tag filter dropped): %v %v", stale, err)
 	}
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "project")
 	if stale, _, err := detector.NeedsRefresh(e.ctx, m); err != nil || !stale {
@@ -42,6 +47,34 @@ func TestFuzzyScopeDropsTagPredicate(t *testing.T) {
 	}
 	if len(e.rc.reqs) != 1 {
 		t.Fatalf("pre-check short-circuited a fuzzy scope: %d retrievals", len(e.rc.reqs))
+	}
+}
+
+// TestAgenticRefreshSetsContext checks that an agentic refresh hands reflect the rendered
+// mm_refresh_context: the full advice on the first build, the delta advice on a delta refresh.
+func TestAgenticRefreshSetsContext(t *testing.T) {
+	e := newEnv(t)
+	e.addModel(deltaSpec("status", domain.RefreshStrategyAgentic))
+	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
+	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.addUnit(domain.FactTypeWorld, "Bob joins the project", "proj")
+	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON())
+	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true}); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.rf.reqs) != 2 {
+		t.Fatalf("%d reflect calls, want 2", len(e.rf.reqs))
+	}
+	m := e.model("status")
+	full, _ := refreshContext(m, port.SeqUpTo(0, 1))
+	delta, _ := refreshContext(m, port.SeqUpTo(1, 2))
+	if got := e.rf.reqs[0].Context; got == "" || got != full {
+		t.Errorf("first build context = %q, want the full context %q", got, full)
+	}
+	if got := e.rf.reqs[1].Context; got != delta {
+		t.Errorf("delta refresh context = %q, want the delta context %q", got, delta)
 	}
 }
 

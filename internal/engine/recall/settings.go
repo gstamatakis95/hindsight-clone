@@ -58,6 +58,10 @@ type settings struct {
 	enabled            map[string]bool
 }
 
+// FuzzyTagMinSimilarity is the trigram floor recall resolves fuzzy tag leaves with under cfg
+// (recall.fuzzy_tag_min_similarity, default 0.45); the mental-model engine resolves model scopes with it.
+func FuzzyTagMinSimilarity(cfg domain.BankConfig) float64 { return settingsOf(cfg).fuzzyMinSimilarity }
+
 // settingsOf reads the recall settings from an effective config. An empty enabled_strategies list (nil, or
 // an explicit clear) runs all four arms.
 func settingsOf(cfg domain.BankConfig) settings {

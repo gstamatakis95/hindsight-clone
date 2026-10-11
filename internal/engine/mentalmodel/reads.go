@@ -4,82 +4,46 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/port"
-	"time"
 )
 
-// The reads below are not in internal/port yet (CCR WP-12-1). The engine declares what it consumes; WP-14
-// wires a Postgres implementation once the CCR lands, and tests use stubs over internal/fake.
+// The reads below are port.Reader methods (CCR WP-12-1, applied by WP-15). The engine declares the small
+// subsets it consumes; port.Reader satisfies each of them.
 
 // ScopeQuery selects the live units (facts and observations) of one bank in a model's scope.
-type ScopeQuery struct {
-	// Bank is the bank searched.
-	Bank port.BankRef
-	// Types limits fact types; empty = all.
-	Types []domain.FactType
-	// Tags filters by tags; nil = no filter.
-	Tags *port.SQLPredicate
-	// Seq bounds the units' seq.
-	Seq port.SeqRange
-}
-
-// ScopeReader answers "has anything in this scope changed?" without a model call.
-type ScopeReader interface {
-	// NewestSeq returns the highest seq of a live unit matching q, or 0 when none matches.
-	NewestSeq(ctx context.Context, q ScopeQuery) (int64, error)
-}
+type ScopeQuery = port.ScopeQuery
 
 // ModelQuery selects mental models of one bank for listing.
-type ModelQuery struct {
-	// Bank is the bank listed.
-	Bank port.BankRef
-	// FolderPrefix keeps models whose folder_path equals it or lies under it ("a" matches "a" and "a/b",
-	// not "ab"); empty = all.
-	FolderPrefix string
-	// Tags filters by model tags with TagsMatch semantics (domain.MatchTags); empty = no filter.
-	Tags []string
-	// TagsMatch is how Tags compare.
-	TagsMatch domain.TagsMatch
-	// RefreshAfterConsolidation keeps only models whose trigger sets refresh_after_consolidation.
-	RefreshAfterConsolidation bool
-	// PageSize caps the page; 0 = all.
-	PageSize int
-	// PageToken continues a previous listing; empty = first page.
-	PageToken string
+type ModelQuery = port.ModelQuery
+
+// CronModel is a model with a refresh_cron schedule, as the cron sweep sees it.
+type CronModel = port.CronModel
+
+// FailedRefresh is a model whose latest terminal refresh_mental_model operation is FAILED.
+type FailedRefresh = port.FailedRefresh
+
+// ScopeReader answers "has anything in this scope changed?" without a model call, and lists the bank's tags
+// so fuzzy tag leaves resolve to exact tags before the scope compiles (decision 1203).
+type ScopeReader interface {
+	// NewestSeqInScope returns the highest seq of a live unit matching q, or 0 when none matches.
+	NewestSeqInScope(ctx context.Context, q ScopeQuery) (int64, error)
+	// TagCounts returns up to limit (<= 0 = all) tags of b's source with how many items carry each.
+	// Unknown or tombstoned bank: domain.ErrNotFound.
+	TagCounts(
+		ctx context.Context, b port.BankRef, source domain.TagSource, prefix, after string, limit int,
+	) ([]domain.TagCount, error)
 }
 
 // ModelLister lists a bank's mental models, ordered by id.
 type ModelLister interface {
-	// ListModels returns one page of models matching q (with content) and the next page token ("" = last).
-	ListModels(ctx context.Context, q ModelQuery) ([]domain.MentalModel, string, error)
-}
-
-// CronModel is a model with a refresh_cron schedule, as the cron sweep sees it.
-type CronModel struct {
-	// Model is the model.
-	Model domain.MentalModel
-	// LastRefreshEnqueuedAt is the created_at of the model's newest refresh_mental_model operation (any
-	// status); zero when it has none.
-	LastRefreshEnqueuedAt time.Time
+	// ListMentalModels returns one page of models matching q (with content) and the next page token
+	// ("" = last). Unknown or tombstoned bank: domain.ErrNotFound.
+	ListMentalModels(ctx context.Context, q ModelQuery) ([]domain.MentalModel, string, error)
 }
 
 // CronSource finds models with a cron schedule across all banks.
 type CronSource interface {
 	// CronModels returns every model with refresh_cron set whose bank is not tombstoned.
 	CronModels(ctx context.Context) ([]CronModel, error)
-}
-
-// FailedRefresh is a model whose latest terminal refresh_mental_model operation is FAILED.
-type FailedRefresh struct {
-	// Bank owns the model.
-	Bank port.BankRef
-	// ModelID is the model.
-	ModelID port.MentalModelID
-	// OperationID is the failed operation.
-	OperationID port.OperationID
-	// FailedAt is when the operation failed (its finished_at, or updated_at).
-	FailedAt time.Time
-	// Error is the operation's recorded error.
-	Error string
 }
 
 // FailureSource finds failed refreshes across all banks.

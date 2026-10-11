@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/engine/recall"
 	"memd/internal/port"
 	"slices"
 )
@@ -23,8 +24,8 @@ type changeDetector struct {
 
 var _ ChangeDetector = (*changeDetector)(nil)
 
-// NewChangeDetector returns the ChangeDetector. r reads BankSeq and the cited sources; s finds the newest
-// in-scope unit (a read the ports lack yet, CCR WP-12-1).
+// NewChangeDetector returns the ChangeDetector. r reads BankSeq and the cited sources; s (port.Reader) finds the
+// newest in-scope unit and resolves fuzzy scope tags.
 func NewChangeDetector(r port.Reader, s ScopeReader) ChangeDetector {
 	return &changeDetector{r: r, scope: s}
 }
@@ -36,7 +37,12 @@ func (d *changeDetector) NeedsRefresh(ctx context.Context, m domain.MentalModel)
 	if err != nil {
 		return false, 0, fmt.Errorf("mentalmodel: bank seq: %w", err)
 	}
-	newest, err := d.scope.NewestSeq(ctx, scopeQuery(m, port.SeqUpTo(m.LastSeqSeen, upTo), true))
+	q, err := scopeQuery(ctx, d.scope, m, port.SeqUpTo(m.LastSeqSeen, upTo), true,
+		recall.FuzzyTagMinSimilarity(domain.BankConfig{}))
+	if err != nil {
+		return false, 0, err
+	}
+	newest, err := d.scope.NewestSeqInScope(ctx, q)
 	if err != nil {
 		return false, 0, fmt.Errorf("mentalmodel: scope seq: %w", err)
 	}
