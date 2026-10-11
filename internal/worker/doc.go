@@ -100,10 +100,13 @@
 //  9. prune_operations / prune_events: delete terminal operations older than OperationRetention (7 days)
 //     and lifecycle events older than EventRetention (30 days).
 //
-// The automatic enqueues use payload {}, no overrides and DedupePendingOrRunning, so concurrent ticks insert
-// at most one row, and one short transaction per bank. They take no tx.Seq: nothing they write is memory
-// content, and Seq refuses a tombstoned bank, which the delete resume must still reach. A bank being deleted
-// or gone is skipped.
+// Steps 2, 5 and 6 enqueue the bank's automatic job with payload {}, no overrides and DedupePendingOrRunning,
+// one short transaction per bank, so concurrent ticks insert at most one row; a bank being deleted or gone is
+// skipped. Step 7 enqueues rederive_memory per fact (curate's payload and serial key, DedupeNone; two workers
+// ticking at once may queue a fact twice, which is harmless because the rederive is idempotent). Steps 2, 5,
+// 6 and 7 take no tx.Seq: nothing they write is memory content, and Seq refuses a tombstoned bank, which the
+// delete resume must still reach. Step 4 goes through mentalmodel's triggers, which take tx.Seq before
+// joining or inserting the model's refresh.
 //
 // # Operation control
 //

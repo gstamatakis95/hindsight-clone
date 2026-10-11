@@ -80,9 +80,10 @@
 //	domain.ErrConflict            ABORTED
 //	anything else                 INTERNAL
 //
-// An error that already carries a gRPC status passes through. ABORTED means a concurrent writer won (for
-// example a superseded sync Retain, or an entity pruned under a retain or curation on every transaction
-// attempt); the client may retry.
+// An error that already carries a gRPC status passes through. ABORTED covers two classes: domain.ErrConflict,
+// a concurrent writer won (for example a superseded sync Retain, or an entity pruned under a retain or
+// curation on every transaction attempt), and the client may retry; and domain.ErrCancelled, the work was
+// cancelled.
 //
 // # Conversion
 //

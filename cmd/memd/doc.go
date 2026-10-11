@@ -20,7 +20,8 @@
 //  1. LoadConfig reads every setting from the environment, then from flags after the mode (a flag wins).
 //     Validate checks the mode, the required settings, positive timings, a heartbeat below 3/4 of the
 //     reclaim threshold, and that EXTRACT and REFLECT have a model (MEMD_MODEL or MEMD_MODEL_<SLOT>), so a
-//     bad deployment fails before anything connects. A bad command line prints the usage and exits 2.
+//     bad deployment fails before anything connects. A missing or unknown mode prints the usage and exits 2;
+//     a bad flag or value, extra arguments or a failed validation prints the error and exits 1.
 //  2. Optional Datadog instrumentation starts (internal/observability); disabled, it installs nothing.
 //  3. The adapters open: Postgres (pinged within 30 s), S3 and the gateway. The gateway's embedding model
 //     must return 768 dimensions (memory_units.embedding is vector(768)), else startup fails.
