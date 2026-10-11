@@ -76,7 +76,7 @@ func (q *Queries) ReadsBankStats(ctx context.Context, arg ReadsBankStatsParams) 
 }
 
 const readsCronModels = `-- name: ReadsCronModels :many
-SELECT m.tenant_id, m.bank_id, m.id, m.name, m.source_query, m.folder_path, m.tags, m.max_tokens, m.trigger, m.overrides, m.content_md, m.structured_output_json, m.version, m.is_stale, m.last_refreshed_at, m.last_seq_seen, m.last_refresh_failed_at, m.auto_refresh_paused, m.source_ids, m.last_trace, m.embedding, m.refresh_cron, m.created_at, m.updated_at, (lo.created_at IS NOT NULL)::bool AS enqueued,
+SELECT m.tenant_id, m.bank_id, m.id, m.name, m.source_query, m.folder_path, m.tags, m.max_tokens, m.trigger, m.overrides, m.content_md, m.structured_output_json, m.version, m.last_refreshed_at, m.last_seq_seen, m.last_refresh_failed_at, m.auto_refresh_paused, m.source_ids, m.last_trace, m.embedding, m.refresh_cron, m.created_at, m.updated_at, (lo.created_at IS NOT NULL)::bool AS enqueued,
     COALESCE(lo.created_at, 'epoch'::timestamptz)::timestamptz AS last_enqueued_at
 FROM mental_models m
 JOIN banks b ON b.tenant_id = m.tenant_id AND b.id = m.bank_id
@@ -123,7 +123,6 @@ func (q *Queries) ReadsCronModels(ctx context.Context) ([]ReadsCronModelsRow, er
 			&i.MentalModel.ContentMd,
 			&i.MentalModel.StructuredOutputJson,
 			&i.MentalModel.Version,
-			&i.MentalModel.IsStale,
 			&i.MentalModel.LastRefreshedAt,
 			&i.MentalModel.LastSeqSeen,
 			&i.MentalModel.LastRefreshFailedAt,
@@ -303,7 +302,7 @@ func (q *Queries) ReadsListDocuments(ctx context.Context, arg ReadsListDocuments
 }
 
 const readsListMentalModels = `-- name: ReadsListMentalModels :many
-SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md, structured_output_json, version, is_stale, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models
+SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models
 WHERE tenant_id = $1 AND bank_id = $2
   AND ($3::text = '' OR folder_path = $3::text OR folder_path LIKE $4::text)
   AND (NOT $5::bool OR COALESCE((trigger ->> 'refresh_after_consolidation')::boolean, false))
@@ -368,7 +367,6 @@ func (q *Queries) ReadsListMentalModels(ctx context.Context, arg ReadsListMental
 			&i.ContentMd,
 			&i.StructuredOutputJson,
 			&i.Version,
-			&i.IsStale,
 			&i.LastRefreshedAt,
 			&i.LastSeqSeen,
 			&i.LastRefreshFailedAt,

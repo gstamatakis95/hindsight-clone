@@ -309,17 +309,6 @@ CREATE TABLE public.memory_units_archive (
 );
 
 --
--- Name: mental_model_folders; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.mental_model_folders (
-    tenant_id text NOT NULL,
-    bank_id text NOT NULL,
-    path text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
---
 -- Name: mental_model_history; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -373,7 +362,6 @@ CREATE TABLE public.mental_models (
     content_md text DEFAULT ''::text NOT NULL,
     structured_output_json jsonb,
     version bigint DEFAULT 0 NOT NULL,
-    is_stale boolean DEFAULT false NOT NULL,
     last_refreshed_at timestamp with time zone,
     last_seq_seen bigint DEFAULT 0 NOT NULL,
     last_refresh_failed_at timestamp with time zone,
@@ -475,24 +463,6 @@ CREATE TABLE public.operations (
     CONSTRAINT operations_finished_at_terminal_only CHECK (((finished_at IS NULL) OR (status = ANY (ARRAY['completed'::text, 'failed'::text, 'cancelled'::text])))),
     CONSTRAINT operations_kind_check CHECK ((kind = ANY (ARRAY['retain_batch'::text, 'retain_document'::text, 'consolidate'::text, 'rederive_memory'::text, 'retag_document'::text, 'refresh_mental_model'::text, 'graph_maintenance'::text, 'delete_bank'::text]))),
     CONSTRAINT operations_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
-);
-
---
--- Name: parked_links; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.parked_links (
-    tenant_id text NOT NULL,
-    bank_id text NOT NULL,
-    archived_unit_id uuid NOT NULL,
-    other_unit_id uuid NOT NULL,
-    kind text NOT NULL,
-    direction text NOT NULL,
-    weight double precision DEFAULT 1 NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT parked_links_direction_check CHECK ((direction = ANY (ARRAY['out'::text, 'in'::text]))),
-    CONSTRAINT parked_links_kind CHECK ((kind = ANY (ARRAY['temporal'::text, 'semantic'::text, 'causal'::text]))),
-    CONSTRAINT parked_links_no_self_link CHECK ((archived_unit_id <> other_unit_id))
 );
 
 --
@@ -640,13 +610,6 @@ ALTER TABLE ONLY public.memory_units
     ADD CONSTRAINT memory_units_pkey PRIMARY KEY (id);
 
 --
--- Name: mental_model_folders mental_model_folders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mental_model_folders
-    ADD CONSTRAINT mental_model_folders_pkey PRIMARY KEY (tenant_id, bank_id, path);
-
---
 -- Name: mental_model_history mental_model_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -694,13 +657,6 @@ ALTER TABLE ONLY public.observation_versions
 
 ALTER TABLE ONLY public.operations
     ADD CONSTRAINT operations_pkey PRIMARY KEY (id);
-
---
--- Name: parked_links parked_links_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.parked_links
-    ADD CONSTRAINT parked_links_pkey PRIMARY KEY (archived_unit_id, other_unit_id, kind, direction);
 
 --
 -- Name: tenants tenants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -933,18 +889,6 @@ CREATE UNIQUE INDEX operations_processing_serial_key_uniq ON public.operations U
 CREATE INDEX operations_terminal_finished_idx ON public.operations USING btree (finished_at) WHERE (status = ANY (ARRAY['completed'::text, 'failed'::text, 'cancelled'::text]));
 
 --
--- Name: parked_links_archived_unit_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX parked_links_archived_unit_idx ON public.parked_links USING btree (tenant_id, bank_id, archived_unit_id);
-
---
--- Name: parked_links_other_unit_idx; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX parked_links_other_unit_idx ON public.parked_links USING btree (other_unit_id);
-
---
 -- Name: unit_entities_entity_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1026,13 +970,6 @@ ALTER TABLE ONLY public.memory_units
 
 ALTER TABLE ONLY public.memory_units
     ADD CONSTRAINT memory_units_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
-
---
--- Name: mental_model_folders mental_model_folders_tenant_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.mental_model_folders
-    ADD CONSTRAINT mental_model_folders_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
 
 --
 -- Name: mental_model_history mental_model_history_tenant_id_bank_id_mental_model_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

@@ -138,7 +138,7 @@ func (q *Queries) MentalModelDelete(ctx context.Context, arg MentalModelDeletePa
 }
 
 const mentalModelGet = `-- name: MentalModelGet :one
-SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md, structured_output_json, version, is_stale, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
 `
 
 type MentalModelGetParams struct {
@@ -165,7 +165,6 @@ func (q *Queries) MentalModelGet(ctx context.Context, arg MentalModelGetParams) 
 		&i.ContentMd,
 		&i.StructuredOutputJson,
 		&i.Version,
-		&i.IsStale,
 		&i.LastRefreshedAt,
 		&i.LastSeqSeen,
 		&i.LastRefreshFailedAt,

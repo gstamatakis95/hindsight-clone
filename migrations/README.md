@@ -32,19 +32,25 @@ make migrate-check   # fails if schema/schema.sql is stale
 make ruff            # ruff check + format --check
 ```
 
-## Adding a revision
+## Changing the schema
 
-Migrations are frozen after WP-00: a schema change needs an approved CCR first.
+Until the first release tag there is exactly one revision, `versions/0001_baseline.py`, which
+creates the whole schema. A schema change edits it in place:
 
-1. Create `versions/NNNN_<slug>.py` with the next number, either by hand or with
-   `.venv/bin/alembic -c migrations/alembic.ini revision --rev-id NNNN -m "<what it does>"`.
-   Set `revision = "NNNN"` and `down_revision` to the previous revision.
-2. Write raw SQL in `upgrade()` and the exact reverse in `downgrade()`. Keep one concern per
-   revision, put `tenant_id` on every new table, and follow
-   `docs/decisions/004-schema-conventions.md`.
-3. Run `make migrate`, then `make downgrade && make migrate`, to prove the round trip.
-4. Run `make ruff` and `make migrate-check`, then commit the revision together with the
-   regenerated `schema/schema.sql`.
+1. Edit the area of `0001_baseline.py` the change belongs to (tables are grouped by area, each
+   with its indexes) and, for a new table, add it to `TABLES` so `downgrade()` drops it. Put
+   `tenant_id` on every new table and follow `docs/decisions/004-schema-conventions.md`.
+2. Rebuild your dev database: its `alembic_version` still says `0001`, so `make migrate` alone
+   would not re-run the edited baseline. Either run `make downgrade` before editing, then
+   `make migrate`, or start over with `docker compose down -v && make up && make migrate`. The
+   second form is the one to use after pulling someone else's baseline change.
+3. Run `make downgrade && make migrate` to prove the round trip, then `make ruff`,
+   `make migrate-check` and `make gen` (sqlc reads the dump). Commit the baseline together with
+   `schema/schema.sql` and the regenerated sqlc code.
+
+After the first release the baseline is frozen and every change is a new revision,
+`versions/NNNN_<slug>.py` (`.venv/bin/alembic -c migrations/alembic.ini revision --rev-id NNNN -m "..."`),
+with raw SQL in `upgrade()` and its exact reverse in `downgrade()`.
 
 ## How sqlc consumes the schema
 
@@ -52,8 +58,12 @@ Migrations are frozen after WP-00: a schema change needs an approved CCR first.
 inside the compose Postgres container, so client and server versions match. It excludes
 `alembic_version` and strips the per-run `\restrict` / `\unrestrict` keys and the version
 header, so the dump is byte-identical across runs. The result is `schema/schema.sql`, which
-`internal/adapter/postgres/sqlc.yaml` uses as its `schema:` input. Run `sqlc generate` in
-`internal/adapter/postgres` after the schema changes.
+`internal/adapter/postgres/sqlc.yaml` uses as its `schema:` input. Run `make gen` after the
+schema changes.
+
+Tests do not use the dev database: `internal/adapter/postgres/pgtest` migrates a template
+database named after a hash of `versions/*.py` and `env.py`, so an edit to the baseline gets a
+fresh template automatically.
 
 ## The diff check
 

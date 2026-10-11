@@ -26,6 +26,7 @@ and `gateway` (port.LLM, port.Embedder, port.Reranker). These rules add to the r
 - Never import `internal/engine`, `internal/server` or `internal/worker`.
 
 ## Postgres
-- Alembic owns the schema; Go never migrates. Queries are sqlc-generated from `schema/schema.sql`.
+- Alembic owns the schema (migrations/; one baseline revision until the first release); Go never migrates.
+  Queries are sqlc-generated from `schema/schema.sql`: edit `postgres/queries/*.sql`, then `make gen`.
 - `pgtest` uses the same Postgres image (pgvector + pg_search) as `docker-compose.yml`, so tests run
   against the extensions production uses.
