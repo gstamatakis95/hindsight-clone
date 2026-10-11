@@ -14,6 +14,7 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+	"github.com/aws/smithy-go/middleware"
 )
 
 // defaultRegion is the signing region used when Config.Region is empty; MinIO accepts any region.
@@ -36,6 +37,9 @@ type Config struct {
 	// UsePathStyle addresses objects as {endpoint}/{bucket}/{key} instead of {bucket}.{endpoint}/{key};
 	// MinIO needs true.
 	UsePathStyle bool
+	// APIOptions are extra SDK middleware for every call, e.g. Datadog tracing from internal/observability;
+	// nil = none.
+	APIOptions []func(*middleware.Stack) error
 }
 
 // Blob implements port.Blob on one S3-compatible bucket.
@@ -64,6 +68,7 @@ func NewBlob(_ context.Context, cfg Config) (*Blob, error) {
 		// support for the SDK's default flexible checksums.
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
+		APIOptions:                 cfg.APIOptions,
 	}
 	if cfg.Endpoint != "" {
 		opts.BaseEndpoint = aws.String(cfg.Endpoint)

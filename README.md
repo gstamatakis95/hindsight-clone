@@ -91,6 +91,62 @@ Every LLM-backed operation has its own slot (EXTRACT, TIME_PARSE, CONSOLIDATE, D
 STRUCTURED_OUTPUT, SYNTHESIZE, MENTAL_MODEL_DELTA, RERANK). Embedding is server-wide:
 nomic-embed-text-v1.5 at 768 dimensions. See "Model routing" in `docs/SPEC.md`.
 
+## Datadog (optional)
+
+memd can send traces, runtime metrics and (separately) profiles to a Datadog agent. It uses dd-trace-go v2
+directly, with no OpenTelemetry. **It is off by default.** When off, no tracer starts, no instrumentation is
+installed and no agent is contacted.
+
+| Setting (env / flag) | Default | Effect |
+|---|---|---|
+| `MEMD_DATADOG_ENABLED` / `-datadog-enabled=true` | `false` | Turns on tracing, trace ids in logs, and runtime metrics. |
+| `MEMD_DATADOG_PROFILER` / `-datadog-profiler=true` | `false` | Also starts the continuous profiler. Ignored unless Datadog is enabled. |
+
+When enabled, the library reads the standard Datadog variables:
+
+- **Agent address:** `DD_AGENT_HOST` / `DD_TRACE_AGENT_PORT`, or `DD_TRACE_AGENT_URL`. The default is `localhost:8126`.
+- **Unified service tagging:** `DD_ENV`, `DD_VERSION`, and `DD_SERVICE` (default `memd`).
+- **Tags:** `DD_TAGS`.
+- **Sampling:** `DD_TRACE_SAMPLE_RATE` / `DD_TRACE_SAMPLING_RULES`.
+- **Runtime metrics:** `DD_RUNTIME_METRICS_ENABLED` (default on with Datadog) and `DD_DOGSTATSD_PORT`.
+
+An unreachable agent never fails startup or a request: payloads are dropped and the tracer keeps retrying.
+
+What gets traced:
+
+- **gRPC:** one `grpc.server` span per RPC, with resource = the full method. It is tagged `memd.tenant` and `memd.bank`.
+- **Worker jobs:** one `memd.job` span per run, with resource = the kind. It carries the operation id, attempt and outcome.
+- **Maintenance:** one `memd.maintenance.tick` span per tick.
+- **Postgres:** one `postgres.query` span per statement, recorded only inside a request, job or tick.
+- **AI gateway:** one `memd.gateway.call` span per call, tagged with model slot and name, with `http.request` spans under it.
+- **S3:** one `S3.request` span per call.
+- **Logs:** records logged with a span in context get `dd.trace_id` and `dd.span_id`.
+
+Prompts, model output, memory content, request bodies, metadata and SQL parameters are never recorded. Span
+errors carry only the error class. See [decision 2400](docs/decisions/2400-datadog-optional.md).
+
+To run an agent next to the local stack, add this to `docker-compose.yml` or an override file:
+
+```yaml
+  datadog-agent:
+    image: gcr.io/datadoghq/agent:7
+    environment:
+      DD_API_KEY: ${DD_API_KEY}
+      DD_SITE: ${DD_SITE:-datadoghq.com}
+      DD_APM_ENABLED: "true"
+      DD_APM_NON_LOCAL_TRAFFIC: "true"
+      DD_DOGSTATSD_NON_LOCAL_TRAFFIC: "true"
+    ports: ["8126:8126", "8125:8125/udp"]
+```
+
+Then start memd:
+
+```sh
+MEMD_DATADOG_ENABLED=true DD_ENV=dev DD_VERSION=$(git rev-parse --short HEAD) go run ./cmd/memd all
+```
+
+In Kubernetes, set `DD_AGENT_HOST` from the node IP (`status.hostIP`) to reach the agent DaemonSet.
+
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) first: layout, rules and the `make gen && make lint && make test` gate.

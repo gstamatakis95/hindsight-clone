@@ -69,9 +69,11 @@ func (c *Client) embed(ctx context.Context, input []string) ([][]float32, error)
 	body := map[string]any{"model": c.cfg.EmbedModel, "input": input, "encoding_format": "float"}
 	a := attempt{slot: domain.ModelSlotEmbed, path: embeddingsPath, timeout: c.cfg.Timeout}
 	var resp embeddingsResponse
-	err := c.retry(ctx, max(c.cfg.MaxRetries, 0), func() error {
-		resp = embeddingsResponse{}
-		return c.post(ctx, a, body, &resp)
+	err := c.traced(ctx, a.slot, c.cfg.EmbedModel, a.path, func(ctx context.Context) error {
+		return c.retry(ctx, max(c.cfg.MaxRetries, 0), func() error {
+			resp = embeddingsResponse{}
+			return c.post(ctx, a, body, &resp)
+		})
 	})
 	if err != nil {
 		return nil, err

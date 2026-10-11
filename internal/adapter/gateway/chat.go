@@ -97,10 +97,12 @@ func (c *Client) complete(ctx context.Context, slot domain.ModelSlot, b domain.M
 ) (chatResponse, domain.Usage, error) {
 	sum := domain.Usage{Slot: slot}
 	var resp chatResponse
-	err := c.retry(ctx, c.retriesFor(b), func() error {
-		var err error
-		resp, err = c.completeOnce(ctx, slot, b, body, &sum)
-		return err
+	err := c.traced(ctx, slot, b.Model, chatPath, func(ctx context.Context) error {
+		return c.retry(ctx, c.retriesFor(b), func() error {
+			var err error
+			resp, err = c.completeOnce(ctx, slot, b, body, &sum)
+			return err
+		})
 	})
 	return resp, finalUsage(sum, b.Model), err
 }
@@ -191,19 +193,22 @@ func (c *Client) Structured(ctx context.Context, req port.StructuredRequest, out
 	format := map[string]any{"type": "json_schema", "json_schema": map[string]any{
 		"name": schemaName(req.Name), "schema": json.RawMessage(req.Schema),
 	}}
-	err = c.retry(ctx, c.retriesFor(req.Binding), func() error {
-		body := chatBody(req.Binding, req.MaxOut, msgs)
-		body["response_format"] = format
-		resp, err := c.completeOnce(ctx, req.Slot, req.Binding, body, &sum)
-		if err != nil {
-			return err
-		}
-		content := deref(resp.Choices[0].Message.Content)
-		if verr := decodeValid(sch, content, out); verr != nil {
-			msgs = append(msgs, textMessage(port.ChatRoleAssistant, content), textMessage(port.ChatRoleUser, verr.Error()))
-			return transient(fmt.Errorf("%w: gateway %s: %w", domain.ErrUnavailable, chatPath, verr))
-		}
-		return nil
+	err = c.traced(ctx, req.Slot, req.Binding.Model, chatPath, func(ctx context.Context) error {
+		return c.retry(ctx, c.retriesFor(req.Binding), func() error {
+			body := chatBody(req.Binding, req.MaxOut, msgs)
+			body["response_format"] = format
+			resp, err := c.completeOnce(ctx, req.Slot, req.Binding, body, &sum)
+			if err != nil {
+				return err
+			}
+			content := deref(resp.Choices[0].Message.Content)
+			if verr := decodeValid(sch, content, out); verr != nil {
+				msgs = append(msgs, textMessage(port.ChatRoleAssistant, content),
+					textMessage(port.ChatRoleUser, verr.Error()))
+				return transient(fmt.Errorf("%w: gateway %s: %w", domain.ErrUnavailable, chatPath, verr))
+			}
+			return nil
+		})
 	})
 	return finalUsage(sum, req.Binding.Model), err
 }

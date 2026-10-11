@@ -37,9 +37,11 @@ func (c *Client) Rerank(ctx context.Context, b domain.ModelBinding, query string
 	maps.Copy(body, b.Extra)
 	a := attempt{slot: domain.ModelSlotRerank, path: c.cfg.RerankPath, timeout: c.timeoutFor(b)}
 	var resp rerankResponse
-	err := c.retry(ctx, c.retriesFor(b), func() error {
-		resp = rerankResponse{}
-		return c.post(ctx, a, body, &resp)
+	err := c.traced(ctx, a.slot, b.Model, a.path, func(ctx context.Context) error {
+		return c.retry(ctx, c.retriesFor(b), func() error {
+			resp = rerankResponse{}
+			return c.post(ctx, a, body, &resp)
+		})
 	})
 	if err != nil {
 		return nil, err
