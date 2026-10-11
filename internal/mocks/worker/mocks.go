@@ -13,6 +13,72 @@ import (
 	"time"
 )
 
+// Ensure that BatchSettler does implement worker.BatchSettler.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.BatchSettler = &BatchSettler{}
+
+// BatchSettler is a mock implementation of worker.BatchSettler.
+//
+//	func TestSomethingThatUsesBatchSettler(t *testing.T) {
+//
+//		// make and configure a mocked worker.BatchSettler
+//		mockedBatchSettler := &BatchSettler{
+//			SettleRetainBatchesFunc: func(ctx context.Context) (int, error) {
+//				panic("mock out the SettleRetainBatches method")
+//			},
+//		}
+//
+//		// use mockedBatchSettler in code that requires worker.BatchSettler
+//		// and then make assertions.
+//
+//	}
+type BatchSettler struct {
+	// SettleRetainBatchesFunc mocks the SettleRetainBatches method.
+	SettleRetainBatchesFunc func(ctx context.Context) (int, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// SettleRetainBatches holds details about calls to the SettleRetainBatches method.
+		SettleRetainBatches []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockSettleRetainBatches sync.RWMutex
+}
+
+// SettleRetainBatches calls SettleRetainBatchesFunc.
+func (mock *BatchSettler) SettleRetainBatches(ctx context.Context) (int, error) {
+	if mock.SettleRetainBatchesFunc == nil {
+		panic("BatchSettler.SettleRetainBatchesFunc: method is nil but BatchSettler.SettleRetainBatches was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockSettleRetainBatches.Lock()
+	mock.calls.SettleRetainBatches = append(mock.calls.SettleRetainBatches, callInfo)
+	mock.lockSettleRetainBatches.Unlock()
+	return mock.SettleRetainBatchesFunc(ctx)
+}
+
+// SettleRetainBatchesCalls gets all the calls that were made to SettleRetainBatches.
+// Check the length with:
+//
+//	len(mockedBatchSettler.SettleRetainBatchesCalls())
+func (mock *BatchSettler) SettleRetainBatchesCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockSettleRetainBatches.RLock()
+	calls = mock.calls.SettleRetainBatches
+	mock.lockSettleRetainBatches.RUnlock()
+	return calls
+}
+
 // Ensure that Checkpoint does implement worker.Checkpoint.
 // If this is not the case, regenerate this file with mockery.
 var _ worker.Checkpoint = &Checkpoint{}
@@ -614,5 +680,83 @@ func (mock *JobRunner) RunCalls() []struct {
 	mock.lockRun.RLock()
 	calls = mock.calls.Run
 	mock.lockRun.RUnlock()
+	return calls
+}
+
+// Ensure that StrandedFactSource does implement worker.StrandedFactSource.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.StrandedFactSource = &StrandedFactSource{}
+
+// StrandedFactSource is a mock implementation of worker.StrandedFactSource.
+//
+//	func TestSomethingThatUsesStrandedFactSource(t *testing.T) {
+//
+//		// make and configure a mocked worker.StrandedFactSource
+//		mockedStrandedFactSource := &StrandedFactSource{
+//			StrandedFactsFunc: func(ctx context.Context, retryAfter time.Duration, limit int) ([]domain.Unit, error) {
+//				panic("mock out the StrandedFacts method")
+//			},
+//		}
+//
+//		// use mockedStrandedFactSource in code that requires worker.StrandedFactSource
+//		// and then make assertions.
+//
+//	}
+type StrandedFactSource struct {
+	// StrandedFactsFunc mocks the StrandedFacts method.
+	StrandedFactsFunc func(ctx context.Context, retryAfter time.Duration, limit int) ([]domain.Unit, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// StrandedFacts holds details about calls to the StrandedFacts method.
+		StrandedFacts []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// RetryAfter is the retryAfter argument value.
+			RetryAfter time.Duration
+			// Limit is the limit argument value.
+			Limit int
+		}
+	}
+	lockStrandedFacts sync.RWMutex
+}
+
+// StrandedFacts calls StrandedFactsFunc.
+func (mock *StrandedFactSource) StrandedFacts(ctx context.Context, retryAfter time.Duration, limit int) ([]domain.Unit, error) {
+	if mock.StrandedFactsFunc == nil {
+		panic("StrandedFactSource.StrandedFactsFunc: method is nil but StrandedFactSource.StrandedFacts was just called")
+	}
+	callInfo := struct {
+		Ctx        context.Context
+		RetryAfter time.Duration
+		Limit      int
+	}{
+		Ctx:        ctx,
+		RetryAfter: retryAfter,
+		Limit:      limit,
+	}
+	mock.lockStrandedFacts.Lock()
+	mock.calls.StrandedFacts = append(mock.calls.StrandedFacts, callInfo)
+	mock.lockStrandedFacts.Unlock()
+	return mock.StrandedFactsFunc(ctx, retryAfter, limit)
+}
+
+// StrandedFactsCalls gets all the calls that were made to StrandedFacts.
+// Check the length with:
+//
+//	len(mockedStrandedFactSource.StrandedFactsCalls())
+func (mock *StrandedFactSource) StrandedFactsCalls() []struct {
+	Ctx        context.Context
+	RetryAfter time.Duration
+	Limit      int
+} {
+	var calls []struct {
+		Ctx        context.Context
+		RetryAfter time.Duration
+		Limit      int
+	}
+	mock.lockStrandedFacts.RLock()
+	calls = mock.calls.StrandedFacts
+	mock.lockStrandedFacts.RUnlock()
 	return calls
 }
