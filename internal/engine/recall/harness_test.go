@@ -2,6 +2,8 @@ package recall
 
 import (
 	"context"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/routing"
@@ -19,6 +21,15 @@ var testBank = port.BankRef{Tenant: "t1", Bank: "b1"}
 
 // testNow is the frozen clock time of every test.
 var testNow = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+// uid is the unit id of a readable fixture name (Postgres stores unit ids as uuid).
+func uid(name string) port.UnitID { return pgtest.ID[port.UnitID](name) }
+
+// uids maps uid over names.
+func uids(names ...string) []port.UnitID { return pgtest.IDs[port.UnitID](names...) }
+
+// cid is the chunk id of a readable fixture name.
+func cid(name string) port.ChunkID { return pgtest.ID[port.ChunkID](name) }
 
 // wordCounter counts whitespace-separated words: a deterministic TokenCounter for tests.
 type wordCounter struct{}
@@ -40,18 +51,18 @@ func (a *stubArm) Retrieve(_ context.Context, q *ParsedQuery) ([]Candidate, erro
 	return candidates(a.name, a.hits, q.Limit), nil
 }
 
-// arm builds a stubArm whose hits are ids in order with descending scores.
-func arm(name string, ids ...port.UnitID) *stubArm {
+// arm builds a stubArm whose hits are the named units in order with descending scores.
+func arm(name string, names ...port.UnitID) *stubArm {
 	a := &stubArm{name: name}
-	for i, id := range ids {
-		a.hits = append(a.hits, port.Hit{ID: id, Score: 1 - float64(i)/100})
+	for i, n := range names {
+		a.hits = append(a.hits, port.Hit{ID: uid(string(n)), Score: 1 - float64(i)/100})
 	}
 	return a
 }
 
-// env is a recall test environment over the fakes.
+// env is a recall test environment over a store on its own database and the model fakes.
 type env struct {
-	store *fake.Store
+	store *postgres.Store
 	clock *fake.Clock
 	emb   *fake.Embedder
 	rr    *fake.Reranker
@@ -72,7 +83,7 @@ func newEnv(t *testing.T, o envOpts) *env {
 		clock: fake.NewClock(testNow), emb: fake.NewEmbedder(fake.EmbedSimilar), rr: fake.NewReranker(),
 		llm: fake.NewLLM(),
 	}
-	e.store = fake.NewStore(e.clock)
+	e.store = pgtest.NewStore(t)
 	vars := map[string]string{config.EnvModel: "llm-1"}
 	if o.rerank {
 		vars[config.EnvModelPrefix+"RERANK"] = "rerank-1"
@@ -116,7 +127,7 @@ func (e *env) tx(t *testing.T, fn func(ctx context.Context, tx port.Tx, seq int6
 // fact builds a world fact with normalized tags.
 func fact(id, text string, tags ...string) domain.Unit {
 	return domain.Unit{
-		ID: port.UnitID(id), Bank: testBank, Type: domain.FactTypeWorld, Text: text, Tags: domain.NormalizeTags(tags),
+		ID: uid(id), Bank: testBank, Type: domain.FactTypeWorld, Text: text, Tags: domain.NormalizeTags(tags),
 	}
 }
 
@@ -149,9 +160,9 @@ func (e *env) cite(t *testing.T, obs string, srcs ...string) {
 	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
 		ev := make([]domain.Evidence, len(srcs))
 		for i, s := range srcs {
-			ev[i] = domain.Evidence{Unit: port.UnitID(s), Quote: s}
+			ev[i] = domain.Evidence{Unit: uid(s), Quote: s}
 		}
-		return tx.Evidence().Add(ctx, port.UnitID(obs), ev)
+		return tx.Evidence().Add(ctx, uid(obs), ev)
 	})
 }
 
@@ -160,7 +171,7 @@ func (e *env) link(t *testing.T, from, to string, w float64) {
 	t.Helper()
 	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
 		return tx.Links().Insert(ctx, []domain.Link{{
-			Bank: testBank, From: port.UnitID(from), To: port.UnitID(to), Kind: domain.LinkSemantic, Weight: w,
+			Bank: testBank, From: uid(from), To: uid(to), Kind: domain.LinkSemantic, Weight: w,
 		}})
 	})
 }
@@ -178,11 +189,11 @@ func (e *env) recall(t *testing.T, req RecallRequest) RecallResult {
 	return res
 }
 
-// ids returns the result ids in order.
+// ids returns the results' fixture names in order.
 func ids(r RecallResult) []string {
 	out := make([]string, len(r.Results))
 	for i, m := range r.Results {
-		out[i] = string(m.Unit.ID)
+		out[i] = pgtest.Name(m.Unit.ID)
 	}
 	return out
 }

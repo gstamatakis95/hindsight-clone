@@ -1,10 +1,11 @@
-# mockery v3: a mock for every interface in port, the engines, the worker runtime and the server's
-# consumer interfaces, written to internal/mocks/<path relative to internal/>, one Go package per source package (package mock<name>).
-# The matryer (moq-style) template needs only the standard library; testify is not an approved
-# dependency (docs/decisions/007-mockery-matryer.md). Never hand-edit the output; run `make gen`.
+# mockery v3: mocks of the interfaces tests stub (the model and config ports, the engines' consumer interfaces,
+# the worker runtime and the server's consumer interfaces), written to internal/mocks/<path relative to
+# internal/>, one Go package per source package (package mock<name>). Store code is tested against real Postgres
+# (internal/adapter/postgres/pgtest), so the persistence ports have no mocks. Add an interface here when a test
+# needs it. The matryer (moq-style) template needs only the standard library; testify is not an approved
+# dependency. Never hand-edit the output; run `make gen`.
 template: matryer
-all: true
-recursive: true
+all: false
 include-auto-generated: false
 force-file-write: true
 formatter: goimports
@@ -13,7 +14,60 @@ filename: mocks.go
 pkgname: 'mock{{ .SrcPackageName }}'
 structname: '{{ .InterfaceName }}'
 packages:
-  memd/internal/port: {}
-  memd/internal/engine: {}
-  memd/internal/worker: {}
-  memd/internal/server: {}
+  memd/internal/port:
+    interfaces:
+      Clock: {}
+      ConfigResolver: {}
+      LLM: {}
+      ModelRouter: {}
+  memd/internal/engine/bank:
+    interfaces:
+      BankDeleter: {}
+      PromptPreviewer: {}
+      StatsReader: {}
+      TemplateCodec: {}
+  memd/internal/engine/consolidate:
+    interfaces:
+      Consolidator: {}
+      StrategyMatcher: {}
+  memd/internal/engine/curate:
+    interfaces:
+      Curator: {}
+      MemoryLister: {}
+      Rederiver: {}
+  memd/internal/engine/docs:
+    interfaces:
+      Retagger: {}
+  memd/internal/engine/maintenance:
+    interfaces:
+      GraphMaintainer: {}
+  memd/internal/engine/mentalmodel:
+    interfaces:
+      PageSearcher: {}
+      RefreshRunner: {}
+  memd/internal/engine/recall:
+    interfaces:
+      Recaller: {}
+  memd/internal/engine/reflect:
+    interfaces:
+      PageReader: {}
+      Recaller: {}
+      Reflector: {}
+  memd/internal/engine/retain:
+    interfaces:
+      Ingestor: {}
+      Retainer: {}
+  memd/internal/worker:
+    interfaces:
+      Checkpoint: {}
+      OperationControl: {}
+  memd/internal/server:
+    interfaces:
+      BankAdmin: {}
+      DirectiveAdmin: {}
+      DocumentAdmin: {}
+      MentalModelAdmin: {}
+      ObservationAdmin: {}
+      OperationReader: {}
+      ReadinessProbe: {}
+      TenantAdmin: {}

@@ -81,7 +81,7 @@
 //
 // Unit tests cover each stage (fusion and boosted trimming, budgets, packing, observation preference,
 // includes, score boosts, gates, tag compilation and fuzzy expansion, trigram similarity). Pipeline tests in
-// recaller_test.go run on fake.Store with fake.Embedder, fake.Reranker and fake.LLM: arms and trace, the
+// recaller_test.go run on a pgtest database with fake.Embedder, fake.Reranker and fake.LLM: arms and trace, the
 // default semantic floor, rerank on and off, the seq snapshot, stale observations, no TIME_PARSE call
 // without a cue or with an explicit window, a failing arm, a golden fusion order, and an unknown bank.
 // SPEC "Recall pipeline", "Engines" (recall) and "gRPC surface" (RecallRequest).

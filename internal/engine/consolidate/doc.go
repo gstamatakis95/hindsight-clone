@@ -113,7 +113,7 @@
 //
 // # Tests
 //
-// run_test.go, consolidator_test.go and the stamp, settle and concurrency tests run on fake.Store with
+// run_test.go, consolidator_test.go and the stamp, settle and concurrency tests run on a pgtest database with
 // fake.LLM and fake.Embedder: replay after a kill, halving down to a poison fact, parking only after a
 // successful probe, outages that park nothing, the circuit breaker, edits and retags between scopes,
 // cleared or invalidated co-sources, dedup merge and keep, observation caps, manual scopes, document scope

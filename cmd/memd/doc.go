@@ -101,8 +101,8 @@
 // # Tests
 //
 // config_test.go covers settings from the environment and flags, validation, required slots, the unbound-slot
-// router, per-slot concurrency, S3 keys, the usage text, the worker id and health server, and the embedding
-// and tokenizer checks; wire_test.go runs the fully wired stack over internal/fake and checks that no model
+// router, per-slot concurrency, S3 keys, the worker id and health server, and the embedding and tokenizer
+// checks; wire_test.go runs the fully wired stack over a pgtest database and the model fakes and checks that no model
 // call happens inside a store transaction; glue_test.go checks ListEvents' default and cap; and
 // observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest, an unreachable agent
 // still serves). End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a gateway

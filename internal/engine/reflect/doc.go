@@ -93,7 +93,7 @@
 //
 // # Tests
 //
-// reflector_test.go and tools_test.go run the loop against fake.LLM with scripted turns over fake.Store:
+// reflector_test.go and tools_test.go run the loop against fake.LLM with scripted turns over a pgtest database:
 // retrieval errors, empty retrieval, empty answers, models without tool calls, context overflow and
 // synthesis fallbacks, the token budget, malformed calls, done before retrieval, citation filtering, the
 // iteration cap per budget, extra directives, structured output and its failure, as-document answers, fact

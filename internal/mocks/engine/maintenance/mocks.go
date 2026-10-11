@@ -6,7 +6,6 @@ package mockmaintenance
 
 import (
 	"context"
-	"memd/internal/domain"
 	"memd/internal/engine/maintenance"
 	"memd/internal/port"
 	"sync"
@@ -88,95 +87,5 @@ func (mock *GraphMaintainer) RunCalls() []struct {
 	mock.lockRun.RLock()
 	calls = mock.calls.Run
 	mock.lockRun.RUnlock()
-	return calls
-}
-
-// Ensure that Linker does implement maintenance.Linker.
-// If this is not the case, regenerate this file with mockery.
-var _ maintenance.Linker = &Linker{}
-
-// Linker is a mock implementation of maintenance.Linker.
-//
-//	func TestSomethingThatUsesLinker(t *testing.T) {
-//
-//		// make and configure a mocked maintenance.Linker
-//		mockedLinker := &Linker{
-//			LinkFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error {
-//				panic("mock out the Link method")
-//			},
-//		}
-//
-//		// use mockedLinker in code that requires maintenance.Linker
-//		// and then make assertions.
-//
-//	}
-type Linker struct {
-	// LinkFunc mocks the Link method.
-	LinkFunc func(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// Link holds details about calls to the Link method.
-		Link []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Tx is the tx argument value.
-			Tx port.Tx
-			// B is the b argument value.
-			B port.BankRef
-			// Units is the units argument value.
-			Units []domain.Unit
-			// Causes is the causes argument value.
-			Causes map[port.UnitID][]port.UnitID
-		}
-	}
-	lockLink sync.RWMutex
-}
-
-// Link calls LinkFunc.
-func (mock *Linker) Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error {
-	if mock.LinkFunc == nil {
-		panic("Linker.LinkFunc: method is nil but Linker.Link was just called")
-	}
-	callInfo := struct {
-		Ctx    context.Context
-		Tx     port.Tx
-		B      port.BankRef
-		Units  []domain.Unit
-		Causes map[port.UnitID][]port.UnitID
-	}{
-		Ctx:    ctx,
-		Tx:     tx,
-		B:      b,
-		Units:  units,
-		Causes: causes,
-	}
-	mock.lockLink.Lock()
-	mock.calls.Link = append(mock.calls.Link, callInfo)
-	mock.lockLink.Unlock()
-	return mock.LinkFunc(ctx, tx, b, units, causes)
-}
-
-// LinkCalls gets all the calls that were made to Link.
-// Check the length with:
-//
-//	len(mockedLinker.LinkCalls())
-func (mock *Linker) LinkCalls() []struct {
-	Ctx    context.Context
-	Tx     port.Tx
-	B      port.BankRef
-	Units  []domain.Unit
-	Causes map[port.UnitID][]port.UnitID
-} {
-	var calls []struct {
-		Ctx    context.Context
-		Tx     port.Tx
-		B      port.BankRef
-		Units  []domain.Unit
-		Causes map[port.UnitID][]port.UnitID
-	}
-	mock.lockLink.RLock()
-	calls = mock.calls.Link
-	mock.lockLink.RUnlock()
 	return calls
 }

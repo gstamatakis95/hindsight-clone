@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/maintenance"
 	"memd/internal/fake"
@@ -53,9 +55,10 @@ func (l *stubLinker) linked() []port.UnitID {
 // seedHub stores a hub unit (document "hub") linked to n neighbour units (document "rest") and two entities:
 // "orphan" attached only to the hub and "kept" attached to the hub and the first neighbour. It then deletes
 // the hub's document, which queues the n neighbours in graph_dirty and both entities in entity_maintenance.
-func seedHub(t *testing.T, store *fake.Store, n int) (orphan, kept port.EntityID) {
+func seedHub(t *testing.T, store *postgres.Store, n int) (orphan, kept port.EntityID) {
 	t.Helper()
 	ctx := context.Background()
+	hub := pgtest.ID[port.UnitID]("hub")
 	err := store.InTx(ctx, func(tx port.Tx) error {
 		if _, err := tx.Banks().Ensure(ctx, testBank); err != nil {
 			return err
@@ -69,15 +72,15 @@ func seedHub(t *testing.T, store *fake.Store, n int) (orphan, kept port.EntityID
 				return err
 			}
 		}
-		units := []domain.Unit{{ID: "hub", Bank: testBank, DocumentID: "hub", Type: domain.FactTypeWorld, Seq: seq}}
+		units := []domain.Unit{{ID: hub, Bank: testBank, DocumentID: "hub", Type: domain.FactTypeWorld, Seq: seq}}
 		var links []domain.Link
 		for i := range n {
-			id := port.UnitID(fmt.Sprintf("n%03d", i))
+			id := pgtest.ID[port.UnitID](fmt.Sprintf("n%03d", i))
 			units = append(units, domain.Unit{
 				ID: id, Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld,
 				Seq: seq,
 			})
-			links = append(links, domain.Link{Bank: testBank, From: id, To: "hub", Kind: domain.LinkTemporal, Weight: 1})
+			links = append(links, domain.Link{Bank: testBank, From: id, To: hub, Kind: domain.LinkTemporal, Weight: 1})
 		}
 		if err := tx.Units().Insert(ctx, units); err != nil {
 			return err
@@ -91,10 +94,10 @@ func seedHub(t *testing.T, store *fake.Store, n int) (orphan, kept port.EntityID
 		if kept, err = tx.Entities().Upsert(ctx, domain.Entity{Bank: testBank, CanonicalName: "Kept"}); err != nil {
 			return err
 		}
-		if err := tx.Entities().Attach(ctx, "hub", []port.EntityID{orphan, kept}); err != nil {
+		if err := tx.Entities().Attach(ctx, hub, []port.EntityID{orphan, kept}); err != nil {
 			return err
 		}
-		if err := tx.Entities().Attach(ctx, "n000", []port.EntityID{kept}); err != nil {
+		if err := tx.Entities().Attach(ctx, pgtest.ID[port.UnitID]("n000"), []port.EntityID{kept}); err != nil {
 			return err
 		}
 		_, err = tx.Units().DeleteByDocument(ctx, testBank, "hub")
@@ -107,15 +110,15 @@ func seedHub(t *testing.T, store *fake.Store, n int) (orphan, kept port.EntityID
 }
 
 // queues returns what is left in graph_dirty and entity_maintenance.
-func queues(t *testing.T, store *fake.Store) (dirty []port.UnitID, pending []port.EntityID) {
+func queues(t *testing.T, store *postgres.Store) (dirty []port.UnitID, pending []port.EntityID) {
 	t.Helper()
 	ctx := context.Background()
 	err := store.InTx(ctx, func(tx port.Tx) error {
 		var err error
-		if dirty, err = tx.Links().Dirty(ctx, testBank, 0); err != nil {
+		if dirty, err = tx.Links().Dirty(ctx, testBank, 1000); err != nil {
 			return err
 		}
-		pending, err = tx.Entities().PendingMaintenance(ctx, testBank, 0)
+		pending, err = tx.Entities().PendingMaintenance(ctx, testBank, 1000)
 		return err
 	})
 	if err != nil {
@@ -125,7 +128,7 @@ func queues(t *testing.T, store *fake.Store) (dirty []port.UnitID, pending []por
 }
 
 // entityNames returns the canonical names of the entities resembling "Orphan" or "Kept".
-func entityNames(t *testing.T, store *fake.Store) []string {
+func entityNames(t *testing.T, store *postgres.Store) []string {
 	t.Helper()
 	ctx := context.Background()
 	var names []string
@@ -150,7 +153,7 @@ func entityNames(t *testing.T, store *fake.Store) []string {
 func TestGraphMaintenanceTopsUpAndPrunes(t *testing.T) {
 	ctx := context.Background()
 	clock := fake.NewClock(time.Time{})
-	store := fake.NewStore(clock)
+	store := pgtest.NewStore(t)
 	seedHub(t, store, 3)
 	if d, p := queues(t, store); len(d) != 3 || len(p) != 2 {
 		t.Fatalf("seeded queues: %d dirty, %d entities; want 3 and 2", len(d), len(p))
@@ -162,7 +165,9 @@ func TestGraphMaintenanceTopsUpAndPrunes(t *testing.T) {
 	if err != nil || !done {
 		t.Fatalf("Run = %v, %v; want done", done, err)
 	}
-	if got, want := l.linked(), []port.UnitID{"n000", "n001", "n002"}; !slices.Equal(got, want) {
+	got := pgtest.Names(l.linked())
+	slices.Sort(got) // the dirty queue drains in id order
+	if want := []string{"n000", "n001", "n002"}; !slices.Equal(got, want) {
 		t.Fatalf("linker topped up %v, want %v", got, want)
 	}
 	if d, p := queues(t, store); len(d) != 0 || len(p) != 0 {
@@ -179,7 +184,7 @@ func TestGraphMaintenanceTopsUpAndPrunes(t *testing.T) {
 func TestGraphMaintenanceResumesAfterBudget(t *testing.T) {
 	ctx := context.Background()
 	clock := fake.NewClock(time.Time{})
-	store := fake.NewStore(clock)
+	store := pgtest.NewStore(t)
 	n := maintenance.DirtyBatch + 50
 	seedHub(t, store, n)
 	// The first batch "takes" longer than the whole budget.
@@ -209,7 +214,7 @@ func TestGraphMaintenanceResumesAfterBudget(t *testing.T) {
 func TestGraphMaintenanceStopsOnTombstone(t *testing.T) {
 	ctx := context.Background()
 	clock := fake.NewClock(time.Time{})
-	store := fake.NewStore(clock)
+	store := pgtest.NewStore(t)
 	seedHub(t, store, 2)
 	g := maintenance.NewGraphMaintainer(store, &stubLinker{clock: clock}, clock)
 
@@ -253,31 +258,32 @@ func (l *archivingLinker) Link(
 func TestGraphMaintenanceRechecksAfterFinalBatch(t *testing.T) {
 	ctx := context.Background()
 	clock := fake.NewClock(time.Time{})
-	store := fake.NewStore(clock)
+	store := pgtest.NewStore(t)
 	seedHub(t, store, 2)
+	z, w := pgtest.ID[port.UnitID]("z"), pgtest.ID[port.UnitID]("w")
 	err := store.InTx(ctx, func(tx port.Tx) error {
 		units := []domain.Unit{
-			{ID: "z", Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld},
-			{ID: "w", Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld},
+			{ID: z, Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld},
+			{ID: w, Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld},
 		}
 		if err := tx.Units().Insert(ctx, units); err != nil {
 			return err
 		}
 		return tx.Links().Insert(ctx, []domain.Link{
-			{Bank: testBank, From: "z", To: "w", Kind: domain.LinkTemporal, Weight: 1},
+			{Bank: testBank, From: z, To: w, Kind: domain.LinkTemporal, Weight: 1},
 		})
 	})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	l := &archivingLinker{stubLinker: stubLinker{clock: clock}, victim: "w"}
+	l := &archivingLinker{stubLinker: stubLinker{clock: clock}, victim: w}
 	g := maintenance.NewGraphMaintainer(store, l, clock)
 
 	done, err := g.Run(ctx, testBank, maintenance.DefaultGraphBudget)
 	if err != nil || !done {
 		t.Fatalf("Run = %v, %v; want done", done, err)
 	}
-	if !slices.Contains(l.linked(), "z") {
+	if !slices.Contains(l.linked(), z) {
 		t.Fatalf("linker saw %v; want z, queued during the first batch, topped up too", l.linked())
 	}
 	if d, p := queues(t, store); len(d) != 0 || len(p) != 0 {

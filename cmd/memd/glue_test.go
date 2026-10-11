@@ -1,8 +1,8 @@
 package main
 
 import (
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/fake"
 	"memd/internal/port"
 	"testing"
 )
@@ -10,7 +10,7 @@ import (
 // TestListEventsDefaultAndCap: ListEvents with limit 0 returns the server default (100), not the whole
 // history; a limit above the cap returns 1000; a small limit is kept (decision 2502).
 func TestListEventsDefaultAndCap(t *testing.T) {
-	store := fake.NewStore(systemClock{})
+	store := pgtest.NewStore(t)
 	b := port.BankRef{Tenant: "t", Bank: "events"}
 	const total = maxEventsLimit + 50
 	for range total { // one seq per event, so the soft limit never extends a page over a seq group

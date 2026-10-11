@@ -79,7 +79,7 @@
 //
 // # Tests
 //
-// retagger_test.go, retag_labels_test.go and retag_cancel_test.go run the retagger on fake.Store: the
+// retagger_test.go, retag_labels_test.go and retag_cancel_test.go run the retagger on a pgtest database: the
 // set-equal no-op, observation clearing on a real change, the job reading current tags, unknown documents,
 // re-enqueue after a failed retag, label tags kept, and cancellation mid-transaction. documents_test.go
 // covers listing, paging, reading with and without text, a missing blob, and reprocessing. SPEC

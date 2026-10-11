@@ -22,8 +22,8 @@ func fuzzySpec() domain.MentalModelSpec {
 	}}
 }
 
-// TestFuzzyScopeResolvesBankTags checks decision 1203 after WP-16: a fuzzy leaf resolves against the bank's
-// tags (the fake's Reader.TagCounts) before the scope compiles. An off-tag unit no longer stales the model,
+// TestFuzzyScopeResolvesBankTags checks decision 1203: a fuzzy leaf resolves against the bank's
+// tags (Reader.TagCounts) before the scope compiles. An off-tag unit no longer stales the model,
 // the misspelt leaf matches the real tag, an untagged unit still never stales it, and the runner's pre-check
 // lets the refresh retrieve.
 func TestFuzzyScopeResolvesBankTags(t *testing.T) {
@@ -107,7 +107,7 @@ func TestAutomaticRunSkipsFreshOrFlooredModel(t *testing.T) {
 	builtModel(e, domain.RefreshStrategySingleShot)
 	assertSkipped := func(when string) {
 		t.Helper()
-		out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: "op"})
+		out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: opID("op")})
 		if err != nil || out.Trace.Outcome != domain.RefreshOutcomeNoNewFacts || out.VersionWritten != 0 {
 			t.Fatalf("%s: err %v outcome %s version %d", when, err, out.Trace.Outcome, out.VersionWritten)
 		}
@@ -143,9 +143,20 @@ func assertReparked(t *testing.T, e *env, end time.Time) {
 	if _, _, ok := claimRefresh(e); ok {
 		t.Fatal("re-parked refresh due before the floor's end")
 	}
+	var ops []domain.Operation
+	e.tx(func(tx port.Tx) error {
+		var err error
+		ops, _, err = tx.Queue().List(e.ctx, e.bank, port.OperationFilter{
+			Kind: domain.OperationKindRefreshMentalModel, Status: domain.OperationStatusPending, PageSize: 10,
+		})
+		return err
+	})
+	if len(ops) != 1 || ops[0].NextRunAt == nil || !ops[0].NextRunAt.Equal(end) {
+		t.Fatalf("pending refreshes %+v, want one with run_at %v", ops, end)
+	}
 	e.clock.Set(end)
 	job, p, ok := claimRefresh(e)
-	if !ok || !job.RunAt.Equal(end) || job.SerialKey != "mm:status" || p.Manual || p.ForceFull {
+	if !ok || job.ID != ops[0].ID || job.SerialKey != "mm:status" || p.Manual || p.ForceFull {
 		t.Fatalf("re-parked job %v %+v payload %+v", ok, job, p)
 	}
 }

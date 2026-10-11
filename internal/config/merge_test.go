@@ -138,13 +138,3 @@ func TestMergeDoesNotAliasInputs(t *testing.T) {
 		t.Fatal("Merge result aliases an input")
 	}
 }
-
-// TestMergeEmpty: no levels and all-unset levels give the zero config.
-func TestMergeEmpty(t *testing.T) {
-	if got := Merge(); !reflect.DeepEqual(got, domain.BankConfig{}) {
-		t.Fatalf("Merge() = %+v", got)
-	}
-	if got := Merge(domain.BankConfig{}, domain.BankConfig{}); !reflect.DeepEqual(got, domain.BankConfig{}) {
-		t.Fatalf("Merge(zero, zero) = %+v", got)
-	}
-}

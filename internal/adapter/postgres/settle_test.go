@@ -59,7 +59,8 @@ func settleStatus(t *testing.T, s *postgres.Store, id port.OperationID) domain.O
 // TestSettleRetainBatches checks a retain_batch parent stays PENDING while a child runs, then aggregates its
 // children: COMPLETED when all completed, FAILED when one failed.
 func TestSettleRetainBatches(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
+	t.Parallel()
+	s := pgtest.NewStore(t)
 	ctx := t.Context()
 	parent, kids := settleBatch(t, s, 2)
 	jobs, err := s.Claim(ctx, "w", []port.JobKind{domain.OperationKindRetainDocument}, 10)
@@ -88,7 +89,8 @@ func TestSettleRetainBatches(t *testing.T) {
 
 // TestSettleRetainBatchFailedChild checks a parent with a failed child ends FAILED with an error.
 func TestSettleRetainBatchFailedChild(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
+	t.Parallel()
+	s := pgtest.NewStore(t)
 	ctx := t.Context()
 	failedParent, kids2 := settleBatch(t, s, 1)
 	if _, err := s.Claim(ctx, "w", []port.JobKind{domain.OperationKindRetainDocument}, 10); err != nil {

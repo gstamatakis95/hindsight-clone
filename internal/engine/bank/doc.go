@@ -114,7 +114,7 @@
 //
 // # Tests
 //
-// Tests run on fake.Store and fake.Blob: bank create/get/patch and tenant patches, directive selection and
+// Tests run on a pgtest database and fake.Blob: bank create/get/patch and tenant patches, directive selection and
 // admin, stats and tag paging, preview of each operation (and the chunks skip), template round trip and
 // rollback, and the delete lifecycle (idempotent tombstone, resumption of a half-deleted bank, paged blob
 // deletes with fencing, the processing-job re-check in the final transaction, a cancelled run). The

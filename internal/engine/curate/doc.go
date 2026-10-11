@@ -110,7 +110,7 @@
 //
 // # Tests
 //
-// Tests run on fake.Store, fake.Embedder and fake.Clock: paging, invalidate (citing observations removed,
+// Tests run on a pgtest database, fake.Embedder and fake.Clock: paging, invalidate (citing observations removed,
 // refreshes queued), restore round trip and restore after an entity prune, edits (embedding cleared,
 // rederive queued, entities cleared, Timeless cleared, unit kept out of consolidation until the rederive),
 // rederive skips (unit gone, text changed), a retried older rederive keeping newer entities, cancellation,

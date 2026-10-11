@@ -2,6 +2,7 @@ package recall
 
 import (
 	"math"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/port"
 	"slices"
 	"testing"
@@ -15,7 +16,7 @@ func list(name string, ids ...port.UnitID) []Candidate {
 func fusedIDs(cs []Candidate) []port.UnitID {
 	out := make([]port.UnitID, len(cs))
 	for i, c := range cs {
-		out[i] = c.ID
+		out[i] = port.UnitID(pgtest.Name(c.ID))
 	}
 	return out
 }

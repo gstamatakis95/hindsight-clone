@@ -3,6 +3,7 @@ package retain
 import (
 	"errors"
 	"fmt"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/fake"
 	"memd/internal/port"
@@ -165,16 +166,17 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 		t.Fatalf("setup: %+v %+v", a, b)
 	}
 	aUnit, bUnit := e.docUnit("a"), e.docUnit("b")
+	obs1 := pgtest.ID[port.UnitID]("obs1")
 	err := e.store.InTx(e.ctx, func(tx port.Tx) error {
 		seq, err := tx.Seq(e.ctx, testBank)
 		if err != nil {
 			return err
 		}
-		obs := domain.Unit{ID: "obs1", Bank: testBank, Type: domain.FactTypeObservation, Text: "people like tea", Seq: seq}
+		obs := domain.Unit{ID: obs1, Bank: testBank, Type: domain.FactTypeObservation, Text: "people like tea", Seq: seq}
 		if err := tx.Units().Insert(e.ctx, []domain.Unit{obs}); err != nil {
 			return err
 		}
-		if err := tx.Evidence().Add(e.ctx, "obs1", []domain.Evidence{{Unit: aUnit}, {Unit: bUnit}}); err != nil {
+		if err := tx.Evidence().Add(e.ctx, obs1, []domain.Evidence{{Unit: aUnit}, {Unit: bUnit}}); err != nil {
 			return err
 		}
 		return tx.Units().MarkConsolidated(e.ctx, []port.UnitID{aUnit, bUnit}, e.clock.Now())
@@ -186,7 +188,7 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("Alice likes coffee")))
 	e.ingest(IngestRequest{SkipConsolidation: true, Items: []IngestItem{{DocumentID: "a", Content: "Alice coffee"}}})
 
-	if got := e.units([]port.UnitID{"obs1", aUnit}); len(got) != 0 {
+	if got := e.units([]port.UnitID{obs1, aUnit}); len(got) != 0 {
 		t.Errorf("observation or old unit still live: %+v", got)
 	}
 	got := e.units([]port.UnitID{bUnit})

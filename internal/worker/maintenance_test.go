@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"memd/internal/domain"
+	"memd/internal/fake"
 	"memd/internal/port"
 	"strings"
 	"sync"
@@ -85,18 +86,17 @@ func (l loggingBanks) UnconsolidatedBanks(ctx context.Context, before time.Time)
 // Accept: three concurrent maintenance loops produce no duplicate enqueues.
 func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 	clock := newClock()
-	ops := newOps(clock)
-	store := &fakeStore{ops: ops}
+	ops := newOps(t)
 	// A job whose worker died long ago: it must be reclaimed exactly once.
 	stale := ops.add(retainJob("1"))
 	kinds := []port.JobKind{domain.OperationKindRetainDocument}
 	if js, _ := ops.Claim(context.Background(), "dead", kinds, 1); len(js) != 1 {
 		t.Fatal("setup claim")
 	}
-	clock.Advance(DefaultStaleAfter + time.Second)
+	ops.ageHeartbeats(DefaultStaleAfter + time.Second)
 	cron, failures := &countingCron{}, &countingFailures{}
 	deps := MaintenanceDeps{
-		Claimer: ops, Store: store, Clock: clock, Consolidation: fixedBanks{bankA, bankB, bankC},
+		Claimer: ops, Store: ops, Clock: clock, Consolidation: fixedBanks{bankA, bankB, bankC},
 		CronRefresh: cron, RefreshFailures: failures, Interval: time.Millisecond, Logger: quiet,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -113,13 +113,12 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 	wg.Wait()
 
 	for _, b := range []port.BankRef{bankA, bankB, bankC} {
-		n := ops.count(func(r *fakeRow) bool { return r.job.Bank == b && r.job.Kind == domain.OperationKindConsolidate })
-		if n != 1 {
+		if n := ops.countBank(b, domain.OperationKindConsolidate, ""); n != 1 {
 			t.Errorf("bank %v: %d consolidate jobs, want exactly 1", b, n)
 		}
 	}
-	if row := ops.row(stale); row.status != domain.OperationStatusPending || row.job.Attempt != 1 {
-		t.Errorf("stale job: status %s attempt %d, want pending attempt 1 (reclaimed once)", row.status, row.job.Attempt)
+	if row := ops.row(stale); row.status != domain.OperationStatusPending || row.attempt != 1 {
+		t.Errorf("stale job: status %s attempt %d, want pending attempt 1 (reclaimed once)", row.status, row.attempt)
 	}
 	if failures.calls.Load() < 60 {
 		t.Errorf("refresh-failure reconcile ran %d times, want every tick", failures.calls.Load())
@@ -130,9 +129,9 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 // cut-offs come from the clock and the retentions.
 func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 	clock := newClock()
-	ops := newOps(clock)
-	ops.deleting[bankC] = true
-	store := &fakeStore{ops: ops}
+	ops := newOps(t)
+	ops.markDeleting(bankC)
+	store := &pruneStore{Store: ops}
 	log := &stepLog{}
 	cron := &countingCron{log: log, err: errors.New("cron parse failed")}
 	deps := MaintenanceDeps{
@@ -148,18 +147,18 @@ func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 	if strings.Join(log.steps, ",") != strings.Join(want, ",") {
 		t.Errorf("steps = %v, want %v", log.steps, want)
 	}
-	if n := ops.count(func(r *fakeRow) bool { return r.job.Bank == bankA }); n != 1 {
+	if n := ops.count(`tenant_id = $1 AND bank_id = $2`, bankA.Tenant, bankA.Bank); n != 1 {
 		t.Errorf("bank A consolidate jobs = %d, want 1", n)
 	}
-	if n := ops.count(func(r *fakeRow) bool { return r.job.Bank == bankC }); n != 0 {
+	if n := ops.count(`tenant_id = $1 AND bank_id = $2`, bankC.Tenant, bankC.Bank); n != 0 {
 		t.Errorf("deleting bank C got %d jobs", n)
 	}
 	now := clock.Now()
-	if len(ops.prunedAt) != 1 || !ops.prunedAt[0].Equal(now.Add(-DefaultOperationRetention)) {
-		t.Errorf("operations pruned before %v, want %v", ops.prunedAt, now.Add(-DefaultOperationRetention))
+	if len(store.ops) != 1 || !store.ops[0].Equal(now.Add(-DefaultOperationRetention)) {
+		t.Errorf("operations pruned before %v, want %v", store.ops, now.Add(-DefaultOperationRetention))
 	}
-	if len(store.eventsPrunedBefore) != 1 || !store.eventsPrunedBefore[0].Equal(now.Add(-DefaultEventRetention)) {
-		t.Errorf("events pruned before %v, want %v", store.eventsPrunedBefore, now.Add(-DefaultEventRetention))
+	if len(store.evts) != 1 || !store.evts[0].Equal(now.Add(-DefaultEventRetention)) {
+		t.Errorf("events pruned before %v, want %v", store.evts, now.Add(-DefaultEventRetention))
 	}
 	if err := RunMaintenance(context.Background(), MaintenanceDeps{}); err == nil {
 		t.Error("RunMaintenance without a Claimer and Store must fail")
@@ -169,42 +168,41 @@ func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 // The reconcile joins a running automatic consolidate instead of queueing another one behind it.
 func TestConsolidationReconcileJoinsRunning(t *testing.T) {
 	clock := newClock()
-	ops := newOps(clock)
+	ops := newOps(t)
 	ops.add(consolidateJob(bankA))
 	kinds := []port.JobKind{domain.OperationKindConsolidate}
 	if js, _ := ops.Claim(context.Background(), "w1", kinds, 1); len(js) != 1 {
 		t.Fatal("setup claim")
 	}
 	deps := MaintenanceDeps{
-		Claimer: ops, Store: &fakeStore{ops: ops}, Clock: clock, Consolidation: fixedBanks{bankA}, Logger: quiet,
+		Claimer: ops, Store: ops, Clock: clock, Consolidation: fixedBanks{bankA}, Logger: quiet,
 	}.withDefaults()
 	n, err := reconcileConsolidation(context.Background(), deps)
 	if err != nil || n != 0 {
 		t.Fatalf("reconcile = %d, %v; want 0 inserted", n, err)
 	}
-	if c := ops.count(func(*fakeRow) bool { return true }); c != 1 {
+	if c := ops.count("true"); c != 1 {
 		t.Errorf("%d consolidate rows, want 1", c)
 	}
 }
 
 func TestPruneOperations(t *testing.T) {
-	clock := newClock()
-	ops := newOps(clock)
+	clock := fake.NewClock(time.Now())
+	ops := newOps(t)
 	done := ops.add(retainJob("old"))
 	pending := ops.add(retainJob("pending"))
-	if _, err := ops.Cancel(context.Background(), bankA, done); err != nil {
-		t.Fatal(err)
-	}
-	clock.Advance(48 * time.Hour)
 	recent := ops.add(retainJob("recent"))
-	if _, err := ops.Cancel(context.Background(), bankA, recent); err != nil {
-		t.Fatal(err)
+	for _, id := range []port.OperationID{done, recent} {
+		if _, err := ops.cancel(bankA, id); err != nil {
+			t.Fatal(err)
+		}
 	}
-	n, err := PruneOperations(context.Background(), &fakeStore{ops: ops}, clock, 24*time.Hour)
+	ops.exec(`UPDATE operations SET finished_at = now() - interval '48 hours' WHERE id = $1`, string(done))
+	n, err := PruneOperations(context.Background(), ops, clock, 24*time.Hour)
 	if err != nil || n != 1 {
 		t.Fatalf("PruneOperations = %d, %v; want 1", n, err)
 	}
-	if ops.count(func(r *fakeRow) bool { return r.job.ID == pending || r.job.ID == recent }) != 2 {
+	if ops.count(`id = ANY($1::uuid[])`, []string{string(pending), string(recent)}) != 2 {
 		t.Error("pruned a pending or recent operation")
 	}
 }

@@ -21,15 +21,15 @@ func (f fixture) addLabelledUnit(t *testing.T) {
 			return err
 		}
 		if err := tx.Units().Insert(ctx, []domain.Unit{
-			{ID: "f4", Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "four", Tags: tags, Seq: seq},
-			{ID: "f5", Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "five", Tags: tags, Seq: seq},
+			{ID: uid("f4"), Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "four", Tags: tags, Seq: seq},
+			{ID: uid("f5"), Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "five", Tags: tags, Seq: seq},
 		}); err != nil {
 			return err
 		}
-		if err := tx.Units().MarkConsolidated(ctx, []port.UnitID{"f4"}, f.clock.Now()); err != nil {
+		if err := tx.Units().MarkConsolidated(ctx, uids("f4"), f.clock.Now()); err != nil {
 			return err
 		}
-		return tx.Units().Archive(ctx, testBank, "f5", "test")
+		return tx.Units().Archive(ctx, testBank, uid("f5"), "test")
 	})
 	if err != nil {
 		t.Fatalf("seed labelled units: %v", err)
@@ -44,14 +44,14 @@ func (f fixture) restore(t *testing.T, id port.UnitID) {
 		if _, err := tx.Seq(ctx, testBank); err != nil {
 			return err
 		}
-		return tx.Units().Restore(ctx, testBank, id)
+		return tx.Units().Restore(ctx, testBank, uid(string(id)))
 	})
 	if err != nil {
 		t.Fatalf("Restore %s: %v", id, err)
 	}
 }
 
-// TestRetagKeepsLabelTags (WP-19, final review H1): retagging d1 [a b]→[c] replaces only the document-derived
+// TestRetagKeepsLabelTags: retagging d1 [a b]→[c] replaces only the document-derived
 // tags, so a unit's write_to_tags label tag survives, on live and archived units, through UpdateDocument
 // and through retag_document (run twice). The live unit is re-consolidated. A set-equal retag afterwards is
 // still a no-op that bumps no change seq.

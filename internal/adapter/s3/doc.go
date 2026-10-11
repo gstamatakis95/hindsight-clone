@@ -61,8 +61,8 @@
 //
 // # Testing
 //
-// blob_test.go starts one MinIO container per test binary (testcontainers, the docker-compose image), gives every test
-// its own bucket and runs the shared internal/porttest blob suite (porttest.RunBlobSuite) plus adapter-specific tests
-// (multi-page DeletePrefix, non-seekable readers, missing bucket). Without Docker the tests skip. Governing SPEC
-// sections: "Ports" (Blob) and "Behavioural rules" (DeleteBank).
+// blob_test.go starts one MinIO container per test binary (testcontainers, the docker-compose image) and gives every
+// test its own bucket. TestBlob's cases cover round trips, overwrite, Delete, and DeletePrefix and List over more keys
+// than one S3 page; the other tests cover the empty-prefix refusal, non-seekable readers and a missing bucket. Without
+// Docker the tests skip. Governing SPEC sections: "Ports" (Blob) and "Behavioural rules" (DeleteBank).
 package s3

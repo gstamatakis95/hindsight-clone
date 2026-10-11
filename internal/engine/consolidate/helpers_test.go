@@ -4,14 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/routing"
 	"memd/internal/fake"
 	"memd/internal/port"
 	"memd/internal/prompts"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // bank is the test bank.
@@ -35,7 +41,41 @@ type update struct {
 	Reason        string   `json:"reason"`
 }
 
-// reply renders a CONSOLIDATE reply.
+// uid is the unit id of a readable fixture name (Postgres stores unit ids as uuid).
+func uid(name string) port.UnitID { return pgtest.ID[port.UnitID](name) }
+
+// uids maps uid over names.
+func uids(names ...string) []port.UnitID { return pgtest.IDs[port.UnitID](names...) }
+
+// names maps unit ids back to their fixture names.
+func names(ids []port.UnitID) []string { return pgtest.Names(ids) }
+
+// sortedNames is names, sorted: Postgres returns an observation's sources in id order, which is not the
+// order of their names.
+func sortedNames(ids []port.UnitID) []string {
+	out := names(ids)
+	slices.Sort(out)
+	return out
+}
+
+// toID maps a fixture name to its unit id; an id passes through.
+func toID(s string) string {
+	if pgtest.Name(s) != s {
+		return s
+	}
+	return string(uid(s))
+}
+
+// toIDs maps toID over ss.
+func toIDs(ss []string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = toID(s)
+	}
+	return out
+}
+
+// reply renders a CONSOLIDATE reply; fact and observation names become their unit ids.
 func reply(creates []create, updates []update) string {
 	if creates == nil {
 		creates = []create{}
@@ -43,16 +83,25 @@ func reply(creates []create, updates []update) string {
 	if updates == nil {
 		updates = []update{}
 	}
+	for i := range creates {
+		creates[i].SourceFactIDs = toIDs(creates[i].SourceFactIDs)
+	}
+	for i := range updates {
+		updates[i].SourceFactIDs = toIDs(updates[i].SourceFactIDs)
+		updates[i].ObservationID = toID(updates[i].ObservationID)
+	}
 	b, _ := json.Marshal(map[string]any{"creates": creates, "updates": updates})
 	return string(b)
 }
 
-// env is a consolidation test environment over the fakes (Store, LLM, Embedder, Clock) with the real
+// env is a consolidation test environment over a store on its own database and the fakes (LLM, Embedder,
+// Clock) with the real
 // config resolver, router and StrategyMatcher.
 type env struct {
 	t      *testing.T
 	clock  *fake.Clock
-	store  *fake.Store
+	store  *postgres.Store
+	pool   *pgxpool.Pool
 	llm    *fake.LLM
 	emb    *fake.Embedder
 	deps   ConsolidatorDeps
@@ -64,8 +113,9 @@ type env struct {
 func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 	t.Helper()
 	clock := fake.NewClock(time.Time{})
+	db := pgtest.New(t)
 	e := &env{
-		t: t, clock: clock, store: fake.NewStore(clock), llm: fake.NewLLM(),
+		t: t, clock: clock, store: db.Store(), pool: db.Pool, llm: fake.NewLLM(),
 		emb: fake.NewEmbedder(fake.EmbedSimilar), texts: map[port.UnitID]string{},
 	}
 	server, err := config.ServerDefaults(func(k string) string {
@@ -92,7 +142,7 @@ func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 		Clock:    clock,
 		NewID: func() port.UnitID {
 			e.nextID++
-			return port.UnitID(fmt.Sprintf("obs-%02d", e.nextID))
+			return uid(fmt.Sprintf("obs-%02d", e.nextID))
 		},
 	}
 	return e
@@ -140,7 +190,7 @@ func fail() fake.Reply { return fake.Reply{Err: errPoison} }
 func (e *env) createEach(ids ...string) fake.Reply {
 	var cs []create
 	for _, id := range ids {
-		cs = append(cs, create{Text: "Observed: " + e.texts[port.UnitID(id)], SourceFactIDs: []string{id}})
+		cs = append(cs, create{Text: "Observed: " + e.texts[port.UnitID(id)], SourceFactIDs: []string{toID(id)}})
 	}
 	return ok(reply(cs, nil))
 }
@@ -165,7 +215,7 @@ func (e *env) calls(slot port.ModelSlot) []port.StructuredRequest {
 func (e *env) batches() [][]string {
 	var out [][]string
 	for _, c := range e.calls(domain.ModelSlotConsolidate) {
-		out = append(out, schemaFactIDs(c.Schema))
+		out = append(out, pgtest.Names(schemaFactIDs(c.Schema)))
 	}
 	return out
 }
@@ -199,7 +249,7 @@ func (e *env) fact(id, text string, tags ...string) {
 			return err
 		}
 		return tx.Units().Insert(e.t.Context(), []domain.Unit{{
-			ID: port.UnitID(id), Bank: bank, Type: domain.FactTypeWorld, Text: text,
+			ID: uid(id), Bank: bank, Type: domain.FactTypeWorld, Text: text,
 			Tags: domain.NormalizeTags(tags), Embedding: e.emb.Vector(text), Seq: seq,
 		}})
 	})
@@ -221,7 +271,7 @@ func (e *env) seedObservation(id, text string, tags []string, stamp bool, source
 			return err
 		}
 		err = tx.Units().UpsertObservation(ctx, domain.Unit{
-			ID: port.UnitID(id), Bank: bank, Type: domain.FactTypeObservation, Text: text,
+			ID: uid(id), Bank: bank, Type: domain.FactTypeObservation, Text: text,
 			Tags: domain.NormalizeTags(tags), Embedding: e.emb.Vector(text), Seq: seq, Version: 1,
 			ProofCount: len(sources),
 		})
@@ -231,10 +281,10 @@ func (e *env) seedObservation(id, text string, tags []string, stamp bool, source
 		var ev []domain.Evidence
 		var ids []port.UnitID
 		for _, s := range sources {
-			ev = append(ev, domain.Evidence{Unit: port.UnitID(s), Quote: e.texts[port.UnitID(s)]})
-			ids = append(ids, port.UnitID(s))
+			ev = append(ev, domain.Evidence{Unit: uid(s), Quote: e.texts[port.UnitID(s)]})
+			ids = append(ids, uid(s))
 		}
-		if err := tx.Evidence().Add(ctx, port.UnitID(id), ev); err != nil || !stamp {
+		if err := tx.Evidence().Add(ctx, uid(id), ev); err != nil || !stamp {
 			return err
 		}
 		return tx.Units().MarkConsolidated(ctx, ids, e.clock.Now())
@@ -244,7 +294,7 @@ func (e *env) seedObservation(id, text string, tags []string, stamp bool, source
 // unit reads one live unit.
 func (e *env) unit(id string) domain.Unit {
 	e.t.Helper()
-	us, err := e.store.Read().GetUnits(e.t.Context(), bank, []port.UnitID{port.UnitID(id)})
+	us, err := e.store.Read().GetUnits(e.t.Context(), bank, []port.UnitID{uid(id)})
 	if err != nil || len(us) != 1 {
 		e.t.Fatalf("unit %s: %v (%d found)", id, err, len(us))
 	}
@@ -254,16 +304,14 @@ func (e *env) unit(id string) domain.Unit {
 // observations returns every live observation of the bank.
 func (e *env) observations() []domain.Unit {
 	e.t.Helper()
-	hits, err := e.store.Read().SearchVector(e.t.Context(), port.VectorQuery{
-		Bank: bank, Embedding: make([]float32, domain.EmbeddingDim),
-		Types: []domain.FactType{domain.FactTypeObservation},
-	})
+	rows, err := e.pool.Query(e.t.Context(), `SELECT id::text FROM memory_units
+		WHERE tenant_id = $1 AND bank_id = $2 AND fact_type = 'observation' ORDER BY id`, bank.Tenant, bank.Bank)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	ids := make([]port.UnitID, 0, len(hits))
-	for _, h := range hits {
-		ids = append(ids, h.ID)
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[port.UnitID])
+	if err != nil {
+		e.t.Fatal(err)
 	}
 	us, err := e.store.Read().GetUnits(e.t.Context(), bank, ids)
 	if err != nil {
@@ -307,7 +355,7 @@ func (e *env) run(j port.Job) ConsolidationResult {
 // autoJob is the automatic consolidate job of the test bank.
 func autoJob() port.Job {
 	j := NewJob(bank, nil, nil)
-	j.ID = "op-1"
+	j.ID = pgtest.ID[port.OperationID]("op-1")
 	return j
 }
 

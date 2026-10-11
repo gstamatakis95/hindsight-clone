@@ -125,7 +125,8 @@
 //
 // # Tests
 //
-// runner_test.go, exec_retry_test.go and handlers_test.go run against a fake Claimer (fake_test.go): slot
+// runner_test.go, exec_retry_test.go and handlers_test.go run against the Postgres Claimer on a pgtest database
+// (ops_test.go records Fail calls and ages heartbeats with SQL): slot
 // reservation, retry policy and caps, lost-job fencing, shutdown release, settle retries, progress
 // checkpoints and handler wiring. maintenance_test.go and maintenance_reconcile_test.go cover each tick step;
 // control_test.go covers cancel and retry. SPEC "Jobs", "Process model" and "Behavioural rules" (Operations).

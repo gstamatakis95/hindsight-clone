@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"memd/internal/adapter/gateway"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/config"
 	"memd/internal/fake"
 	"memd/internal/observability"
@@ -83,7 +84,7 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	_, ts := gatewayemu.Start(gatewayemu.Options{})
 	t.Cleanup(ts.Close)
 	g := &txGuard{}
-	store := fake.NewStore(systemClock{})
+	store := pgtest.NewStore(t)
 	gw := gateway.NewClient(gateway.Config{
 		BaseURL: ts.URL + gatewayemu.BasePath, EmbedModel: defaultEmbedModel, TraceCall: tel.GatewayHook(),
 	}, tel.HTTPClient(&http.Client{Transport: guardTransport{g: g}}))

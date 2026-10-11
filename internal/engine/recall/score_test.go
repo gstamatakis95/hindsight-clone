@@ -2,6 +2,7 @@ package recall
 
 import (
 	"math"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -52,7 +53,10 @@ func TestBoostTemporalIsolated(t *testing.T) {
 	sem := arm(ArmSemantic, "far", "centre", "span", "undated", "outside")
 	// The adapter's own scores order the arm (buckets) but must not reach the boost.
 	tmp := &stubArm{name: ArmTemporal, hits: []port.Hit{
-		{ID: "far", Score: 1}, {ID: "centre", Score: 0.01}, {ID: "span", Score: 0.5}, {ID: "undated", Score: 0.9},
+		{ID: uid("far"), Score: 1},
+		{ID: uid("centre"), Score: 0.01},
+		{ID: uid("span"), Score: 0.5},
+		{ID: uid("undated"), Score: 0.9},
 	}}
 	e := newEnv(t, envOpts{rerank: true, arms: []Retriever{sem, tmp}})
 	flatReranker(e)
@@ -74,7 +78,7 @@ func TestBoostTemporalIsolated(t *testing.T) {
 		"outside": 0.5,
 	}
 	for _, m := range res.Results {
-		prox := want[string(m.Unit.ID)]
+		prox := want[pgtest.Name(m.Unit.ID)]
 		if f := m.Scores.Final; !near(f, 0.5*(1+0.2*(prox-0.5))) {
 			t.Errorf("final(%s) = %v, want proximity %v", m.Unit.ID, f, prox)
 		}
@@ -111,8 +115,10 @@ func TestBoostProofIsolated(t *testing.T) {
 	sem := arm(ArmSemantic, "o1", "o50")
 	e := newEnv(t, envOpts{rerank: true, arms: []Retriever{sem}})
 	flatReranker(e)
-	o1 := domain.Unit{ID: "o1", Bank: testBank, Type: domain.FactTypeObservation, Text: "weak obs", ProofCount: 1}
-	o50 := domain.Unit{ID: "o50", Bank: testBank, Type: domain.FactTypeObservation, Text: "strong obs", ProofCount: 50}
+	o1 := domain.Unit{ID: uid("o1"), Bank: testBank, Type: domain.FactTypeObservation, Text: "weak obs", ProofCount: 1}
+	o50 := domain.Unit{
+		ID: uid("o50"), Bank: testBank, Type: domain.FactTypeObservation, Text: "strong obs", ProofCount: 50,
+	}
 	e.add(t, o1, o50)
 
 	res := e.recall(t, RecallRequest{Query: "obs", Overrides: alphas(0, 0, 0.1)})

@@ -2,7 +2,6 @@ package postgres_test
 
 import (
 	"fmt"
-	"memd/internal/adapter/postgres"
 	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
@@ -54,8 +53,9 @@ func racePatches(
 // TestConcurrentBankConfigPatchesKeepBoth: two concurrent UpdateBankConfig calls patching different fields
 // both land. UpdateBankConfig takes the bank's seq (row lock) before reading the overrides (decision 2500).
 func TestConcurrentBankConfigPatchesKeepBoth(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
-	b := port.BankRef{Tenant: "t-review", Bank: "b-cfg"}
+	t.Parallel()
+	s := pgtest.NewStore(t)
+	b := port.BankRef{Tenant: "t-race", Bank: "b-cfg"}
 	admin := bank.NewBankAdmin(s)
 	if _, err := admin.UpdateBankConfig(t.Context(), b, func(c domain.BankConfig) (domain.BankConfig, error) {
 		return c, nil
@@ -79,10 +79,11 @@ func TestConcurrentBankConfigPatchesKeepBoth(t *testing.T) {
 }
 
 // TestConcurrentTenantConfigPatchesKeepBoth: the same for UpdateTenantConfig on a tenant with no stored
-// config yet; it takes the tenant config lock before reading (decision 2500, CCR WP-25-1).
+// config yet; it takes the tenant config lock before reading (decision 2500).
 func TestConcurrentTenantConfigPatchesKeepBoth(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
-	const tenant = "t-review"
+	t.Parallel()
+	s := pgtest.NewStore(t)
+	const tenant = "t-race"
 	admin := bank.NewTenantAdmin(s)
 	racePatches(t, func(p bank.ConfigPatch) error {
 		if _, err := admin.UpdateTenantConfig(t.Context(), tenant, p); err != nil {

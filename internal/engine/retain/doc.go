@@ -150,7 +150,7 @@
 //
 // # Tests
 //
-// Tests run on fake.Store, fake.Blob, fake.LLM and fake.Embedder: chunking shapes and budgets, extraction per
+// Tests run on a pgtest database, fake.Blob, fake.LLM and fake.Embedder: chunking shapes and budgets, extraction per
 // mode, entity scoring and merge gates, labels, link caps, the no-op path (no LLM call), fan-out rejection,
 // a deleting bank, async batches, crash and resume (only remaining chunks re-extracted, no facts lost on a
 // changed document), overlapping and superseding runs, retags between batches, partial replacement leaving

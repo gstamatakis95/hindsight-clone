@@ -77,7 +77,7 @@ func (e *env) citing(id string, tags ...string) int {
 	for _, o := range e.observations() {
 		if domain.SameTagSet(o.Tags, tags) {
 			for _, s := range o.SourceIDs {
-				if s == port.UnitID(id) {
+				if s == uid(id) {
 					n++
 				}
 			}
@@ -86,7 +86,7 @@ func (e *env) citing(id string, tags ...string) int {
 	return n
 }
 
-// TestRunClearedEarlierScopeIsNotStamped (final review B, H2): per_tag facts tagged [a,b]; a
+// TestRunClearedEarlierScopeIsNotStamped: per_tag facts tagged [a,b]; a
 // ClearObservations of [a] commits after the run wrote [a] and before it decides [b]. The run must not
 // stamp the facts at [b] (scope [a] no longer cites them): it reports More, and the continuation
 // re-creates the [a] observation without re-deciding [b].
@@ -137,10 +137,10 @@ func TestRunCoSourceInvalidatedIsNotStamped(t *testing.T) {
 	e.script(e.cite("Alice and Dan like tea", "f1", "f3"), e.cite("Alice likes tea", "f1"))
 	e.beforeScope(func() {
 		e.tx(func(tx port.Tx) error {
-			if _, err := NewInvalidator().ClearForMemory(t.Context(), tx, bank, "f3"); err != nil {
+			if _, err := NewInvalidator().ClearForMemory(t.Context(), tx, bank, uid("f3")); err != nil {
 				return fmt.Errorf("clear for f3: %w", err)
 			}
-			return tx.Units().Archive(t.Context(), bank, "f3", "wrong")
+			return tx.Units().Archive(t.Context(), bank, uid("f3"), "wrong")
 		})
 	}, "b")
 	if res := e.run(autoJob()); !res.More {
@@ -208,7 +208,7 @@ func (e *env) docFact(doc port.DocumentID, id, text string, tags ...string) {
 			return err
 		}
 		return tx.Units().Insert(e.t.Context(), []domain.Unit{{
-			ID: port.UnitID(id), Bank: bank, DocumentID: doc, Type: domain.FactTypeWorld, Text: text,
+			ID: uid(id), Bank: bank, DocumentID: doc, Type: domain.FactTypeWorld, Text: text,
 			Tags: tags, Embedding: e.emb.Vector(text), Seq: seq,
 		}})
 	})

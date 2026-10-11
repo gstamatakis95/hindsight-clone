@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// cancellingStore cancels the caller's context while its transaction runs, so the fake aborts the commit.
+// cancellingStore cancels the caller's context while its transaction runs, so the commit is aborted.
 type cancellingStore struct {
 	port.Store
 	cancel context.CancelFunc
@@ -23,7 +23,7 @@ func (s cancellingStore) InTx(ctx context.Context, fn func(port.Tx) error) error
 	})
 }
 
-// TestRetagApplyCancelledMidTx (review round 2, LOW): a retag_document job whose context ends inside its
+// TestRetagApplyCancelledMidTx: a retag_document job whose context ends inside its
 // transaction reports domain.ErrCancelled and commits nothing.
 func TestRetagApplyCancelledMidTx(t *testing.T) {
 	f := newFixture(t)
@@ -38,7 +38,7 @@ func TestRetagApplyCancelledMidTx(t *testing.T) {
 	if !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("Apply cancelled mid-tx: %v, want ErrCancelled", err)
 	}
-	us, err := f.store.Read().GetUnits(ctx, testBank, []port.UnitID{"o1"})
+	us, err := f.store.Read().GetUnits(ctx, testBank, uids("o1"))
 	if err != nil || len(us) != 1 {
 		t.Errorf("o1 after a cancelled retag_document = %+v (%v), want it kept", us, err)
 	}

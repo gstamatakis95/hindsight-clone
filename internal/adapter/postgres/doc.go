@@ -149,11 +149,12 @@
 //
 // # Testing
 //
-// contract_test.go, store_gaps_test.go and queue_gaps_test.go run the internal/porttest suites (store, store gaps, seq,
-// queue, queue gaps, reads, curation reads, maintenance, observation admin) against a real Postgres from
-// internal/adapter/postgres/pgtest: one migrated ParadeDB container per test binary, truncated per test, skipped
-// without Docker unless MEMD_REQUIRE_DOCKER is set. The *_accept_test.go files and the race tests pin adapter-specific
-// behaviour: seq order, claims, reclaim, the small-bank HNSW search, TestConcurrentBankConfigPatchesKeepBoth and
+// The tests run on real Postgres from internal/adapter/postgres/pgtest: every test and case gets its own database
+// cloned from a migrated template, so they run in parallel; without Docker they skip unless MEMD_REQUIRE_DOCKER is
+// set. TestStore (Store, Tx, Reader, every repository, the curation writes and tenant isolation), TestSeq, TestQueue
+// (Queue and Claimer), TestReads, TestCurationReads, TestMaintenanceReads and TestObservationAdmin are case tables
+// over the port semantics; the *_accept_test.go files, store_sql_test.go and the race tests pin behaviour that needs
+// raw SQL or load: seq order, claims, reclaim, the small-bank HNSW search, TestConcurrentBankConfigPatchesKeepBoth and
 // TestAttachAfterConcurrentPruneReresolves.
 //
 // Governing SPEC sections: "Ports", "Jobs", "Behavioural rules" and "Recall pipeline".

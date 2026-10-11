@@ -3,6 +3,7 @@ package mentalmodel
 import (
 	"encoding/json"
 	"fmt"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
 	"memd/internal/engine/routing"
@@ -13,7 +14,7 @@ import (
 )
 
 // TestConsolidationTriggeredRefreshRunsAndStaysUnpaused wires the real Consolidator and this package's
-// RunJob and reconciler over one fake store (final review B, C1): the refresh that consolidation enqueues
+// RunJob and reconciler over one store: the refresh that consolidation enqueues
 // decodes, runs, writes a version, and the maintenance reconcile (over the store's own FailedRefreshes)
 // pauses nothing.
 func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
@@ -22,14 +23,14 @@ func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
 	spec.Trigger.Mode = domain.RefreshModeFull
 	spec.Trigger.RefreshAfterConsolidation = true
 	e.addModel(spec)
-	f1 := e.addEmbeddedFact("f1", "Alice leads the project", "proj")
+	f1 := e.addEmbeddedFact(pgtest.ID[port.UnitID]("f1"), "Alice leads the project", "proj")
 
 	n := 0
 	cons := consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
 		Store: e.store, Config: e.config, Router: routing.NewRouter(), LLM: e.llm, Embedder: e.emb, Clock: e.clock,
 		NewID: func() port.UnitID {
 			n++
-			id := port.UnitID(fmt.Sprintf("obs-%02d", n))
+			id := pgtest.ID[port.UnitID](fmt.Sprintf("obs-%02d", n))
 			e.reads.track(id)
 			return id
 		},
@@ -42,15 +43,15 @@ func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
 	})
 	e.llm.Script(domain.ModelSlotConsolidate, prompts.ConsolidateSystem, fakeJSON(string(body)))
 	job := consolidate.NewJob(e.bank, nil, nil)
-	job.ID = "op-consolidate"
+	job.ID = opID("op-consolidate")
 	if _, err := cons.Run(e.ctx, job); err != nil {
 		t.Fatal(err)
 	}
 
 	e.clock.Advance(time.Minute) // past the refresh debounce
-	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{domain.OperationKindRefreshMentalModel}, 10)
-	if err != nil || len(jobs) != 1 {
-		t.Fatalf("claimed %d refresh jobs (%v), want the one consolidation enqueued", len(jobs), err)
+	jobs := e.claimDue(domain.OperationKindRefreshMentalModel)
+	if len(jobs) != 1 {
+		t.Fatalf("claimed %d refresh jobs, want the one consolidation enqueued", len(jobs))
 	}
 	e.scriptSynthesize("## Status\n\nAlice leads the project.")
 	out, runErr := RunJob(e.ctx, e.runner, jobs[0])

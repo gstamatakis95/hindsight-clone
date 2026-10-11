@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"memd/internal/adapter/postgres"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 )
@@ -39,11 +41,32 @@ func loadAcceptFixture(t *testing.T, pool *pgxpool.Pool) map[port.UnitID]bool {
 		WHERE schemaname = 'public' AND indexname = 'memory_units_embedding_hnsw'`).Scan(&indexDef); err != nil {
 		t.Fatalf("hnsw index definition: %v", err)
 	}
+	err := loadAcceptRows(ctx, pool, indexDef, 8)
+	if pgErr := (*pgconn.PgError)(nil); errors.As(err, &pgErr) && pgErr.Code == "53100" {
+		// A parallel build needs shared memory (Docker's default /dev/shm is 64 MB); build serially instead.
+		t.Logf("parallel index build out of shared memory, building serially: %v", err)
+		err = loadAcceptRows(ctx, pool, indexDef, 0)
+	}
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `ANALYZE memory_units`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	t.Logf("loaded %d units in %s", acceptUnits, time.Since(start).Round(time.Millisecond))
+	return smallBankIDs(t, pool)
+}
+
+// loadAcceptRows inserts the fixture's banks and units in one transaction and rebuilds the HNSW index with up to
+// workers parallel workers (0 = serial).
+func loadAcceptRows(ctx context.Context, pool *pgxpool.Pool, indexDef string, workers int) error {
 	// Inserting row by row into a live HNSW index takes minutes; one transaction drops the index, loads the
 	// rows and rebuilds it from its own catalog definition (a rollback restores it), which takes seconds.
 	stmts := []string{
 		`SET LOCAL maintenance_work_mem = '512MB'`,
-		`SET LOCAL max_parallel_maintenance_workers = 4`,
+		fmt.Sprintf(`SET LOCAL max_parallel_maintenance_workers = %d`, workers),
+		// Without a size estimate the planner builds the index serially, several times slower.
+		fmt.Sprintf(`ALTER TABLE memory_units SET (parallel_workers = %d)`, max(workers, 1)),
 		`INSERT INTO banks (tenant_id, id) VALUES ('t1', 'small'), ('t1', 'big'), ('t2', 'small'), ('t2', 'big')`,
 		`DROP INDEX memory_units_embedding_hnsw`,
 		// The subquery references g (in WHERE), so it runs once per row (an uncorrelated one would give every row
@@ -65,12 +88,15 @@ func loadAcceptFixture(t *testing.T, pool *pgxpool.Pool) map[port.UnitID]bool {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("load fixture: %v", err)
+		return fmt.Errorf("load fixture rows: %w", err)
 	}
-	if _, err := pool.Exec(ctx, `ANALYZE memory_units`); err != nil {
-		t.Fatalf("analyze: %v", err)
-	}
-	t.Logf("loaded %d units in %s", acceptUnits, time.Since(start).Round(time.Millisecond))
+	return nil
+}
+
+// smallBankIDs returns the ids of the small bank's units, checking there are as many as the fixture puts there.
+func smallBankIDs(t *testing.T, pool *pgxpool.Pool) map[port.UnitID]bool {
+	t.Helper()
+	ctx := t.Context()
 	rows, err := pool.Query(ctx, `SELECT id::text FROM memory_units WHERE tenant_id = 't1' AND bank_id = 'small'`)
 	if err != nil {
 		t.Fatalf("small ids: %v", err)
@@ -166,10 +192,11 @@ func wantSmallHits(t *testing.T, what string, s *postgres.Store, q []float32, sm
 // SearchVector with Limit 10 still returns 10 hits, all of that bank, also when the plan goes through HNSW
 // (iterative scan keeps scanning past the filtered-out neighbours).
 func TestAcceptSmallBankVector(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads 50,000 units")
 	}
-	pool := pgtest.Fresh(t)
+	pool := pgtest.Pool(t)
 	small := loadAcceptFixture(t, pool)
 	q := randomVec()
 

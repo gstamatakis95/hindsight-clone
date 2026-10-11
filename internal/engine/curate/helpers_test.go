@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/retain"
 	"memd/internal/fake"
@@ -18,13 +20,21 @@ import (
 // testBank is the bank every curate test works in.
 var testBank = port.BankRef{Tenant: "acme", Bank: "notes"}
 
-// env is a fake store with a seeded bank: document d1 with facts f1 (Alice, tagged team, causal link to
+// Fixture unit ids: Postgres stores unit ids as uuid. idNope is never written.
+var (
+	idF1   = pgtest.ID[port.UnitID]("f1")
+	idF2   = pgtest.ID[port.UnitID]("f2")
+	idO1   = pgtest.ID[port.UnitID]("o1")
+	idNope = pgtest.ID[port.UnitID]("nope")
+)
+
+// env is a store with a seeded bank: document d1 with facts f1 (Alice, tagged team, causal link to
 // f2) and f2, and observation o1 citing both.
 type env struct {
 	t      *testing.T
 	ctx    context.Context
 	clock  *fake.Clock
-	fake   *fake.Store
+	fake   *postgres.Store
 	store  *auditStore
 	emb    *fake.Embedder
 	citing *citingStub
@@ -35,12 +45,12 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	clock := fake.NewClock(time.Time{})
-	fs := fake.NewStore(clock)
+	fs := pgtest.NewStore(t)
 	e := &env{
 		t: t, ctx: context.Background(), clock: clock, fake: fs, store: &auditStore{Store: fs},
 		emb: fake.NewEmbedder(fake.EmbedSimilar), linker: &linkerStub{},
 	}
-	e.citing = &citingStub{cites: map[port.UnitID][]port.UnitID{"o1": {"f1", "f2"}}, store: e.store}
+	e.citing = &citingStub{cites: map[port.UnitID][]port.UnitID{idO1: {idF1, idF2}}, store: e.store}
 	e.seed()
 	return e
 }
@@ -59,29 +69,29 @@ func (e *env) seed() {
 		if err := tx.Documents().Upsert(e.ctx, domain.Document{ID: "d1", Bank: testBank}); err != nil {
 			return err
 		}
-		f1 := e.fact("f1", "Alice likes green tea", []string{"team"}, seq)
-		f2 := e.fact("f2", "Bob drinks coffee daily", []string{"team"}, seq)
+		f1 := e.fact(idF1, "Alice likes green tea", []string{"team"}, seq)
+		f2 := e.fact(idF2, "Bob drinks coffee daily", []string{"team"}, seq)
 		f2.ConsolidatedAt = &consolidated
 		o1 := domain.Unit{
-			ID: "o1", Bank: testBank, Type: domain.FactTypeObservation, Text: "Alice and Bob enjoy hot drinks",
+			ID: idO1, Bank: testBank, Type: domain.FactTypeObservation, Text: "Alice and Bob enjoy hot drinks",
 			Tags: []string{"team"}, Embedding: e.emb.Vector("Alice and Bob enjoy hot drinks"), Seq: seq,
 		}
 		if err := tx.Units().Insert(e.ctx, []domain.Unit{f1, f2, o1}); err != nil {
 			return err
 		}
-		if err := tx.Evidence().Add(e.ctx, "o1", []domain.Evidence{{Unit: "f1"}, {Unit: "f2"}}); err != nil {
+		if err := tx.Evidence().Add(e.ctx, idO1, []domain.Evidence{{Unit: idF1}, {Unit: idF2}}); err != nil {
 			return err
 		}
 		ent, err := tx.Entities().Upsert(e.ctx, domain.Entity{Bank: testBank, CanonicalName: "Alice"})
 		if err != nil {
 			return err
 		}
-		if err := tx.Entities().Attach(e.ctx, "f1", []port.EntityID{ent}); err != nil {
+		if err := tx.Entities().Attach(e.ctx, idF1, []port.EntityID{ent}); err != nil {
 			return err
 		}
 		return tx.Links().Insert(e.ctx, []domain.Link{
-			{Bank: testBank, From: "f1", To: "f2", Kind: domain.LinkCausal, Weight: 1},
-			{Bank: testBank, From: "f1", To: "f2", Kind: domain.LinkTemporal, Weight: 0.5},
+			{Bank: testBank, From: idF1, To: idF2, Kind: domain.LinkCausal, Weight: 1},
+			{Bank: testBank, From: idF1, To: idF2, Kind: domain.LinkTemporal, Weight: 0.5},
 		})
 	})
 }
@@ -235,7 +245,7 @@ func (u auditUnits) AppendAudit(ctx context.Context, a domain.AuditEntry) error 
 }
 
 // citingStub maps cited unit ids to the models citing them; cites is the seeded evidence (observation ->
-// the facts it cites), so it follows CCR WP-13-1: models citing ids or an observation citing one of ids.
+// the facts it cites), so it returns the models citing ids or an observation citing one of ids.
 // It fails when called while a transaction of store is open.
 type citingStub struct {
 	by    map[port.UnitID][]port.MentalModelID
@@ -264,7 +274,7 @@ func (c *citingStub) ModelsCiting(_ context.Context, _ port.BankRef, ids []port.
 	return out, nil
 }
 
-// refreshStub enqueues a refresh_mental_model job in the caller's tx, as WP-12's queuer would.
+// refreshStub enqueues a refresh_mental_model job in the caller's tx, as the mental-model queuer would.
 type refreshStub struct{}
 
 // QueueRefresh enqueues {"model_id": id} under serial key mm:{id}.
@@ -327,8 +337,8 @@ func (l *linkerStub) Link(
 	l.mu.Unlock()
 	var ls []domain.Link
 	for _, u := range units {
-		if u.ID != "f2" {
-			ls = append(ls, domain.Link{Bank: b, From: u.ID, To: "f2", Kind: domain.LinkTemporal, Weight: 0.9})
+		if u.ID != idF2 {
+			ls = append(ls, domain.Link{Bank: b, From: u.ID, To: idF2, Kind: domain.LinkTemporal, Weight: 0.9})
 		}
 	}
 	return tx.Links().Insert(ctx, ls)

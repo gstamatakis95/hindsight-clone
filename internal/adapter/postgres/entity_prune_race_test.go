@@ -62,8 +62,9 @@ func pruneOne(t *testing.T, s *postgres.Store, b port.BankRef, e port.EntityID) 
 // E. Attach must not skip E silently: it fails with ErrConflict, InTx re-runs the transaction, and the
 // re-run resolves "John" afresh, creating a new entity that the unit carries (decision 2501).
 func TestAttachAfterConcurrentPruneReresolves(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
-	b := port.BankRef{Tenant: "t-review", Bank: "b-ent"}
+	t.Parallel()
+	s := pgtest.NewStore(t)
+	b := port.BankRef{Tenant: "t-race", Bank: "b-ent"}
 	e, u := orphanEntityAndUnit(t, s, b)
 
 	resolved, pruned, done := make(chan struct{}), make(chan struct{}), make(chan struct{})

@@ -75,7 +75,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
 	e.clock.Advance(time.Minute)
 	e.reads.failed = []FailedRefresh{{
-		Bank: e.bank, ModelID: "status", OperationID: "op0", FailedAt: e.clock.Now(), Error: "boom",
+		Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: e.clock.Now(), Error: "boom",
 	}}
 	var once sync.Once
 	reconcile := func() {
@@ -86,7 +86,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 		})
 	}
 	runner := fwSingleShotRunner(e, hookLLM{LLM: e.llm, hook: reconcile})
-	out, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: "op1"})
+	out, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: opID("op1")})
 	if err != nil || out.VersionWritten != 2 {
 		t.Fatalf("run: version %d: %v", out.VersionWritten, err)
 	}
@@ -101,7 +101,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 
 	e.clock.Advance(time.Minute)
 	e.reads.failed = []FailedRefresh{{
-		Bank: e.bank, ModelID: "status", OperationID: "op2", FailedAt: e.clock.Now(), Error: "boom",
+		Bank: e.bank, ModelID: "status", OperationID: opID("op2"), FailedAt: e.clock.Now(), Error: "boom",
 	}}
 	var wg sync.WaitGroup
 	paused := make([]int, 2)
@@ -119,10 +119,9 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 // a deleted model with the same id) does not pause the recreated model.
 func TestReconcileSkipsFailureOfEarlierModel(t *testing.T) {
 	e := newEnv(t)
-	failedAt := e.clock.Now()
-	e.clock.Advance(time.Minute)
-	e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
-	e.reads.failed = []FailedRefresh{{Bank: e.bank, ModelID: "status", OperationID: "op0", FailedAt: failedAt}}
+	m := e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
+	failedAt := m.CreatedAt.Add(-time.Minute) // created_at is the database's time
+	e.reads.failed = []FailedRefresh{{Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: failedAt}}
 	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
 	if n, err := rec.ReconcileFailedRefreshes(e.ctx); err != nil || n != 0 {
 		t.Fatalf("paused %d: %v", n, err)

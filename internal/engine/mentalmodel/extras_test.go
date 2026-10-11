@@ -38,7 +38,9 @@ func TestStructuredOutputProjectedFromFinalPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := e.model("status")
-	if string(m.StructuredOutputJSON) != `{"lead":"Alice"}` || proj.doc != m.ContentMD || m.LastTrace == nil {
+	var structured map[string]string // jsonb: compare the value, not its spacing
+	if err := json.Unmarshal(m.StructuredOutputJSON, &structured); err != nil || structured["lead"] != "Alice" ||
+		len(structured) != 1 || proj.doc != m.ContentMD || m.LastTrace == nil {
 		t.Fatalf("structured %s, projected %q, trace %v", m.StructuredOutputJSON, proj.doc, m.LastTrace)
 	}
 }
@@ -85,9 +87,9 @@ func TestRetractedSourceTriggersRefresh(t *testing.T) {
 		t.Fatalf("queued %d: %v", n, err)
 	}
 	e.clock.Advance(time.Minute) // past the debounce
-	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{domain.OperationKindRefreshMentalModel}, 10)
-	if err != nil || len(jobs) != 1 {
-		t.Fatalf("claimed %d refreshes: %v", len(jobs), err)
+	jobs := e.claimDue(domain.OperationKindRefreshMentalModel)
+	if len(jobs) != 1 {
+		t.Fatalf("claimed %d refreshes", len(jobs))
 	}
 	var p RefreshPayload
 	if err := json.Unmarshal(jobs[0].Payload, &p); err != nil || p.MentalModelID != "status" ||

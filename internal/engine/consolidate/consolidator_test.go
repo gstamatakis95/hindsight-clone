@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -73,7 +74,7 @@ func perScope(t *testing.T, obs []domain.Unit, source port.UnitID) map[string]in
 	out := map[string]int{}
 	for _, o := range obs {
 		out[o.Scope().String()]++
-		if !slices.Equal(o.SourceIDs, []port.UnitID{source}) {
+		if !slices.Equal(o.SourceIDs, []port.UnitID{uid(string(source))}) {
 			t.Errorf("observation %s cites %v, want [%s]", o.ID, o.SourceIDs, source)
 		}
 	}
@@ -249,7 +250,7 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 	e.run(autoJob())
 	got := map[string]string{}
 	for _, c := range e.calls(domain.ModelSlotConsolidate) {
-		got[schemaFactIDs(c.Schema)[0]] = c.Binding.Model + "|" + missionOf(c.User)
+		got[pgtest.Name(schemaFactIDs(c.Schema)[0])] = c.Binding.Model + "|" + missionOf(c.User)
 	}
 	if got["f1"] != "strategy-model|STRATEGY-MISSION" || got["f2"] != "bank-model|BANK-MISSION" {
 		t.Fatalf("automatic run: %v; want the strategy for team, the bank for other", got)
@@ -260,7 +261,7 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 		ObservationsMission: "REQUEST-MISSION",
 		Models:              consolidateModel("request-model"),
 	})
-	j.ID = "op-manual"
+	j.ID = pgtest.ID[port.OperationID]("op-manual")
 	e.run(j)
 	calls := e.calls(domain.ModelSlotConsolidate)
 	last := calls[len(calls)-1]
@@ -296,8 +297,8 @@ func TestRunDedupMerge(t *testing.T) {
 		t.Fatalf("%d observations, want only the twin", len(obs))
 	}
 	twin := obs[0]
-	if twin.ID != "obs-twin" || twin.Text != "Alice lives in Paris, France" || twin.Version != 2 ||
-		!slices.Equal(twin.SourceIDs, []port.UnitID{"f0", "f1"}) || twin.ProofCount != 2 {
+	if pgtest.Name(twin.ID) != "obs-twin" || twin.Text != "Alice lives in Paris, France" || twin.Version != 2 ||
+		!slices.Equal(sortedNames(twin.SourceIDs), []string{"f0", "f1"}) || twin.ProofCount != 2 {
 		t.Fatalf("twin = %s %q v%d sources %v proof %d; want merged text, v2, [f0 f1], 2",
 			twin.ID, twin.Text, twin.Version, twin.SourceIDs, twin.ProofCount)
 	}
@@ -326,13 +327,13 @@ func TestRunDedupKeep(t *testing.T) {
 		t.Fatalf("%d observations, want the twin and the new one", len(obs))
 	}
 	for _, o := range obs {
-		switch o.ID {
+		switch pgtest.Name(o.ID) {
 		case "obs-twin":
 			if o.Text != "Alice owns 3 cats" || o.Version != 1 {
 				t.Errorf("twin changed: %q v%d", o.Text, o.Version)
 			}
 		default:
-			if o.Text != "Alice owns 4 cats" || !slices.Equal(o.SourceIDs, []port.UnitID{"f1"}) || o.Version != 1 {
+			if o.Text != "Alice owns 4 cats" || !slices.Equal(names(o.SourceIDs), []string{"f1"}) || o.Version != 1 {
 				t.Errorf("new observation = %q v%d sources %v", o.Text, o.Version, o.SourceIDs)
 			}
 		}

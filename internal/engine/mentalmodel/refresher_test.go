@@ -51,7 +51,7 @@ func TestBothStrategiesProduceVersionThroughRunner(t *testing.T) {
 			e.addModel(spec)
 			e.scriptSynthesize("## Status\n\nAlice leads the project.")
 
-			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true, OperationID: "op1"})
+			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true, OperationID: opID("op1")})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func TestDeltaAllOpsRejectedKeepsDocument(t *testing.T) {
 			e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
 				"kind": "append_block", "section_id": "no-such-section", "blocks_md": []string{"Bob joined."},
 			}))
-			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: "op1"})
+			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: opID("op1")})
 			if !errors.Is(err, ErrAllOpsRejected) || out.Trace.Outcome != domain.RefreshOutcomeFailed {
 				t.Fatalf("err %v outcome %s", err, out.Trace.Outcome)
 			}

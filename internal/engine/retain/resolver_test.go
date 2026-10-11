@@ -3,6 +3,7 @@ package retain
 import (
 	"fmt"
 	"math"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -49,7 +50,7 @@ func (e *env) seedEntity(name, partner string, seen time.Time) (port.EntityID, p
 		if err != nil {
 			return err
 		}
-		u := domain.Unit{ID: "seed-" + port.UnitID(name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
+		u := domain.Unit{ID: pgtest.ID[port.UnitID]("seed-" + name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
 		if err := tx.Units().Insert(e.ctx, []domain.Unit{u}); err != nil {
 			return err
 		}
@@ -162,7 +163,7 @@ func (e *env) seedKindEntity(name, kind, partner string, seen time.Time) port.En
 		if partner == "" {
 			return nil
 		}
-		u := domain.Unit{ID: "seed-" + port.UnitID(name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
+		u := domain.Unit{ID: pgtest.ID[port.UnitID]("seed-" + name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
 		if err := tx.Units().Insert(e.ctx, []domain.Unit{u}); err != nil {
 			return err
 		}

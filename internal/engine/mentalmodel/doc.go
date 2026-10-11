@@ -130,7 +130,7 @@
 //
 // # Tests
 //
-// Tests run on fake.Store with fake.LLM, fake.Embedder and fake.Clock: the runner (modes, fallbacks,
+// Tests run on a pgtest database with fake.LLM, fake.Embedder and fake.Clock: the runner (modes, fallbacks,
 // snapshot bound, no-LLM pre-checks, floor re-park, conflicts, dry runs), the planner (delta retry and
 // rejection), markdown splitting and edit application, diffs, scheduling and queuing, cron, failure
 // reconciliation, admin RPCs and page search. SPEC "Behavioural rules" (Mental models), "Engines" (mental

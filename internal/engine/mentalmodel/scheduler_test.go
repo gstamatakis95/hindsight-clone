@@ -88,10 +88,7 @@ func newTriggers(e *env) (Triggers, Admin) {
 // claimRefresh claims the due refresh job, if any.
 func claimRefresh(e *env) (port.Job, RefreshPayload, bool) {
 	e.t.Helper()
-	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{domain.OperationKindRefreshMentalModel}, 10)
-	if err != nil {
-		e.t.Fatal(err)
-	}
+	jobs := e.claimDue(domain.OperationKindRefreshMentalModel)
 	if len(jobs) == 0 {
 		return port.Job{}, RefreshPayload{}, false
 	}
@@ -159,7 +156,7 @@ func TestPauseAndManualUnpause(t *testing.T) {
 	e.addUnit(domain.FactTypeWorld, "Alice leads", "proj")
 	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
 	e.reads.failed = []FailedRefresh{{
-		Bank: e.bank, ModelID: "status", OperationID: "op1", FailedAt: e.clock.Now(),
+		Bank: e.bank, ModelID: "status", OperationID: opID("op1"), FailedAt: e.clock.Now(),
 		Error: "mentalmodel: delta: " + ErrAllOpsRejected.Error(),
 	}}
 	for i, want := range []int{1, 0} {
