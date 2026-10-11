@@ -2,7 +2,7 @@
 #
 #   make gen      buf generate, sqlc, mockery
 #   make lint     golangci-lint, interface-doc check, buf lint + breaking, ruff
-#   make test     go test -race ./...
+#   make test     go test -race ./... (needs Docker or MEMD_TEST_DATABASE_URL)
 #   make e2e      opt-in end-to-end tests (docker compose stack + emulated gateway)
 #   make up       docker compose: postgres, minio
 #   make migrate  alembic upgrade head, then dump schema/schema.sql
@@ -84,7 +84,9 @@ fmt: ## apply gofumpt + goimports and ruff format
 
 # ---------- tests ----------
 
-test: ## go test -race ./...
+# Store tests run on real Postgres (internal/adapter/postgres/pgtest): one container for the whole run, or the
+# server at MEMD_TEST_DATABASE_URL. The venv provides alembic, which migrates the template database.
+test: venv ## go test -race ./... (needs Docker or MEMD_TEST_DATABASE_URL)
 	go test -race ./...
 
 # Each test removes its own compose project; the sweep afterwards catches projects of this run left by a

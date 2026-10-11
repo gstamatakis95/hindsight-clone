@@ -4,8 +4,8 @@ Adapters connect ports to the outside world: `postgres` (port.Store, port.Claime
 and `gateway` (port.LLM, port.Embedder, port.Reranker). These rules add to the root AGENTS.md.
 
 ## Contract
-- Every adapter passes its contract suite in `internal/porttest`, the same suite the in-memory fake
-  in `internal/fake` passes. A behaviour change starts in the suite, then both implementations.
+- Every adapter is tested against the real backend: Postgres through `pgtest` (one cloned database per
+  test, so tests run in parallel), S3 on MinIO. There is no in-memory store: engines test on Postgres too.
 - Implement the port's documented semantics exactly (ordering, dedup, unknown-id behaviour,
   idempotency); the port comments are the specification.
 
@@ -27,5 +27,5 @@ and `gateway` (port.LLM, port.Embedder, port.Reranker). These rules add to the r
 
 ## Postgres
 - Alembic owns the schema; Go never migrates. Queries are sqlc-generated from `schema/schema.sql`.
-- Testcontainers use the same Postgres image (pgvector + pg_search) as `docker-compose.yml`, so
-  tests run against the extensions production uses.
+- `pgtest` uses the same Postgres image (pgvector + pg_search) as `docker-compose.yml`, so tests run
+  against the extensions production uses.

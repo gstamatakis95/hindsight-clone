@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
@@ -23,7 +25,7 @@ var bank = port.BankRef{Tenant: "t1", Bank: "b1"}
 // harness wires a reflector over fakes and mocks.
 type harness struct {
 	t      *testing.T
-	store  *fake.Store
+	store  *postgres.Store
 	llm    *fake.LLM
 	clock  *fake.Clock
 	rc     *mockreflect.Recaller
@@ -36,7 +38,7 @@ type harness struct {
 func newHarness(t *testing.T, cfg domain.BankConfig, units ...domain.Unit) *harness {
 	t.Helper()
 	clock := fake.NewClock(time.Time{})
-	h := &harness{t: t, store: fake.NewStore(clock), llm: fake.NewLLM(), clock: clock}
+	h := &harness{t: t, store: pgtest.NewStore(t), llm: fake.NewLLM(), clock: clock}
 	err := h.store.InTx(context.Background(), func(tx port.Tx) error {
 		return tx.Banks().Create(context.Background(), domain.Bank{Ref: bank, Name: "Bank One", Config: cfg})
 	})

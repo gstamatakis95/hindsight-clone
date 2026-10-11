@@ -2,6 +2,7 @@ package retain
 
 import (
 	"fmt"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"testing"
@@ -16,7 +17,7 @@ func (e *env) seedUnits(prefix string, n int, at time.Time) []domain.Unit {
 		text := fmt.Sprintf("alice likes green tea %s%d", prefix, i)
 		when := at.Add(time.Duration(i) * time.Minute)
 		us[i] = domain.Unit{
-			ID: port.UnitID(fmt.Sprintf("%s%d", prefix, i)), Bank: testBank, Type: domain.FactTypeWorld,
+			ID: pgtest.ID[port.UnitID](fmt.Sprintf("%s%d", prefix, i)), Bank: testBank, Type: domain.FactTypeWorld,
 			Text: text, Embedding: e.emb.Vector(text), MentionedAt: &when,
 		}
 	}
@@ -33,17 +34,21 @@ func (e *env) seedUnits(prefix string, n int, at time.Time) []domain.Unit {
 	return us
 }
 
-// linkCounts returns how many links of kind touch each unit.
+// linkCounts returns how many links of kind touch each unit (by id or fixture name), keyed by fixture name.
 func (e *env) linkCounts(ids []port.UnitID, kind domain.LinkKind) map[port.UnitID]int {
 	e.t.Helper()
 	out := map[port.UnitID]int{}
 	e.inTx(func(tx port.Tx) error {
 		for _, id := range ids {
+			name := port.UnitID(pgtest.Name(id))
+			if name == id {
+				id = pgtest.ID[port.UnitID](string(name))
+			}
 			n, err := tx.Links().Count(e.ctx, id, kind)
 			if err != nil {
 				return err
 			}
-			out[id] = n
+			out[name] = n
 		}
 		return nil
 	})
@@ -87,7 +92,8 @@ func TestLinkerCapsHold(t *testing.T) {
 		t.Errorf("causal counts = %v, want a0 -> a1 only", n)
 	}
 	hits, err := e.store.Read().ExpandGraph(e.ctx, port.GraphQuery{
-		Bank: testBank, Seeds: []port.UnitID{"a1"}, MaxHops: 1, Kinds: []domain.LinkKind{domain.LinkCausal}, Limit: 10,
+		Bank: testBank, Seeds: pgtest.IDs[port.UnitID]("a1"), MaxHops: 1,
+		Kinds: []domain.LinkKind{domain.LinkCausal}, Limit: 10,
 	})
 	if err != nil || len(hits) != 0 {
 		t.Errorf("causal edge runs effect -> cause: %v %v", hits, err)

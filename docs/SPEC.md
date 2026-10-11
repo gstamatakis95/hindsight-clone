@@ -911,7 +911,7 @@ Every RPC's request and response is defined above; list RPCs page with `page_siz
 
 ## File structure
 
-Hexagonal: gRPC handlers and job handlers call engines, engines depend only on port interfaces, adapters implement ports. Engines never import pgx, the gateway client, gRPC or generated proto types, which keeps them unit-testable with fakes.
+Hexagonal: gRPC handlers and job handlers call engines, engines depend only on port interfaces, adapters implement ports. Engines never import pgx, the gateway client, gRPC or generated proto types, which keeps them testable with fakes for the model ports and real Postgres for the store.
 
 ```text
 memd/
@@ -974,7 +974,7 @@ memd/
 │   ├── config/                       # server defaults + level merge
 │   │   ├── doc.go  defaults.go  merge.go  resolver.go
 │   ├── engine/
-│   │   ├── AGENTS.md                 # ports only, no adapters; test through interfaces with fakes
+│   │   ├── AGENTS.md                 # ports only, no adapters; test through interfaces on real Postgres
 │   │   ├── routing/   doc.go  router.go
 │   │   ├── timex/     doc.go  normalizer.go  rules.go
 │   │   ├── retain/    doc.go  ingestor.go  retainer.go  chunker.go  extractor.go  modes.go
@@ -991,7 +991,7 @@ memd/
 │   │   ├── docs/      doc.go  retagger.go
 │   │   └── maintenance/ doc.go  graph.go
 │   ├── adapter/
-│   │   ├── AGENTS.md                 # every adapter passes its porttest suite
+│   │   ├── AGENTS.md                 # every adapter is tested against the real backend
 │   │   ├── postgres/  doc.go  store.go  tx.go  seq.go  search.go  queue.go  claim.go
 │   │   │              sqlc.yaml  queries/*.sql  db/
 │   │   ├── s3/        doc.go  blob.go
@@ -1001,8 +1001,7 @@ memd/
 │   │                  mentalmodel.go  operation.go  memories.go
 │   ├── worker/        doc.go  runner.go  handlers.go  maintenance.go  checkpoint.go  control.go
 │   ├── prompts/       doc.go  prompts.go  templates/*.tmpl
-│   ├── porttest/      doc.go  store_suite.go  blob_suite.go  queue_suite.go  seq_suite.go
-│   ├── fake/          doc.go  store.go  queue.go  llm.go  embedder.go  reranker.go  blob.go  clock.go
+│   ├── fake/          doc.go  llm.go  embedder.go  reranker.go  blob.go  clock.go
 │   └── mocks/                        # mockery output, never hand-edited
 ├── eval/
 │   ├── README.md                     # datasets, how to run, how to read the report
@@ -1026,7 +1025,7 @@ Every component is an interface owned by its package, every implementation prove
 - Each implementation carries a compile-time assertion, e.g. `var _ port.Store = (*Store)(nil)`.
 - Constructors take interfaces. Engine constructors return their package's interface. Adapters return concrete types, because one Postgres `Store` implements several ports (`port.Store`, `port.Claimer`); `cmd/memd/wire.go`, the only composition root, narrows each to the port it is used as.
 - Import boundaries are enforced by `depguard`: `engine/` cannot import `adapter/`, `server/`, `worker/`, `gen/`, pgx, net/http or the AWS SDK; `server/` cannot import `adapter/`; `domain/` imports nothing internal. A package that needs another engine declares the small interface it consumes (mentalmodel declares the `Reflector` it calls), so engines never import each other in a cycle.
-- Every port has one shared contract test suite. The Postgres adapter runs it against a real Postgres (testcontainers), and the in-memory fake must pass it too, so fakes can't drift.
+- Store code (the Postgres adapter and every engine, worker and wiring test that touches the store) is tested against real Postgres: `internal/adapter/postgres/pgtest` gives each test its own database cloned from a migrated template on one shared server. There is no in-memory store; fakes exist only for the LLM, embedder, reranker, blob and clock.
 - Mocks for every interface are generated with mockery; hand-written mocks are not allowed.
 
 **Go lint gates** (golangci-lint, fail on any finding)
@@ -1084,11 +1083,11 @@ formatters:
 - **Docstrings everywhere:** `revive` enforces doc comments on exported identifiers and packages. It skips interface methods, so a small go/analysis check in `make lint` covers those. Unexported functions over ~10 lines get one too, checked in review. The listings below abbreviate comments; the real files carry one on every method.
 - **Proto:** `buf lint` with the STANDARD and COMMENTS categories, so every service, RPC, message, field and enum value needs a comment; `buf breaking` against main blocks wire-incompatible changes.
 - **Python (Alembic only):** ruff with `line-length = 120`, `C901` max complexity 15, and pydocstyle (`D`) rules.
-- **Tests:** `go test -race` in CI; engines tested only through their interfaces with fakes and an injected Clock.
+- **Tests:** `go test -race` in CI (Docker or `MEMD_TEST_DATABASE_URL`); engines tested only through their interfaces, on real Postgres, with model fakes and an injected Clock.
 
 ## Ports
 
-Ports are the only things engines see of the outside world. Each has one production adapter and one in-memory fake for tests.
+Ports are the only things engines see of the outside world. Each has one production adapter; the model, blob and clock ports also have fakes for tests.
 
 ```go
 package port
@@ -1886,7 +1885,8 @@ The spec is the source of truth for behaviour; this file is the source of truth 
 
 ## Before you finish
 - make gen && make lint && make test pass, with no diff left in gen/, schema/ or internal/mocks/.
-- A new port gets a contract suite in internal/porttest and a fake in internal/fake.
+- Store code is tested against real Postgres: pgtest.NewStore(t) gives each test its own migrated database.
+  Fakes (internal/fake) exist only for the LLM, embedder, reranker, blob and clock.
 - A proto change passes buf breaking and comments every new element.
 ```
 
@@ -1894,8 +1894,8 @@ The spec is the source of truth for behaviour; this file is the source of truth 
 |---|---|---|
 | `README.md` | Humans | What memd is, architecture diagram, quick start (`make up`, `make migrate`, `make run`), grpcurl examples for Retain / Recall / Reflect, config levels and overrides, model routing, link to AGENTS.md |
 | `api/AGENTS.md` | Agents | Comment every service, RPC, message, field and enum value; never renumber or reuse fields; new config goes in `BankConfig` |
-| `internal/engine/AGENTS.md` | Agents | Ports only; inject `Clock`; LLM calls go through `ModelRouter` with a slot; test through interfaces with fakes |
-| `internal/adapter/AGENTS.md` | Agents | Every adapter passes its porttest suite; no business logic; map errors to domain errors |
+| `internal/engine/AGENTS.md` | Agents | Ports only; inject `Clock`; LLM calls go through `ModelRouter` with a slot; test through interfaces on real Postgres |
+| `internal/adapter/AGENTS.md` | Agents | Every adapter is tested against the real backend; no business logic; map errors to domain errors |
 | `migrations/AGENTS.md` | Agents | Raw SQL via `op.execute`; one concern per revision; always write `downgrade()`; regenerate schema.sql |
 | `migrations/README.md` | Humans | Adding a revision, running locally, how sqlc consumes the dump |
 | `eval/README.md` | Humans | Datasets, running LongMemEval / LoCoMo against memd and stock Hindsight, reading the per-category report |

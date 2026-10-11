@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/routing"
@@ -24,7 +26,7 @@ type env struct {
 	t        *testing.T
 	ctx      context.Context
 	clock    *fake.Clock
-	store    *fake.Store
+	store    *postgres.Store
 	llm      *fake.LLM
 	emb      *fake.Embedder
 	blob     *fake.Blob
@@ -49,7 +51,7 @@ func newEnv(t *testing.T, batch int) *env {
 		t: t, ctx: context.Background(), clock: fake.NewClock(time.Time{}), llm: fake.NewLLM(),
 		emb: fake.NewEmbedder(fake.EmbedSimilar), blob: fake.NewBlob(),
 	}
-	e.store = fake.NewStore(e.clock)
+	e.store = pgtest.NewStore(t)
 	e.cfg = config.NewResolver(e.store, nil, server)
 	router := routing.NewRouter()
 	e.retainer = NewRetainer(RetainerDeps{

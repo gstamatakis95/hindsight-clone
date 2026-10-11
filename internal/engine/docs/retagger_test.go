@@ -3,6 +3,8 @@ package docs_test
 import (
 	"context"
 	"errors"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
 	"memd/internal/fake"
@@ -14,18 +16,24 @@ import (
 
 var testBank = port.BankRef{Tenant: "acme", Bank: "notes"}
 
+// uid is the unit id of a readable fixture name (Postgres stores unit ids as uuid).
+func uid(name string) port.UnitID { return pgtest.ID[port.UnitID](name) }
+
+// uids maps uid over names.
+func uids(names ...string) []port.UnitID { return pgtest.IDs[port.UnitID](names...) }
+
 // fixture is a bank with document d1 (units f1, f2), document d2 (unit f3) and observation o1 citing f1
 // and f3; f3 is consolidated so a reset is visible.
 type fixture struct {
 	clock *fake.Clock
-	store *fake.Store
+	store *postgres.Store
 }
 
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	ctx := context.Background()
 	clock := fake.NewClock(time.Time{})
-	store := fake.NewStore(clock)
+	store := pgtest.NewStore(t)
 	err := store.InTx(ctx, func(tx port.Tx) error {
 		if _, err := tx.Banks().Ensure(ctx, testBank); err != nil {
 			return err
@@ -44,21 +52,21 @@ func newFixture(t *testing.T) fixture {
 			}
 		}
 		units := []domain.Unit{
-			{ID: "f1", Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "one", Tags: ab, Seq: seq},
-			{ID: "f2", Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "two", Tags: ab, Seq: seq},
+			{ID: uid("f1"), Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "one", Tags: ab, Seq: seq},
+			{ID: uid("f2"), Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "two", Tags: ab, Seq: seq},
 			{
-				ID: "f3", Bank: testBank, DocumentID: "d2", Type: domain.FactTypeWorld, Text: "three",
+				ID: uid("f3"), Bank: testBank, DocumentID: "d2", Type: domain.FactTypeWorld, Text: "three",
 				Tags: []string{"x"}, Seq: seq,
 			},
-			{ID: "o1", Bank: testBank, Type: domain.FactTypeObservation, Text: "obs", Seq: seq},
+			{ID: uid("o1"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs", Seq: seq},
 		}
 		if err := tx.Units().Insert(ctx, units); err != nil {
 			return err
 		}
-		if err := tx.Evidence().Add(ctx, "o1", []domain.Evidence{{Unit: "f1"}, {Unit: "f3"}}); err != nil {
+		if err := tx.Evidence().Add(ctx, uid("o1"), []domain.Evidence{{Unit: uid("f1")}, {Unit: uid("f3")}}); err != nil {
 			return err
 		}
-		return tx.Units().MarkConsolidated(ctx, []port.UnitID{"f1", "f2", "f3"}, clock.Now())
+		return tx.Units().MarkConsolidated(ctx, uids("f1", "f2", "f3"), clock.Now())
 	})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
@@ -66,16 +74,20 @@ func newFixture(t *testing.T) fixture {
 	return fixture{clock: clock, store: store}
 }
 
-// units reads live units by id.
-func (f fixture) units(t *testing.T, ids ...port.UnitID) map[port.UnitID]domain.Unit {
+// units reads live units by fixture name, keyed by name.
+func (f fixture) units(t *testing.T, names ...port.UnitID) map[port.UnitID]domain.Unit {
 	t.Helper()
+	ids := make([]port.UnitID, len(names))
+	for i, n := range names {
+		ids[i] = uid(string(n))
+	}
 	us, err := f.store.Read().GetUnits(context.Background(), testBank, ids)
 	if err != nil {
 		t.Fatalf("GetUnits: %v", err)
 	}
 	out := map[port.UnitID]domain.Unit{}
 	for _, u := range us {
-		out[u.ID] = u
+		out[port.UnitID(pgtest.Name(u.ID))] = u
 	}
 	return out
 }

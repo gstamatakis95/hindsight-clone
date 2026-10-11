@@ -60,7 +60,7 @@ func TestTemplateRoundTrip(t *testing.T) {
 	src := port.BankRef{Tenant: "t", Bank: "src"}
 	dst := port.BankRef{Tenant: "t", Bank: "dst"}
 	seedTemplateSource(t, e, src)
-	e.tx(t, func(tx port.Tx) error { // Export lists them with the fake's Reader.ListMentalModels
+	e.tx(t, func(tx port.Tx) error { // Export lists them with Reader.ListMentalModels
 		for _, s := range []domain.MentalModelSpec{
 			{ID: "tea", Name: "Tea", SourceQuery: "what tea?"},
 			{ID: "people", Name: "People", SourceQuery: "who is who?", Tags: []string{"Team"}},

@@ -87,9 +87,22 @@ across retries and worker crashes. You can also give the call a longer client de
 ## Tests
 
 ```sh
-make test      # go test -race ./... (the Postgres contract suites use testcontainers)
+make test      # go test -race ./...: store code runs on real Postgres, so this needs Docker or a database URL
 make e2e       # compose stack + emulated gateway + memd api/worker processes: every scenario, crash and reclaim
 ```
+
+Every test that touches the store gets its own database, cloned from a migrated template
+(`internal/adapter/postgres/pgtest`). One ParadeDB container serves the whole `go test ./...` run and is
+removed when it ends. Environment:
+
+- `MEMD_TEST_DATABASE_URL` (or `DATABASE_URL`): use an existing server instead of a container, e.g.
+  `MEMD_TEST_DATABASE_URL=postgres://memd:memd@localhost:55432/memd make test` after `make up`. The user must
+  be allowed to create databases; templates are named `memd_tpl_<migrations hash>`, test databases
+  `memd_t_<random>` (dropped after each test).
+- `MEMD_REQUIRE_DOCKER=1`: fail, rather than skip, the database tests when neither Docker nor a URL is
+  available (CI sets it).
+- `MEMD_ALEMBIC`: the alembic binary that migrates the template (default `.venv/bin/alembic`, built by
+  `make tools`).
 
 ## Configuration and overrides
 

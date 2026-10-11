@@ -152,7 +152,7 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 		MentalModelID: "status", ForceFull: true, Manual: true, Strategy: domain.RefreshStrategyAgentic,
 	})
 	over := &domain.BankConfig{ReflectMission: "be brief"}
-	job := port.Job{ID: "op7", Bank: e.bank, Payload: payload, Overrides: over}
+	job := port.Job{ID: opID("op7"), Bank: e.bank, Payload: payload, Overrides: over}
 	if _, err := RunJob(e.ctx, r, job); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 	c := r.calls[0]
 	o := c.opts
 	if c.b != e.bank || c.id != "status" || !o.Manual || !o.ForceFull || o.DryRun ||
-		o.Strategy != domain.RefreshStrategyAgentic || o.Overrides != over || o.OperationID != "op7" {
+		o.Strategy != domain.RefreshStrategyAgentic || o.Overrides != over || o.OperationID != opID("op7") {
 		t.Fatalf("options not passed through: %+v", c)
 	}
 }

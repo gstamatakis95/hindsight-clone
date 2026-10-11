@@ -17,7 +17,7 @@ linters:
     depguard:
       rules:
         engines:
-          files: ["**/internal/engine/**"]
+          files: ["**/internal/engine/**", "!$test"]   # tests may use pgtest and pgx: store code runs on real Postgres
           deny:
             - pkg: "memd/internal/adapter"
               desc: engines depend on ports only

@@ -1,9 +1,12 @@
 package worker_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
 	"memd/internal/engine/retain"
@@ -29,16 +32,16 @@ type capture map[port.JobKind]worker.Handler
 func (c capture) Handle(kind port.JobKind, h worker.Handler) { c[kind] = h }
 func (c capture) Run(context.Context) error                  { return nil }
 
-// handlerEnv is a fake store with hBank created, and the clock.
+// handlerEnv is a store over the test's database with hBank created, and a clock frozen at the start.
 type handlerEnv struct {
-	store *fake.Store
+	store *postgres.Store
 	clock *fake.Clock
 }
 
 func newHandlerEnv(t *testing.T) handlerEnv {
 	t.Helper()
-	clock := fake.NewClock(time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC))
-	s := fake.NewStore(clock)
+	clock := fake.NewClock(time.Now().UTC().Truncate(time.Microsecond))
+	s := pgtest.NewStore(t)
 	if err := s.InTx(t.Context(), func(tx port.Tx) error {
 		_, err := tx.Banks().Ensure(t.Context(), hBank)
 		return err
@@ -305,7 +308,11 @@ func TestMaintenanceRederivesStrandedFacts(t *testing.T) {
 	}
 	got := map[string]string{}
 	for _, j := range jobs {
-		got[j.SerialKey] = string(j.Payload)
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, j.Payload); err != nil {
+			t.Fatal(err)
+		}
+		got[j.SerialKey] = compact.String()
 	}
 	want := map[string]string{"doc:d1": `{"unit_id":"u1"}`, "unit:u2": `{"unit_id":"u2"}`}
 	if len(got) != 2 || got["doc:d1"] != want["doc:d1"] || got["unit:u2"] != want["unit:u2"] {

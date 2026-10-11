@@ -24,7 +24,7 @@ const (
 	seqTxPerWriter = 25
 )
 
-// TestAcceptSeqOrder is the WP-01 "Seq order" acceptance test: of concurrent transactions on one bank, the
+// TestAcceptSeqOrder is the "Seq order" acceptance test: of concurrent transactions on one bank, the
 // one that commits later always has the higher seq, and a reader that sees BankSeq S sees every row stamped
 // at or below S.
 //
@@ -34,7 +34,8 @@ const (
 // commit order. A concurrent reader repeatedly reads BankSeq S and then counts the bank's units with
 // seq <= S, which must be exactly S (seqs 1..S, one unit each).
 func TestAcceptSeqOrder(t *testing.T) {
-	pool := pgtest.Fresh(t)
+	t.Parallel()
+	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
 	bank := port.BankRef{Tenant: "tenant-seq", Bank: "bank-seq"}
 	if err := s.InTx(t.Context(), func(tx port.Tx) error {

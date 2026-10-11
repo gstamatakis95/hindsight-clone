@@ -31,8 +31,8 @@
 //
 // # Testing
 //
-// The generated code has no tests of its own; it is exercised through internal/adapter/postgres's tests and the
-// internal/porttest suites against a migrated ParadeDB container (internal/adapter/postgres/pgtest). The generated
+// The generated code has no tests of its own; it is exercised through internal/adapter/postgres's tests against a
+// migrated ParadeDB database (internal/adapter/postgres/pgtest). The generated
 // types follow the schema conventions: text ids for client-supplied ids, uuid for server ids, text enums with CHECK
 // constraints and jsonb for config, overrides, progress and usage.
 package db

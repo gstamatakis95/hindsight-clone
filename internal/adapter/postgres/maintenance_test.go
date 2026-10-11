@@ -14,8 +14,8 @@ import (
 // errNoRetry fails a job for good.
 var errNoRetry = errors.New("delete failed")
 
-// mtEmbedded returns a world fact of b with an embedding, created at created.
-func mtEmbedded(b port.BankRef, text string, created time.Time) domain.Unit {
+// mtEmbeddedAt returns a world fact of b with an embedding, created at created.
+func mtEmbeddedAt(b port.BankRef, text string, created time.Time) domain.Unit {
 	u := fuUnit(b, text)
 	u.Embedding = make([]float32, domain.EmbeddingDim)
 	u.Embedding[0] = 1
@@ -41,14 +41,15 @@ func mtEnsure(t *testing.T, s *postgres.Store, bs ...port.BankRef) {
 // TestUnconsolidatedBanks checks the consolidation reconcile's read: only units created before the cut-off
 // count, consolidated units and tombstoned banks never do.
 func TestUnconsolidatedBanks(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
+	t.Parallel()
+	s := pgtest.NewStore(t)
 	ctx := t.Context()
 	now := time.Now().UTC().Truncate(time.Second)
 	old, fresh := now.Add(-time.Hour), now.Add(-time.Minute)
 	mtEnsure(t, s, fuBank, fuOther)
-	fuInsert(t, s, mtEmbedded(fuBank, "old fact", old))
-	fuInsert(t, s, mtEmbedded(fuOther, "fresh fact", fresh))
-	stamped := mtEmbedded(fuOther, "old but consolidated", old)
+	fuInsert(t, s, mtEmbeddedAt(fuBank, "old fact", old))
+	fuInsert(t, s, mtEmbeddedAt(fuOther, "fresh fact", fresh))
+	stamped := mtEmbeddedAt(fuOther, "old but consolidated", old)
 	stamped.ConsolidatedAt = &now
 	fuInsert(t, s, stamped)
 
@@ -70,7 +71,8 @@ func TestUnconsolidatedBanks(t *testing.T) {
 // TestStalledBankDeletes checks the delete-resume read: a tombstoned bank is listed only while it has no
 // pending or processing delete_bank.
 func TestStalledBankDeletes(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
+	t.Parallel()
+	s := pgtest.NewStore(t)
 	ctx := t.Context()
 	mtEnsure(t, s, fuBank, fuOther)
 	if got, err := s.StalledBankDeletes(ctx); err != nil || len(got) != 0 {
@@ -110,7 +112,8 @@ func TestStalledBankDeletes(t *testing.T) {
 // TestBanksWithGraphWork checks the graph-maintenance reconcile's read: banks with graph_dirty or
 // entity_maintenance rows, never tombstoned ones.
 func TestBanksWithGraphWork(t *testing.T) {
-	pool := pgtest.Fresh(t)
+	t.Parallel()
+	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
 	ctx := t.Context()
 	third := port.BankRef{Tenant: "tenant-fu-3", Bank: "bank-fu"}

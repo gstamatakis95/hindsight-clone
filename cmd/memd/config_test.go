@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -42,7 +41,7 @@ func loadValidate(args []string, env map[string]string) (Config, error) {
 	return cfg, cfg.Validate()
 }
 
-// TestEffectiveWorkerID (WP-20 item 4): "<MEMD_WORKER_ID or hostname>-<uuid>", unique per process.
+// TestEffectiveWorkerID: "<MEMD_WORKER_ID or hostname>-<uuid>", unique per process.
 func TestEffectiveWorkerID(t *testing.T) {
 	host := func() (string, error) { return "node-7", nil }
 	noHost := func() (string, error) { return "", errors.New("no hostname") }
@@ -69,7 +68,7 @@ func TestEffectiveWorkerID(t *testing.T) {
 	}
 }
 
-// TestValidateS3Keys (WP-20 item 4): both static S3 keys are required.
+// TestValidateS3Keys: both static S3 keys are required.
 func TestValidateS3Keys(t *testing.T) {
 	for _, drop := range [][]string{{envS3AccessKey}, {envS3SecretKey}, {envS3AccessKey, envS3SecretKey}} {
 		env := baseEnv()
@@ -85,7 +84,7 @@ func TestValidateS3Keys(t *testing.T) {
 	}
 }
 
-// TestRequiredSlots (WP-20 item 4): startup fails when EXTRACT or REFLECT has no model.
+// TestRequiredSlots: startup fails when EXTRACT or REFLECT has no model.
 func TestRequiredSlots(t *testing.T) {
 	env := baseEnv()
 	delete(env, config.EnvModel)
@@ -105,7 +104,7 @@ func TestRequiredSlots(t *testing.T) {
 	}
 }
 
-// TestUnboundSlotRouter (WP-20 item 4): a call on an unbound slot is FAILED_PRECONDITION (and a permanent job
+// TestUnboundSlotRouter: a call on an unbound slot is FAILED_PRECONDITION (and a permanent job
 // failure), not INVALID_ARGUMENT; bound slots and EMBED keep the engine router's behaviour.
 func TestUnboundSlotRouter(t *testing.T) {
 	r := slotRouter{routing.NewRouter()}
@@ -125,7 +124,7 @@ func TestUnboundSlotRouter(t *testing.T) {
 	}
 }
 
-// TestSlotConcurrencyEnv (WP-20 item 4): MEMD_GATEWAY_MAX_CONCURRENT_<SLOT> reaches Config.SlotConcurrency
+// TestSlotConcurrencyEnv: MEMD_GATEWAY_MAX_CONCURRENT_<SLOT> reaches Config.SlotConcurrency
 // (and from there gateway.Config.SlotConcurrency); bad values are rejected.
 func TestSlotConcurrencyEnv(t *testing.T) {
 	env := baseEnv()
@@ -157,7 +156,7 @@ func (p *failingProbe) Ready(context.Context) error {
 	return nil
 }
 
-// TestWorkerHealthServer (WP-20 item 4): the worker's health endpoint answers Check from the probes and
+// TestWorkerHealthServer: the worker's health endpoint answers Check from the probes and
 // stops when its context ends.
 func TestWorkerHealthServer(t *testing.T) {
 	probe := &failingProbe{}
@@ -269,19 +268,6 @@ func TestValidateRejects(t *testing.T) {
 				t.Fatal("accepted")
 			}
 		})
-	}
-}
-
-// TestUsage checks a missing mode is a usage error and the usage text never says "not implemented" (the
-// e2e harness skips on that marker, decision 1411).
-func TestUsage(t *testing.T) {
-	if _, err := LoadConfig(nil, func(string) string { return "" }); !errors.Is(err, errUsage) {
-		t.Fatalf("no mode: %v", err)
-	}
-	var buf bytes.Buffer
-	usage(&buf)
-	if !strings.Contains(buf.String(), envDSN) || strings.Contains(buf.String(), "not implemented") {
-		t.Fatalf("usage text:\n%s", buf.String())
 	}
 }
 

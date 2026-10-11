@@ -3,6 +3,8 @@ package bank
 import (
 	"context"
 	"encoding/json"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/fake"
@@ -14,18 +16,18 @@ import (
 	"time"
 )
 
-// env is one test's fake store, clock and blob store.
+// env is one test's store, fake clock and fake blob store.
 type env struct {
 	ctx   context.Context
 	clock *fake.Clock
-	store *fake.Store
+	store *postgres.Store
 	blob  *fake.Blob
 }
 
 func newEnv(t *testing.T) env {
 	t.Helper()
 	clock := fake.NewClock(time.Time{})
-	return env{ctx: context.Background(), clock: clock, store: fake.NewStore(clock), blob: fake.NewBlob()}
+	return env{ctx: context.Background(), clock: clock, store: pgtest.NewStore(t), blob: fake.NewBlob()}
 }
 
 // tx runs fn in a transaction and fails the test on error.
@@ -60,7 +62,7 @@ func (e env) getOp(t *testing.T, b port.BankRef, id port.OperationID) (domain.Op
 	return op, err
 }
 
-// refreshStub enqueues a refresh_mental_model job like WP-12 would, inside the caller's tx.
+// refreshStub enqueues a refresh_mental_model job like the mental-model queuer would, inside the caller's tx.
 type refreshStub struct{}
 
 func (refreshStub) QueueRefresh(

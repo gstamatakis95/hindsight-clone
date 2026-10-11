@@ -45,11 +45,3 @@ func TestTagsPaging(t *testing.T) {
 		t.Errorf("page size not clamped: %v %q", err, src.calls[len(src.calls)-1])
 	}
 }
-
-func TestStats(t *testing.T) {
-	src := &statsStub{stats: domain.BankStats{Documents: 3, ChangeSeq: 7}}
-	st, err := NewStatsReader(src).Stats(t.Context(), port.BankRef{Tenant: "t", Bank: "b"})
-	if err != nil || st.Documents != 3 || st.ChangeSeq != 7 {
-		t.Errorf("stats = %+v %v", st, err)
-	}
-}

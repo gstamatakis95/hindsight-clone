@@ -2,6 +2,8 @@ package mentalmodel
 
 import (
 	"context"
+	"memd/internal/adapter/postgres"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
@@ -16,16 +18,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// env is one test's world: the fake store, clock and LLM, its reads (stubReads),
+// env is one test's world: a store over its own database, the fake clock and LLM, its reads (stubReads),
 // and stub recall / reflect engines that return the in-scope units of their window.
 type env struct {
 	t      *testing.T
 	ctx    context.Context
 	bank   port.BankRef
 	clock  *fake.Clock
-	store  *fake.Store
+	store  *postgres.Store
+	pool   *pgxpool.Pool
 	llm    *fake.LLM
 	emb    *fake.Embedder
 	reads  *stubReads
@@ -38,8 +42,11 @@ type env struct {
 // newEnv builds an env with every LLM slot bound to "test-model" and the bank created.
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	clock := fake.NewClock(time.Time{})
-	store := fake.NewStore(clock)
+	// The test clock runs an hour ahead of the database, so every run_at the engines park is in the
+	// database's future until claimDue releases the ones the test clock says are due.
+	clock := fake.NewClock(time.Now().Add(time.Hour).UTC().Truncate(time.Second))
+	db := pgtest.New(t)
+	store := db.Store()
 	server, err := config.ServerDefaults(func(k string) string {
 		if k == config.EnvModel {
 			return "test-model"
@@ -51,7 +58,7 @@ func newEnv(t *testing.T) *env {
 	}
 	e := &env{
 		t: t, ctx: context.Background(), bank: port.BankRef{Tenant: "t1", Bank: "b1"}, clock: clock,
-		store: store, llm: fake.NewLLM(), emb: fake.NewEmbedder(fake.EmbedSimilar),
+		store: store, pool: db.Pool, llm: fake.NewLLM(), emb: fake.NewEmbedder(fake.EmbedSimilar),
 		config: config.NewResolver(store, nil, server),
 	}
 	e.reads = &stubReads{Reader: store.Read(), store: store}
@@ -68,6 +75,24 @@ func newEnv(t *testing.T) *env {
 	})
 	return e
 }
+
+// claimDue claims up to 10 jobs of kind that are due by the test clock: the database decides due-ness by
+// its own clock, so pending jobs whose run_at the test clock has reached are made due first.
+func (e *env) claimDue(kind port.JobKind) []port.Job {
+	e.t.Helper()
+	if _, err := e.pool.Exec(e.ctx, `UPDATE operations SET run_at = now()
+		WHERE status = 'pending' AND run_at > now() AND run_at <= $1`, e.clock.Now()); err != nil {
+		e.t.Fatal(err)
+	}
+	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{kind}, 10)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return jobs
+}
+
+// opID is the operation id of a readable name (Postgres stores operation ids as uuid).
+func opID(name string) port.OperationID { return pgtest.ID[port.OperationID](name) }
 
 // tx runs fn in a transaction and fails the test on error.
 func (e *env) tx(fn func(port.Tx) error) {
@@ -149,12 +174,12 @@ func (e *env) scriptSynthesize(content string) {
 		port.ChatResponse{Message: port.ChatMessage{Content: content}})
 }
 
-// stubReads is the fake store's port.Reader (so NewestSeqInScope, TagCounts and ListMentalModels are the
-// fake's real reads) with test-only CronModels and FailedRefreshes lists, and it tracks the units a test
+// stubReads is the store's port.Reader (so NewestSeqInScope, TagCounts and ListMentalModels are the
+// real reads) with test-only CronModels and FailedRefreshes lists, and it tracks the units a test
 // created for the stub recall and reflect engines.
 type stubReads struct {
 	port.Reader
-	store  *fake.Store
+	store  *postgres.Store
 	mu     sync.Mutex
 	units  []port.UnitID
 	models []modelRef

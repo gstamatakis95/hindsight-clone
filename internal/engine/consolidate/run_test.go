@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"strings"
@@ -30,14 +31,15 @@ func TestRunCreateAndUpdateWriteVersionsAndEvidence(t *testing.T) {
 		[]update{{ObservationID: "obs-chess", Text: "Bob plays chess every Sunday", SourceFactIDs: []string{"f1"}}},
 	)))
 	res := e.run(autoJob())
-	if user := e.calls(domain.ModelSlotConsolidate)[0].User; !strings.Contains(user, `"id":"obs-chess"`) ||
+	user := e.calls(domain.ModelSlotConsolidate)[0].User
+	if !strings.Contains(user, `"id":"`+string(uid("obs-chess"))+`"`) ||
 		!strings.Contains(user, `"source_memories":[{"text":"Bob plays chess"}]`) {
 		t.Errorf("the related observation and its source are not shown: %s", user)
 	}
 	got := map[port.UnitID]string{}
 	for _, o := range e.observations() {
-		got[o.ID] = fmt.Sprintf("%s|v%d|proof %d|%v|%v|new seq %t",
-			o.Text, o.Version, o.ProofCount, o.SourceIDs, o.Tags, o.Seq > before)
+		got[port.UnitID(pgtest.Name(o.ID))] = fmt.Sprintf("%s|v%d|proof %d|%v|%v|new seq %t",
+			o.Text, o.Version, o.ProofCount, sortedNames(o.SourceIDs), o.Tags, o.Seq > before)
 	}
 	want := map[port.UnitID]string{
 		"obs-chess": "Bob plays chess every Sunday|v2|proof 2|[f0 f1]|[x]|new seq true",
@@ -57,7 +59,7 @@ func TestRunCreateAndUpdateWriteVersionsAndEvidence(t *testing.T) {
 		})
 		return err
 	})
-	if len(events) != 1 || events[0].OperationID != "op-1" {
+	if len(events) != 1 || pgtest.Name(events[0].OperationID) != "op-1" {
 		t.Fatalf("events = %+v, want one CONSOLIDATION_COMPLETED for op-1", events)
 	}
 	want0 := port.Usage{Slot: domain.ModelSlotConsolidate, Model: "base-model", InputTokens: 10, OutputTokens: 2}
@@ -206,7 +208,7 @@ func TestRunDocumentScopeMode(t *testing.T) {
 			return err
 		}
 		return tx.Units().Insert(t.Context(), []domain.Unit{{
-			ID: "f1", Bank: bank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Ivy hikes",
+			ID: uid("f1"), Bank: bank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Ivy hikes",
 			Tags: []string{"a", "b"}, Embedding: e.emb.Vector("Ivy hikes"), Seq: seq,
 		}})
 	})
@@ -218,7 +220,7 @@ func TestRunDocumentScopeMode(t *testing.T) {
 	}
 }
 
-// addModels stores mental models in the fake store; the run lists them with Reader.ListMentalModels.
+// addModels stores mental models in the store; the run lists them with Reader.ListMentalModels.
 func (e *env) addModels(ms ...domain.MentalModel) {
 	e.t.Helper()
 	e.tx(func(tx port.Tx) error {

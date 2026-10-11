@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"errors"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"reflect"
@@ -11,25 +12,39 @@ import (
 	"time"
 
 	mockconsolidate "memd/internal/mocks/engine/consolidate"
-	mockport "memd/internal/mocks/port"
 )
 
 var ref = port.BankRef{Tenant: "t1", Bank: "b1"}
 
-// fakeStore wires the generated mocks: one tenant config and a set of banks.
-func fakeStore(tenant domain.BankConfig, banks map[string]domain.Bank) *mockport.Store {
-	repo := &mockport.BankRepo{
-		TenantConfigFunc: func(_ context.Context, _ string) (domain.BankConfig, error) { return tenant, nil },
-		GetFunc: func(_ context.Context, b port.BankRef) (domain.Bank, error) {
-			bk, ok := banks[b.Bank]
-			if !ok {
-				return domain.Bank{}, domain.ErrNotFound
+// seedStore returns a store over a new database holding tenant t1's config and banks (with their configs,
+// tombstoned when DeletingAt is set).
+func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank) port.Store {
+	t.Helper()
+	s := pgtest.NewStore(t)
+	ctx := t.Context()
+	err := s.InTx(ctx, func(tx port.Tx) error {
+		if err := tx.Banks().SetTenantConfig(ctx, ref.Tenant, tenant); err != nil {
+			return err
+		}
+		for _, b := range banks {
+			if _, err := tx.Banks().Ensure(ctx, b.Ref); err != nil {
+				return err
 			}
-			return bk, nil
-		},
+			if err := tx.Banks().SetConfig(ctx, b.Ref, b.Config); err != nil {
+				return err
+			}
+			if b.DeletingAt != nil {
+				if err := tx.Banks().MarkDeleting(ctx, b.Ref, *b.DeletingAt); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	tx := &mockport.Tx{BanksFunc: func() port.BankRepo { return repo }}
-	return &mockport.Store{InTxFunc: func(_ context.Context, fn func(port.Tx) error) error { return fn(tx) }}
+	return s
 }
 
 func TestEffectivePrecedence(t *testing.T) {
@@ -42,7 +57,7 @@ func TestEffectivePrecedence(t *testing.T) {
 		ObservationsMission: "bank",
 		Models:              []domain.SlotBinding{bind(domain.ModelSlotRerank, "b-rr")},
 	}}
-	r := NewResolver(fakeStore(tenant, map[string]domain.Bank{"b1": bank}), nil, server)
+	r := NewResolver(seedStore(t, tenant, map[string]domain.Bank{"b1": bank}), nil, server)
 
 	got, err := r.Effective(context.Background(), ref,
 		domain.BankConfig{DedupThreshold: ptr(0.5)}, domain.BankConfig{DedupThreshold: ptr(0.6)})
@@ -59,7 +74,7 @@ func TestEffectivePrecedence(t *testing.T) {
 func TestEffectiveUnknownOrDeletingBank(t *testing.T) {
 	now := time.Unix(0, 0)
 	banks := map[string]domain.Bank{"gone": {Ref: port.BankRef{Tenant: "t1", Bank: "gone"}, DeletingAt: &now}}
-	r := NewResolver(fakeStore(domain.BankConfig{}, banks), nil, domain.BankConfig{})
+	r := NewResolver(seedStore(t, domain.BankConfig{}, banks), nil, domain.BankConfig{})
 	for _, b := range []string{"missing", "gone"} {
 		_, err := r.Effective(context.Background(), port.BankRef{Tenant: "t1", Bank: b})
 		if !errors.Is(err, domain.ErrNotFound) {
@@ -94,7 +109,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 		}
 		return &s[0], true
 	}}
-	r := NewResolver(fakeStore(domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), m, domain.BankConfig{})
+	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), m, domain.BankConfig{})
 	scope := domain.NewScopeKey(ref, []string{"people"})
 
 	got, err := r.ForScope(context.Background(), scope, &domain.BankConfig{MaxObservationsPerScope: ptr(9)})
@@ -148,7 +163,7 @@ func TestEffectiveConcurrentNoAliasing(t *testing.T) {
 	}
 	snap := Merge(server)
 	bank := domain.Bank{Ref: ref, Config: domain.BankConfig{Recall: &domain.RecallConfig{RRFK: ptr(5)}}}
-	r := NewResolver(fakeStore(domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), nil, server)
+	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), nil, server)
 	var wg sync.WaitGroup
 	for range 16 {
 		wg.Go(func() {

@@ -27,11 +27,10 @@
 //   - ModelRouter: internal/engine/routing (and a slot router in cmd/memd); ConfigResolver: internal/config; Clock: a
 //     system clock in cmd/memd and internal/fake.Clock.
 //
-// Mockery generates a mock of every interface into internal/mocks/port (`make gen`).
-//
-// The persistence, queue and blob ports have shared contract suites in internal/porttest that the production adapter
-// and the fake both pass, so engines tested on the fake behave the same on Postgres and S3. The doc comment on each
-// interface method is its specification; a change starts in that comment and the suite.
+// Mockery generates mocks of the model, clock and config ports into internal/mocks/port (`make gen`). The persistence
+// and queue ports have no mock or fake: their only implementation is tested on real Postgres
+// (internal/adapter/postgres), and engines are tested on it too. The doc comment on each interface method is its
+// specification; a change starts in that comment and the adapter's tests.
 //
 // # Transactions and the change sequence
 //

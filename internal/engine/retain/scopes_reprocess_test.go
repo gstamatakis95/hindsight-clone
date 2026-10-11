@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// TestIngestStoresItemScopes: an item's observation_scopes are stored on its document row (the fake's
+// TestIngestStoresItemScopes: an item's observation_scopes are stored on its document row (the store's
 // DocumentRepo.Upsert and Get), a nil scopes argument stores nil, and changing only the scopes is not a no-op.
 func TestIngestStoresItemScopes(t *testing.T) {
 	e := newEnv(t, 0)

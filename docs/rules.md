@@ -4,42 +4,41 @@ Every bullet and table row of SPEC "Jobs", "Curation" and "Behavioural rules", m
 it. Notation:
 
 - `pkg.TestName` is a Go test in `internal/<pkg>` (or `cmd/memd`, `test/e2e`).
-- `porttest:Case` is a case of a shared port contract suite. It runs against Postgres
-  (`postgres.TestStoreContract`, `TestQueueContract`, `TestSeqContract`, `TestReadsContract`,
-  `TestCurationReadsContract`, `TestMaintenanceContract`, `TestObservationAdminContract`) and against
-  `internal/fake`.
+- `postgres.TestX/Case` is a case of one of the adapter's case tables (`TestStore`, `TestQueue`, `TestSeq`,
+  `TestReads`, `TestCurationReads`, `TestMaintenanceReads`, `TestObservationAdmin`), each on its own Postgres
+  database.
 - `e2e.TestScenarios/X` runs against real Postgres + MinIO, the emulated gateway and memd as separate api and
   worker processes (`make e2e`).
 
-Every name below was checked to exist (`func Test...` or a suite case string) when this file was written.
+Every name below was checked to exist (`func Test...` or a case string) when this file was written.
 
 ## Jobs
 
 | Rule | Tests |
 |---|---|
-| A job row commits in the same transaction as its cause | `porttest:TxCommitsEverything`, `porttest:TxErrorRollsBackEverything`, `retain.TestRetainStampsSeqAndEnqueuesConsolidate` |
+| A job row commits in the same transaction as its cause | `postgres.TestStore/TxCommitsEverything`, `postgres.TestStore/TxErrorRollsBackEverything`, `retain.TestRetainStampsSeqAndEnqueuesConsolidate` |
 | retain_document: serial key `doc:{id}`, not deduplicated, enqueued by async Retain and ReprocessDocument | `retain.TestIngestAsyncEnqueuesChildrenUnderBatch`, `retain.TestReprocessCarriesScopesAndOverrides`, `e2e.TestScenarios/RetainAsync`, `e2e.TestScenarios/RetagReprocess` |
 | retain_document: one tx per chunk batch, resumes by chunk hash, enqueues consolidate | `retain.TestRetainResumeAfterCrashReextractsOnlyRemainingChunks`, `retain.TestRetainChangedDocumentCrashResumeKeepsAllFacts`, `retain.TestRetainStampsSeqAndEnqueuesConsolidate` |
 | retain_batch: parent only; its status aggregates its children | `postgres.TestSettleRetainBatches`, `postgres.TestSettleRetainBatchFailedChild`, `worker.TestRegisterEveryKindButRetainBatch`, `e2e.TestScenarios/RetainAsync` |
-| consolidate: one per bank, pending dedupe unless it carries overrides or scopes | `porttest:DedupePending`, `porttest:DedupeOverridesNeverJoin`, `consolidate.TestRunScopedContinuationNeverJoins`, `worker.TestConsolidationReconcileJoinsRunning` |
+| consolidate: one per bank, pending dedupe unless it carries overrides or scopes | `postgres.TestQueue/DedupePending`, `postgres.TestQueue/DedupeOverridesNeverJoin`, `consolidate.TestRunScopedContinuationNeverJoins`, `worker.TestConsolidationReconcileJoinsRunning` |
 | consolidate: up to 100 oldest units, every scope of each, re-enqueues while units remain (the handler never re-enqueues) | `consolidate.TestRunContinuationAtCap`, `consolidate.TestRunManualScopes`, `worker.TestConsolidateHandlerNeverReenqueuesOnMore`, `consolidate.TestRunClearedEarlierScopeIsNotStamped`, `consolidate.TestRunCoSourceInvalidatedIsNotStamped`, `consolidate.TestRunCoSourceRetaggedIsNotStamped` (a unit is stamped only while every scope this run wrote still cites it, decision 1801) |
 | consolidate: triggers refreshes of stale models | `consolidate.TestRunTriggersRefreshes`, `consolidate.TestRunRefreshSurvivesFailedRun`, `mentalmodel.TestConsolidationTriggeredRefreshRunsAndStaysUnpaused`, `mentalmodel.TestRunJobAcceptsLegacyModelIDKey`, `e2e.TestScenarios/ConsolidationTriggersRefresh` (one payload shape, decision 1800) |
 | rederive_memory: serial key of the unit's document; re-embed, re-resolve, rebuild links, enqueue consolidate | `curate.TestEditClearsEmbeddingAndQueuesRederive`, `curate.TestRederiveSkipsWhenUnitGone`, `curate.TestRederiveSkipsWhenTextChanged`, `e2e.TestScenarios/InvalidateRestore` |
 | retag_document: pending dedupe; rewrite unit tags, clear observations, enqueue consolidate | `docs.TestRetagChangeClearsObservations`, `docs.TestRetagJobReadsCurrentTags`, `docs.TestRetagKeepsLabelTags`, `e2e.TestScenarios/RetagReprocess` |
-| refresh_mental_model: serial key `mm:{id}`, a new request upgrades the queued one; agentic or single-shot | `mentalmodel.TestJoiningQueuedRefreshWithForceFullUpgrades`, `porttest:DedupeRefreshJoinsDespiteOverrides`, `mentalmodel.TestBothStrategiesProduceVersionThroughRunner`, `e2e.TestScenarios/MentalModelBothStrategies` |
+| refresh_mental_model: serial key `mm:{id}`, a new request upgrades the queued one; agentic or single-shot | `mentalmodel.TestJoiningQueuedRefreshWithForceFullUpgrades`, `postgres.TestQueue/DedupeRefreshJoinsDespiteOverrides`, `mentalmodel.TestBothStrategiesProduceVersionThroughRunner`, `e2e.TestScenarios/MentalModelBothStrategies` |
 | graph_maintenance: one per bank, pending-or-running dedupe, 240 s budget, re-enqueues if work is left | `maintenance.TestGraphMaintenanceResumesAfterBudget`, `curate.TestRemovalPathsQueueGraphMaintenance`, `worker.TestGraphHandlerReenqueuesAndRechecks` |
 | delete_bank: batched deletes, blob prefix, then the bank row | `bank.TestBankDeleteLifecycle`, `bank.TestDeletePagesBlobsWithFencing`, `worker.TestDeleteBankReenqueuesUntilDone`, `e2e.TestScenarios/BankDelete` |
-| The claim: SKIP LOCKED, serial key, unique partial index on processing rows | `porttest:EnqueueClaimRoundTrip`, `porttest:ClaimKindsLimitOldestFirst`, `porttest:ConcurrentClaims`, `postgres.TestAcceptSerialKeys`, `postgres.TestLostClaimRace` |
-| One at a time per key | `porttest:SerialKeyOneAtATime`, `porttest:SerialKeysIndependent`, `porttest:ParkedOlderJobDoesNotBlock` |
+| The claim: SKIP LOCKED, serial key, unique partial index on processing rows | `postgres.TestQueue/EnqueueClaimRoundTrip`, `postgres.TestQueue/ClaimKindsLimitOldestFirst`, `postgres.TestQueue/ConcurrentClaims`, `postgres.TestAcceptSerialKeys`, `postgres.TestLostClaimRace` |
+| One at a time per key | `postgres.TestQueue/SerialKeyOneAtATime`, `postgres.TestQueue/SerialKeysIndependent`, `postgres.TestQueue/ParkedOlderJobDoesNotBlock` |
 | No model calls inside a transaction | `memd.TestWiredStackNoModelCallInsideTransaction` (every engine as wired, through retain, consolidation, recall, reflect, both refresh strategies and curation) |
-| Heartbeats every 15 s; stale PROCESSING rows go back to PENDING or fail past max attempts | `porttest:HeartbeatPreventsReclaim`, `porttest:ReclaimStale`, `porttest:ReclaimPastMaxFails`, `worker.TestKilledWorkerJobReclaimed`, `worker.TestRunnerFencesItselfWithoutHeartbeats`, `e2e.TestScenarios/WorkerCrashReclaim` |
+| Heartbeats every 15 s; stale PROCESSING rows go back to PENDING or fail past max attempts | `postgres.TestQueue/HeartbeatPreventsReclaim`, `postgres.TestQueue/ReclaimStale`, `postgres.TestQueue/ReclaimPastMaxFails`, `worker.TestKilledWorkerJobReclaimed`, `worker.TestRunnerFencesItselfWithoutHeartbeats`, `e2e.TestScenarios/WorkerCrashReclaim` |
 | Retries: backoff 60 s × attempt, 3 attempts; consolidate (and delete_bank) uncapped, skipping when another consolidate is pending; deterministic errors fail at once | `worker.TestRetryPolicy`, `worker.TestRunnerRetrySchedule`, `worker.TestRunnerConsolidateSkipsRetryWhenPending`, `worker.TestDeleteBankRetriesWithoutAttemptCap` |
-| No dead-letter queue: FAILED stays, RetryOperation re-queues | `porttest:RetryFailedAndCancelled`, `e2e.TestScenarios/CancelRetry` |
+| No dead-letter queue: FAILED stays, RetryOperation re-queues | `postgres.TestQueue/RetryFailedAndCancelled`, `e2e.TestScenarios/CancelRetry` |
 | Bounded runs re-enqueue themselves | `consolidate.TestRunContinuationAtCap`, `maintenance.TestGraphMaintenanceResumesAfterBudget`, `worker.TestDeleteBankReenqueuesUntilDone`, `worker.TestGraphHandlerReenqueuesAndRechecks` |
 | Slots: 10 per worker, 2 reserved for consolidate | `worker.TestRunnerReservedSlotsHoldUnderRetainFlood` |
 | Maintenance tick: reclaim, cron refreshes, consolidation reconcile, prune; no leader, idempotent | `worker.TestMaintenanceStepOrderAndIsolation`, `worker.TestConcurrentMaintenanceNoDuplicateEnqueues`, `worker.TestPruneOperations`, `mentalmodel.TestCronRefreshes`, `mentalmodel.TestCronFiresOnScheduleWithinGrace`, `worker.TestMaintenanceRederivesStrandedFacts`, `postgres.TestStrandedFacts` |
-| Debounce and parking; Reschedule releases a parked job | `mentalmodel.TestRefreshQueuer`, `mentalmodel.TestDecide`, `porttest:DedupePendingJoinsParked`, `porttest:RescheduleReleaseAndPark` |
-| Events: written in the change's tx, numbered by the change seq, polled by after_seq; ListEvents limit 0 = 100, capped at 1000 | `porttest:EventsAppendList`, `porttest:EventsListNeverSplitsSeqGroup`, `porttest:EventsTypeFilterAdvancesLastSeq`, `porttest:FailTerminalAppendsEvent`, `memd.TestListEventsDefaultAndCap` |
+| Debounce and parking; Reschedule releases a parked job | `mentalmodel.TestRefreshQueuer`, `mentalmodel.TestDecide`, `postgres.TestQueue/DedupePendingJoinsParked`, `postgres.TestQueue/RescheduleReleaseAndPark` |
+| Events: written in the change's tx, numbered by the change seq, polled by after_seq; ListEvents limit 0 = 100, capped at 1000 | `postgres.TestStore/EventsAppendList`, `postgres.TestStore/EventsListNeverSplitsSeqGroup`, `postgres.TestStore/EventsTypeFilterAdvancesLastSeq`, `postgres.TestQueue/FailTerminalAppendsEvent`, `memd.TestListEventsDefaultAndCap` |
 
 ## Curation
 
@@ -47,14 +46,14 @@ Every name below was checked to exist (`func Test...` or a suite case string) wh
 |---|---|
 | Edit: new values, edited_at, audit row; embedding cleared; citing observations deleted, co-sources reset; rederive enqueued | `curate.TestEditClearsEmbeddingAndQueuesRederive`, `curate.TestEditClearEntities`, `curate.TestEditDateClearsTimeless`, `curate.TestEditKeepsUnitOutOfConsolidationUntilRederive`, `e2e.TestScenarios/InvalidateRestore` (edit step) |
 | Edit job: re-embed, entities (literal or resolved), relink, enqueue consolidation | `curate.TestRederiveBackoffRetryKeepsNewerEntities`, `curate.TestRederiveCancelledMidTx`, `e2e.TestScenarios/InvalidateRestore` |
-| Invalidate: archive with snapshots; delete links and entity rows; delete citing observations; graph_dirty; enqueue consolidate, graph_maintenance and refreshes of citing models | `curate.TestInvalidateRemovesCitingObservationsAndQueuesRefresh`, `curate.TestRemovalPathsQueueGraphMaintenance`, `porttest:UnitsArchiveRestore`, `e2e.TestScenarios/InvalidateRestore` |
+| Invalidate: archive with snapshots; delete links and entity rows; delete citing observations; graph_dirty; enqueue consolidate, graph_maintenance and refreshes of citing models | `curate.TestInvalidateRemovesCitingObservationsAndQueuesRefresh`, `curate.TestRemovalPathsQueueGraphMaintenance`, `postgres.TestStore/UnitsArchiveRestore`, `e2e.TestScenarios/InvalidateRestore` |
 | Restore: move back, reattach entities and causal links; then as edit | `curate.TestRestoreRoundTrip`, `curate.TestRestoreAfterEntityPruneKeepsEntities`, `curate.TestRestoreLiveUnitIsNoop`, `e2e.TestScenarios/InvalidateRestore` |
-| Recall and consolidation never see invalidated units | `porttest:UnitsArchiveRestore`, `e2e.TestScenarios/InvalidateRestore` (recall excludes the fact) |
+| Recall and consolidation never see invalidated units | `postgres.TestStore/UnitsArchiveRestore`, `e2e.TestScenarios/InvalidateRestore` (recall excludes the fact) |
 | Every curation calls tx.Seq | `curate.TestRestoreRoundTrip` (seq bumped), `e2e.TestScenarios/InvalidateRestore` (change_seq rises on invalidate, restore and edit) |
-| ListMemories reads both tables; state selects one; entity_id matches live units only | `porttest:list_units`, `curate.TestListerPaging` |
+| ListMemories reads both tables; state selects one; entity_id matches live units only | `postgres.TestCurationReads/list_units`, `curate.TestListerPaging` |
 | Reprocessing a document resets curation of its units | `retain.TestReprocessIgnoresCuratedUnit`, `docs.TestDocumentAdminGetAndReprocess`, `e2e.TestScenarios/RetagReprocess` |
-| Audit and archive rows of replaced units are kept and tagged with the reprocess operation id | Not tested: the tagging is a known gap (no port method; WP-08/WP-16 known gaps) |
-| Observation history from observation_versions on every create and update | `consolidate.TestRunCreateAndUpdateWriteVersionsAndEvidence`, `porttest:observation_history` |
+| Audit and archive rows of replaced units are kept and tagged with the reprocess operation id | Not tested: the tagging is a known gap (no port method) |
+| Observation history from observation_versions on every create and update | `consolidate.TestRunCreateAndUpdateWriteVersionsAndEvidence`, `postgres.TestCurationReads/observation_history` |
 
 ## Behavioural rules
 
@@ -63,15 +62,15 @@ Every name below was checked to exist (`func Test...` or a suite case string) wh
 | Rule | Tests |
 |---|---|
 | A write to an unknown bank creates it; a read of an unknown bank is NOT_FOUND | `recall.TestRecallUnknownBank`, `e2e.TestScenarios/ConsolidationRecallReflect` (recall of an unknown bank), `e2e.TestScenarios/RetainSync` |
-| DeleteBank: tombstone, cancel pending, enqueue delete_bank in one tx; writes FAILED_PRECONDITION, reads NOT_FOUND, claims skip, running jobs stop; batched delete, blob prefix, bank row; a later write creates a new bank | `bank.TestBankDeleteLifecycle`, `bank.TestTombstoneIdempotent`, `bank.TestDeleteRunStopsWhenCancelled`, `bank.TestRedeleteResumesHalfDeletedBank`, `porttest:CancelBank`, `porttest:DeletingBankClaims`, `porttest:BankDeleteRemovesOperationsAndEvents`, `e2e.TestScenarios/BankDelete` |
+| DeleteBank: tombstone, cancel pending, enqueue delete_bank in one tx; writes FAILED_PRECONDITION, reads NOT_FOUND, claims skip, running jobs stop; batched delete, blob prefix, bank row; a later write creates a new bank | `bank.TestBankDeleteLifecycle`, `bank.TestTombstoneIdempotent`, `bank.TestDeleteRunStopsWhenCancelled`, `bank.TestRedeleteResumesHalfDeletedBank`, `postgres.TestQueue/CancelBank`, `postgres.TestQueue/DeletingBankClaims`, `postgres.TestQueue/BankDeleteRemovesOperationsAndEvents`, `e2e.TestScenarios/BankDelete` |
 | Retain idempotency: same content + overrides hash is a no-op unless force_reextract | `retain.TestIngestUnchangedMakesNoLLMCall`, `retain.TestRetainCompletedJobReplayIsNoop`, `retain.TestRetainForceReextractCrashResume`, `retain.TestRetainSyncVictimPartialReplaceIsNotUnchanged`, `e2e.TestScenarios/RetainSync` |
 | A changed document replaces old units in the first batch tx, deleting observations and resetting co-sources; an interrupted retain resumes | `retain.TestRetainReplacementDeletesObservationsAndResetsCoSources`, `retain.TestRetainResumeAfterCrashReextractsOnlyRemainingChunks`, `retain.TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged` |
 | ALL_COMBINATIONS fan-out over max_combinations is INVALID_ARGUMENT synchronously | `retain.TestIngestFanOutRejectionStoresNothing`, `retain.TestIngestFanOutRejectionUnknownBankCreatesNothing`, `consolidate.TestScopeExpanderTooManyCombinations` |
 | UpdateDocument replaces the tag set; set-equal is a no-op; a change clears observations and re-consolidates | `docs.TestRetagSetEqualIsNoop`, `docs.TestRetagChangeClearsObservations`, `e2e.TestScenarios/RetagReprocess` |
-| graph_maintenance refills links of graph_dirty neighbours below their caps and prunes orphan entities, in committed batches, resuming; an entity pruned between resolve and Attach is a conflict and the tx re-resolves | `maintenance.TestGraphMaintenanceTopsUpAndPrunes`, `maintenance.TestGraphMaintenanceResumesAfterBudget`, `maintenance.TestGraphMaintenanceRechecksAfterFinalBatch`, `porttest:EntitiesAttachPrunedIsConflict`, `postgres.TestAttachAfterConcurrentPruneReresolves` |
-| Config writes (UpdateBankConfig, ResetBankConfig, UpdateTenantConfig) serialize their read-modify-write, so concurrent patches of different fields both land | `postgres.TestConcurrentBankConfigPatchesKeepBoth`, `postgres.TestConcurrentTenantConfigPatchesKeepBoth`, `porttest:BanksTenantConfigLockSerializes` |
-| Change sequence: one bump per tx under the bank row lock; seq order is commit order | `porttest:SameValueWithinTx`, `porttest:StrictlyIncreasingAcrossTx`, `porttest:ConcurrentWritersSerialize`, `postgres.TestAcceptSeqOrder` |
-| Stats and tag counts from COUNT queries; ListMemories returns no total | `bank.TestStats`, `bank.TestTagsPaging`, `porttest:bank_stats`, `porttest:tag_counts` |
+| graph_maintenance refills links of graph_dirty neighbours below their caps and prunes orphan entities, in committed batches, resuming; an entity pruned between resolve and Attach is a conflict and the tx re-resolves | `maintenance.TestGraphMaintenanceTopsUpAndPrunes`, `maintenance.TestGraphMaintenanceResumesAfterBudget`, `maintenance.TestGraphMaintenanceRechecksAfterFinalBatch`, `postgres.TestStore/EntitiesAttachPrunedIsConflict`, `postgres.TestAttachAfterConcurrentPruneReresolves` |
+| Config writes (UpdateBankConfig, ResetBankConfig, UpdateTenantConfig) serialize their read-modify-write, so concurrent patches of different fields both land | `postgres.TestConcurrentBankConfigPatchesKeepBoth`, `postgres.TestConcurrentTenantConfigPatchesKeepBoth`, `postgres.TestStore/BanksTenantConfigLockSerializes` |
+| Change sequence: one bump per tx under the bank row lock; seq order is commit order | `postgres.TestSeq/SameValueWithinTx`, `postgres.TestSeq/StrictlyIncreasingAcrossTx`, `postgres.TestSeq/ConcurrentWritersSerialize`, `postgres.TestAcceptSeqOrder` |
+| Stats and tag counts from COUNT queries; ListMemories returns no total | `bank.TestTagsPaging`, `postgres.TestCurationReads/bank_stats`, `postgres.TestReads/tag_counts` |
 
 ### Reflect
 
@@ -95,21 +94,21 @@ Every name below was checked to exist (`func Test...` or a suite case string) wh
 | Nothing in scope: no LLM call, only last_refreshed_at advances | `mentalmodel.TestNothingInScopeMeansNoLLMCall`, `mentalmodel.TestFullWithNothingInScopeKeepsSourcesAndWatermark` |
 | Paused by failure until a manual refresh succeeds; failures in history | `mentalmodel.TestPauseAndManualUnpause`, `mentalmodel.TestReconcileSkipsFailureOfEarlierModel`, `mentalmodel.TestReconcileInterleavedWithWrite` |
 | min_refresh_interval parks a triggered refresh; manual ones ignore the floor and release it | `mentalmodel.TestDecide`, `mentalmodel.TestAutomaticRunSkipsFreshOrFlooredModel`, `mentalmodel.TestFloorSkewTolerance` |
-| At most one queued refresh per model; a new request joins and upgrades it; refreshes never overlap | `mentalmodel.TestJoiningQueuedRefreshWithForceFullUpgrades`, `mentalmodel.TestWeakerJoinerKeepsUpgrade`, `porttest:UpgradeMergesPayloadAndOverrides`, `porttest:SerialKeyOneAtATime` |
+| At most one queued refresh per model; a new request joins and upgrades it; refreshes never overlap | `mentalmodel.TestJoiningQueuedRefreshWithForceFullUpgrades`, `mentalmodel.TestWeakerJoinerKeepsUpgrade`, `postgres.TestQueue/UpgradeMergesPayloadAndOverrides`, `postgres.TestQueue/SerialKeyOneAtATime` |
 | DryRunRefresh runs the pipeline and writes nothing | `mentalmodel.TestDryRunWritesNothing` |
 
 ### Operations
 
 | Rule | Tests |
 |---|---|
-| Cancel works on PENDING and PROCESSING; handlers stop at checkpoints; workers never overwrite CANCELLED | `porttest:CancelPending`, `porttest:CancelProcessingReportedLost`, `porttest:CancelledPendingFenced`, `worker.TestRunnerCancelledJobStopsAtCheckpoint`, `worker.TestOperationControl`, `e2e.TestScenarios/CancelRetry` |
-| Retry works on FAILED and CANCELLED, resetting to PENDING with run_at = now | `porttest:RetryFailedAndCancelled`, `e2e.TestScenarios/CancelRetry` |
-| Progress at checkpoints; the runner heartbeats | `worker.TestCheckpointReport`, `porttest:Progress`, `porttest:HeartbeatPreventsReclaim` |
+| Cancel works on PENDING and PROCESSING; handlers stop at checkpoints; workers never overwrite CANCELLED | `postgres.TestQueue/CancelPending`, `postgres.TestQueue/CancelProcessingReportedLost`, `postgres.TestQueue/CancelledPendingFenced`, `worker.TestRunnerCancelledJobStopsAtCheckpoint`, `e2e.TestScenarios/CancelRetry` |
+| Retry works on FAILED and CANCELLED, resetting to PENDING with run_at = now | `postgres.TestQueue/RetryFailedAndCancelled`, `e2e.TestScenarios/CancelRetry` |
+| Progress at checkpoints; the runner heartbeats | `worker.TestCheckpointReport`, `postgres.TestQueue/Progress`, `postgres.TestQueue/HeartbeatPreventsReclaim` |
 | Deterministic failures skip retries; transient ones back off | `worker.TestRetryPolicy`, `worker.TestRunnerRetrySchedule` |
 | Large retains create a retain_batch parent aggregating its children; eval barrier = sync Retain + empty pending_operations_by_kind | `retain.TestIngestAsyncEnqueuesChildrenUnderBatch`, `postgres.TestSettleRetainBatches`, `e2e.TestScenarios/RetainAsync`, `e2e.TestGoldenAgainstMemdAll` |
-| Terminal operations are pruned after the retention; pending and processing never are | `worker.TestPruneOperations`, `porttest:Prune`, `porttest:EventsPrune` |
+| Terminal operations are pruned after the retention; pending and processing never are | `worker.TestPruneOperations`, `postgres.TestQueue/Prune`, `postgres.TestStore/EventsPrune` |
 
-## Final-review additions (WP-20)
+## Operation control and maintenance
 
 | Rule | Tests |
 |---|---|

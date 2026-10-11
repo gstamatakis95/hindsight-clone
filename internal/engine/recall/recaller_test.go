@@ -195,7 +195,7 @@ func TestScoreGate(t *testing.T) {
 func TestRecallPreferObservationsBackfill(t *testing.T) {
 	e := newEnv(t, envOpts{arms: []Retriever{arm(ArmSemantic, "f1", "o1", "f2", "f3", "f4")}})
 	e.add(t, fact("f1", "fact one"), fact("f2", "fact two"), fact("f3", "fact three"), fact("f4", "fact four"))
-	e.add(t, domain.Unit{ID: "o1", Bank: testBank, Type: domain.FactTypeObservation, Text: "obs one"})
+	e.add(t, domain.Unit{ID: uid("o1"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs one"})
 	e.cite(t, "o1", "f1", "f2")
 	base := RecallRequest{Query: "fact", MaxTokens: 6, Overrides: alphas(0, 0, 0)}
 	if got := ids(e.recall(t, base)); !slices.Equal(got, []string{"f1", "o1", "f2"}) {
@@ -287,7 +287,7 @@ func TestRecallArmsAndTrace(t *testing.T) {
 	e.add(t, fact("tnext", "zzz qqq"))
 	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
 		return tx.Links().Insert(ctx, []domain.Link{{
-			Bank: testBank, From: "seed", To: "tnext", Kind: domain.LinkTemporal, Weight: 1,
+			Bank: testBank, From: uid("seed"), To: uid("tnext"), Kind: domain.LinkTemporal, Weight: 1,
 		}})
 	})
 	res := e.recall(t, RecallRequest{Query: "rocket launch schedule", Trace: true})
@@ -304,7 +304,7 @@ func TestRecallArmsAndTrace(t *testing.T) {
 	if got := arms(res); !slices.Equal(got, []string{ArmSemantic, ArmKeyword, ArmGraph}) {
 		t.Fatalf("arms = %v", got)
 	}
-	if g := res.Trace.Arms[2]; g.Candidates != 1 || !slices.Equal(g.TopIDs, []port.UnitID{"hop"}) {
+	if g := res.Trace.Arms[2]; g.Candidates != 1 || !slices.Equal(g.TopIDs, uids("hop")) {
 		t.Fatalf("graph trace = %+v", g)
 	}
 	w := &domain.TimeWindow{Start: testNow.AddDate(0, 0, -7), End: testNow}
@@ -327,11 +327,11 @@ func TestRecallArmsAndTrace(t *testing.T) {
 
 func TestRecallIncludes(t *testing.T) {
 	e := newEnv(t, envOpts{arms: []Retriever{arm(ArmSemantic, "o1", "f2")}})
-	e.addChunks(t, "d1", domain.Chunk{ID: "c2", Index: 0, Text: "chunk of f2"})
+	e.addChunks(t, "d1", domain.Chunk{ID: cid("c2"), Index: 0, Text: "chunk of f2"})
 	f2 := fact("f2", "other fact")
-	f2.DocumentID, f2.ChunkID = "d1", "c2"
+	f2.DocumentID, f2.ChunkID = "d1", cid("c2")
 	e.add(t, fact("f1", "source fact"), f2)
-	e.add(t, domain.Unit{ID: "o1", Bank: testBank, Type: domain.FactTypeObservation, Text: "obs"})
+	e.add(t, domain.Unit{ID: uid("o1"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs"})
 	e.cite(t, "o1", "f1")
 	var alice port.EntityID
 	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
@@ -339,7 +339,7 @@ func TestRecallIncludes(t *testing.T) {
 		if alice, err = tx.Entities().Upsert(ctx, domain.Entity{Bank: testBank, CanonicalName: "Alice"}); err != nil {
 			return err
 		}
-		for _, u := range []port.UnitID{"f1", "f2"} {
+		for _, u := range uids("f1", "f2") {
 			if err := tx.Entities().Attach(ctx, u, []port.EntityID{alice}); err != nil {
 				return err
 			}
@@ -349,14 +349,14 @@ func TestRecallIncludes(t *testing.T) {
 	res := e.recall(t, RecallRequest{Query: "obs", Include: domain.RecallInclude{
 		SourceFacts: ptr(true), Entities: ptr(true), Chunks: ptr(true),
 	}})
-	if _, ok := res.SourceFacts["f1"]; !ok || res.SourceFactsTruncated {
+	if _, ok := res.SourceFacts[uid("f1")]; !ok || res.SourceFactsTruncated {
 		t.Fatalf("source facts = %v", res.SourceFacts)
 	}
 	got := res.Entities[alice]
-	if got.CanonicalName != "Alice" || !slices.Equal(got.ObservationIDs, []port.UnitID{"o1"}) {
+	if got.CanonicalName != "Alice" || !slices.Equal(got.ObservationIDs, uids("o1")) {
 		t.Fatalf("entities = %+v, want Alice (from f2) with observation o1 (citing f1)", res.Entities)
 	}
-	if c := res.Chunks["c2"]; c.Text != "chunk of f2" || len(res.Chunks) != 1 {
+	if c := res.Chunks[cid("c2")]; c.Text != "chunk of f2" || len(res.Chunks) != 1 {
 		t.Fatalf("chunks = %+v, want f2's chunk", res.Chunks)
 	}
 }

@@ -6,7 +6,7 @@
 services:
   postgres:
     # ParadeDB ships pgvector, pg_search and pg_trgm in one image. Keep this tag in sync
-    # with the testcontainers image used by the Postgres porttest suite.
+    # with pgtest.Image (internal/adapter/postgres/pgtest), the image the tests run on.
     image: paradedb/paradedb:0.26.1-pg17
     environment:
       POSTGRES_DB: memd

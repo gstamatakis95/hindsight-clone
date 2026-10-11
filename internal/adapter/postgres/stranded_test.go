@@ -34,7 +34,8 @@ func strandedRederive(t *testing.T, s *postgres.Store, u domain.Unit) port.Opera
 // rederive failed for good is listed once the retry delay has passed, and not while a rederive is pending,
 // once it has an embedding, or when its bank is tombstoned.
 func TestStrandedFacts(t *testing.T) {
-	s := postgres.New(pgtest.Fresh(t))
+	t.Parallel()
+	s := pgtest.NewStore(t)
 	ctx := t.Context()
 	stranded := fuUnit(fuBank, "stranded fact")
 	stranded.DocumentID = "doc-1"

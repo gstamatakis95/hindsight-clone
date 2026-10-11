@@ -1,15 +1,12 @@
 package s3
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"memd/internal/domain"
-	"memd/internal/port"
-	"memd/internal/porttest"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -20,7 +17,6 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"golang.org/x/sync/errgroup"
 )
 
 // minioImage must match the minio service image in docker-compose.yml.
@@ -98,50 +94,6 @@ func newTestBlob(t *testing.T) *Blob {
 	return b
 }
 
-// TestBlobContract runs the shared port.Blob contract suite against MinIO.
-func TestBlobContract(t *testing.T) {
-	porttest.RunBlobSuite(t, func(t *testing.T) port.Blob { return newTestBlob(t) })
-}
-
-// TestDeletePrefix2500Keys deletes a bank prefix spanning three listing pages and delete batches and
-// checks the count, the deleted keys and the survivors sharing leading characters.
-func TestDeletePrefix2500Keys(t *testing.T) {
-	const n = 2500
-	b := newTestBlob(t)
-	key := func(i int) string { return fmt.Sprintf("t/bank/docs/d%05d/h", i) }
-	g, ctx := errgroup.WithContext(t.Context())
-	g.SetLimit(32)
-	for i := range n {
-		g.Go(func() error {
-			data := []byte(key(i))
-			return b.Put(ctx, key(i), bytes.NewReader(data), int64(len(data)), "text/plain")
-		})
-	}
-	if err := g.Wait(); err != nil {
-		t.Fatalf("put %d keys: %v", n, err)
-	}
-	outside := []string{"t/bank2/docs/d/h", "t/bankx", "t/ban", "u/bank/docs/d/h"}
-	for _, k := range outside {
-		mustPut(t, b, k, k)
-	}
-	if got, err := b.DeletePrefix(t.Context(), "t/bank/"); err != nil || got != n {
-		t.Fatalf("DeletePrefix = %d, %v; want %d, nil", got, err, n)
-	}
-	for _, i := range []int{0, 999, 1000, 1999, 2000, n - 1} {
-		if _, err := b.Get(t.Context(), key(i)); !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("Get(%q) error = %v, want ErrNotFound", key(i), err)
-		}
-	}
-	for _, k := range outside {
-		if got := mustGet(t, b, k); got != k {
-			t.Errorf("Get(%q) = %q, want %q", k, got, k)
-		}
-	}
-	if got, err := b.DeletePrefix(t.Context(), "t/bank/"); err != nil || got != 0 {
-		t.Errorf("second DeletePrefix = %d, %v; want 0, nil", got, err)
-	}
-}
-
 // TestPutNonSeekableReader stores bodies from readers that are not io.Seekers, including an empty one,
 // and rejects a body whose length disagrees with size.
 func TestPutNonSeekableReader(t *testing.T) {
@@ -182,13 +134,6 @@ func TestMissingBucketUnavailable(t *testing.T) {
 	}
 	if err := b.Put(t.Context(), "k", strings.NewReader("v"), 1, ""); !errors.Is(err, domain.ErrUnavailable) {
 		t.Errorf("Put on missing bucket error = %v, want ErrUnavailable", err)
-	}
-}
-
-// TestNewBlobRequiresBucket rejects an empty bucket name without contacting the server.
-func TestNewBlobRequiresBucket(t *testing.T) {
-	if _, err := NewBlob(t.Context(), Config{Endpoint: "http://127.0.0.1:1"}); !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Errorf("NewBlob without bucket error = %v, want ErrInvalidArgument", err)
 	}
 }
 

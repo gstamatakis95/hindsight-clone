@@ -43,7 +43,9 @@ func loadAcceptFixture(t *testing.T, pool *pgxpool.Pool) map[port.UnitID]bool {
 	// rows and rebuilds it from its own catalog definition (a rollback restores it), which takes seconds.
 	stmts := []string{
 		`SET LOCAL maintenance_work_mem = '512MB'`,
-		`SET LOCAL max_parallel_maintenance_workers = 4`,
+		`SET LOCAL max_parallel_maintenance_workers = 8`,
+		// Without a size estimate the planner builds the index serially, several times slower.
+		`ALTER TABLE memory_units SET (parallel_workers = 8)`,
 		`INSERT INTO banks (tenant_id, id) VALUES ('t1', 'small'), ('t1', 'big'), ('t2', 'small'), ('t2', 'big')`,
 		`DROP INDEX memory_units_embedding_hnsw`,
 		// The subquery references g (in WHERE), so it runs once per row (an uncorrelated one would give every row
@@ -166,10 +168,11 @@ func wantSmallHits(t *testing.T, what string, s *postgres.Store, q []float32, sm
 // SearchVector with Limit 10 still returns 10 hits, all of that bank, also when the plan goes through HNSW
 // (iterative scan keeps scanning past the filtered-out neighbours).
 func TestAcceptSmallBankVector(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("loads 50,000 units")
 	}
-	pool := pgtest.Fresh(t)
+	pool := pgtest.Pool(t)
 	small := loadAcceptFixture(t, pool)
 	q := randomVec()
 

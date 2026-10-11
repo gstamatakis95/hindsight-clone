@@ -61,12 +61,13 @@ func (h *keyHolders) release(j port.Job) {
 	delete(h.held, j.SerialKey)
 }
 
-// TestAcceptSerialKeys is the WP-01 "serial keys" acceptance test: 8 concurrent claimers work through 500
+// TestAcceptSerialKeys is the "serial keys" acceptance test: 8 concurrent claimers work through 500
 // jobs spread over 20 serial keys, holding each job 1-5 ms. No key is ever held by two jobs at once (checked by
 // the workers and by sampling the table), each key's jobs run in enqueue order, Claim never errors and every
 // job completes.
 func TestAcceptSerialKeys(t *testing.T) {
-	pool := pgtest.Fresh(t)
+	t.Parallel()
+	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
 	bank := port.BankRef{Tenant: "tenant-serial", Bank: "bank-serial"}
 	ensureQueueBanks(t, s, bank)
@@ -196,11 +197,12 @@ func sampleDoubleHeld(ctx context.Context, pool *pgxpool.Pool, stop <-chan struc
 	}
 }
 
-// TestAcceptReclaim is the WP-01 "reclaim" acceptance test: a claimed job whose heartbeat goes stale is
+// TestAcceptReclaim is the "reclaim" acceptance test: a claimed job whose heartbeat goes stale is
 // reclaimed to PENDING with attempt+1 and is claimable again; at max attempts it becomes FAILED with exactly
 // one operation_failed event, and the stale worker's late Complete is fenced.
 func TestAcceptReclaim(t *testing.T) {
-	pool := pgtest.Fresh(t)
+	t.Parallel()
+	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
 	ctx := t.Context()
 	bank := port.BankRef{Tenant: "tenant-reclaim", Bank: "bank-reclaim"}

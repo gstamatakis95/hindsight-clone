@@ -39,6 +39,8 @@ docs, maintenance, timex and routing. These rules add to the root AGENTS.md.
   a `doc.go`. Lines are at most 120 columns; McCabe complexity at most 15.
 
 ## Tests
-- Test through the package interfaces with the in-memory fakes in `internal/fake` and an injected
-  Clock. Mocks come from mockery (`internal/mocks`); never hand-write one.
+- Test through the package interfaces against real Postgres (`pgtest.NewStore(t)`, one database per
+  test) with the LLM, embedder, reranker, blob and clock fakes in `internal/fake` and an injected Clock.
+  Postgres judges due-ness and heartbeats by its own clock: move run_at or heartbeat_at with SQL rather
+  than advancing a fake clock. Mocks come from mockery (`internal/mocks`); never hand-write one.
 - Each `_test.go` sits next to the file it tests; run with `-race`.

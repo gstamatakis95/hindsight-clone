@@ -25,7 +25,7 @@ func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 	e := newEnv(t)
 	e.invalidate(e.curator())
 	e.inTx(func(tx port.Tx) error {
-		ids, err := tx.Entities().PendingMaintenance(e.ctx, testBank, 0)
+		ids, err := tx.Entities().PendingMaintenance(e.ctx, testBank, 100)
 		if err != nil {
 			return err
 		}
@@ -39,10 +39,10 @@ func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 		Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{}, Resolver: resolverStub{},
 		Config: configStub{},
 		Archived: archivedStub{u: domain.Unit{
-			ID: "f1", Bank: testBank, State: domain.MemoryStateInvalidated, Entities: []string{"Alice"},
+			ID: idF1, Bank: testBank, State: domain.MemoryStateInvalidated, Entities: []string{"Alice"},
 		}},
 	})
-	req := UpdateMemoryRequest{Bank: testBank, ID: "f1", State: domain.MemoryStateValid}
+	req := UpdateMemoryRequest{Bank: testBank, ID: idF1, State: domain.MemoryStateValid}
 	if _, _, err := c.Update(e.ctx, req); err != nil {
 		t.Fatal(err)
 	}

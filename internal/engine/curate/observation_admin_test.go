@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
 	"memd/internal/port"
@@ -11,7 +12,7 @@ import (
 	"testing"
 )
 
-// adminEnv is an ObservationAdmin over the seeded env, with the fake's port.Reader as ScopeSource and the
+// adminEnv is an ObservationAdmin over the seeded env, with the store's port.Reader as ScopeSource and the
 // real consolidate.Invalidator as ObservationClearer. On top of the seed (o1 in scope team) it stores 2
 // observations in scope a, 3 in b, 4 in c and 1 in the shared scope.
 func adminEnv(t *testing.T) (*env, ObservationAdmin) {
@@ -28,7 +29,7 @@ func adminEnv(t *testing.T) (*env, ObservationAdmin) {
 			for i := range s.n {
 				text := fmt.Sprintf("observation %v %d", s.tags, i)
 				o := domain.Unit{
-					ID: port.UnitID(fmt.Sprintf("obs-%v-%d", s.tags, i)), Bank: testBank,
+					ID: pgtest.ID[port.UnitID](fmt.Sprintf("obs-%v-%d", s.tags, i)), Bank: testBank,
 					Type: domain.FactTypeObservation, Text: text, Tags: s.tags, Embedding: e.emb.Vector(text), Seq: seq,
 				}
 				if err := tx.Units().UpsertObservation(e.ctx, o); err != nil {
@@ -120,7 +121,7 @@ func listScopeKeys(t *testing.T, e *env, a ObservationAdmin, size int) ([]string
 	return nil, nil
 }
 
-// TestObservationAdminListScopes pages the fake's Reader.ListScopes at sizes 1, 2 and 10: every scope once,
+// TestObservationAdminListScopes pages Reader.ListScopes at sizes 1, 2 and 10: every scope once,
 // the shared scope first and with its count.
 func TestObservationAdminListScopes(t *testing.T) {
 	e, a := adminEnv(t)
@@ -170,7 +171,7 @@ func TestObservationAdminClears(t *testing.T) {
 	if err != nil || all.Deleted != 8 || all.Operation != nil { // a 2 + c 4 + shared 1 + team (o1) 1
 		t.Errorf("clear all = %+v, %v", all, err)
 	}
-	if _, ok := e.unit("o1"); ok {
+	if _, ok := e.unit(idO1); ok {
 		t.Error("clear all left o1")
 	}
 	// The caller owns the consolidate enqueue (Invalidator.ClearScopes enqueues none): exactly one, from the
@@ -182,20 +183,20 @@ func TestObservationAdminClears(t *testing.T) {
 
 func TestObservationAdminClearMemory(t *testing.T) {
 	e, a := adminEnv(t)
-	mem, err := a.ClearMemoryObservations(e.ctx, testBank, "f1", true)
+	mem, err := a.ClearMemoryObservations(e.ctx, testBank, idF1, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mem.Deleted != 1 || mem.Operation == nil || mem.Operation.Kind != domain.OperationKindConsolidate {
 		t.Errorf("clear f1 = %+v", mem)
 	}
-	if _, ok := e.unit("o1"); ok {
+	if _, ok := e.unit(idO1); ok {
 		t.Error("observation citing f1 survived")
 	}
-	if f2, _ := e.unit("f2"); f2.ConsolidatedAt != nil {
+	if f2, _ := e.unit(idF2); f2.ConsolidatedAt != nil {
 		t.Error("co-source f2 not reset")
 	}
-	if _, err := a.ClearMemoryObservations(e.ctx, testBank, "nope", false); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := a.ClearMemoryObservations(e.ctx, testBank, idNope, false); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("unknown memory err = %v", err)
 	}
 }

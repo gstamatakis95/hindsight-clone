@@ -17,7 +17,7 @@ func (a *alwaysPending) HasPending(context.Context, port.BankRef, port.JobKind) 
 	return true, nil
 }
 
-// Accept (WP-20 item 3): a failing manual consolidate (scopes or overrides) keeps its retry even when an
+// A failing manual consolidate (scopes or overrides) keeps its retry even when an
 // automatic consolidate is due; only an automatic one skips its retry.
 func TestManualConsolidateRetriedDespitePending(t *testing.T) {
 	boom := errors.New("gateway timeout")
@@ -38,7 +38,7 @@ func TestManualConsolidateRetriedDespitePending(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			clock := newClock()
 			pending := &alwaysPending{}
-			r := testRunner(newOps(clock), clock, RunnerConfig{Pending: pending})
+			r := testRunner(newOps(t), clock, RunnerConfig{Pending: pending})
 			j := consolidateJob(bankA)
 			j.Payload, j.Overrides = json.RawMessage(tc.payload), tc.overrides
 			at := r.retryAt(context.Background(), j, boom)

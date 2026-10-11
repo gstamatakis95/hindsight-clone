@@ -3,6 +3,7 @@ package bank
 import (
 	"encoding/json"
 	"errors"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -27,8 +28,14 @@ func seedBank(t *testing.T, e env, b port.BankRef) (pending, claimed port.Operat
 			return err
 		}
 		units := []domain.Unit{
-			{ID: "u1", Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Alice likes tea", Seq: seq},
-			{ID: "u2", Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Bob likes coffee", Seq: seq},
+			{
+				ID: pgtest.ID[port.UnitID]("u1"), Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld,
+				Text: "Alice likes tea", Seq: seq,
+			},
+			{
+				ID: pgtest.ID[port.UnitID]("u2"), Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld,
+				Text: "Bob likes coffee", Seq: seq,
+			},
 		}
 		if err := tx.Units().Insert(e.ctx, units); err != nil {
 			return err
@@ -276,7 +283,7 @@ func assertFreshBank(t *testing.T, e env, b port.BankRef, oldOps ...port.Operati
 	if seq != 1 {
 		t.Errorf("fresh bank's first seq = %d, want 1", seq)
 	}
-	units, err := e.store.Read().GetUnits(e.ctx, b, []port.UnitID{"u1", "u2"})
+	units, err := e.store.Read().GetUnits(e.ctx, b, pgtest.IDs[port.UnitID]("u1", "u2"))
 	if err != nil || len(units) != 0 {
 		t.Errorf("fresh bank units = %v (%v), want none", units, err)
 	}

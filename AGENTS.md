@@ -28,14 +28,15 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 ## Commands
 - make gen      # buf generate, sqlc, mockery
 - make lint     # golangci-lint, buf lint + breaking, ruff (BREAKING_AGAINST=contracts-v1 checks the frozen tag)
-- make test     # go test -race ./...
+- make test     # go test -race ./... (needs Docker, or MEMD_TEST_DATABASE_URL; see internal/adapter/postgres/pgtest)
 - make up       # docker compose: postgres, minio
 - make migrate  # alembic upgrade head, then dump schema/schema.sql
 - make run      # memd all
 
 ## Before you finish
 - make gen && make lint && make test pass, with no diff left in gen/, schema/ or internal/mocks/.
-- A new port gets a contract suite in internal/porttest and a fake in internal/fake.
+- Store code is tested against real Postgres: pgtest.NewStore(t) gives each test its own migrated database.
+  Fakes (internal/fake) exist only for the LLM, embedder, reranker, blob and clock.
 - A proto change passes buf breaking and comments every new element.
 
 ## Frozen contracts

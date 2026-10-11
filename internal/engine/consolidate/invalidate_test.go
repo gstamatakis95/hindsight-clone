@@ -3,6 +3,7 @@ package consolidate
 import (
 	"context"
 	"fmt"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -10,7 +11,7 @@ import (
 )
 
 // TestInvalidatorClearForMemory: the observations citing the unit are deleted, their other sources reset,
-// the automatic consolidate queued and the scopes returned (EvidenceRepo.CitingScopes on the fake).
+// the automatic consolidate queued and the scopes returned (EvidenceRepo.CitingScopes).
 func TestInvalidatorClearForMemory(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	e.fact("f1", "Kim sails", "x")
@@ -20,13 +21,13 @@ func TestInvalidatorClearForMemory(t *testing.T) {
 	e.observation("obs-row", "Lee rows", []string{"y"}, "f3")
 	var scopes []port.ScopeKey
 	scopes = e.scopesTx(func(tx port.Tx) ([]port.ScopeKey, error) {
-		return NewInvalidator().ClearForMemory(t.Context(), tx, bank, "f1")
+		return NewInvalidator().ClearForMemory(t.Context(), tx, bank, uid("f1"))
 	})
 	if len(scopes) != 1 || scopes[0].String() != scopeOf("x").String() {
 		t.Fatalf("scopes = %v", scopes)
 	}
 	obs := e.observations()
-	if len(obs) != 1 || obs[0].ID != "obs-row" {
+	if len(obs) != 1 || pgtest.Name(obs[0].ID) != "obs-row" {
 		t.Fatalf("observations left = %+v", obs)
 	}
 	if e.unit("f2").ConsolidatedAt != nil || e.unit("f3").ConsolidatedAt == nil {
@@ -37,7 +38,7 @@ func TestInvalidatorClearForMemory(t *testing.T) {
 	}
 	// Nothing to clear: no job, no scopes.
 	scopes = e.scopesTx(func(tx port.Tx) ([]port.ScopeKey, error) {
-		return NewInvalidator().ClearForMemory(t.Context(), tx, bank, "f3x")
+		return NewInvalidator().ClearForMemory(t.Context(), tx, bank, uid("f3x"))
 	})
 	if len(scopes) != 0 || len(e.jobs(domain.OperationKindConsolidate)) != 1 {
 		t.Fatalf("no-op clear: scopes %v", scopes)
@@ -59,7 +60,7 @@ func seedDocScopes(t *testing.T, e *env) {
 			return wrapErr(err)
 		}
 		return tx.Units().Insert(t.Context(), []domain.Unit{{
-			ID: "f3", Bank: bank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Ola dives",
+			ID: uid("f3"), Bank: bank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Ola dives",
 			Tags: []string{"z"}, Embedding: e.emb.Vector("Ola dives"), Seq: seq,
 		}})
 	})
@@ -82,7 +83,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 		return wrapErr(err)
 	})
 	if ids := obsIDs(e.observations()); !slices.Equal(ids, []port.UnitID{"obs-y", "obs-z"}) ||
-		!slices.Equal(deleted, []port.UnitID{"obs-x"}) {
+		!slices.Equal(names(deleted), []string{"obs-x"}) {
 		t.Fatalf("after ClearScopes(x): left %v, deleted %v", ids, deleted)
 	}
 	if e.unit("f1").ConsolidatedAt != nil {
@@ -104,7 +105,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 		deleted, err = inv.ClearScopes(t.Context(), tx, bank, nil)
 		return wrapErr(err)
 	})
-	if left := e.observations(); len(left) != 0 || !slices.Equal(deleted, []port.UnitID{"obs-y"}) {
+	if left := e.observations(); len(left) != 0 || !slices.Equal(names(deleted), []string{"obs-y"}) {
 		t.Fatalf("after ClearScopes(all): left %+v, deleted %v", left, deleted)
 	}
 }
@@ -112,7 +113,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 // callLog records, in order, the Seq and observation-delete calls a transaction sees.
 type callLog []string
 
-// loggingTx wraps the fake's transaction and logs Seq and the evidence and unit calls the Invalidator makes.
+// loggingTx wraps the store's transaction and logs Seq and the evidence and unit calls the Invalidator makes.
 type loggingTx struct {
 	port.Tx
 	log *callLog
@@ -196,7 +197,7 @@ func TestInvalidatorSeqBeforeDelete(t *testing.T) {
 			return wrapErr(err)
 		}, callLog{"Seq", "DeleteAllObservations"}},
 		{"ClearForMemory", func(ctx context.Context, tx port.Tx) error {
-			_, err := inv.ClearForMemory(ctx, tx, bank, "f1")
+			_, err := inv.ClearForMemory(ctx, tx, bank, uid("f1"))
 			return wrapErr(err)
 		}, callLog{"Seq", "CitingScopes", "DeleteCiting"}},
 		{"ClearDocumentUnits", func(ctx context.Context, tx port.Tx) error {
@@ -227,7 +228,7 @@ func TestInvalidatorDataDerivedEmptyNeverClearsAll(t *testing.T) {
 	var log callLog
 	e.tx(func(tx port.Tx) error {
 		ltx := loggingTx{tx, &log}
-		if _, err := inv.ClearForMemory(t.Context(), ltx, bank, "uncited"); err != nil {
+		if _, err := inv.ClearForMemory(t.Context(), ltx, bank, uid("uncited")); err != nil {
 			return wrapErr(err)
 		}
 		if _, err := inv.ClearDocumentUnits(t.Context(), ltx, bank, "d-empty"); err != nil {
@@ -245,7 +246,7 @@ func TestInvalidatorDataDerivedEmptyNeverClearsAll(t *testing.T) {
 	e.wantPending(domain.OperationKindConsolidate, 0)
 }
 
-// wrapErr wraps a non-nil error from the Invalidator or the fake store for the test's transaction.
+// wrapErr wraps a non-nil error from the Invalidator or the store for the test's transaction.
 func wrapErr(err error) error {
 	if err != nil {
 		return fmt.Errorf("in test tx: %w", err)
@@ -257,7 +258,7 @@ func wrapErr(err error) error {
 func obsIDs(us []domain.Unit) []port.UnitID {
 	var ids []port.UnitID
 	for _, u := range us {
-		ids = append(ids, u.ID)
+		ids = append(ids, port.UnitID(pgtest.Name(u.ID)))
 	}
 	slices.Sort(ids)
 	return ids

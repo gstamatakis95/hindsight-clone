@@ -2,6 +2,7 @@ package recall
 
 import (
 	"context"
+	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -10,7 +11,7 @@ import (
 	"time"
 )
 
-// addChunks stores document doc with the given chunks (ids, indexes and texts) in the fake store.
+// addChunks stores document doc with the given chunks (ids, indexes and texts) in the store.
 func (e *env) addChunks(t *testing.T, doc port.DocumentID, cs ...domain.Chunk) {
 	t.Helper()
 	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
@@ -24,9 +25,9 @@ func (e *env) addChunks(t *testing.T, doc port.DocumentID, cs ...domain.Chunk) {
 	})
 }
 
-// TestRecallFuzzyTagsThroughFake: a fuzzy leaf resolves against the bank's tags read with the fake's
+// TestRecallFuzzyTagsThroughTagCounts: a fuzzy leaf resolves against the bank's tags read with
 // Reader.TagCounts, so a typo matches the real tag and the filter still excludes other tags.
-func TestRecallFuzzyTagsThroughFake(t *testing.T) {
+func TestRecallFuzzyTagsThroughTagCounts(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	e.add(t, fact("eng", "rocket launch notes", "engineering"), fact("mkt", "rocket launch notes", "marketing"))
 	g := gFuzzy(domain.TagsMatchAnyStrict, "enginering")
@@ -36,7 +37,7 @@ func TestRecallFuzzyTagsThroughFake(t *testing.T) {
 	}
 }
 
-// TestBankTagsMostUsedFirst: the vocabulary read through the fake's TagCounts is ordered by count desc, then
+// TestBankTagsMostUsedFirst: the vocabulary read through Reader.TagCounts is ordered by count desc, then
 // tag, not TagCounts' byte order.
 func TestBankTagsMostUsedFirst(t *testing.T) {
 	e := newEnv(t, envOpts{})
@@ -47,17 +48,18 @@ func TestBankTagsMostUsedFirst(t *testing.T) {
 	}
 }
 
-// TestRecallMemoryStale: Memory.Stale is set from the fake's Reader.StaleScopes on observations whose scope
+// TestRecallMemoryStale: Memory.Stale is set from Reader.StaleScopes on observations whose scope
 // holds an unconsolidated fact, never on facts, and clears once the fact is consolidated.
 func TestRecallMemoryStale(t *testing.T) {
 	e := newEnv(t, envOpts{arms: []Retriever{arm(ArmSemantic, "oa", "ob", "fa")}})
 	e.add(t, fact("fa", "fact a", "a"))
-	e.add(t, domain.Unit{ID: "oa", Bank: testBank, Type: domain.FactTypeObservation, Text: "obs a", Tags: []string{"a"}},
-		domain.Unit{ID: "ob", Bank: testBank, Type: domain.FactTypeObservation, Text: "obs b", Tags: []string{"b"}})
+	e.add(t,
+		domain.Unit{ID: uid("oa"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs a", Tags: []string{"a"}},
+		domain.Unit{ID: uid("ob"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs b", Tags: []string{"b"}})
 	stale := func() map[string]bool {
 		out := map[string]bool{}
 		for _, m := range e.recall(t, RecallRequest{Query: "obs"}).Results {
-			out[string(m.Unit.ID)] = m.Stale
+			out[pgtest.Name(m.Unit.ID)] = m.Stale
 		}
 		return out
 	}
@@ -65,21 +67,21 @@ func TestRecallMemoryStale(t *testing.T) {
 		t.Fatalf("stale = %v, want only oa", got)
 	}
 	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
-		return tx.Units().MarkConsolidated(ctx, []port.UnitID{"fa"}, testNow)
+		return tx.Units().MarkConsolidated(ctx, uids("fa"), testNow)
 	})
 	if got := stale(); got["oa"] {
 		t.Fatalf("stale after consolidation = %v, want none", got)
 	}
 }
 
-// temporalSpy wraps the fake reader and records the temporal queries it serves.
+// temporalSpy wraps the store's reader and records the temporal queries it serves.
 type temporalSpy struct {
 	port.Reader
 	mu sync.Mutex
 	qs []port.TemporalQuery
 }
 
-// SearchTemporal records q and delegates to the fake.
+// SearchTemporal records q and delegates.
 func (s *temporalSpy) SearchTemporal(ctx context.Context, q port.TemporalQuery) ([]port.Hit, error) {
 	s.mu.Lock()
 	s.qs = append(s.qs, q)
@@ -87,7 +89,7 @@ func (s *temporalSpy) SearchTemporal(ctx context.Context, q port.TemporalQuery) 
 	return s.Reader.SearchTemporal(ctx, q)
 }
 
-// TestTemporalArmRelevanceFilter: the temporal arm passes the query embedding and the 0.1 floor, so the fake's
+// TestTemporalArmRelevanceFilter: the temporal arm passes the query embedding and the 0.1 floor, so
 // SearchTemporal drops an in-window unit with no embedding (the filter is on) and keeps the relevant one.
 func TestTemporalArmRelevanceFilter(t *testing.T) {
 	e := newEnv(t, envOpts{})
@@ -106,7 +108,7 @@ func TestTemporalArmRelevanceFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cs) != 1 || cs[0].ID != "rel" {
+	if len(cs) != 1 || cs[0].ID != uid("rel") {
 		t.Fatalf("temporal arm = %+v, want only rel", cs)
 	}
 	if len(spy.qs) != 1 || spy.qs[0].MinSimilarity != 0.1 || len(spy.qs[0].Embedding) == 0 {

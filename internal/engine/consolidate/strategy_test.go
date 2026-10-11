@@ -70,7 +70,7 @@ func TestStrategyPreviewIncomplete(t *testing.T) {
 }
 
 // TestStrategyPreview: each draft strategy lists the scopes it wins and those an earlier one shadows, over
-// the scopes the fake's Reader.ListScopes returns (every scope that holds an observation).
+// the scopes Reader.ListScopes returns (every scope that holds an observation).
 func TestStrategyPreview(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	for i, tags := range [][]string{{"team", "x"}, {"team"}, {"other"}, {}} {
