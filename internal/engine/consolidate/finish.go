@@ -76,12 +76,11 @@ func (r *run) finish(ctx context.Context) error {
 }
 
 // refreshCandidates lists, once per run and outside any transaction, the bank's models with
-// refresh_after_consolidation that are not paused.
+// refresh_after_consolidation that are not paused (Reader.ListMentalModels, every page).
 func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, error) {
-	if r.c.d.Models == nil {
-		return nil, nil
-	}
-	all, err := r.c.d.Models.MentalModels(ctx, r.job.Bank)
+	all, _, err := r.c.d.Store.Read().ListMentalModels(ctx, port.ModelQuery{
+		Bank: r.job.Bank, RefreshAfterConsolidation: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("consolidate: list mental models: %w", err)
 	}

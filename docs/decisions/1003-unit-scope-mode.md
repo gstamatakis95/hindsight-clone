@@ -9,6 +9,10 @@ Round 1 read it from `Document.Overrides.DefaultObservationScopes`. The orchestr
 WP-15 adds a nullable `documents.observation_scopes` column, exposed as
 `domain.Document.ObservationScopes *ObservationScopes`.
 
+**Update (WP-16):** WP-15 landed the column. `unitMode` now reads `Document.ObservationScopes` through
+`tx.Documents().Get`, and `DocumentScopeReader` / `ConsolidatorDeps.DocScopes` are removed. The precedence
+below is unchanged. WP-08 writes the column on every Upsert, and the Reprocessor carries it (decision 1600).
+
 ## Decision
 - **Precedence.** A unit's scope mode comes from, in order:
   1. its document's item-level `observation_scopes` (WP-15's column), read through the consumer

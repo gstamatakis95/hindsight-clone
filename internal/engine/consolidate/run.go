@@ -149,24 +149,17 @@ func (r *run) unitMode(
 	return domain.ObservationScopes{Mode: domain.ScopeModeCombined}, nil
 }
 
-// docMode reads a document's own scope fan-out: the item's observation_scopes, else its overrides'
-// default; nil when neither is set or the document is gone.
+// docMode reads a document's own scope fan-out: the item's observation_scopes (Document.ObservationScopes),
+// else its overrides' default; nil when neither is set or the document is gone.
 func (r *run) docMode(ctx context.Context, tx port.Tx, doc port.DocumentID) (*domain.ObservationScopes, error) {
-	if r.c.d.DocScopes != nil {
-		m, err := r.c.d.DocScopes.ItemScopes(ctx, tx, r.job.Bank, doc)
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			return nil, fmt.Errorf("observation scopes of document %s: %w", doc, err)
-		}
-		if m != nil {
-			return m, nil
-		}
-	}
 	d, err := tx.Documents().Get(ctx, r.job.Bank, doc)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return nil, nil
 	case err != nil:
 		return nil, fmt.Errorf("document %s: %w", doc, err)
+	case d.ObservationScopes != nil:
+		return d.ObservationScopes, nil
 	case d.Overrides != nil:
 		return d.Overrides.DefaultObservationScopes, nil
 	}

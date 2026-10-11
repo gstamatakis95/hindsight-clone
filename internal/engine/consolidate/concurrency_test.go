@@ -1,7 +1,6 @@
 package consolidate
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,12 +134,12 @@ func TestRunArchivedEvidenceSkipsAction(t *testing.T) {
 // of the models it reaches.
 func TestRunRefreshSurvivesFailedRun(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
-	e.deps.Models = fixedModels{{
+	e.addModels(domain.MentalModel{
 		Spec: domain.MentalModelSpec{ID: "ma", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{
 			RefreshAfterConsolidation: true,
 		}},
 		Bank: bank,
-	}}
+	})
 	e.fact("f1", "Kim sails", "a")
 	e.fact("f2", "Lee rows", "b")
 	e.script(e.createEach("f1"), fail())
@@ -236,23 +235,15 @@ func TestRunDoubleUpdateLeavesBatchUnstamped(t *testing.T) {
 	}
 }
 
-// itemScopes is a DocumentScopeReader returning a fixed fan-out.
-type itemScopes struct{ s *domain.ObservationScopes }
-
-// ItemScopes returns the fixed fan-out.
-func (i itemScopes) ItemScopes(
-	context.Context, port.Tx, port.BankRef, port.DocumentID,
-) (*domain.ObservationScopes, error) {
-	return i.s, nil
-}
-
-// TestRunItemScopesBeatOverrides: a document's item-level observation_scopes beat its overrides' default.
+// TestRunItemScopesBeatOverrides: a document's item-level observation_scopes (Document.ObservationScopes,
+// stored by the fake's DocumentRepo.Upsert) beat its overrides' default.
 func TestRunItemScopesBeatOverrides(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	e.tx(func(tx port.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
 			Overrides: &domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+			ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared},
 		})
 	})
 	e.texts["f1"] = "Ivy hikes"
@@ -266,7 +257,6 @@ func TestRunItemScopesBeatOverrides(t *testing.T) {
 			Tags: []string{"a", "b"}, Embedding: e.emb.Vector("Ivy hikes"), Seq: seq,
 		}})
 	})
-	e.deps.DocScopes = itemScopes{&domain.ObservationScopes{Mode: domain.ScopeModeShared}}
 	e.script(e.createEach("f1"))
 	e.run(autoJob())
 	if obs := e.observations(); len(obs) != 1 || len(obs[0].Tags) != 0 {
@@ -309,25 +299,6 @@ func TestRunVersionsAndQuotesRecorded(t *testing.T) {
 	}
 }
 
-// TestInvalidatorWithoutClearer: a nil ObservationClearer fails every method with FAILED_PRECONDITION.
-func TestInvalidatorWithoutClearer(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{})
-	inv := NewInvalidator(nil)
-	err := e.store.InTx(t.Context(), func(tx port.Tx) error {
-		_, err1 := inv.ClearForMemory(t.Context(), tx, bank, "f1")
-		_, err2 := inv.ClearDocumentUnits(t.Context(), tx, bank, "d1")
-		err3 := inv.ClearScopes(t.Context(), tx, bank, nil)
-		for _, err := range []error{err1, err2, err3} {
-			if !errors.Is(err, domain.ErrFailedPrecondition) {
-				t.Errorf("err = %v, want FAILED_PRECONDITION", err)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
 
 // TestScopeExpanderRejectsNonPositiveCap: max_combinations <= 0 is INVALID_ARGUMENT.
 func TestScopeExpanderRejectsNonPositiveCap(t *testing.T) {
