@@ -17,7 +17,7 @@ import (
 // minute, so a few minutes absorb a slow or skipped tick; an older fire time waits for the next one.
 const cronGrace = 5 * time.Minute
 
-// parseCron parses a refresh_cron expression: exactly 5 fields (minute hour dom month dow), evaluated in
+// parseCron parses a schedule.cron expression: exactly 5 fields (minute hour dom month dow), evaluated in
 // UTC. It rejects @ descriptors and a TZ= or CRON_TZ= prefix.
 func parseCron(expr string) (cron.Schedule, error) {
 	expr = strings.TrimSpace(expr)
@@ -39,7 +39,7 @@ func parseCron(expr string) (cron.Schedule, error) {
 }
 
 // EnqueueDueCronRefreshes is the maintenance tick's cron sweep. It enqueues one automatic refresh per model whose
-// refresh_cron has an unserved fire time F in (now - cronGrace, now]: no refresh operation of the model was
+// schedule.cron has an unserved fire time F in (now - cronGrace, now]: no refresh operation of the model was
 // created at or after F, and F is not before the model's creation. Each refresh goes through decide (paused and
 // fresh models are skipped; the rest are parked for the debounce or interval floor) and is enqueued in its own
 // short transaction, joining a queued one; tombstoned banks are skipped. It returns how many refreshes it
@@ -68,7 +68,7 @@ func (s *Service) EnqueueDueCronRefreshes(ctx context.Context) (int, error) {
 // (no refresh operation created at or after F) and not before the model's creation. An unparsable schedule
 // never fires.
 func cronDue(cm store.CronModel, now time.Time) bool {
-	expr := strings.TrimSpace(cm.Model.Spec.Trigger.RefreshCron)
+	expr := strings.TrimSpace(cm.Model.Spec.Schedule.Cron)
 	if expr == "" {
 		return false
 	}

@@ -12,7 +12,7 @@ import (
 // resolveScope applies the scope defaults to m (domain.MentalModelSpec.ScopeFilter): the match mode defaults to
 // all_strict when the model is tagged (any otherwise), and tag groups override the flat tags.
 func resolveScope(m domain.MentalModel) ResolvedScope {
-	return ResolvedScope{Tags: m.Spec.ScopeFilter(), FactTypes: slices.Clone(m.Spec.Trigger.FactTypes)}
+	return ResolvedScope{Tags: m.Spec.ScopeFilter(), FactTypes: slices.Clone(m.Spec.Scope.FactTypes)}
 }
 
 // tagFilter is the scope as the recall and reflect libraries take it.

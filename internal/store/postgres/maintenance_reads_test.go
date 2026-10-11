@@ -47,8 +47,8 @@ func TestMaintenanceReads(t *testing.T) {
 func mtCreateModel(t *testing.T, s store.DB, b domain.BankRef, id domain.MentalModelID, cron string) {
 	t.Helper()
 	m := sampleModel(b, id)
-	m.Spec.Trigger.RefreshCron = cron
-	m.Spec.Trigger.RefreshAfterConsolidation = cron == ""
+	m.Spec.Schedule.Cron = cron
+	m.Spec.Schedule.AfterConsolidation = cron == ""
 	inTx(t, s, func(tx store.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
 }
 
@@ -249,8 +249,8 @@ func mtWantCron(t *testing.T, ms []store.CronModel, want []string, last map[stri
 	wantSeq(t, "CronModels", mtCronKeys(ms), want)
 	for _, m := range ms {
 		key := mtModelKey(m.Model.Bank, m.Model.Spec.ID)
-		if m.Model.Spec.Trigger.RefreshCron != mtCron {
-			t.Errorf("CronModels %s refresh_cron = %q, want %q", key, m.Model.Spec.Trigger.RefreshCron, mtCron)
+		if m.Model.Spec.Schedule.Cron != mtCron {
+			t.Errorf("CronModels %s schedule.cron = %q, want %q", key, m.Model.Spec.Schedule.Cron, mtCron)
 		}
 		if w := last[key]; !m.LastRefreshEnqueuedAt.Equal(w) {
 			t.Errorf("CronModels %s LastRefreshEnqueuedAt = %v, want %v", key, m.LastRefreshEnqueuedAt, w)

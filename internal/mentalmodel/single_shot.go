@@ -123,12 +123,12 @@ func (s *singleShot) render(
 	return system, user, nil
 }
 
-// budget is the trigger's budget, default mid.
+// budget is the spec's budget, default mid.
 func budget(m domain.MentalModel) domain.Budget {
-	if m.Spec.Trigger.Budget == domain.BudgetUnspecified {
+	if m.Spec.Budget == domain.BudgetUnspecified {
 		return domain.BudgetMid
 	}
-	return m.Spec.Trigger.Budget
+	return m.Spec.Budget
 }
 
 // scopeDirectives returns the directives synthesize applies to m: the bank's active directives that

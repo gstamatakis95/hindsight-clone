@@ -19,7 +19,7 @@ const (
 	pageSnippetRunes = 200
 )
 
-// SearchPagesRequest mirrors memory.v1.SearchPagesRequest.
+// SearchPagesRequest mirrors memory.v1.SearchMentalModelsRequest.
 type SearchPagesRequest struct {
 	// Bank is the bank searched.
 	Bank domain.BankRef

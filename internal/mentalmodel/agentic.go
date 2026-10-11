@@ -95,16 +95,17 @@ func (a *agentic) request(
 	m domain.MentalModel, cfg domain.BankConfig, window domain.SeqRange,
 ) (reflect.Request, error) {
 	scope := resolveScope(m)
-	t := m.Spec.Trigger
 	facts, outputs := true, false
 	req := reflect.Request{
 		Bank: m.Bank, Query: m.Spec.SourceQuery, Tags: scope.tagFilter(), Budget: budget(m),
 		Include:   reflect.Include{Facts: &facts, ToolCalls: true, ToolOutputs: &outputs},
 		Overrides: &cfg, Seq: window, Types: scope.FactTypes,
-		ExcludeMentalModels:   t.ExcludeMentalModels,
-		ExcludeMentalModelIDs: appendUnique(slices.Clone(t.ExcludeMentalModelIDs), m.Spec.ID),
-		RecallInclude:         domain.RecallInclude{Chunks: t.IncludeChunks, ChunksMaxTokens: t.RecallChunksMaxTokens},
-		AsDocument:            true,
+		ExcludeMentalModels:   m.Spec.ExcludeMentalModels,
+		ExcludeMentalModelIDs: appendUnique(slices.Clone(m.Spec.ExcludeMentalModelIDs), m.Spec.ID),
+		RecallInclude: domain.RecallInclude{
+			Chunks: m.Spec.IncludeChunks, ChunksMaxTokens: m.Spec.RecallChunksMaxTokens,
+		},
+		AsDocument: true,
 	}
 	if n := maxContentTokens(m, cfg); n > 0 {
 		req.MaxTokens = &n

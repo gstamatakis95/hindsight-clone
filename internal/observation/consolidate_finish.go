@@ -61,7 +61,7 @@ func (r *run) finish(ctx context.Context) error {
 }
 
 // refreshCandidates lists, once per run and outside any transaction, the bank's models with
-// refresh_after_consolidation that are not paused (Reader.ListMentalModels, every page).
+// schedule.after_consolidation that are not paused (Reader.ListMentalModels, every page).
 func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, error) {
 	all, _, err := r.c.d.DB.Read().ListMentalModels(ctx, store.ModelQuery{
 		Bank: r.job.Bank, RefreshAfterConsolidation: true,
@@ -71,7 +71,7 @@ func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, erro
 	}
 	var out []domain.MentalModel
 	for _, m := range all {
-		if m.Spec.Trigger.RefreshAfterConsolidation && !m.AutoRefreshPaused {
+		if m.Spec.Schedule.AfterConsolidation && !m.AutoRefreshPaused {
 			out = append(out, m)
 		}
 	}

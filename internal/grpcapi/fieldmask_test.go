@@ -146,29 +146,29 @@ func TestFieldMaskInvalid(t *testing.T) {
 	}
 }
 
-// TestFieldMaskSpecPatch checks a spec patch, including a nested trigger path and RefreshOverrides paths
+// TestFieldMaskSpecPatch checks a spec patch, including a nested schedule path and RefreshOverrides paths
 // mapped onto the stored config; the id is kept.
 func TestFieldMaskSpecPatch(t *testing.T) {
 	patch, err := specPatch(&pb.MentalModelSpec{
-		Name: "new", Trigger: &pb.RefreshTrigger{RefreshCron: "0 * * * *"},
+		Name: "new", Schedule: &pb.RefreshSchedule{When: &pb.RefreshSchedule_Cron{Cron: "0 * * * *"}},
 		Overrides: &pb.RefreshOverrides{
 			Reflect: &pb.ReflectConfig{Mission: "m"}, MaxDeltaRatio: ptr(0.5),
 			MentalModelModel: &pb.ModelBinding{Model: "cheap"},
 		},
-	}, mask("name", "trigger.refresh_cron", "tags", "overrides.reflect.mission", "overrides.max_delta_ratio",
+	}, mask("name", "schedule.cron", "tags", "overrides.reflect.mission", "overrides.max_delta_ratio",
 		"overrides.mental_model_model"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cur := domain.MentalModelSpec{
-		ID: "m", Name: "old", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{KeepTrace: true},
+		ID: "m", Name: "old", Tags: []string{"a"}, KeepTrace: true,
 	}
 	got, err := patch(cur)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := domain.MentalModelSpec{
-		ID: "m", Name: "new", Tags: []string{}, Trigger: domain.RefreshTrigger{KeepTrace: true, RefreshCron: "0 * * * *"},
+		ID: "m", Name: "new", Tags: []string{}, KeepTrace: true, Schedule: domain.RefreshSchedule{Cron: "0 * * * *"},
 		Overrides: &domain.BankConfig{
 			Reflect:      &domain.ReflectConfig{Mission: "m"},
 			MentalModels: &domain.MentalModelConfig{MaxDeltaRatio: ptr(0.5)},
@@ -177,6 +177,42 @@ func TestFieldMaskSpecPatch(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got, want)
+	}
+}
+
+// TestFieldMaskScheduleOneof checks that patching either member of schedule.when clears the other, with an
+// implicit or an explicit mask, and keeps the interval floor.
+func TestFieldMaskScheduleOneof(t *testing.T) {
+	floor := 60
+	cases := []struct {
+		name  string
+		patch *pb.RefreshSchedule
+		mask  *fieldmaskpb.FieldMask
+		cur   domain.RefreshSchedule
+		want  domain.RefreshSchedule
+	}{
+		{
+			"cron to after_consolidation, implicit mask",
+			&pb.RefreshSchedule{When: &pb.RefreshSchedule_AfterConsolidation{AfterConsolidation: true}}, nil,
+			domain.RefreshSchedule{Cron: "0 * * * *", MinIntervalSeconds: &floor},
+			domain.RefreshSchedule{AfterConsolidation: true, MinIntervalSeconds: &floor},
+		},
+		{
+			"after_consolidation to cron, explicit mask",
+			&pb.RefreshSchedule{When: &pb.RefreshSchedule_Cron{Cron: "0 * * * *"}}, mask("schedule.cron"),
+			domain.RefreshSchedule{AfterConsolidation: true},
+			domain.RefreshSchedule{Cron: "0 * * * *"},
+		},
+	}
+	for _, tc := range cases {
+		patch, err := specPatch(&pb.MentalModelSpec{Schedule: tc.patch}, tc.mask)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		got, err := patch(domain.MentalModelSpec{ID: "m", Schedule: tc.cur})
+		if err != nil || !reflect.DeepEqual(got.Schedule, tc.want) {
+			t.Errorf("%s: got %+v %v, want %+v", tc.name, got.Schedule, err, tc.want)
+		}
 	}
 }
 
@@ -202,19 +238,23 @@ func TestFieldMaskImpliedLeaves(t *testing.T) {
 	if got, _ := empty(baseConfig()); !reflect.DeepEqual(got, baseConfig()) {
 		t.Fatalf("empty nested message changed the config: %+v", got)
 	}
-	spec, err := specPatch(&pb.MentalModelSpec{Trigger: &pb.RefreshTrigger{RefreshCron: "0 * * * *"}}, nil)
+	minInterval := int32(60)
+	spec, err := specPatch(&pb.MentalModelSpec{Schedule: &pb.RefreshSchedule{MinIntervalSeconds: &minInterval}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cur := domain.MentalModelSpec{ID: "m", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{
-		Tags: domain.TagFilter{Match: domain.TagsMatchAll}, FactTypes: []domain.FactType{domain.FactTypeWorld},
-	}}
+	cur := domain.MentalModelSpec{
+		ID: "m", Tags: []string{"a"}, Schedule: domain.RefreshSchedule{Cron: "0 * * * *"},
+		Scope: domain.MentalModelScope{
+			Tags: domain.TagFilter{Match: domain.TagsMatchAll}, FactTypes: []domain.FactType{domain.FactTypeWorld},
+		},
+	}
 	gotSpec, err := spec(cur)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wantSpec := cur
-	wantSpec.Trigger.RefreshCron = "0 * * * *"
+	wantSpec.Schedule.MinIntervalSeconds = ptr(60)
 	if !reflect.DeepEqual(gotSpec, wantSpec) {
 		t.Fatalf("got  %+v\nwant %+v", gotSpec, wantSpec)
 	}

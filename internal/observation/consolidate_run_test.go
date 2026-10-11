@@ -234,19 +234,19 @@ func (e *env) addModels(ms ...domain.MentalModel) {
 	})
 }
 
-// TestRunTriggersRefreshes: models with refresh_after_consolidation whose scope a changed scope reaches
+// TestRunTriggersRefreshes: models with schedule.after_consolidation whose scope a changed scope reaches
 // get a debounced refresh (or one parked at the end of their interval floor); paused, cron and
 // unreached models do not.
 func TestRunTriggersRefreshes(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	now := e.clock.Now()
 	last := now.Add(-10 * time.Second)
-	after := domain.RefreshTrigger{RefreshAfterConsolidation: true}
+	after := domain.RefreshSchedule{AfterConsolidation: true}
 	floor := after
-	floor.MinRefreshIntervalSeconds = ptr(120)
-	model := func(id string, tags []string, tr domain.RefreshTrigger) domain.MentalModel {
+	floor.MinIntervalSeconds = ptr(120)
+	model := func(id string, tags []string, sc domain.RefreshSchedule) domain.MentalModel {
 		return domain.MentalModel{
-			Spec: domain.MentalModelSpec{ID: domain.MentalModelID(id), Tags: tags, Trigger: tr},
+			Spec: domain.MentalModelSpec{ID: domain.MentalModelID(id), Tags: tags, Schedule: sc},
 			Bank: bank, LastRefreshedAt: &last,
 		}
 	}
@@ -257,7 +257,7 @@ func TestRunTriggersRefreshes(t *testing.T) {
 		model("untagged", nil, after),
 		model("floor", []string{"x"}, floor),
 		model("other", []string{"y"}, after),
-		model("cron", []string{"x"}, domain.RefreshTrigger{RefreshCron: "0 * * * *"}),
+		model("cron", []string{"x"}, domain.RefreshSchedule{Cron: "0 * * * *"}),
 		paused,
 	)
 	e.fact("f1", "Jack climbs", "x")
@@ -297,10 +297,10 @@ func TestRunTriggersRefreshes(t *testing.T) {
 
 // TestModelReaches: the shared scope never reaches a tagged model; tag groups are AND-ed.
 func TestModelReaches(t *testing.T) {
-	m := func(tags []string, tr domain.RefreshTrigger) domain.MentalModel {
-		return domain.MentalModel{Spec: domain.MentalModelSpec{Tags: tags, Trigger: tr}}
+	m := func(tags []string, sc domain.MentalModelScope) domain.MentalModel {
+		return domain.MentalModel{Spec: domain.MentalModelSpec{Tags: tags, Scope: sc}}
 	}
-	trig := func(f domain.TagFilter) domain.RefreshTrigger { return domain.RefreshTrigger{Tags: f} }
+	trig := func(f domain.TagFilter) domain.MentalModelScope { return domain.MentalModelScope{Tags: f} }
 	group := domain.TagGroup{Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{Tags: []string{"x"}}}
 	tests := []struct {
 		name  string
@@ -308,11 +308,11 @@ func TestModelReaches(t *testing.T) {
 		tags  []string
 		want  bool
 	}{
-		{"untagged model, shared scope", m(nil, domain.RefreshTrigger{}), nil, true},
-		{"untagged model, tagged scope", m(nil, domain.RefreshTrigger{}), []string{"x"}, true},
-		{"tagged model, shared scope", m([]string{"x"}, domain.RefreshTrigger{}), nil, false},
-		{"tagged model, containing scope", m([]string{"x"}, domain.RefreshTrigger{}), []string{"x", "y"}, true},
-		{"tagged model, other scope", m([]string{"x"}, domain.RefreshTrigger{}), []string{"y"}, false},
+		{"untagged model, shared scope", m(nil, domain.MentalModelScope{}), nil, true},
+		{"untagged model, tagged scope", m(nil, domain.MentalModelScope{}), []string{"x"}, true},
+		{"tagged model, shared scope", m([]string{"x"}, domain.MentalModelScope{}), nil, false},
+		{"tagged model, containing scope", m([]string{"x"}, domain.MentalModelScope{}), []string{"x", "y"}, true},
+		{"tagged model, other scope", m([]string{"x"}, domain.MentalModelScope{}), []string{"y"}, false},
 		{"exact mode", m([]string{"x"}, trig(domain.TagFilter{Match: domain.TagsMatchExact})), []string{"x", "y"}, false},
 		{"tag groups", m(nil, trig(domain.TagFilter{Groups: []domain.TagGroup{group}})), []string{"x"}, true},
 		{"tag groups, shared", m(nil, trig(domain.TagFilter{Groups: []domain.TagGroup{group}})), nil, false},

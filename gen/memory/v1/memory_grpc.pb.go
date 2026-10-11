@@ -35,8 +35,8 @@
 // Paging. Every List RPC takes page_size and page_token and returns next_page_token (empty = no more pages).
 // page_size 0 = 100, larger than 1000 = 1000, negative = INVALID_ARGUMENT. A page token is opaque and only
 // valid for the same request; a malformed one is INVALID_ARGUMENT. ListEvents pages by sequence instead
-// (page_size + after_seq / next_after_seq), and SearchPages takes max_results (0 = 10, larger than 100 = 100,
-// negative = INVALID_ARGUMENT).
+// (page_size + after_seq / next_after_seq), and SearchMentalModels takes max_results (0 = 10, larger than
+// 100 = 100, negative = INVALID_ARGUMENT).
 //
 // Tag filters. Every request that filters by tag takes one TagFilter: flat tags under a match mode, or
 // boolean tag groups (setting both = INVALID_ARGUMENT). Each TagFilter field states its default match mode.
@@ -1153,17 +1153,16 @@ var ObservationService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	MentalModelService_CreateMentalModel_FullMethodName     = "/memory.v1.MentalModelService/CreateMentalModel"
-	MentalModelService_GetMentalModel_FullMethodName        = "/memory.v1.MentalModelService/GetMentalModel"
-	MentalModelService_ListMentalModels_FullMethodName      = "/memory.v1.MentalModelService/ListMentalModels"
-	MentalModelService_UpdateMentalModel_FullMethodName     = "/memory.v1.MentalModelService/UpdateMentalModel"
-	MentalModelService_RefreshMentalModel_FullMethodName    = "/memory.v1.MentalModelService/RefreshMentalModel"
-	MentalModelService_DryRunRefresh_FullMethodName         = "/memory.v1.MentalModelService/DryRunRefresh"
-	MentalModelService_ClearMentalModel_FullMethodName      = "/memory.v1.MentalModelService/ClearMentalModel"
-	MentalModelService_GetMentalModelHistory_FullMethodName = "/memory.v1.MentalModelService/GetMentalModelHistory"
-	MentalModelService_DeleteMentalModel_FullMethodName     = "/memory.v1.MentalModelService/DeleteMentalModel"
-	MentalModelService_DeleteFolder_FullMethodName          = "/memory.v1.MentalModelService/DeleteFolder"
-	MentalModelService_SearchPages_FullMethodName           = "/memory.v1.MentalModelService/SearchPages"
+	MentalModelService_CreateMentalModel_FullMethodName         = "/memory.v1.MentalModelService/CreateMentalModel"
+	MentalModelService_GetMentalModel_FullMethodName            = "/memory.v1.MentalModelService/GetMentalModel"
+	MentalModelService_ListMentalModels_FullMethodName          = "/memory.v1.MentalModelService/ListMentalModels"
+	MentalModelService_UpdateMentalModel_FullMethodName         = "/memory.v1.MentalModelService/UpdateMentalModel"
+	MentalModelService_RefreshMentalModel_FullMethodName        = "/memory.v1.MentalModelService/RefreshMentalModel"
+	MentalModelService_PreviewMentalModelRefresh_FullMethodName = "/memory.v1.MentalModelService/PreviewMentalModelRefresh"
+	MentalModelService_ListMentalModelHistory_FullMethodName    = "/memory.v1.MentalModelService/ListMentalModelHistory"
+	MentalModelService_DeleteMentalModel_FullMethodName         = "/memory.v1.MentalModelService/DeleteMentalModel"
+	MentalModelService_DeleteMentalModelFolder_FullMethodName   = "/memory.v1.MentalModelService/DeleteMentalModelFolder"
+	MentalModelService_SearchMentalModels_FullMethodName        = "/memory.v1.MentalModelService/SearchMentalModels"
 )
 
 // MentalModelServiceClient is the client API for MentalModelService service.
@@ -1174,28 +1173,26 @@ const (
 type MentalModelServiceClient interface {
 	// CreateMentalModel stores a model and enqueues its first build asynchronously.
 	CreateMentalModel(ctx context.Context, in *CreateMentalModelRequest, opts ...grpc.CallOption) (*CreateMentalModelResponse, error)
-	// GetMentalModel returns one model at the requested detail, default DETAIL_FULL.
+	// GetMentalModel returns one model in the requested view, default MENTAL_MODEL_VIEW_FULL.
 	GetMentalModel(ctx context.Context, in *GetMentalModelRequest, opts ...grpc.CallOption) (*GetMentalModelResponse, error)
-	// ListMentalModels pages through models with filters, default DETAIL_METADATA.
+	// ListMentalModels pages through models with filters, default MENTAL_MODEL_VIEW_BASIC.
 	ListMentalModels(ctx context.Context, in *ListMentalModelsRequest, opts ...grpc.CallOption) (*ListMentalModelsResponse, error)
 	// UpdateMentalModel patches a model's spec with a FieldMask.
 	UpdateMentalModel(ctx context.Context, in *UpdateMentalModelRequest, opts ...grpc.CallOption) (*UpdateMentalModelResponse, error)
 	// RefreshMentalModel enqueues a manual refresh. It ignores the interval floor, releases a parked
 	// refresh, joins and upgrades a queued one, and on success clears auto_refresh_paused.
 	RefreshMentalModel(ctx context.Context, in *RefreshMentalModelRequest, opts ...grpc.CallOption) (*RefreshMentalModelResponse, error)
-	// DryRunRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes nothing,
-	// not even usage.
-	DryRunRefresh(ctx context.Context, in *DryRunRefreshRequest, opts ...grpc.CallOption) (*DryRunRefreshResponse, error)
-	// ClearMentalModel empties a model's content so that its next refresh is full.
-	ClearMentalModel(ctx context.Context, in *ClearMentalModelRequest, opts ...grpc.CallOption) (*ClearMentalModelResponse, error)
-	// GetMentalModelHistory pages through a model's versions and refresh failures.
-	GetMentalModelHistory(ctx context.Context, in *GetMentalModelHistoryRequest, opts ...grpc.CallOption) (*GetMentalModelHistoryResponse, error)
+	// PreviewMentalModelRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes
+	// nothing, not even usage.
+	PreviewMentalModelRefresh(ctx context.Context, in *PreviewMentalModelRefreshRequest, opts ...grpc.CallOption) (*PreviewMentalModelRefreshResponse, error)
+	// ListMentalModelHistory pages through a model's versions and refresh failures, newest first.
+	ListMentalModelHistory(ctx context.Context, in *ListMentalModelHistoryRequest, opts ...grpc.CallOption) (*ListMentalModelHistoryResponse, error)
 	// DeleteMentalModel deletes one model and its history.
 	DeleteMentalModel(ctx context.Context, in *DeleteMentalModelRequest, opts ...grpc.CallOption) (*DeleteMentalModelResponse, error)
-	// DeleteFolder deletes every model under a folder path, recursively.
-	DeleteFolder(ctx context.Context, in *DeleteFolderRequest, opts ...grpc.CallOption) (*DeleteFolderResponse, error)
-	// SearchPages ranks whole pages by fused full-text and semantic scores, without rerank.
-	SearchPages(ctx context.Context, in *SearchPagesRequest, opts ...grpc.CallOption) (*SearchPagesResponse, error)
+	// DeleteMentalModelFolder deletes every model under a folder path, recursively.
+	DeleteMentalModelFolder(ctx context.Context, in *DeleteMentalModelFolderRequest, opts ...grpc.CallOption) (*DeleteMentalModelFolderResponse, error)
+	// SearchMentalModels ranks whole models by fused full-text and semantic scores, without rerank.
+	SearchMentalModels(ctx context.Context, in *SearchMentalModelsRequest, opts ...grpc.CallOption) (*SearchMentalModelsResponse, error)
 }
 
 type mentalModelServiceClient struct {
@@ -1256,30 +1253,20 @@ func (c *mentalModelServiceClient) RefreshMentalModel(ctx context.Context, in *R
 	return out, nil
 }
 
-func (c *mentalModelServiceClient) DryRunRefresh(ctx context.Context, in *DryRunRefreshRequest, opts ...grpc.CallOption) (*DryRunRefreshResponse, error) {
+func (c *mentalModelServiceClient) PreviewMentalModelRefresh(ctx context.Context, in *PreviewMentalModelRefreshRequest, opts ...grpc.CallOption) (*PreviewMentalModelRefreshResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DryRunRefreshResponse)
-	err := c.cc.Invoke(ctx, MentalModelService_DryRunRefresh_FullMethodName, in, out, cOpts...)
+	out := new(PreviewMentalModelRefreshResponse)
+	err := c.cc.Invoke(ctx, MentalModelService_PreviewMentalModelRefresh_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *mentalModelServiceClient) ClearMentalModel(ctx context.Context, in *ClearMentalModelRequest, opts ...grpc.CallOption) (*ClearMentalModelResponse, error) {
+func (c *mentalModelServiceClient) ListMentalModelHistory(ctx context.Context, in *ListMentalModelHistoryRequest, opts ...grpc.CallOption) (*ListMentalModelHistoryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ClearMentalModelResponse)
-	err := c.cc.Invoke(ctx, MentalModelService_ClearMentalModel_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *mentalModelServiceClient) GetMentalModelHistory(ctx context.Context, in *GetMentalModelHistoryRequest, opts ...grpc.CallOption) (*GetMentalModelHistoryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetMentalModelHistoryResponse)
-	err := c.cc.Invoke(ctx, MentalModelService_GetMentalModelHistory_FullMethodName, in, out, cOpts...)
+	out := new(ListMentalModelHistoryResponse)
+	err := c.cc.Invoke(ctx, MentalModelService_ListMentalModelHistory_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1296,20 +1283,20 @@ func (c *mentalModelServiceClient) DeleteMentalModel(ctx context.Context, in *De
 	return out, nil
 }
 
-func (c *mentalModelServiceClient) DeleteFolder(ctx context.Context, in *DeleteFolderRequest, opts ...grpc.CallOption) (*DeleteFolderResponse, error) {
+func (c *mentalModelServiceClient) DeleteMentalModelFolder(ctx context.Context, in *DeleteMentalModelFolderRequest, opts ...grpc.CallOption) (*DeleteMentalModelFolderResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteFolderResponse)
-	err := c.cc.Invoke(ctx, MentalModelService_DeleteFolder_FullMethodName, in, out, cOpts...)
+	out := new(DeleteMentalModelFolderResponse)
+	err := c.cc.Invoke(ctx, MentalModelService_DeleteMentalModelFolder_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *mentalModelServiceClient) SearchPages(ctx context.Context, in *SearchPagesRequest, opts ...grpc.CallOption) (*SearchPagesResponse, error) {
+func (c *mentalModelServiceClient) SearchMentalModels(ctx context.Context, in *SearchMentalModelsRequest, opts ...grpc.CallOption) (*SearchMentalModelsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SearchPagesResponse)
-	err := c.cc.Invoke(ctx, MentalModelService_SearchPages_FullMethodName, in, out, cOpts...)
+	out := new(SearchMentalModelsResponse)
+	err := c.cc.Invoke(ctx, MentalModelService_SearchMentalModels_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1324,28 +1311,26 @@ func (c *mentalModelServiceClient) SearchPages(ctx context.Context, in *SearchPa
 type MentalModelServiceServer interface {
 	// CreateMentalModel stores a model and enqueues its first build asynchronously.
 	CreateMentalModel(context.Context, *CreateMentalModelRequest) (*CreateMentalModelResponse, error)
-	// GetMentalModel returns one model at the requested detail, default DETAIL_FULL.
+	// GetMentalModel returns one model in the requested view, default MENTAL_MODEL_VIEW_FULL.
 	GetMentalModel(context.Context, *GetMentalModelRequest) (*GetMentalModelResponse, error)
-	// ListMentalModels pages through models with filters, default DETAIL_METADATA.
+	// ListMentalModels pages through models with filters, default MENTAL_MODEL_VIEW_BASIC.
 	ListMentalModels(context.Context, *ListMentalModelsRequest) (*ListMentalModelsResponse, error)
 	// UpdateMentalModel patches a model's spec with a FieldMask.
 	UpdateMentalModel(context.Context, *UpdateMentalModelRequest) (*UpdateMentalModelResponse, error)
 	// RefreshMentalModel enqueues a manual refresh. It ignores the interval floor, releases a parked
 	// refresh, joins and upgrades a queued one, and on success clears auto_refresh_paused.
 	RefreshMentalModel(context.Context, *RefreshMentalModelRequest) (*RefreshMentalModelResponse, error)
-	// DryRunRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes nothing,
-	// not even usage.
-	DryRunRefresh(context.Context, *DryRunRefreshRequest) (*DryRunRefreshResponse, error)
-	// ClearMentalModel empties a model's content so that its next refresh is full.
-	ClearMentalModel(context.Context, *ClearMentalModelRequest) (*ClearMentalModelResponse, error)
-	// GetMentalModelHistory pages through a model's versions and refresh failures.
-	GetMentalModelHistory(context.Context, *GetMentalModelHistoryRequest) (*GetMentalModelHistoryResponse, error)
+	// PreviewMentalModelRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes
+	// nothing, not even usage.
+	PreviewMentalModelRefresh(context.Context, *PreviewMentalModelRefreshRequest) (*PreviewMentalModelRefreshResponse, error)
+	// ListMentalModelHistory pages through a model's versions and refresh failures, newest first.
+	ListMentalModelHistory(context.Context, *ListMentalModelHistoryRequest) (*ListMentalModelHistoryResponse, error)
 	// DeleteMentalModel deletes one model and its history.
 	DeleteMentalModel(context.Context, *DeleteMentalModelRequest) (*DeleteMentalModelResponse, error)
-	// DeleteFolder deletes every model under a folder path, recursively.
-	DeleteFolder(context.Context, *DeleteFolderRequest) (*DeleteFolderResponse, error)
-	// SearchPages ranks whole pages by fused full-text and semantic scores, without rerank.
-	SearchPages(context.Context, *SearchPagesRequest) (*SearchPagesResponse, error)
+	// DeleteMentalModelFolder deletes every model under a folder path, recursively.
+	DeleteMentalModelFolder(context.Context, *DeleteMentalModelFolderRequest) (*DeleteMentalModelFolderResponse, error)
+	// SearchMentalModels ranks whole models by fused full-text and semantic scores, without rerank.
+	SearchMentalModels(context.Context, *SearchMentalModelsRequest) (*SearchMentalModelsResponse, error)
 	mustEmbedUnimplementedMentalModelServiceServer()
 }
 
@@ -1371,23 +1356,20 @@ func (UnimplementedMentalModelServiceServer) UpdateMentalModel(context.Context, 
 func (UnimplementedMentalModelServiceServer) RefreshMentalModel(context.Context, *RefreshMentalModelRequest) (*RefreshMentalModelResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshMentalModel not implemented")
 }
-func (UnimplementedMentalModelServiceServer) DryRunRefresh(context.Context, *DryRunRefreshRequest) (*DryRunRefreshResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DryRunRefresh not implemented")
+func (UnimplementedMentalModelServiceServer) PreviewMentalModelRefresh(context.Context, *PreviewMentalModelRefreshRequest) (*PreviewMentalModelRefreshResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreviewMentalModelRefresh not implemented")
 }
-func (UnimplementedMentalModelServiceServer) ClearMentalModel(context.Context, *ClearMentalModelRequest) (*ClearMentalModelResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ClearMentalModel not implemented")
-}
-func (UnimplementedMentalModelServiceServer) GetMentalModelHistory(context.Context, *GetMentalModelHistoryRequest) (*GetMentalModelHistoryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetMentalModelHistory not implemented")
+func (UnimplementedMentalModelServiceServer) ListMentalModelHistory(context.Context, *ListMentalModelHistoryRequest) (*ListMentalModelHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMentalModelHistory not implemented")
 }
 func (UnimplementedMentalModelServiceServer) DeleteMentalModel(context.Context, *DeleteMentalModelRequest) (*DeleteMentalModelResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteMentalModel not implemented")
 }
-func (UnimplementedMentalModelServiceServer) DeleteFolder(context.Context, *DeleteFolderRequest) (*DeleteFolderResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DeleteFolder not implemented")
+func (UnimplementedMentalModelServiceServer) DeleteMentalModelFolder(context.Context, *DeleteMentalModelFolderRequest) (*DeleteMentalModelFolderResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteMentalModelFolder not implemented")
 }
-func (UnimplementedMentalModelServiceServer) SearchPages(context.Context, *SearchPagesRequest) (*SearchPagesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SearchPages not implemented")
+func (UnimplementedMentalModelServiceServer) SearchMentalModels(context.Context, *SearchMentalModelsRequest) (*SearchMentalModelsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SearchMentalModels not implemented")
 }
 func (UnimplementedMentalModelServiceServer) mustEmbedUnimplementedMentalModelServiceServer() {}
 func (UnimplementedMentalModelServiceServer) testEmbeddedByValue()                            {}
@@ -1500,56 +1482,38 @@ func _MentalModelService_RefreshMentalModel_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MentalModelService_DryRunRefresh_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DryRunRefreshRequest)
+func _MentalModelService_PreviewMentalModelRefresh_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreviewMentalModelRefreshRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MentalModelServiceServer).DryRunRefresh(ctx, in)
+		return srv.(MentalModelServiceServer).PreviewMentalModelRefresh(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: MentalModelService_DryRunRefresh_FullMethodName,
+		FullMethod: MentalModelService_PreviewMentalModelRefresh_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MentalModelServiceServer).DryRunRefresh(ctx, req.(*DryRunRefreshRequest))
+		return srv.(MentalModelServiceServer).PreviewMentalModelRefresh(ctx, req.(*PreviewMentalModelRefreshRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MentalModelService_ClearMentalModel_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ClearMentalModelRequest)
+func _MentalModelService_ListMentalModelHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMentalModelHistoryRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MentalModelServiceServer).ClearMentalModel(ctx, in)
+		return srv.(MentalModelServiceServer).ListMentalModelHistory(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: MentalModelService_ClearMentalModel_FullMethodName,
+		FullMethod: MentalModelService_ListMentalModelHistory_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MentalModelServiceServer).ClearMentalModel(ctx, req.(*ClearMentalModelRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MentalModelService_GetMentalModelHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetMentalModelHistoryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MentalModelServiceServer).GetMentalModelHistory(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MentalModelService_GetMentalModelHistory_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MentalModelServiceServer).GetMentalModelHistory(ctx, req.(*GetMentalModelHistoryRequest))
+		return srv.(MentalModelServiceServer).ListMentalModelHistory(ctx, req.(*ListMentalModelHistoryRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1572,38 +1536,38 @@ func _MentalModelService_DeleteMentalModel_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MentalModelService_DeleteFolder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteFolderRequest)
+func _MentalModelService_DeleteMentalModelFolder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteMentalModelFolderRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MentalModelServiceServer).DeleteFolder(ctx, in)
+		return srv.(MentalModelServiceServer).DeleteMentalModelFolder(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: MentalModelService_DeleteFolder_FullMethodName,
+		FullMethod: MentalModelService_DeleteMentalModelFolder_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MentalModelServiceServer).DeleteFolder(ctx, req.(*DeleteFolderRequest))
+		return srv.(MentalModelServiceServer).DeleteMentalModelFolder(ctx, req.(*DeleteMentalModelFolderRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MentalModelService_SearchPages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SearchPagesRequest)
+func _MentalModelService_SearchMentalModels_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SearchMentalModelsRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MentalModelServiceServer).SearchPages(ctx, in)
+		return srv.(MentalModelServiceServer).SearchMentalModels(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: MentalModelService_SearchPages_FullMethodName,
+		FullMethod: MentalModelService_SearchMentalModels_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MentalModelServiceServer).SearchPages(ctx, req.(*SearchPagesRequest))
+		return srv.(MentalModelServiceServer).SearchMentalModels(ctx, req.(*SearchMentalModelsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1636,28 +1600,24 @@ var MentalModelService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MentalModelService_RefreshMentalModel_Handler,
 		},
 		{
-			MethodName: "DryRunRefresh",
-			Handler:    _MentalModelService_DryRunRefresh_Handler,
+			MethodName: "PreviewMentalModelRefresh",
+			Handler:    _MentalModelService_PreviewMentalModelRefresh_Handler,
 		},
 		{
-			MethodName: "ClearMentalModel",
-			Handler:    _MentalModelService_ClearMentalModel_Handler,
-		},
-		{
-			MethodName: "GetMentalModelHistory",
-			Handler:    _MentalModelService_GetMentalModelHistory_Handler,
+			MethodName: "ListMentalModelHistory",
+			Handler:    _MentalModelService_ListMentalModelHistory_Handler,
 		},
 		{
 			MethodName: "DeleteMentalModel",
 			Handler:    _MentalModelService_DeleteMentalModel_Handler,
 		},
 		{
-			MethodName: "DeleteFolder",
-			Handler:    _MentalModelService_DeleteFolder_Handler,
+			MethodName: "DeleteMentalModelFolder",
+			Handler:    _MentalModelService_DeleteMentalModelFolder_Handler,
 		},
 		{
-			MethodName: "SearchPages",
-			Handler:    _MentalModelService_SearchPages_Handler,
+			MethodName: "SearchMentalModels",
+			Handler:    _MentalModelService_SearchMentalModels_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

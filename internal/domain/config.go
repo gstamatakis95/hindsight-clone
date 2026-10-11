@@ -259,17 +259,17 @@ type ReflectConfig struct {
 	MaxTotalTokens *int64 `json:"max_total_tokens,omitempty"`
 }
 
-// MentalModelConfig holds bank-level mental-model defaults; a model's RefreshTrigger wins.
+// MentalModelConfig holds bank-level mental-model defaults; a model's MentalModelSpec wins.
 type MentalModelConfig struct {
-	// DefaultMode is the refresh mode when a trigger leaves it unset.
+	// DefaultMode is the refresh mode when the spec leaves it unset.
 	DefaultMode RefreshMode `json:"default_mode,omitempty"`
 	// MaxDeltaRatio bounds how much of a document a delta may change before falling back to full.
 	MaxDeltaRatio *float64 `json:"max_delta_ratio,omitempty"`
-	// RefreshDebounceSeconds delays triggered refreshes so bursts join one (default 30).
+	// RefreshDebounceSeconds delays automatic refreshes so bursts join one (default 30).
 	RefreshDebounceSeconds *int `json:"refresh_debounce_seconds,omitempty"`
 	// MaxContentTokens caps a model's content.
 	MaxContentTokens *int `json:"max_content_tokens,omitempty"`
-	// MinRefreshIntervalSeconds is the interval floor for triggered refreshes (default 0 = none).
+	// MinRefreshIntervalSeconds is the interval floor for automatic refreshes (default 0 = none).
 	MinRefreshIntervalSeconds *int `json:"min_refresh_interval_seconds,omitempty"`
 	// HistoryMaxEntries caps history per kind (default 50).
 	HistoryMaxEntries *int `json:"history_max_entries,omitempty"`

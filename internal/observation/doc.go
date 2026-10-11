@@ -33,7 +33,7 @@
 // the result keys processed, changed_scopes and more plus the model usage on the operation:
 //
 //  1. Resolve the effective config; with observations.enabled false the run does nothing. List the bank's
-//     unpaused mental models with refresh_after_consolidation, outside any transaction.
+//     unpaused mental models scheduled after_consolidation, outside any transaction.
 //  2. Plan in one read transaction: up to observations.max_units_per_run of the oldest unconsolidated
 //     facts (consolidated_at and consolidation_failed_at unset), their scopes, and which scopes already cite
 //     each fact (those are skipped, so a replayed run is safe). Scopes are processed in a fixed order.
@@ -82,7 +82,7 @@
 //
 // When a batch writes an observation, the same transaction enqueues refresh_mental_model (jobs.EnqueueRefresh: payload
 // jobs.RefreshPayload with the model id only, serial key "mm:{id}", DedupePending) for every listed model the scope
-// reaches (domain.MentalModelSpec.ScopeFilter: its tag groups when set, else its tags under the trigger's match mode,
+// reaches (domain.MentalModelSpec.ScopeFilter: its tag groups when set, else its tags under the scope's match mode,
 // unset = all_strict for a tagged model, any for an untagged one); the shared scope never reaches a tagged model. The
 // job is due at domain.RefreshDueAt: after mental_models.refresh_debounce_seconds (default 30; an unset or non-positive
 // value counts as the default here) or at the end of the model's minimum refresh interval, whichever is later.

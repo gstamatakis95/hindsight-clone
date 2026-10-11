@@ -13,8 +13,8 @@ func TestRefreshDueAt(t *testing.T) {
 	ptr := func(v int) *int { return &v }
 	last := now.Add(-10 * time.Second)
 	model := func(floor *int, refreshed bool) MentalModel {
-		trigger := RefreshTrigger{MinRefreshIntervalSeconds: floor}
-		m := MentalModel{Spec: MentalModelSpec{Trigger: trigger}}
+		schedule := RefreshSchedule{MinIntervalSeconds: floor}
+		m := MentalModel{Spec: MentalModelSpec{Schedule: schedule}}
 		if refreshed {
 			m.LastRefreshedAt = &last
 		}

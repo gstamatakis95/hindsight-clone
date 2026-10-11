@@ -35,8 +35,8 @@
 // Paging. Every List RPC takes page_size and page_token and returns next_page_token (empty = no more pages).
 // page_size 0 = 100, larger than 1000 = 1000, negative = INVALID_ARGUMENT. A page token is opaque and only
 // valid for the same request; a malformed one is INVALID_ARGUMENT. ListEvents pages by sequence instead
-// (page_size + after_seq / next_after_seq), and SearchPages takes max_results (0 = 10, larger than 100 = 100,
-// negative = INVALID_ARGUMENT).
+// (page_size + after_seq / next_after_seq), and SearchMentalModels takes max_results (0 = 10, larger than
+// 100 = 100, negative = INVALID_ARGUMENT).
 //
 // Tag filters. Every request that filters by tag takes one TagFilter: flat tags under a match mode, or
 // boolean tag groups (setting both = INVALID_ARGUMENT). Each TagFilter field states its default match mode.
@@ -152,28 +152,26 @@ service ObservationService {
 service MentalModelService {
   // CreateMentalModel stores a model and enqueues its first build asynchronously.
   rpc CreateMentalModel(CreateMentalModelRequest) returns (CreateMentalModelResponse);
-  // GetMentalModel returns one model at the requested detail, default DETAIL_FULL.
+  // GetMentalModel returns one model in the requested view, default MENTAL_MODEL_VIEW_FULL.
   rpc GetMentalModel(GetMentalModelRequest) returns (GetMentalModelResponse);
-  // ListMentalModels pages through models with filters, default DETAIL_METADATA.
+  // ListMentalModels pages through models with filters, default MENTAL_MODEL_VIEW_BASIC.
   rpc ListMentalModels(ListMentalModelsRequest) returns (ListMentalModelsResponse);
   // UpdateMentalModel patches a model's spec with a FieldMask.
   rpc UpdateMentalModel(UpdateMentalModelRequest) returns (UpdateMentalModelResponse);
   // RefreshMentalModel enqueues a manual refresh. It ignores the interval floor, releases a parked
   // refresh, joins and upgrades a queued one, and on success clears auto_refresh_paused.
   rpc RefreshMentalModel(RefreshMentalModelRequest) returns (RefreshMentalModelResponse);
-  // DryRunRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes nothing,
-  // not even usage.
-  rpc DryRunRefresh(DryRunRefreshRequest) returns (DryRunRefreshResponse);
-  // ClearMentalModel empties a model's content so that its next refresh is full.
-  rpc ClearMentalModel(ClearMentalModelRequest) returns (ClearMentalModelResponse);
-  // GetMentalModelHistory pages through a model's versions and refresh failures.
-  rpc GetMentalModelHistory(GetMentalModelHistoryRequest) returns (GetMentalModelHistoryResponse);
+  // PreviewMentalModelRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes
+  // nothing, not even usage.
+  rpc PreviewMentalModelRefresh(PreviewMentalModelRefreshRequest) returns (PreviewMentalModelRefreshResponse);
+  // ListMentalModelHistory pages through a model's versions and refresh failures, newest first.
+  rpc ListMentalModelHistory(ListMentalModelHistoryRequest) returns (ListMentalModelHistoryResponse);
   // DeleteMentalModel deletes one model and its history.
   rpc DeleteMentalModel(DeleteMentalModelRequest) returns (DeleteMentalModelResponse);
-  // DeleteFolder deletes every model under a folder path, recursively.
-  rpc DeleteFolder(DeleteFolderRequest) returns (DeleteFolderResponse);
-  // SearchPages ranks whole pages by fused full-text and semantic scores, without rerank.
-  rpc SearchPages(SearchPagesRequest) returns (SearchPagesResponse);
+  // DeleteMentalModelFolder deletes every model under a folder path, recursively.
+  rpc DeleteMentalModelFolder(DeleteMentalModelFolderRequest) returns (DeleteMentalModelFolderResponse);
+  // SearchMentalModels ranks whole models by fused full-text and semantic scores, without rerank.
+  rpc SearchMentalModels(SearchMentalModelsRequest) returns (SearchMentalModelsResponse);
 }
 
 // BankService manages banks, their config, directives and templates.
@@ -1023,8 +1021,12 @@ message StrategyMatch {
 // A mental model is a Markdown page synthesized from a bank's memories for a source query, organized in
 // folders and kept fresh by refresh jobs. A refresh is agentic (the reflect loop) or single-shot (one
 // recall plus one MENTAL_MODEL slot call), and full or delta. Refreshes of one model never
-// overlap; a model has at most one queued refresh, and a failed refresh pauses automatic triggers until a
+// overlap; a model has at most one queued refresh, and a failed refresh pauses automatic refreshes until a
 // manual refresh succeeds.
+//
+// Where each refresh setting lives, from least to most specific: BankConfig.mental_models (bank defaults),
+// the model's spec (schedule, scope, run settings and stored overrides), then the call
+// (RefreshMentalModelRequest.strategy, force_full and overrides). Each setting has one field per level.
 
 // ---- CreateMentalModel ----
 
@@ -1050,44 +1052,46 @@ message CreateMentalModelResponse {
 
 // GetMentalModelRequest names one model.
 message GetMentalModelRequest {
+  reserved 3;
+  reserved "detail";
   // Bank owning the model; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Model id.
   string mental_model_id = 2;
-  // How much to return, default DETAIL_FULL.
-  Detail detail = 3;
+  // How much to return; unset = MENTAL_MODEL_VIEW_FULL.
+  MentalModelView view = 4;
 }
 
 // GetMentalModelResponse carries the model.
 message GetMentalModelResponse {
-  // The model at the requested detail; content is the latest version.
+  // The model in the requested view; content is the latest version.
   MentalModel mental_model = 1;
 }
 
-// Detail picks how much of a mental model a read returns.
-enum Detail {
-  // Not set; the RPC's default applies (GetMentalModel: FULL, ListMentalModels: METADATA).
-  DETAIL_UNSPECIFIED = 0;
+// MentalModelView picks how much of a mental model a read returns.
+enum MentalModelView {
+  // Not set; the RPC's default applies (GetMentalModel: FULL, ListMentalModels: BASIC).
+  MENTAL_MODEL_VIEW_UNSPECIFIED = 0;
   // Spec and status fields only, no content.
-  DETAIL_METADATA = 1;
-  // Metadata plus content_md and structured_output_json.
-  DETAIL_CONTENT = 2;
-  // Everything, including source_ids and last_trace.
-  DETAIL_FULL = 3;
+  MENTAL_MODEL_VIEW_BASIC = 1;
+  // BASIC plus content_md and structured_output_json.
+  MENTAL_MODEL_VIEW_CONTENT = 2;
+  // Everything, including stale, source_memory_ids and last_trace.
+  MENTAL_MODEL_VIEW_FULL = 3;
 }
 
 // ---- ListMentalModels ----
 
 // ListMentalModelsRequest filters and pages the bank's models.
 message ListMentalModelsRequest {
-  reserved 5;
-  reserved "tags_match";
+  reserved 3, 5;
+  reserved "detail", "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Only models whose folder path starts with this; empty = all.
   string folder_prefix = 2;
-  // How much of each model to return, default DETAIL_METADATA.
-  Detail detail = 3;
+  // How much of each model to return; unset = MENTAL_MODEL_VIEW_BASIC.
+  MentalModelView view = 8;
   // Tag filter on the models' own tags (MentalModelSpec.tags); unset or empty tags = no filter. Flat form
   // only; tags.match unset = TAGS_MATCH_ANY.
   TagFilter tags = 4;
@@ -1115,7 +1119,9 @@ message UpdateMentalModelRequest {
   string mental_model_id = 2;
   // New values for the fields named in update_mask.
   MentalModelSpec spec = 3;
-  // MentalModelSpec paths to replace; a path set to an empty value clears it.
+  // MentalModelSpec paths to replace (for example schedule.cron, scope.fact_types, strategy or
+  // overrides.reflect.mission); a path set to an empty value clears it. Setting either member of
+  // schedule.when clears the other one. Unset = every populated field of spec; id cannot be updated.
   google.protobuf.FieldMask update_mask = 4;
 }
 
@@ -1138,7 +1144,7 @@ message RefreshMentalModelRequest {
   // Overrides for this refresh only, over the model's stored ones. Kept on the operation; they replace a
   // queued refresh's overrides.
   RefreshOverrides overrides = 4;
-  // Per-call override of the trigger's strategy; unset = the trigger's.
+  // Strategy for this refresh only; unset = MentalModelSpec.strategy.
   RefreshStrategy strategy = 5;
 }
 
@@ -1150,23 +1156,23 @@ message RefreshMentalModelResponse {
   bool joined_queued = 2;
 }
 
-// ---- DryRunRefresh ----
+// ---- PreviewMentalModelRefresh ----
 
-// DryRunRefreshRequest asks for a refresh that writes nothing.
-message DryRunRefreshRequest {
+// PreviewMentalModelRefreshRequest asks for a refresh that writes nothing.
+message PreviewMentalModelRefreshRequest {
   // Bank owning the model.
   string bank_id = 1;
   // Model id.
   string mental_model_id = 2;
-  // Strategy to dry-run; unset = the trigger's.
+  // Strategy to preview; unset = MentalModelSpec.strategy.
   RefreshStrategy strategy = 3;
 }
 
-// DryRunRefreshResponse reports what a refresh would do.
-message DryRunRefreshResponse {
-  // Mode the trigger and state ask for, before any fallback.
+// PreviewMentalModelRefreshResponse reports what a refresh would do.
+message PreviewMentalModelRefreshResponse {
+  // Mode the spec and state ask for, before any fallback.
   RefreshMode requested_mode = 1;
-  // Trace of the dry run, including the effective mode and outcome.
+  // Trace of the preview, including the effective mode and outcome.
   RefreshTrace trace = 2;
   // Scope the refresh read with.
   ResolvedScope resolved_scope = 3;
@@ -1184,50 +1190,34 @@ message DryRunRefreshResponse {
   bool would_persist = 9;
 }
 
-// ResolvedScope is the effective filter a refresh reads with, after defaults and overrides.
+// ResolvedScope is the effective filter a refresh reads with, after defaults.
 message ResolvedScope {
   reserved 2, 3;
   reserved "tags_match", "tag_groups";
-  // Effective tag filter: the trigger's groups, or the model's tags under the effective match mode.
+  // Effective tag filter: the scope's groups, or the model's tags under the effective match mode.
   TagFilter tags = 1;
   // Effective fact types; empty = all.
   repeated FactType fact_types = 4;
 }
 
-// ---- ClearMentalModel ----
+// ---- ListMentalModelHistory ----
 
-// ClearMentalModelRequest names the model to clear.
-message ClearMentalModelRequest {
-  // Bank owning the model.
-  string bank_id = 1;
-  // Model id.
-  string mental_model_id = 2;
-}
-
-// ClearMentalModelResponse carries the cleared model.
-message ClearMentalModelResponse {
-  // The model with empty content; its next refresh is full.
-  MentalModel mental_model = 1;
-}
-
-// ---- GetMentalModelHistory ----
-
-// GetMentalModelHistoryRequest pages a model's history.
-message GetMentalModelHistoryRequest {
+// ListMentalModelHistoryRequest pages a model's history.
+message ListMentalModelHistoryRequest {
   // Bank owning the model; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Model id.
   string mental_model_id = 2;
   // Only this kind; unspecified = both.
-  HistoryKind kind = 3;
+  MentalModelHistoryEntry.Kind kind = 3;
   // Maximum entries per page; 0 = 100, at most 1000.
   int32 page_size = 4;
   // Token from a previous response; empty = first page.
   string page_token = 5;
 }
 
-// GetMentalModelHistoryResponse is one page of history, newest first.
-message GetMentalModelHistoryResponse {
+// ListMentalModelHistoryResponse is one page of history, newest first.
+message ListMentalModelHistoryResponse {
   // Entries on this page.
   repeated MentalModelHistoryEntry entries = 1;
   // Token for the next page; empty = no more.
@@ -1236,28 +1226,30 @@ message GetMentalModelHistoryResponse {
 
 // MentalModelHistoryEntry is one history row of a model.
 message MentalModelHistoryEntry {
+  reserved 3;
+  reserved "changed_at";
+  // Kind separates content versions from refresh failures; each is capped separately
+  // (MentalModelConfig.history_max_entries).
+  enum Kind {
+    // Not set; in ListMentalModelHistory it means both kinds.
+    KIND_UNSPECIFIED = 0;
+    // A previous content version.
+    KIND_VERSION = 1;
+    // A failed refresh.
+    KIND_REFRESH_FAILED = 2;
+  }
   // Version or failure.
-  HistoryKind kind = 1;
-  // Content before the change (HISTORY_KIND_VERSION).
+  Kind kind = 1;
+  // Content before the change (KIND_VERSION).
   string previous_content = 2;
   // When the entry was recorded.
-  google.protobuf.Timestamp changed_at = 3;
+  google.protobuf.Timestamp created_at = 7;
   // Outcome of the refresh behind the entry.
   RefreshOutcome outcome = 4;
-  // Machine-readable failure reason (HISTORY_KIND_REFRESH_FAILED).
+  // Machine-readable failure reason (KIND_REFRESH_FAILED).
   string failure_reason = 5;
-  // Error message of the failure (HISTORY_KIND_REFRESH_FAILED).
+  // Error message of the failure (KIND_REFRESH_FAILED).
   string error_message = 6;
-}
-
-// HistoryKind separates content versions from refresh failures; each is capped separately.
-enum HistoryKind {
-  // Not set; in GetMentalModelHistory it means both kinds.
-  HISTORY_KIND_UNSPECIFIED = 0;
-  // A previous content version.
-  HISTORY_KIND_VERSION = 1;
-  // A failed refresh.
-  HISTORY_KIND_REFRESH_FAILED = 2;
 }
 
 // ---- DeleteMentalModel ----
@@ -1273,51 +1265,51 @@ message DeleteMentalModelRequest {
 // DeleteMentalModelResponse is empty on success.
 message DeleteMentalModelResponse {}
 
-// ---- DeleteFolder ----
+// ---- DeleteMentalModelFolder ----
 
-// DeleteFolderRequest names the folder to delete.
-message DeleteFolderRequest {
+// DeleteMentalModelFolderRequest names the folder to delete.
+message DeleteMentalModelFolderRequest {
   // Bank owning the folder.
   string bank_id = 1;
-  // Folder path; every model under it is deleted, recursively.
+  // Folder path; every model under it is deleted, recursively. Empty = INVALID_ARGUMENT.
   string folder_path = 2;
 }
 
-// DeleteFolderResponse reports how many models were deleted.
-message DeleteFolderResponse {
+// DeleteMentalModelFolderResponse reports how many models were deleted.
+message DeleteMentalModelFolderResponse {
   // Models deleted.
   int32 deleted = 1;
 }
 
-// ---- SearchPages ----
+// ---- SearchMentalModels ----
 
-// SearchPagesRequest searches mental-model pages.
-message SearchPagesRequest {
+// SearchMentalModelsRequest searches the bank's mental models by content.
+message SearchMentalModelsRequest {
   reserved 4;
   reserved "limit";
   // Bank to search; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Search text.
   string query = 2;
-  // Only pages whose folder path starts with this; empty = all.
+  // Only models whose folder path starts with this; empty = all.
   string folder_prefix = 3;
   // Maximum hits; 0 = 10, at most 100, negative = INVALID_ARGUMENT.
   int32 max_results = 5;
 }
 
-// SearchPagesResponse lists matching pages.
-message SearchPagesResponse {
+// SearchMentalModelsResponse lists matching models.
+message SearchMentalModelsResponse {
   // Hits, best first.
-  repeated PageHit hits = 1;
+  repeated MentalModelHit hits = 1;
 }
 
-// PageHit is one page matching a search.
-message PageHit {
+// MentalModelHit is one mental model matching a search.
+message MentalModelHit {
   // Model id.
   string mental_model_id = 1;
-  // Folder the page lives in.
+  // Folder the model lives in.
   string folder_path = 2;
-  // Page name.
+  // Model name.
   string name = 3;
   // Matching excerpt of the content.
   string snippet = 4;
@@ -1329,18 +1321,19 @@ message PageHit {
 
 // MentalModel is a stored mental model with its content and refresh state.
 message MentalModel {
+  reserved 2, 6, 11;
+  reserved "bank_id", "is_stale", "source_ids";
   // The writable spec.
   MentalModelSpec spec = 1;
-  // Bank owning the model.
-  string bank_id = 2;
   // Page content in Markdown.
   string content_md = 3;
-  // Structured output matching the trigger's response_schema_json; empty when none.
+  // Structured output matching spec.response_schema_json; empty when none.
   string structured_output_json = 4;
   // Content version, incremented on every write.
   int64 version = 5;
-  // True when an in-scope unit or observation changed after last_seq_seen, or a source was retracted.
-  bool is_stale = 6;
+  // True when an in-scope memory or observation changed after last_seq_seen, or a source was retracted;
+  // computed in MENTAL_MODEL_VIEW_FULL only (false otherwise).
+  bool stale = 14;
   // Wall clock of the last completed refresh, including no-op refreshes.
   google.protobuf.Timestamp last_refreshed_at = 7;
   // The bank change_seq the last successful refresh read up to (its watermark): the same counter as
@@ -1348,18 +1341,23 @@ message MentalModel {
   int64 last_seq_seen = 8;
   // When the last refresh failed; unset if none has.
   google.protobuf.Timestamp last_refresh_failed_at = 9;
-  // Set by a failed refresh; automatic triggers skip the model until a manual refresh succeeds.
+  // Set by a failed refresh; automatic refreshes skip the model until a manual refresh succeeds.
   bool auto_refresh_paused = 10;
-  // Cumulative based_on ids; pruned on full refresh and on invalidate.
-  repeated string source_ids = 11;
-  // Trace of the last refresh when keep_trace; DETAIL_FULL only.
+  // Ids of the memories the content cites, accumulated across refreshes; pruned on full refresh and on
+  // invalidate. MENTAL_MODEL_VIEW_FULL only.
+  repeated string source_memory_ids = 15;
+  // Trace of the last refresh when spec.keep_trace; MENTAL_MODEL_VIEW_FULL only.
   RefreshTrace last_trace = 12;
   // When the model was created.
   google.protobuf.Timestamp created_at = 13;
 }
 
-// MentalModelSpec is the writable part of a mental model.
+// MentalModelSpec is the writable part of a mental model: what it answers, when it refreshes (schedule),
+// what it reads (scope), how a refresh runs, and its stored overrides. Unset run settings fall back to
+// BankConfig.mental_models.
 message MentalModelSpec {
+  reserved 7;
+  reserved "trigger";
   // Model id: lowercase alphanumerics and hyphens, unique per (tenant, bank).
   string id = 1;
   // Display name.
@@ -1369,62 +1367,69 @@ message MentalModelSpec {
   // Folder the page lives in, for example team/projects.
   string folder_path = 4;
   // Tags of the model: ListMentalModels and ListTags filter on them, and they scope what the model reads
-  // and when it goes stale (see RefreshTrigger.tags).
+  // and when it goes stale (see MentalModelScope.tags).
   repeated string tags = 5;
-  // Token cap on the content; overrides MentalModelConfig.max_content_tokens.
+  // When the model refreshes on its own; unset = manual refreshes only.
+  RefreshSchedule schedule = 9;
+  // What the model reads; unset = everything its tags select.
+  MentalModelScope scope = 10;
+  // Full or delta; unset = MentalModelConfig.default_mode.
+  RefreshMode mode = 11;
+  // Agentic or single-shot; unset = MentalModelConfig.default_strategy. RefreshMentalModelRequest.strategy
+  // wins for one call.
+  RefreshStrategy strategy = 12;
+  // Size class of a refresh; unset = BUDGET_MID.
+  Budget budget = 13;
+  // Token cap on the content; unset = MentalModelConfig.max_content_tokens.
   optional int32 max_tokens = 6;
-  // Refresh trigger, mode, strategy and scope.
-  RefreshTrigger trigger = 7;
-  // Overrides stored on the model and applied to every refresh. In an update_mask, paths go inside it
+  // Include source chunks in the refresh's recall results; unset = no chunks.
+  optional bool include_chunks = 14;
+  // Token cap on chunks attached to a recall during refresh; unset = the recall default.
+  optional int32 recall_chunks_max_tokens = 15;
+  // Do not read other mental models while refreshing (agentic refresh).
+  bool exclude_mental_models = 16;
+  // Mental models never read while refreshing (agentic refresh); the model itself is always excluded.
+  repeated string exclude_mental_model_ids = 17;
+  // JSON Schema for structured output projected from the page (MentalModel.structured_output_json); empty =
+  // none.
+  string response_schema_json = 18;
+  // Keep the last refresh trace on the model (MentalModel.last_trace).
+  bool keep_trace = 19;
+  // Overrides stored on the model and applied to every refresh; the reflect loop's caps
+  // (reflect.recall_max_tokens, reflect.search_observations_max_tokens,
+  // reflect.search_observations_include_entities) are set here. In an update_mask, paths go inside it
   // (overrides.reflect.mission, overrides.mental_model_model).
   RefreshOverrides overrides = 8;
 }
 
-// RefreshTrigger decides when and how a model refreshes, and what scope it reads. Unset fields fall back
-// to MentalModelConfig.
-message RefreshTrigger {
-  reserved 5, 6;
-  reserved "tags_match", "tag_groups";
-  // Full or delta; unset = MentalModelConfig.default_mode.
-  RefreshMode mode = 1;
-  // Agentic or single-shot; unset = MentalModelConfig.default_strategy.
-  RefreshStrategy strategy = 18;
-  // Refresh after a consolidation changes an in-scope unit or observation; exclusive with refresh_cron.
-  bool refresh_after_consolidation = 2;
-  // Cron schedule for refreshes, UTC, 5 fields; exclusive with refresh_after_consolidation.
-  string refresh_cron = 3;
-  // Minimum seconds between triggered refreshes; unset = MentalModelConfig value.
-  optional int32 min_refresh_interval_seconds = 4;
-  // What the model reads, by tag. The flat tags always come from MentalModelSpec.tags, so tags.tags must
-  // stay empty (INVALID_ARGUMENT otherwise); tags.match is how the model's tags filter memories, unset =
-  // TAGS_MATCH_ALL_STRICT when the model is tagged (TAGS_MATCH_ANY otherwise). tags.groups, when set,
-  // replace the model's tags and the match mode.
-  TagFilter tags = 19;
-  // Fact types in scope; empty = all.
-  repeated FactType fact_types = 7;
-  // Do not read other mental models while refreshing.
-  bool exclude_mental_models = 8;
-  // Mental models never read while refreshing.
-  repeated string exclude_mental_model_ids = 9;
-  // Include source chunks in recall results.
-  optional bool include_chunks = 10;
-  // Token cap on one recall during refresh.
-  optional int32 recall_max_tokens = 11;
-  // Token cap on chunks attached to a recall during refresh.
-  optional int32 recall_chunks_max_tokens = 12;
-  // Token cap on one search_observations result during refresh.
-  optional int32 search_observations_max_tokens = 13;
-  // Include entity state in search_observations results during refresh.
-  optional bool search_observations_include_entities = 14;
-  // Size class of the refresh, default BUDGET_MID.
-  Budget budget = 15;
-  // JSON Schema for structured output projected from the page; empty = none.
-  string response_schema_json = 16;
-  // Keep the last refresh trace on the model (MentalModel.last_trace).
-  bool keep_trace = 17;
+// RefreshSchedule decides when a model refreshes on its own. Manual refreshes (RefreshMentalModel) are always
+// allowed.
+message RefreshSchedule {
+  // When is the automatic trigger: at most one. Unset (or after_consolidation=false, or an empty cron) = no
+  // automatic refresh.
+  oneof when {
+    // Refresh after a consolidation changes an in-scope memory or observation (debounced by
+    // MentalModelConfig.refresh_debounce_seconds).
+    bool after_consolidation = 1;
+    // Cron schedule, UTC, 5 fields; malformed = INVALID_ARGUMENT.
+    string cron = 2;
+  }
+  // Minimum seconds between automatic refreshes; unset = MentalModelConfig.min_refresh_interval_seconds.
+  optional int32 min_interval_seconds = 3;
 }
 
-// RefreshTrace explains one refresh or dry run.
+// MentalModelScope is what a model reads and goes stale by, beyond its own tags.
+message MentalModelScope {
+  // Tag filter. The flat tags always come from MentalModelSpec.tags, so tags.tags must stay empty
+  // (INVALID_ARGUMENT otherwise); tags.match is how the model's tags filter memories, unset =
+  // TAGS_MATCH_ALL_STRICT when the model is tagged (TAGS_MATCH_ANY otherwise). tags.groups, when set,
+  // replace the model's tags and the match mode.
+  TagFilter tags = 1;
+  // Fact types in scope; empty = all.
+  repeated FactType fact_types = 2;
+}
+
+// RefreshTrace explains one refresh or preview.
 message RefreshTrace {
   // Mode actually used.
   RefreshMode effective_mode = 1;
@@ -2573,22 +2578,22 @@ message ReflectConfig {
   Disposition disposition = 11;
 }
 
-// MentalModelConfig holds bank-level mental-model defaults; a model's RefreshTrigger wins over them.
+// MentalModelConfig holds bank-level mental-model defaults; a model's MentalModelSpec wins over them.
 message MentalModelConfig {
-  // Refresh mode when a trigger does not set one.
+  // Refresh mode when MentalModelSpec.mode is unset.
   RefreshMode default_mode = 1;
   // Largest share of the page a delta refresh may change before it falls back to a full refresh.
   optional double max_delta_ratio = 2;
-  // Delay before a triggered refresh runs, so a burst of consolidations joins one refresh, default 30.
+  // Delay before an automatic refresh runs, so a burst of consolidations joins one refresh, default 30.
   optional int32 refresh_debounce_seconds = 3;
   // Token cap on a model's content; MentalModelSpec.max_tokens wins.
   optional int32 max_content_tokens = 4;
-  // Minimum seconds between triggered refreshes of one model, default 0 = no floor. Manual refreshes
-  // ignore it.
+  // Minimum seconds between automatic refreshes of one model, default 0 = no floor; RefreshSchedule's
+  // min_interval_seconds wins. Manual refreshes ignore it.
   optional int32 min_refresh_interval_seconds = 5;
   // History entries kept per kind (versions, failures), default 50.
   optional int32 history_max_entries = 6;
-  // Refresh strategy when neither the trigger nor the call sets one, default REFRESH_STRATEGY_AGENTIC.
+  // Refresh strategy when neither the spec nor the call sets one, default REFRESH_STRATEGY_AGENTIC.
   RefreshStrategy default_strategy = 7;
 }
 
@@ -2719,7 +2724,8 @@ message RederiveOverrides {
 // RefreshOverrides is what a mental-model refresh may override, per call or stored on the model: the reflect
 // group, the delta ratio, and the REFLECT, MENTAL_MODEL and STRUCTURED_OUTPUT models.
 message RefreshOverrides {
-  // Reflect settings (mission, disposition, loop) for the refresh.
+  // Reflect settings for the refresh: mission, disposition, and the loop with its tool caps
+  // (recall_max_tokens, search_observations_max_tokens, search_observations_include_entities).
   ReflectConfig reflect = 1;
   // Largest share of the page a delta refresh may change before it falls back to a full refresh.
   optional double max_delta_ratio = 2;
@@ -2765,7 +2771,7 @@ enum Budget {
 // plain variants also accept untagged (global) ones.
 enum TagsMatch {
   // Not set; the field's documented default applies (TAGS_MATCH_ANY unless it says otherwise: TagLeaf,
-  // ListDocuments and ListDirectives use ANY_STRICT; RefreshTrigger on a tagged model and strategy scope
+  // ListDocuments and ListDirectives use ANY_STRICT; MentalModelScope on a tagged model and strategy scope
   // patterns use ALL_STRICT).
   TAGS_MATCH_UNSPECIFIED = 0;
   // At least one of the tags, or untagged.
@@ -2782,9 +2788,9 @@ enum TagsMatch {
 
 // RefreshMode decides whether a mental-model refresh rewrites the page or edits it.
 enum RefreshMode {
-  // Not set; inherit (RefreshTrigger.mode falls back to MentalModelConfig.default_mode).
+  // Not set; inherit (MentalModelSpec.mode falls back to MentalModelConfig.default_mode).
   REFRESH_MODE_UNSPECIFIED = 0;
-  // Rewrite the whole document from everything in scope; prunes source_ids.
+  // Rewrite the whole document from everything in scope; prunes source_memory_ids.
   REFRESH_MODE_FULL = 1;
   // Apply edit ops for what changed in scope since last_seq_seen; falls back to full when there is no
   // baseline content or the source query changed.

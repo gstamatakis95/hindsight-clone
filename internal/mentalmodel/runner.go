@@ -25,7 +25,7 @@ type refreshPlan struct {
 	reason    string
 	upTo      int64
 	window    domain.SeqRange
-	// automatic: neither manual, force_full nor a dry run; such a run re-checks staleness and the
+	// automatic: neither manual, force_full nor a preview; such a run re-checks staleness and the
 	// interval floor before drafting.
 	automatic bool
 }
@@ -54,7 +54,7 @@ type drafted struct {
 
 // refresh is the one pipeline behind the refresh job and the preview: it reads the model and BankSeq (the
 // snapshot bound), plans the mode and strategy, drafts, and writes the result in one short transaction (nothing
-// for a dry run). A failed run writes nothing and returns the error with Trace.Outcome = failed; the document
+// for a preview). A failed run writes nothing and returns the error with Trace.Outcome = failed; the document
 // stays as it was. Pausing and the REFRESH_FAILED history entry happen once the operation fails for good, in
 // ReconcileFailedRefreshes, so job retries are not recorded as failures.
 func (s *Service) refresh(
@@ -81,7 +81,7 @@ func (s *Service) refresh(
 	if !out.WouldPersist {
 		out.Trace.Outcome = domain.RefreshOutcomeNoNewFacts
 	}
-	if opts.DryRun {
+	if opts.Preview {
 		return out, nil
 	}
 	if dr.floored {
@@ -118,7 +118,7 @@ func (s *Service) plan(
 	if err != nil {
 		return nil, fmt.Errorf("mentalmodel: config: %w", err)
 	}
-	p := &refreshPlan{m: m, cfg: cfg, upTo: upTo, automatic: !opts.Manual && !opts.ForceFull && !opts.DryRun}
+	p := &refreshPlan{m: m, cfg: cfg, upTo: upTo, automatic: !opts.Manual && !opts.ForceFull && !opts.Preview}
 	strategy := effectiveStrategy(opts.Strategy, m, cfg)
 	if p.synth = s.synths[strategy]; p.synth == nil {
 		return nil, fmt.Errorf("%w: no synthesizer for refresh strategy %q", domain.ErrInvalidArgument, strategy)
@@ -245,14 +245,15 @@ func (s *Service) freshAutomatic(ctx context.Context, p *refreshPlan) (bool, err
 	return !stale, nil
 }
 
-// intervalFloor is min_refresh_interval_seconds: the trigger's, else the merged config's; 0 = none.
+// intervalFloor is the automatic-refresh floor: the schedule's min_interval_seconds, else the merged config's
+// min_refresh_interval_seconds; 0 = none.
 func intervalFloor(m domain.MentalModel, cfg domain.BankConfig) time.Duration {
 	secs := 0
 	if cfg.MentalModels != nil && cfg.MentalModels.MinRefreshIntervalSeconds != nil {
 		secs = *cfg.MentalModels.MinRefreshIntervalSeconds
 	}
-	if m.Spec.Trigger.MinRefreshIntervalSeconds != nil {
-		secs = *m.Spec.Trigger.MinRefreshIntervalSeconds
+	if m.Spec.Schedule.MinIntervalSeconds != nil {
+		secs = *m.Spec.Schedule.MinIntervalSeconds
 	}
 	return time.Duration(max(secs, 0)) * time.Second
 }
@@ -302,9 +303,9 @@ func (s *Service) full(ctx context.Context, p *refreshPlan) (drafted, error) {
 	return dr, nil
 }
 
-// finish projects structured output onto the trigger's schema when the content changed.
+// finish projects structured output onto the spec's response schema when the content changed.
 func (s *Service) finish(ctx context.Context, p *refreshPlan, dr drafted, err error) (drafted, error) {
-	schema := strings.TrimSpace(p.m.Spec.Trigger.ResponseSchemaJSON)
+	schema := strings.TrimSpace(p.m.Spec.ResponseSchemaJSON)
 	if err != nil || dr.noNewFacts || schema == "" || dr.content == p.m.ContentMD {
 		return dr, err
 	}

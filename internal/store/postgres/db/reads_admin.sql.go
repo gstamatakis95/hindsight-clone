@@ -305,7 +305,7 @@ const readsListMentalModels = `-- name: ReadsListMentalModels :many
 SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models
 WHERE tenant_id = $1 AND bank_id = $2
   AND ($3::text = '' OR folder_path = $3::text OR folder_path LIKE $4::text)
-  AND (NOT $5::bool OR COALESCE((trigger ->> 'refresh_after_consolidation')::boolean, false))
+  AND (NOT $5::bool OR COALESCE((trigger -> 'schedule' ->> 'after_consolidation')::boolean, false))
   AND ($6::text = '' OR id COLLATE "C" > $6::text)
   AND (CASE $7::text
       WHEN 'exact' THEN tags @> $8::text[] AND tags <@ $8::text[]
@@ -333,7 +333,7 @@ type ReadsListMentalModelsParams struct {
 // ReadsListMentalModels returns a bank's models ordered by id (byte order) after after_id (” = from the start):
 // folder ” or folder_path = folder or LIKE folder_like (folder escaped, then '/%'); tags with
 // domain.MatchTags semantics under tags_match (filter tags normalized, never NULL); refresh_after keeps only
-// models whose trigger sets refresh_after_consolidation. A NULL lim returns all.
+// models whose schedule sets after_consolidation. A NULL lim returns all.
 func (q *Queries) ReadsListMentalModels(ctx context.Context, arg ReadsListMentalModelsParams) ([]MentalModel, error) {
 	rows, err := q.db.Query(ctx, readsListMentalModels,
 		arg.TenantID,

@@ -134,8 +134,8 @@ func TestRunArchivedEvidenceSkipsAction(t *testing.T) {
 func TestRunRefreshSurvivesFailedRun(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	e.addModels(domain.MentalModel{
-		Spec: domain.MentalModelSpec{ID: "ma", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{
-			RefreshAfterConsolidation: true,
+		Spec: domain.MentalModelSpec{ID: "ma", Tags: []string{"a"}, Schedule: domain.RefreshSchedule{
+			AfterConsolidation: true,
 		}},
 		Bank: bank,
 	})

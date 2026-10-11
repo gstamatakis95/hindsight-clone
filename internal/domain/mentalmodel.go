@@ -47,25 +47,25 @@ const (
 	RefreshOutcomeFailed RefreshOutcome = "failed"
 )
 
-// Detail selects how much of a mental model a read returns.
-type Detail string
+// MentalModelView selects how much of a mental model a read returns.
+type MentalModelView string
 
-// Detail levels, mirroring memory.v1.Detail.
+// Mental-model views, mirroring memory.v1.MentalModelView.
 const (
-	// DetailUnspecified is the zero value (RPC default).
-	DetailUnspecified Detail = ""
-	// DetailMetadata returns the spec and state, no content.
-	DetailMetadata Detail = "metadata"
-	// DetailContent adds content and structured output.
-	DetailContent Detail = "content"
-	// DetailFull adds the last refresh trace.
-	DetailFull Detail = "full"
+	// MentalModelViewUnspecified is the zero value (RPC default).
+	MentalModelViewUnspecified MentalModelView = ""
+	// MentalModelViewBasic returns the spec and state, no content.
+	MentalModelViewBasic MentalModelView = "basic"
+	// MentalModelViewContent adds content and structured output.
+	MentalModelViewContent MentalModelView = "content"
+	// MentalModelViewFull adds staleness, the source ids and the last refresh trace.
+	MentalModelViewFull MentalModelView = "full"
 )
 
 // HistoryKind separates version entries from failure entries; each is capped separately.
 type HistoryKind string
 
-// History kinds, mirroring memory.v1.HistoryKind.
+// History kinds, mirroring memory.v1.MentalModelHistoryEntry.Kind.
 const (
 	// HistoryKindUnspecified is the zero value (all kinds).
 	HistoryKindUnspecified HistoryKind = ""
@@ -75,47 +75,29 @@ const (
 	HistoryKindRefreshFailed HistoryKind = "refresh_failed"
 )
 
-// RefreshTrigger says when and how a model refreshes, and over which scope.
-type RefreshTrigger struct {
-	// Mode is full or delta; unset = MentalModelConfig.DefaultMode.
-	Mode RefreshMode `json:"mode,omitempty"`
-	// Strategy is agentic or single-shot; unset = MentalModelConfig.DefaultStrategy.
-	Strategy RefreshStrategy `json:"strategy,omitempty"`
-	// RefreshAfterConsolidation refreshes when consolidation changes the scope (exclusive with RefreshCron).
-	RefreshAfterConsolidation bool `json:"refresh_after_consolidation,omitempty"`
-	// RefreshCron is a 5-field UTC cron expression (exclusive with RefreshAfterConsolidation).
-	RefreshCron string `json:"refresh_cron,omitempty"`
-	// MinRefreshIntervalSeconds is the interval floor; nil = MentalModelConfig value.
-	MinRefreshIntervalSeconds *int `json:"min_refresh_interval_seconds,omitempty"`
+// RefreshSchedule says when a model refreshes on its own. AfterConsolidation and Cron are a oneof on the wire;
+// neither set = manual refreshes only.
+type RefreshSchedule struct {
+	// AfterConsolidation refreshes when consolidation changes the scope.
+	AfterConsolidation bool `json:"after_consolidation,omitempty"`
+	// Cron is a 5-field UTC cron expression.
+	Cron string `json:"cron,omitempty"`
+	// MinIntervalSeconds is the interval floor of automatic refreshes; nil = MentalModelConfig value.
+	MinIntervalSeconds *int `json:"min_interval_seconds,omitempty"`
+}
+
+// MentalModelScope is what a model reads and goes stale by, beyond its own tags.
+type MentalModelScope struct {
 	// Tags is the scope's tag filter without flat tags (those are the model's own, MentalModelSpec.Tags): Match
 	// applies to the model's tags (unset = all_strict when the model is tagged), and Groups, when set, replace
 	// the model's tags and Match. See [MentalModelSpec.ScopeFilter].
 	Tags TagFilter `json:"tags,omitzero"`
 	// FactTypes limits the scope; empty = all.
 	FactTypes []FactType `json:"fact_types,omitempty"`
-	// ExcludeMentalModels hides other models from the agentic refresh.
-	ExcludeMentalModels bool `json:"exclude_mental_models,omitempty"`
-	// ExcludeMentalModelIDs hides specific models.
-	ExcludeMentalModelIDs []MentalModelID `json:"exclude_mental_model_ids,omitempty"`
-	// IncludeChunks attaches chunks to recall results.
-	IncludeChunks *bool `json:"include_chunks,omitempty"`
-	// RecallMaxTokens caps recall results.
-	RecallMaxTokens *int `json:"recall_max_tokens,omitempty"`
-	// RecallChunksMaxTokens caps attached chunks.
-	RecallChunksMaxTokens *int `json:"recall_chunks_max_tokens,omitempty"`
-	// SearchObservationsMaxTokens caps search_observations results.
-	SearchObservationsMaxTokens *int `json:"search_observations_max_tokens,omitempty"`
-	// SearchObservationsIncludeEntities adds entity state to search_observations.
-	SearchObservationsIncludeEntities *bool `json:"search_observations_include_entities,omitempty"`
-	// Budget is the refresh's budget; unset = mid.
-	Budget Budget `json:"budget,omitempty"`
-	// ResponseSchemaJSON asks for a structured-output projection of the document.
-	ResponseSchemaJSON string `json:"response_schema_json,omitempty"`
-	// KeepTrace stores the last refresh trace on the model.
-	KeepTrace bool `json:"keep_trace,omitempty"`
 }
 
-// MentalModelSpec is the writable part of a mental model.
+// MentalModelSpec is the writable part of a mental model. JSON tags are the proto field names, so FieldMask
+// paths apply to it directly.
 type MentalModelSpec struct {
 	// ID is lowercase alphanumerics and hyphens, unique per bank.
 	ID MentalModelID `json:"id"`
@@ -127,22 +109,42 @@ type MentalModelSpec struct {
 	FolderPath string `json:"folder_path,omitempty"`
 	// Tags label the model (list filters, tag counts) and scope what it reads ([MentalModelSpec.ScopeFilter]).
 	Tags []string `json:"tags,omitempty"`
+	// Schedule is when the model refreshes on its own.
+	Schedule RefreshSchedule `json:"schedule,omitzero"`
+	// Scope is what the model reads beyond its tags.
+	Scope MentalModelScope `json:"scope,omitzero"`
+	// Mode is full or delta; unset = MentalModelConfig.DefaultMode.
+	Mode RefreshMode `json:"mode,omitempty"`
+	// Strategy is agentic or single-shot; unset = MentalModelConfig.DefaultStrategy.
+	Strategy RefreshStrategy `json:"strategy,omitempty"`
+	// Budget is the refresh's budget; unset = mid.
+	Budget Budget `json:"budget,omitempty"`
 	// MaxTokens overrides MentalModelConfig.MaxContentTokens.
 	MaxTokens *int `json:"max_tokens,omitempty"`
-	// Trigger is the refresh trigger and scope.
-	Trigger RefreshTrigger `json:"trigger"`
+	// IncludeChunks attaches chunks to recall results.
+	IncludeChunks *bool `json:"include_chunks,omitempty"`
+	// RecallChunksMaxTokens caps attached chunks.
+	RecallChunksMaxTokens *int `json:"recall_chunks_max_tokens,omitempty"`
+	// ExcludeMentalModels hides other models from the agentic refresh.
+	ExcludeMentalModels bool `json:"exclude_mental_models,omitempty"`
+	// ExcludeMentalModelIDs hides specific models.
+	ExcludeMentalModelIDs []MentalModelID `json:"exclude_mental_model_ids,omitempty"`
+	// ResponseSchemaJSON asks for a structured-output projection of the document.
+	ResponseSchemaJSON string `json:"response_schema_json,omitempty"`
+	// KeepTrace stores the last refresh trace on the model.
+	KeepTrace bool `json:"keep_trace,omitempty"`
 	// Overrides are applied to every refresh.
 	Overrides *BankConfig `json:"overrides,omitempty"`
 }
 
-// ScopeFilter is the tag filter the model reads with and goes stale by: the trigger's tag groups when set,
-// else the model's normalized tags under the trigger's match mode (unset = all_strict when the model is
+// ScopeFilter is the tag filter the model reads with and goes stale by: the scope's tag groups when set,
+// else the model's normalized tags under the scope's match mode (unset = all_strict when the model is
 // tagged, any when it is untagged).
 func (s MentalModelSpec) ScopeFilter() TagFilter {
-	if len(s.Trigger.Tags.Groups) > 0 {
-		return TagFilter{Groups: slices.Clone(s.Trigger.Tags.Groups)}
+	if len(s.Scope.Tags.Groups) > 0 {
+		return TagFilter{Groups: slices.Clone(s.Scope.Tags.Groups)}
 	}
-	f := TagFilter{Tags: NormalizeTags(s.Tags), Match: s.Trigger.Tags.Match}
+	f := TagFilter{Tags: NormalizeTags(s.Tags), Match: s.Scope.Tags.Match}
 	if f.Match == TagsMatchUnspecified {
 		f.Match = TagsMatchAny
 		if len(f.Tags) > 0 {
@@ -164,8 +166,8 @@ type MentalModel struct {
 	StructuredOutputJSON json.RawMessage
 	// Version is bumped on every written version.
 	Version int64
-	// IsStale is computed by readers from the change detector.
-	IsStale bool
+	// Stale is computed by readers from the change detector.
+	Stale bool
 	// LastRefreshedAt is the wall clock of the last completed refresh.
 	LastRefreshedAt *time.Time
 	// LastSeqSeen is the bank change_seq the last successful refresh read up to.
@@ -176,7 +178,7 @@ type MentalModel struct {
 	AutoRefreshPaused bool
 	// SourceIDs is the cumulative based_on set; pruned on full refresh and invalidate.
 	SourceIDs []UnitID
-	// LastTrace is kept when the trigger asks for it.
+	// LastTrace is kept when the spec asks for it (KeepTrace).
 	LastTrace *RefreshTrace
 	// Embedding is the page embedding used by page search.
 	Embedding []float32
@@ -287,7 +289,7 @@ type MentalModelHistoryEntry struct {
 	ErrorMessage string
 }
 
-// PageHit is one SearchPages result.
+// PageHit is one mental-model search result (SearchMentalModels, the search_pages reflect tool).
 type PageHit struct {
 	// MentalModelID is the page.
 	MentalModelID MentalModelID

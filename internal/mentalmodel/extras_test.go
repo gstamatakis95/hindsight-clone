@@ -10,13 +10,13 @@ import (
 )
 
 // TestStructuredOutputProjectedFromFinalPage checks that the page written is projected onto the
-// trigger's schema and the projection is stored with the version.
+// spec's response schema and the projection is stored with the version.
 func TestStructuredOutputProjectedFromFinalPage(t *testing.T) {
 	e := newEnv(t)
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-	spec.Trigger.ResponseSchemaJSON = `{"type":"object","properties":{"lead":{"type":"string"}}}`
-	spec.Trigger.KeepTrace = true
+	spec.ResponseSchemaJSON = `{"type":"object","properties":{"lead":{"type":"string"}}}`
+	spec.KeepTrace = true
 	e.addModel(spec)
 	e.scriptSynthesize("## Status\n\nAlice leads the project.")
 	e.llm.Script(domain.ModelSlotStructuredOutput, "", fakeJSON(`{"lead":"Alice"}`))

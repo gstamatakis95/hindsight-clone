@@ -70,9 +70,9 @@ func TestTagFilterEverySite(t *testing.T) {
 			r, err := listDirectivesFromProto(&pb.ListDirectivesRequest{Tags: in})
 			return r.Tags, err
 		},
-		"RefreshTrigger": func() (domain.TagFilter, error) {
+		"MentalModelScope": func() (domain.TagFilter, error) {
 			var d decoder
-			return d.trigger(&pb.RefreshTrigger{Tags: in}).Tags, d.err
+			return d.scope(&pb.MentalModelScope{Tags: in}).Tags, d.err
 		},
 		"ConsolidationStrategy.scopes": func() (domain.TagFilter, error) {
 			var d decoder

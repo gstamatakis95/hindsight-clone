@@ -21,7 +21,7 @@ type PageBounds struct {
 var (
 	// ListPage bounds page_size on every List RPC: 0 = 100, at most 1000.
 	ListPage = PageBounds{Field: "page_size", Default: 100, Max: 1000}
-	// SearchResults bounds max_results on SearchPages: 0 = 10, at most 100.
+	// SearchResults bounds max_results on SearchMentalModels: 0 = 10, at most 100.
 	SearchResults = PageBounds{Field: "max_results", Default: 10, Max: 100}
 )
 

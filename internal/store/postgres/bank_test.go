@@ -280,12 +280,12 @@ func sampleModel(b domain.BankRef, id domain.MentalModelID) domain.MentalModel {
 		Spec: domain.MentalModelSpec{
 			ID: id, Name: "Team overview", SourceQuery: "Who is on the team?", FolderPath: "teams/eng",
 			Tags: []string{"eng", "team"}, MaxTokens: ptr(2000),
-			Trigger: domain.RefreshTrigger{
-				Mode: domain.RefreshModeDelta, Strategy: domain.RefreshStrategySingleShot,
-				RefreshAfterConsolidation: true, MinRefreshIntervalSeconds: ptr(60),
+			Schedule: domain.RefreshSchedule{AfterConsolidation: true, MinIntervalSeconds: ptr(60)},
+			Scope: domain.MentalModelScope{
 				Tags: domain.TagFilter{Match: domain.TagsMatchAllStrict}, FactTypes: []domain.FactType{domain.FactTypeWorld},
-				IncludeChunks: ptr(false), Budget: domain.BudgetHigh, KeepTrace: true,
 			},
+			Mode: domain.RefreshModeDelta, Strategy: domain.RefreshStrategySingleShot,
+			IncludeChunks: ptr(false), Budget: domain.BudgetHigh, KeepTrace: true,
 			Overrides: &domain.BankConfig{
 				Recall: &domain.RecallConfig{BudgetLow: ptr(10)}, Reflect: &domain.ReflectConfig{Mission: "be brief"},
 			},
@@ -360,7 +360,7 @@ func testModelUpdate(t *testing.T, s store.DB) {
 	m := sampleModel(bankA, "team-overview")
 	inTx(t, s, func(tx store.Tx) error { return tx.MentalModels().Create(t.Context(), m) })
 	u := m
-	u.Spec.Name, u.Spec.Tags, u.Spec.Trigger = "Renamed", []string{"eng"}, domain.RefreshTrigger{RefreshCron: "0 * * * *"}
+	u.Spec.Name, u.Spec.Tags, u.Spec.Schedule = "Renamed", []string{"eng"}, domain.RefreshSchedule{Cron: "0 * * * *"}
 	u.Spec.Overrides = nil
 	u.ContentMD, u.Version, u.LastSeqSeen, u.AutoRefreshPaused = "# Team v2", 2, 9, true
 	u.LastRefreshedAt, u.LastRefreshFailedAt = ptr(day(5)), ptr(day(6))

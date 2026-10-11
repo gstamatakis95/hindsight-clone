@@ -14,7 +14,7 @@ import (
 func TestAutomaticRefreshRunsAndStaysUnpaused(t *testing.T) {
 	e := newEnv(t)
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-	spec.Trigger.Mode = domain.RefreshModeFull
+	spec.Mode = domain.RefreshModeFull
 	e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	e.tx(func(tx store.Tx) error {
