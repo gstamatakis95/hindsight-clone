@@ -111,13 +111,13 @@ func (e *env) retain(t *testing.T, bank, doc, content string, tags ...string) *p
 // memories lists the bank's live memories of the given types (none = all), optionally of one document.
 func (e *env) memories(t *testing.T, bank, doc string, types ...pb.FactType) []*pb.Memory {
 	t.Helper()
-	resp, err := e.c.Units.ListMemories(e.ctx(t), &pb.ListMemoriesRequest{
-		BankId: bank, Types: types, DocumentId: doc, State: pb.MemoryState_MEMORY_STATE_VALID, PageSize: 500,
+	resp, err := e.c.Memory.ListMemories(e.ctx(t), &pb.ListMemoriesRequest{
+		BankId: bank, FactTypes: types, DocumentId: doc, State: pb.MemoryState_MEMORY_STATE_VALID, PageSize: 500,
 	})
 	if err != nil {
 		t.Fatalf("list memories: %v", err)
 	}
-	return resp.GetItems()
+	return resp.GetMemories()
 }
 
 // facts lists the bank's live world and experience facts.

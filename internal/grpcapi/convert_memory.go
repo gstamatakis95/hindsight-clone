@@ -62,7 +62,7 @@ func (d *decoder) retainItems(in []*pb.RetainItem) []memory.RetainItem {
 // retainedDocToProto converts a RetainedDocument.
 func retainedDocToProto(x memory.RetainedDocument) *pb.RetainedDocument {
 	return &pb.RetainedDocument{
-		DocumentId: string(x.DocumentID), UnitsCreated: i32(x.UnitsCreated), Unchanged: x.Unchanged,
+		DocumentId: string(x.DocumentID), MemoriesCreated: i32(x.UnitsCreated), Unchanged: x.Unchanged,
 		Operation: operationPtrToProto(x.Operation),
 	}
 }
@@ -90,7 +90,7 @@ func recallRequestFromProto(r *pb.RecallRequest) (recall.Request, error) {
 	out := recall.Request{
 		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
-		Types:              fromEnums[domain.FactType](&d, r.GetTypes()),
+		Types:              fromEnums[domain.FactType](&d, r.GetFactTypes()),
 		Tags:               d.tagFilter(r.GetTags()),
 		Budget:             fromEnum[domain.Budget](&d, r.GetBudget()),
 		MaxTokens:          int(r.GetMaxTokens()),
@@ -202,11 +202,11 @@ func reflectIncludeFromProto(x *pb.ReflectInclude) reflecteng.Include {
 		return reflecteng.Include{}
 	}
 	return reflecteng.Include{
-		Facts: optCopy(x.Facts), ToolCalls: x.GetToolCalls(), ToolOutputs: optCopy(x.ToolOutputs),
+		Facts: optCopy(x.BasedOn), ToolCalls: x.GetTrace(), ToolOutputs: optCopy(x.ToolOutputs),
 	}
 }
 
-// basedOnToProto converts a BasedOn; one with no citations at all is nil (include.facts = false).
+// basedOnToProto converts a BasedOn; one with no citations at all is nil (include.based_on = false).
 func basedOnToProto(b reflecteng.BasedOn) *pb.BasedOn {
 	if len(b.Memories) == 0 && len(b.MentalModelIDs) == 0 && len(b.DirectiveIDs) == 0 {
 		return nil

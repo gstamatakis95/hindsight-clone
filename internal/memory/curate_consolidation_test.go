@@ -61,7 +61,7 @@ func TestRederiveBackoffRetryKeepsNewerEntities(t *testing.T) {
 	c := e.curator()
 	edit := func(names ...string) {
 		t.Helper()
-		if _, _, err := c.Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, Entities: names}); err != nil {
+		if _, _, err := c.Update(e.ctx, edit(idF1, Edit{Entities: names}, EditEntities)); err != nil {
 			t.Fatal(err)
 		}
 		if got := e.entitiesOf(idF1); !slices.Equal(got, names) {
@@ -104,7 +104,7 @@ func TestRemovalPathsQueueGraphMaintenance(t *testing.T) {
 		e.drainClaimed()
 	}
 	text := "Alice likes oolong tea"
-	if _, _, err := e.curator().Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, Text: &text}); err != nil {
+	if _, _, err := e.curator().Update(e.ctx, edit(idF1, Edit{Text: text}, EditText)); err != nil {
 		t.Fatal(err)
 	}
 	queued("edit")
@@ -129,7 +129,7 @@ func (e *curateEnv) drainClaimed() {
 func TestEditKeepsUnitOutOfConsolidationUntilRederive(t *testing.T) {
 	e := newCurateEnv(t)
 	text := "Alice likes oolong tea"
-	if _, _, err := e.curator().Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, Text: &text}); err != nil {
+	if _, _, err := e.curator().Update(e.ctx, edit(idF1, Edit{Text: text}, EditText)); err != nil {
 		t.Fatal(err)
 	}
 	if e.unconsolidated(idF1) {
@@ -141,8 +141,7 @@ func TestEditKeepsUnitOutOfConsolidationUntilRederive(t *testing.T) {
 	}
 
 	e.invalidate(e.service(nil))
-	req := UpdateRequest{Bank: testBank, ID: idF1, State: domain.MemoryStateValid}
-	if _, _, err := e.curator().Update(e.ctx, req); err != nil {
+	if _, _, err := e.service(nil).RestoreMemory(e.ctx, RestoreRequest{Bank: testBank, ID: idF1}); err != nil {
 		t.Fatal(err)
 	}
 	if e.unconsolidated(idF1) {
@@ -163,7 +162,7 @@ func TestEditDateClearsTimeless(t *testing.T) {
 		return tx.Units().Update(e.ctx, u)
 	})
 	at := e.clock.Now().Add(-time.Hour)
-	u, _, err := e.curator().Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, OccurredStart: &at})
+	u, _, err := e.curator().Update(e.ctx, edit(idF1, Edit{OccurredStart: &at}, EditOccurredStart))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +187,7 @@ func (c cancellingEmbedder) EmbedDocuments(ctx context.Context, texts []string) 
 func TestRederiveCancelledMidTx(t *testing.T) {
 	e := newCurateEnv(t)
 	text := "Alice likes oolong tea"
-	if _, _, err := e.curator().Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, Text: &text}); err != nil {
+	if _, _, err := e.curator().Update(e.ctx, edit(idF1, Edit{Text: text}, EditText)); err != nil {
 		t.Fatal(err)
 	}
 	jobs := e.claim(domain.OperationKindRederiveMemory)

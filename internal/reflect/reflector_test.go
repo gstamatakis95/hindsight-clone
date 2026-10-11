@@ -313,7 +313,7 @@ func TestReflectCitationFiltering(t *testing.T) {
 		t.Errorf("mental models = %v, want [mm-tea]", res.BasedOn.MentalModelIDs)
 	}
 
-	t.Run("include.facts=false", func(t *testing.T) {
+	t.Run("include.based_on=false", func(t *testing.T) {
 		h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
 		h.turns(recallCall(), doneCall("tea", "u1"))
 		res, err := h.reflect(func(r *rf.Request) { r.Include.Facts = ptr(false) })

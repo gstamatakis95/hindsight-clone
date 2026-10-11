@@ -1,11 +1,12 @@
 // Package memory is MemoryService: it turns documents into memory units (Retain), answers queries over them
-// (Recall, Reflect), lists and curates individual units without hard deletes (ListMemories, GetMemory,
-// UpdateMemory, InvalidateMemory, RestoreMemory), runs the retain_document and rederive_memory jobs, and
-// owns two steps of the maintenance tick (RederiveStranded, SettleRetainBatches).
+// (Recall, Reflect, ListRecallArms), lists and curates individual units without hard deletes (ListMemories,
+// GetMemory, UpdateMemory, InvalidateMemory, RestoreMemory), runs the retain_document and rederive_memory
+// jobs, and owns two steps of the maintenance tick (RederiveStranded, SettleRetainBatches).
 //
 // Its one exported type, [Service], is built by [New] from [Deps]. The request and result types the gRPC
 // handlers convert to and from are [RetainRequest], [RetainItem], [RetainResult], [RetainedDocument],
-// [ListRequest], [Page], [UpdateRequest] and [RestoreRequest]; everything else is unexported.
+// [ListRequest], [Page], [UpdateRequest], [Edit], [EditField] and [RestoreRequest]; everything else is
+// unexported.
 //
 // # Where it sits
 //
@@ -14,13 +15,13 @@
 // package, grpcapi, maintenance, an adapter, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Its effects
 // on other features go through the jobs catalogue: retain and curation enqueue consolidate, graph_maintenance
 // and refresh_mental_model jobs inside their own transactions. cmd/memd/wire_memory.go builds the Service,
-// hands it to grpcapi's MemoryHandler and MemoryUnitHandler, registers [Service.RunRetainJob] and
-// [Service.RunRederiveJob] with the job runner, and gives it to the maintenance tick.
+// hands it to grpcapi's MemoryHandler, registers [Service.RunRetainJob] and [Service.RunRederiveJob] with the
+// job runner, and gives it to the maintenance tick.
 //
 // Internally the Service delegates to four unexported parts, each with its own dependencies: the ingestor
 // (the API side of Retain), the retainer (one document: the job and the inline run), the curator
-// (UpdateMemory) and the rederiver (the rederive_memory job). Recall, ListRecallArms and Reflect delegate to the
-// recall engine and the reflect agent unchanged.
+// (UpdateMemory, InvalidateMemory, RestoreMemory) and the rederiver (the rederive_memory job). Recall,
+// ListRecallArms and Reflect delegate to the recall engine and the reflect agent unchanged.
 //
 // # Retain
 //
@@ -125,16 +126,15 @@
 // # Curation
 //
 // Observations are never curated directly; they re-derive from their sources. Curation never hard-deletes a
-// fact: invalidating moves it to the archive and restoring moves it back. [Service.UpdateMemory] takes an
-// [UpdateRequest]; [Service.InvalidateMemory] and [Service.RestoreMemory] are UpdateMemory with only State
-// set. Validation before any transaction: state invalidated with edits, no state and no edits, a fact type
-// other than world or experience, empty text, and clear_occurred together with dates are
-// domain.ErrInvalidArgument. Then, still outside the transaction, it reads what the transaction will need: for
-// a restore, the archived unit's snapshot entity names (graph maintenance may have pruned those entities while
-// the unit was archived); for an entity change, the effective retain.entity_match_threshold with the request
-// overrides; for an invalidate, the mental models whose source_ids cite the unit. Then one DB.InTx:
+// fact: [Service.InvalidateMemory] moves it to the archive and [Service.RestoreMemory] moves it back;
+// [Service.UpdateMemory] takes an [UpdateRequest], whose Fields name the [Edit] fields to apply (a named field
+// left zero clears it). Validation before any transaction: a missing id, and for an edit no fields, an unknown
+// field, an empty text or a fact type other than world or experience, are domain.ErrInvalidArgument. Then,
+// still outside the transaction, it reads what the transaction will need: for a restore, the archived unit's
+// snapshot entity names (graph maintenance may have pruned those entities while the unit was archived); for an
+// entity change, the effective retain.entity_match_threshold with the request overrides. Then one DB.InTx:
 //
-// Invalidate (state invalidated):
+// Invalidate:
 //
 //  1. tx.Seq(bank); read the live fact (absent = domain.ErrNotFound; an observation = INVALID_ARGUMENT);
 //  2. delete the observations citing it and reset their co-sources (before the archive, which drops the
@@ -142,27 +142,29 @@
 //  3. UnitRepo.Archive, which snapshots its entities and causal links, deletes its links and entity rows and
 //     queues its link neighbours in graph_dirty and its entities in entity_maintenance;
 //  4. an invalidate audit row with the before snapshot and reason;
-//  5. enqueue consolidate ({}, DedupePending), graph_maintenance and one refresh per citing mental model
-//     (jobs.QueueModelRefresh);
+//  5. enqueue consolidate ({}, DedupePending), graph_maintenance and one refresh (jobs.QueueModelRefresh) per
+//     mental model whose source_ids cite the fact or an observation deleted in step 2 (ModelsCiting, read in
+//     the transaction);
 //  6. a memory_curated event stamped with the seq.
 //
-// No job follows; the response is the unit with state invalidated, no embedding and no operation.
+// No job follows; the result is the unit with state invalidated and no embedding.
 //
-// Restore and/or edit (state valid, or edit fields):
+// Restore or edit:
 //
-//  1. tx.Seq(bank); with state valid, UnitRepo.Restore moves an archived unit back (reattaching the entities
-//     and causal links that still exist) and stamps it consolidated; state valid on a live unit is no state
-//     change, and with no edits nothing is written and no operation is returned;
-//  2. edits write the new values with edited_at, the seq and a cleared embedding (the unit leaves semantic
-//     search until the rederive), stamp the unit consolidated, delete the observations citing it (resetting
-//     their co-sources) and enqueue graph_maintenance; a new occurrence date clears Timeless;
+//  1. tx.Seq(bank); a restore moves an archived unit back with UnitRepo.Restore (reattaching the entities and
+//     causal links that still exist) and stamps it consolidated; a restore of a live unit writes nothing and
+//     returns no operation;
+//  2. an edit writes the new values with edited_at, the seq and a cleared embedding (the unit leaves semantic
+//     search until the rederive), stamps the unit consolidated, deletes the observations citing it (resetting
+//     their co-sources), enqueues graph_maintenance and one refresh per mental model whose source_ids cite a
+//     deleted observation; setting an occurrence date clears Timeless;
 //  3. entity changes are committed here, not in the job: the unit's attachments are detached and the new
 //     names (or a restore's snapshot names) are resolved with linking.Resolver (no model call) and attached;
-//     resolve_entities=false takes edited names literally;
+//     resolve_entities=false takes the names literally;
 //  4. enqueue rederive_memory (jobs.EnqueueRederive: the unit id only; serial key "doc:{document}" so it never
 //     overlaps a retain of that document, or "unit:{id}" for a unit without one; DedupeNone; the request
 //     overrides ride on the job);
-//  5. restore and edit audit rows (before and after snapshots) and the memory_curated event.
+//  5. a restore or edit audit row (before and after snapshots for an edit) and the memory_curated event.
 //
 // Stamping an edited or restored unit consolidated keeps consolidation from deciding on it while its embedding
 // is empty; the rederive's write clears the stamp. Resolving entities in the RPC transaction means an older

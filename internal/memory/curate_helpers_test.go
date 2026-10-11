@@ -123,6 +123,11 @@ func (e *curateEnv) service(emb ai.Embedder) *Service {
 // curator returns the Service's curator.
 func (e *curateEnv) curator() *curator { return e.service(nil).curate }
 
+// edit returns the curation editing the fields of ed that fields names on unit id of the test bank.
+func edit(id domain.UnitID, ed Edit, fields ...EditField) curation {
+	return curation{UpdateRequest: UpdateRequest{Bank: testBank, ID: id, Edit: ed, Fields: fields}, act: actionEdit}
+}
+
 // rederiver returns the Service's rederiver embedding with emb (nil = the env's embedder).
 func (e *curateEnv) rederiver(emb ai.Embedder) *rederiver { return e.service(emb).rederive }
 

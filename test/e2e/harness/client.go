@@ -22,9 +22,9 @@ type Client struct {
 	Conn *grpc.ClientConn
 	// Tenant is the tenant id every call sends.
 	Tenant string
-	// Memory is MemoryService (Retain, Recall, Reflect).
+	// Memory is MemoryService (Retain, Recall, Reflect, memory listing and curation).
 	Memory memoryv1.MemoryServiceClient
-	// Units is MemoryUnitService.
+	// Units is MemoryUnitService (observation history).
 	Units memoryv1.MemoryUnitServiceClient
 	// Documents is DocumentService.
 	Documents memoryv1.DocumentServiceClient

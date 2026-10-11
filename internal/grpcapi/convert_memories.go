@@ -3,36 +3,40 @@ package grpcapi
 import (
 	"memd/internal/domain"
 	"memd/internal/memory"
+	"slices"
+
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	pb "memd/gen/memory/v1"
 )
 
-// Converters for MemoryUnitService.
+// Converters for MemoryService's listing and curation, and for GetObservationHistory.
 
 // listMemoriesRequestFromProto converts a ListMemoriesRequest; Bank carries only bank_id (the handler sets
 // the tenant).
 func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (memory.ListRequest, error) {
 	var d decoder
 	out := memory.ListRequest{
-		Bank:       domain.BankRef{Bank: r.GetBankId()},
-		Types:      fromEnums[domain.FactType](&d, r.GetTypes()),
-		Q:          r.GetQ(),
-		DocumentID: domain.DocumentID(r.GetDocumentId()),
-		EntityID:   domain.EntityID(r.GetEntityId()),
-		State:      fromEnum[domain.MemoryState](&d, r.GetState()),
-		Start:      d.tsPtr(r.GetStart()),
-		End:        d.tsPtr(r.GetEnd()),
-		TimeField:  fromEnum[domain.TimeField](&d, r.GetTimeField()),
-		Tags:       d.tagFilter(r.GetTags()),
-		PageSize:   int(r.GetPageSize()),
-		PageToken:  r.GetPageToken(),
+		Bank:         domain.BankRef{Bank: r.GetBankId()},
+		FactTypes:    fromEnums[domain.FactType](&d, r.GetFactTypes()),
+		TextContains: r.GetTextContains(),
+		DocumentID:   domain.DocumentID(r.GetDocumentId()),
+		EntityID:     domain.EntityID(r.GetEntityId()),
+		State:        fromEnum[domain.MemoryState](&d, r.GetState()),
+		Start:        d.tsPtr(r.GetStart()),
+		End:          d.tsPtr(r.GetEnd()),
+		TimeField:    fromEnum[domain.TimeField](&d, r.GetTimeField()),
+		Tags:         d.tagFilter(r.GetTags()),
+		PageSize:     int(r.GetPageSize()),
+		PageToken:    r.GetPageToken(),
 	}
 	return out, d.err
 }
 
 // listMemoriesPageToProto converts a memory page to a ListMemoriesResponse.
 func listMemoriesPageToProto(p memory.Page) *pb.ListMemoriesResponse {
-	return &pb.ListMemoriesResponse{Items: unitsToProto(p.Items), NextPageToken: p.NextPageToken}
+	return &pb.ListMemoriesResponse{Memories: unitsToProto(p.Items), NextPageToken: p.NextPageToken}
 }
 
 // observationVersionToProto converts an ObservationVersion.
@@ -54,39 +58,69 @@ func observationHistoryToProto(in []domain.ObservationVersion) *pb.GetObservatio
 	return out
 }
 
-// entityListFromProto converts an EntityList keeping presence: nil = nil (unchanged), a set list is a
-// non-nil slice even when empty (clear).
-func entityListFromProto(l *pb.EntityList) []string {
-	if l == nil {
-		return nil
+// memoryEditFields returns the MemoryEdit fields an UpdateMemory applies: the mask's paths, each of which
+// must name a top-level MemoryEdit field, or the populated fields of ed when the mask is empty.
+func memoryEditFields(ed *pb.MemoryEdit, mask *fieldmaskpb.FieldMask) ([]memory.EditField, error) {
+	var out []memory.EditField
+	if len(mask.GetPaths()) == 0 {
+		ed.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+			out = append(out, memory.EditField(fd.Name()))
+			return true
+		})
+		return out, nil
 	}
-	return append([]string{}, l.GetNames()...)
+	fields := ed.ProtoReflect().Descriptor().Fields()
+	for _, p := range mask.GetPaths() {
+		if fields.ByName(protoreflect.Name(p)) == nil {
+			return nil, domain.InvalidField("update_mask", "invalid update_mask path %q for %s", p,
+				ed.ProtoReflect().Descriptor().FullName())
+		}
+		if f := memory.EditField(p); !slices.Contains(out, f) {
+			out = append(out, f)
+		}
+	}
+	return out, nil
 }
 
 // updateMemoryRequestFromProto converts an UpdateMemoryRequest; Bank carries only bank_id (the handler
 // sets the tenant).
 func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (memory.UpdateRequest, error) {
+	ed := r.GetMemory()
+	if ed == nil {
+		ed = &pb.MemoryEdit{}
+	}
+	fields, err := memoryEditFields(ed, r.GetUpdateMask())
+	if err != nil {
+		return memory.UpdateRequest{}, err
+	}
 	var d decoder
 	out := memory.UpdateRequest{
-		Bank:            domain.BankRef{Bank: r.GetBankId()},
-		ID:              domain.UnitID(r.GetMemoryId()),
-		Text:            optCopy(r.Text),
-		Context:         optCopy(r.Context),
-		OccurredStart:   d.tsPtr(r.GetOccurredStart()),
-		OccurredEnd:     d.tsPtr(r.GetOccurredEnd()),
-		ClearOccurred:   r.GetClearOccurred(),
-		FactType:        fromEnum[domain.FactType](&d, r.GetFactType()),
-		Entities:        entityListFromProto(r.GetEntities()),
+		Bank: domain.BankRef{Bank: r.GetBankId()},
+		ID:   domain.UnitID(r.GetMemoryId()),
+		Edit: memory.Edit{
+			Text:          ed.GetText(),
+			Context:       ed.GetContext(),
+			OccurredStart: d.tsPtr(ed.GetOccurredStart()),
+			OccurredEnd:   d.tsPtr(ed.GetOccurredEnd()),
+			FactType:      fromEnum[domain.FactType](&d, ed.GetFactType()),
+			Entities:      slices.Clone(ed.GetEntities()),
+		},
+		Fields:          fields,
 		ResolveEntities: optCopy(r.ResolveEntities),
-		State:           fromEnum[domain.MemoryState](&d, r.GetState()),
 		Reason:          r.GetReason(),
 		Overrides:       rederiveOverrides(r.GetOverrides()),
 	}
 	return out, d.err
 }
 
-// updateResultToProto converts what memory.Service.UpdateMemory returns (the unit after the change and the
-// rederive_memory operation, nil for invalidate) to an UpdateMemoryResponse.
-func updateResultToProto(u domain.Unit, op *domain.Operation) *pb.UpdateMemoryResponse {
-	return &pb.UpdateMemoryResponse{Memory: unitToProto(u), Operation: operationPtrToProto(op)}
+// restoreMemoryRequestFromProto converts a RestoreMemoryRequest; Bank carries only bank_id (the handler sets
+// the tenant).
+func restoreMemoryRequestFromProto(r *pb.RestoreMemoryRequest) memory.RestoreRequest {
+	return memory.RestoreRequest{
+		Bank:            domain.BankRef{Bank: r.GetBankId()},
+		ID:              domain.UnitID(r.GetMemoryId()),
+		Reason:          r.GetReason(),
+		ResolveEntities: optCopy(r.ResolveEntities),
+		Overrides:       rederiveOverrides(r.GetOverrides()),
+	}
 }
