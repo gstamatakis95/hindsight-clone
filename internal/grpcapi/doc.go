@@ -25,7 +25,7 @@
 //
 // # Interceptors
 //
-// Three unary interceptors run first, in this order; options passed to New chain after them:
+// Four unary interceptors run first, in this order; options passed to New chain after them:
 //
 //   - [TenantInterceptor] reads the tenant from the x-tenant-id metadata header ([TenantHeader]); exactly one
 //     non-empty value is required, else INVALID_ARGUMENT. The tenant is never read from the request body
@@ -34,6 +34,11 @@
 //     api.rpc_deadline in the server config file); 0 = none.
 //   - The paging interceptor rejects a negative page_size or limit field with INVALID_ARGUMENT; 0 keeps
 //     meaning "the server default".
+//   - The arm-name interceptor finds every RecallConfig in a request (config levels and patches, templates, spec
+//     and request overrides) and rejects recall.arms or recall.arm_boosts names outside Options.RecallArms, the
+//     registered recall arms (config.CheckArms), with INVALID_ARGUMENT. A request's own arms and min_scores.arms
+//     are checked by the recall engine; overrides.recall.arms on Recall and Reflect is rejected outright, since
+//     the request's arms field picks the arms there. ListRecallArms lists the registered arms.
 //
 // Tenant and bank ids must be non-empty, at most 256 bytes, not "." or "..", and free of '/' and control
 // characters, because blob keys are "{tenant}/{bank}/..." and one bank's prefix must never cover another's.

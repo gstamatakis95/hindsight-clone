@@ -65,6 +65,9 @@ func (r *Agent) Reflect(ctx context.Context, req Request) (Result, error) {
 	if err := validate(req); err != nil {
 		return Result{}, err
 	}
+	if err := r.d.Recall.CheckArms(req.Arms); err != nil {
+		return Result{}, fmt.Errorf("reflect: %w", err)
+	}
 	var overrides []domain.BankConfig
 	if req.Overrides != nil {
 		overrides = append(overrides, *req.Overrides)

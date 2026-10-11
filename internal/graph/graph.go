@@ -70,7 +70,7 @@ type Reader interface {
 	// q.Kinds, and returns up to q.Limit reached units, best score first (ties by id). Seeds are never hits, and
 	// only live units of the bank are reached. The Types, Tags and Seq filters are hints the adapter MAY apply
 	// before the limit; callers always re-check the hits against the store (GetUnits plus the same filters), and
-	// the graph may lag the store, because the graph arm is one of four fused recall arms.
+	// the graph may lag the store, because the graph arm is one of several fused recall arms.
 	Expand(ctx context.Context, q Query) ([]Hit, error)
 	// Degree returns how many links of kind touch unit in either direction (the linker's per-unit caps). Inside a
 	// transaction it sees the transaction's own writes.

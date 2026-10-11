@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// parsedQuery is a recall request after parsing: what every retriever and the *scorer read.
+// parsedQuery is a recall request after parsing: what the scorer reads, and what the arms read as a Query.
 type parsedQuery struct {
 	// Bank is the bank searched.
 	Bank domain.BankRef
@@ -25,10 +25,12 @@ type parsedQuery struct {
 	Types []domain.FactType
 	// Tags is the request's tag filter.
 	Tags domain.TagFilter
-	// Predicate is Tags compiled once (fuzzy leaves resolved) and shared by all four arms.
+	// Predicate is Tags compiled once (fuzzy leaves resolved) and shared by every arm.
 	Predicate *domain.TagPredicate
 	// Limit is the per-arm candidate limit from the budget: 100 / 300 / 1000.
 	Limit int
+	// Budget is the request's effort level.
+	Budget domain.Budget
 	// At is the reference time for recency and temporal boosts.
 	At time.Time
 	// MinScores are the request's arm and result floors.
@@ -59,7 +61,7 @@ func parse(ctx context.Context, req Request, cfg domain.BankConfig, d parseDeps)
 	text = truncateTokens(text, MaxQueryTokens, d.count)
 	q := &parsedQuery{
 		Bank: req.Bank, Text: text, Types: factTypes(req.Types), Tags: req.Tags,
-		MinScores: req.MinScores, Seq: req.Seq, Config: cfg, At: d.clock.Now(),
+		MinScores: req.MinScores, Seq: req.Seq, Config: cfg, At: d.clock.Now(), Budget: req.Budget,
 	}
 	if req.QueryTime != nil {
 		q.At = *req.QueryTime
@@ -114,4 +116,16 @@ func factTypes(ts []domain.FactType) []domain.FactType {
 		}
 	}
 	return out
+}
+
+// arm returns the Query the arms see.
+func (q *parsedQuery) arm() Query {
+	rc := domain.RecallConfig{}
+	if q.Config.Recall != nil {
+		rc = *q.Config.Recall
+	}
+	return Query{
+		Bank: q.Bank, Text: q.Text, Embedding: q.Embedding, Window: q.Window, Types: q.Types, Tags: q.Predicate,
+		Seq: q.Seq, Limit: q.Limit, Budget: q.Budget, minScores: q.MinScores.Arms, recall: rc,
+	}
 }

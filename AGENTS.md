@@ -21,12 +21,14 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   internal/prompts: templates.
 - internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
   kind's payload, serial key and Enqueue helper. internal/maintenance: the 60 s tick and the graph_maintenance job.
-- Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, CompileTags, SearchPages,
-  ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking (Linker,
-  Resolver, LabelResolver).
+- Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, Arms, CheckArms, CompileTags,
+  SearchPages, ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking
+  (Linker, Resolver, LabelResolver). Recall arms are the one extension point inside a library: the recall.Arm
+  interface, the built-in vector, text, graph and temporal arms in internal/recall/arms (one file each), and their
+  contract suite in internal/recall/armtest.
 - Services, one package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC
   logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
-  - internal/memory: MemoryService (Retain, Recall, Reflect, ListMemories, GetMemory, UpdateMemory,
+  - internal/memory: MemoryService (Retain, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory,
     InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
     sweeps.
   - internal/observation: ObservationService and GetObservationHistory; consolidate; the consolidation
@@ -60,6 +62,8 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - New behaviour knobs go in BankConfig, in their phase group (retain, observations, recall, reflect, mental_models,
   models), and in the overrides message of each RPC that may change them. Operator-only settings go in a section
   of the server config file. Environment variables are only for deployment, infrastructure and secrets.
+- New retrieval arms implement recall.Arm, take only the boundary they read, run armtest, and are registered in
+  recallArms (cmd/memd/wire.go); clients reach them by name. Never special-case an arm in the engine.
 - No per-memory delete API. Invalidate archives a unit; upsert and reprocess replace a document's units.
 - Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim. Report
   progress and results through jobs.Run; keep result keys stable (GetOperation shows them).

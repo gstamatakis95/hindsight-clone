@@ -3,15 +3,20 @@ package grpcapi
 import (
 	"context"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"strings"
 	"time"
+
+	pb "memd/gen/memory/v1"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protopath"
+	"google.golang.org/protobuf/reflect/protorange"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
@@ -137,4 +142,38 @@ func checkPaging(m protoreflect.Message) error {
 		}
 	}
 	return nil
+}
+
+// armNamesInterceptor rejects a request holding a RecallConfig anywhere (a config level or patch, a bank
+// template, a mental model's overrides, a request's overrides) whose recall.arms or recall.arm_boosts name an arm
+// outside registered (config.CheckArms; INVALID_ARGUMENT). No registered arms turns the check off. The
+// request-level arms and min_scores.arms are checked by the recall engine.
+func armNamesInterceptor(registered []string) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
+	) (any, error) {
+		if m, ok := req.(proto.Message); ok && len(registered) > 0 {
+			if err := checkArmNames(m.ProtoReflect(), registered); err != nil {
+				return nil, toStatus(err)
+			}
+		}
+		return handler(ctx, req)
+	}
+}
+
+// checkArmNames runs config.CheckArms on every RecallConfig inside m.
+func checkArmNames(m protoreflect.Message, registered []string) error {
+	check := func(v protopath.Values) error {
+		msg, ok := v.Index(-1).Value.Interface().(protoreflect.Message)
+		if !ok {
+			return nil
+		}
+		rc, ok := msg.Interface().(*pb.RecallConfig)
+		if !ok {
+			return nil
+		}
+		cfg := domain.BankConfig{Recall: &domain.RecallConfig{Arms: rc.GetArms(), ArmBoosts: rc.GetArmBoosts()}}
+		return config.CheckArms(cfg, registered)
+	}
+	return protorange.Range(m, check) //nolint:wrapcheck // check returns config.CheckArms's domain error class
 }

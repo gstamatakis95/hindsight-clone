@@ -19,8 +19,8 @@
 //
 // Internally the Service delegates to four unexported parts, each with its own dependencies: the ingestor
 // (the API side of Retain), the retainer (one document: the job and the inline run), the curator
-// (UpdateMemory) and the rederiver (the rederive_memory job). Recall and Reflect delegate to the recall engine
-// and the reflect agent unchanged.
+// (UpdateMemory) and the rederiver (the rederive_memory job). Recall, ListRecallArms and Reflect delegate to the
+// recall engine and the reflect agent unchanged.
 //
 // # Retain
 //

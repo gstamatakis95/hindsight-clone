@@ -62,3 +62,26 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckArms(t *testing.T) {
+	registered := []string{"vector", "text"}
+	recall := func(arms []string, boosts map[string]float64) domain.BankConfig {
+		return domain.BankConfig{Recall: &domain.RecallConfig{Arms: arms, ArmBoosts: boosts}}
+	}
+	for _, tc := range []struct {
+		name string
+		cfg  domain.BankConfig
+		ok   bool
+	}{
+		{"no recall group", domain.BankConfig{}, true},
+		{"registered names", recall([]string{"text", "vector"}, map[string]float64{"vector": 2}), true},
+		{"unknown arm", recall([]string{"semantic"}, nil), false},
+		{"repeated arm", recall([]string{"text", "text"}, nil), false},
+		{"unknown boost", recall(nil, map[string]float64{"graph": 2}), false},
+	} {
+		err := CheckArms(tc.cfg, registered)
+		if tc.ok && err != nil || !tc.ok && !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("%s: err = %v, want ok = %v", tc.name, err, tc.ok)
+		}
+	}
+}

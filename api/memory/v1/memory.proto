@@ -50,13 +50,17 @@ service MemoryService {
   // commit); run_async=true enqueues retain_document jobs and returns their ids. A write to an unknown
   // bank creates it with tenant defaults.
   rpc Retain(RetainRequest) returns (RetainResponse);
-  // Recall retrieves memories with four arms (semantic, keyword, graph, temporal), RRF fusion, rerank,
-  // boosts and token packing. Unknown bank = NOT_FOUND.
+  // Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
+  // rerank, boosts and token packing. Unknown bank = NOT_FOUND.
   rpc Recall(RecallRequest) returns (RecallResponse);
   // Reflect answers a query with an agentic tool loop over mental models, observations and raw facts.
   // Strict: a failing retrieval dependency fails the call with UNAVAILABLE; exceeding max_total_tokens
   // fails it with RESOURCE_EXHAUSTED. Unknown bank = NOT_FOUND.
   rpc Reflect(ReflectRequest) returns (ReflectResponse);
+  // ListRecallArms lists the recall arms this server has registered, with a one-line description each: the
+  // names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
+  // MinScores.arms accept.
+  rpc ListRecallArms(ListRecallArmsRequest) returns (ListRecallArmsResponse);
 }
 
 // MemoryUnitService lists, reads and curates individual memory units.
@@ -314,6 +318,10 @@ message RecallRequest {
   bool trace = 15;
   // Overrides for this call only.
   RecallOverrides overrides = 16;
+  // Recall arms to run, by name (ListRecallArms), e.g. ["graph", "vector"] runs only those two; empty = the
+  // effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
+  // INVALID_ARGUMENT.
+  repeated string arms = 17;
 }
 
 // RecallResponse carries ranked memories and any requested attachments.
@@ -388,6 +396,10 @@ message ReflectRequest {
   google.protobuf.Timestamp query_time = 12;
   // Overrides for this call only. Extra directives come through extra_directives.
   ReflectOverrides overrides = 13;
+  // Recall arms the agent's recall and search_observations tools run, by name (ListRecallArms); empty = the
+  // effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
+  // INVALID_ARGUMENT.
+  repeated string arms = 14;
 }
 
 // ReflectResponse carries the answer and its provenance.
@@ -424,6 +436,25 @@ message BasedOn {
   repeated string mental_model_ids = 2;
   // Directives applied.
   repeated string directive_ids = 3;
+}
+
+// ---- ListRecallArms ----
+
+// ListRecallArmsRequest takes no parameters: the arms are the server's, the same for every tenant and bank.
+message ListRecallArmsRequest {}
+
+// ListRecallArmsResponse lists the registered recall arms.
+message ListRecallArmsResponse {
+  // The registered arms, in fusion order.
+  repeated RecallArm arms = 1;
+}
+
+// RecallArm describes one registered recall arm.
+message RecallArm {
+  // Arm name, as RecallRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and MinScores.arms take it.
+  string name = 1;
+  // One-line description of what the arm retrieves.
+  string description = 2;
 }
 
 // ---- Resources ----
@@ -2050,23 +2081,22 @@ message Scores {
   double final = 1;
   // Cross-encoder score; unset when rerank did not run.
   optional double reranker = 2;
-  // Cosine similarity from the semantic arm; unset when the arm did not return the memory.
-  optional double semantic = 3;
-  // BM25 score from the keyword arm; unset when the arm did not return the memory.
-  optional double keyword = 4;
+  // Raw score per arm name from each arm that returned the memory (vector: cosine similarity, text: BM25,
+  // graph: path weight, temporal: proximity); an arm that did not return it has no entry.
+  map<string, double> arms = 3;
 }
 
-// MinScores sets score floors for recall. Arm floors (semantic, keyword) apply inside retrieval; result
-// floors (reranker, final) apply after scoring. Unset = no floor.
+// MinScores sets score floors for recall. Arm floors apply inside retrieval; result floors (reranker, final)
+// apply after scoring. Unset = no floor.
 message MinScores {
-  // Minimum cosine similarity for the semantic arm.
-  optional double semantic = 1;
-  // Minimum BM25 score for the keyword arm.
-  optional double keyword = 2;
+  // Retrieval floor per arm name (ListRecallArms); an unknown name = INVALID_ARGUMENT. Each arm reads its own
+  // entry: vector takes a cosine-similarity floor (absent = 0.3, an explicit 0 disables it), text a BM25
+  // floor (absent = none); graph and temporal ignore theirs.
+  map<string, double> arms = 1;
   // Minimum cross-encoder score after rerank.
-  optional double reranker = 3;
+  optional double reranker = 2;
   // Minimum final score after boosts.
-  optional double final = 4;
+  optional double final = 3;
 }
 
 // Chunk is a slice of a retained document that units were extracted from.
@@ -2096,7 +2126,8 @@ message SlotUsage {
 // RecallTrace explains a recall: per-arm results, fusion, rerank and packing. Returned when
 // RecallRequest.trace is set.
 message RecallTrace {
-  // One entry per arm: semantic, keyword, graph, temporal.
+  // One entry per arm that ran, in fusion order; an arm that does not apply to the query (temporal without
+  // a time window) has none.
   repeated ArmTrace arms = 1;
   // Candidates after RRF fusion.
   int32 fused = 2;
@@ -2116,9 +2147,9 @@ message RecallTrace {
   int64 duration_ms = 9;
 }
 
-// ArmTrace describes one recall retriever's contribution.
+// ArmTrace describes one recall arm's contribution.
 message ArmTrace {
-  // Arm name: semantic, keyword, graph or temporal.
+  // Arm name (ListRecallArms), e.g. vector, text, graph or temporal.
   string arm = 1;
   // Candidates the arm returned.
   int32 candidates = 2;
@@ -2335,7 +2366,7 @@ message ScopePattern {
   TagsMatch tags_match = 2;
 }
 
-// RecallConfig tunes the recall pipeline: four arms, RRF fusion, rerank, boosts and packing.
+// RecallConfig tunes the recall pipeline: the arms, RRF fusion, rerank, boosts and packing.
 message RecallConfig {
   // How a Budget becomes the per-arm candidate cap.
   BudgetFunction budget_function = 1;
@@ -2345,10 +2376,12 @@ message RecallConfig {
   optional int32 budget_mid = 3;
   // Per-arm candidate cap for BUDGET_HIGH, default 1000.
   optional int32 budget_high = 4;
-  // RRF weight per arm name (semantic, keyword, graph, temporal); missing = 1.
-  map<string, double> strategy_boosts = 5;
-  // Arms to run; empty = all four.
-  repeated string enabled_strategies = 6;
+  // Fusion weight per arm name (ListRecallArms); missing = 1. It decides which candidates survive the
+  // reranker_max_candidates cut. An unknown name = INVALID_ARGUMENT.
+  map<string, double> arm_boosts = 5;
+  // Arms to run, by name (ListRecallArms); empty = every registered arm. RecallRequest.arms and
+  // ReflectRequest.arms win over it. An unknown name = INVALID_ARGUMENT.
+  repeated string arms = 6;
   // Candidates sent to the cross-encoder, default 300.
   optional int32 reranker_max_candidates = 7;
   // Whether to run the cross-encoder (needs a models.rerank binding).
@@ -2483,7 +2516,8 @@ message RetainOverrides {
 
 // RecallOverrides is what a Recall may override: the recall group and the TIME_PARSE and RERANK models.
 message RecallOverrides {
-  // Recall settings for this call.
+  // Recall settings for this call. recall.arms must stay empty (INVALID_ARGUMENT otherwise): pick the arms
+  // with RecallRequest.arms.
   RecallConfig recall = 1;
   // MODEL_SLOT_TIME_PARSE for this call (query time windows).
   ModelBinding time_parse_model = 2;
@@ -2496,7 +2530,8 @@ message RecallOverrides {
 message ReflectOverrides {
   // Reflect settings for this call.
   ReflectConfig reflect = 1;
-  // Recall settings of the agent's retrieval tools for this call.
+  // Recall settings of the agent's retrieval tools for this call. recall.arms must stay empty
+  // (INVALID_ARGUMENT otherwise): pick the arms with ReflectRequest.arms.
   RecallConfig recall = 2;
   // MODEL_SLOT_REFLECT for this call.
   ModelBinding reflect_model = 3;

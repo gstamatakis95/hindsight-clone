@@ -40,7 +40,7 @@ func TestMergePrecedence(t *testing.T) {
 			EntityLabels: []domain.EntityLabel{{Key: "server"}},
 		},
 		Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.97)},
-		Recall:       &domain.RecallConfig{RRFK: ptr(60), BudgetLow: ptr(100), EnabledStrategies: []string{"a", "b"}},
+		Recall:       &domain.RecallConfig{RRFK: ptr(60), BudgetLow: ptr(100), Arms: []string{"a", "b"}},
 		Reflect:      &domain.ReflectConfig{Disposition: &domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3}},
 	}
 	tenant := domain.BankConfig{
@@ -53,7 +53,7 @@ func TestMergePrecedence(t *testing.T) {
 		Reflect:      &domain.ReflectConfig{Disposition: &domain.Disposition{Empathy: 5}},
 	}
 	strategy := StrategyLevel(domain.ConsolidationStrategy{Mission: "strategy obs"})
-	request := domain.BankConfig{Recall: &domain.RecallConfig{EnabledStrategies: []string{}}}
+	request := domain.BankConfig{Recall: &domain.RecallConfig{Arms: []string{}}}
 	item := domain.BankConfig{Retain: &domain.RetainConfig{Mission: "item mission"}}
 
 	got := Merge(server, tenant, bank, strategy, request, item)
@@ -69,7 +69,7 @@ func TestMergePrecedence(t *testing.T) {
 		{"list replaced, not appended", len(got.Retain.EntityLabels), 2},
 		{"nested field from tenant", *got.Recall.BudgetLow, 50},
 		{"nested field from server kept", *got.Recall.RRFK, 60},
-		{"empty list clears", got.Recall.EnabledStrategies, []string{}},
+		{"empty list clears", got.Recall.Arms, []string{}},
 		{
 			"nested message merges by field", *got.Reflect.Disposition,
 			domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 5},
@@ -148,7 +148,7 @@ func TestModelResolution(t *testing.T) {
 // TestMergeDoesNotAliasInputs: mutating the result never reaches the inputs, and inputs are unchanged.
 func TestMergeDoesNotAliasInputs(t *testing.T) {
 	server := domain.BankConfig{
-		Recall: &domain.RecallConfig{RRFK: ptr(60), StrategyBoosts: map[string]float64{"semantic": 1}},
+		Recall: &domain.RecallConfig{RRFK: ptr(60), ArmBoosts: map[string]float64{"vector": 1}},
 		Retain: &domain.RetainConfig{EntityLabels: []domain.EntityLabel{{Key: "k", Optional: ptr(true)}}},
 		Models: &domain.ModelBindings{Default: &domain.ModelBinding{Model: "m", Extra: map[string]any{"a": 1}}},
 	}
@@ -165,7 +165,7 @@ func TestMergeDoesNotAliasInputs(t *testing.T) {
 	got := Merge(server, bank)
 	*got.Recall.RRFK = 1
 	*got.Recall.BudgetLow = 1
-	got.Recall.StrategyBoosts["semantic"] = 9
+	got.Recall.ArmBoosts["vector"] = 9
 	*got.Retain.EntityLabels[0].Optional = false
 	got.Models.Extract.Extra["a"] = 2
 	got.Models.Default.Model = "x"

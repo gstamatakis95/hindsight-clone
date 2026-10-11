@@ -153,12 +153,11 @@ type TimeWindow struct {
 	End time.Time
 }
 
-// MinScores are recall floors: arm floors (semantic, keyword) apply in retrieval, the rest after scoring.
+// MinScores are recall floors: arm floors apply in retrieval, the rest after scoring.
 type MinScores struct {
-	// Semantic is the cosine-similarity floor of the semantic arm.
-	Semantic *float64
-	// Keyword is the BM25 score floor of the keyword arm.
-	Keyword *float64
+	// Arms are the retrieval floors by arm name; each arm reads its own entry (a missing entry = the arm's
+	// default).
+	Arms map[string]float64
 	// Reranker is the cross-encoder score floor.
 	Reranker *float64
 	// Final is the final score floor.

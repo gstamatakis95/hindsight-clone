@@ -30,7 +30,7 @@ type dedupVerdict struct {
 	Usage *domain.Usage
 }
 
-// deduper reconciles a new observation with a near-duplicate already in its scope, over the semantic arm of
+// deduper reconciles a new observation with a near-duplicate already in its scope, over the vector search of
 // store.Reader.
 type deduper struct {
 	llm    ai.LLM

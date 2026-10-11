@@ -68,6 +68,8 @@ defaults:
     reranker_max_candidates: 300
     # rerank: true                      # default true with models.rerank bound, false without (true needs it)
     rrf_k: 60
+    # arms: [vector, text, graph, temporal]   # recall arms to run (ListRecallArms); empty = every registered arm
+    # arm_boosts: {graph: 1.5}            # fusion weight per arm name; missing = 1
     recency_alpha: 0.2
     temporal_alpha: 0.2
     proof_alpha: 0.1

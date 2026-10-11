@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// VectorQuery is one semantic-arm search.
+// VectorQuery is one vector search (the vector arm, the graph arm's seeds).
 type VectorQuery struct {
 	// Bank is the bank searched.
 	Bank domain.BankRef
@@ -15,7 +15,7 @@ type VectorQuery struct {
 	Types []domain.FactType
 	// Tags filters by tags; nil = no filter.
 	Tags *domain.TagPredicate
-	// MinSimilarity is the cosine-similarity floor (min_scores.semantic); 0 = none.
+	// MinSimilarity is the cosine-similarity floor (the vector arm's floor); 0 = none.
 	MinSimilarity float64
 	// Seq bounds the units' seq.
 	Seq domain.SeqRange
@@ -23,7 +23,7 @@ type VectorQuery struct {
 	Limit int
 }
 
-// TextQuery is one keyword-arm (BM25) search.
+// TextQuery is one text (BM25) search.
 type TextQuery struct {
 	// Bank is the bank searched.
 	Bank domain.BankRef
@@ -33,7 +33,7 @@ type TextQuery struct {
 	Types []domain.FactType
 	// Tags filters by tags; nil = no filter.
 	Tags *domain.TagPredicate
-	// MinScore is the BM25 score floor (min_scores.keyword); 0 = none.
+	// MinScore is the BM25 score floor (the text arm's floor); 0 = none.
 	MinScore float64
 	// Seq bounds the units' seq.
 	Seq domain.SeqRange
@@ -65,8 +65,8 @@ type TemporalQuery struct {
 	Limit int
 }
 
-// Hit is one search result: a unit id and its arm-specific score (cosine similarity for semantic, BM25
-// for keyword, proximity for temporal). Higher is better.
+// Hit is one search result: a unit id and its arm-specific score (cosine similarity for a vector search, BM25
+// for a text search, proximity for a temporal search). Higher is better.
 type Hit struct {
 	// ID is the unit.
 	ID domain.UnitID

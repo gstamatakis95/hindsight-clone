@@ -7,13 +7,13 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/fake"
-	"memd/internal/graph"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
 	"memd/internal/timex"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -38,26 +38,47 @@ type wordCounter struct{}
 
 func (wordCounter) Count(s string) int { return len(strings.Fields(s)) }
 
-// stubArm is a retriever returning fixed hits and recording the query it saw.
+// The built-in arm names, for stub arms standing in for them.
+const (
+	armVector   = "vector"
+	armText     = "text"
+	armGraph    = "graph"
+	armTemporal = "temporal"
+)
+
+// testOrder is the built-in registration (fusion) order.
+var testOrder = []string{armVector, armText, armGraph, armTemporal}
+
+// stubArm is an Arm returning fixed hits and recording the query it saw.
 type stubArm struct {
 	name   string
-	hits   []store.Hit
-	seen   *parsedQuery
+	window bool // a WindowArm
+	hits   []Hit
+	mu     sync.Mutex
+	seen   Query
 	called int
 }
 
+var _ WindowArm = (*stubArm)(nil)
+
 func (a *stubArm) Name() string { return a.name }
 
-func (a *stubArm) Retrieve(_ context.Context, q *parsedQuery) ([]candidate, error) {
+func (a *stubArm) Description() string { return "stub " + a.name }
+
+func (a *stubArm) MatchesWindow() bool { return a.window }
+
+func (a *stubArm) Retrieve(_ context.Context, q Query) ([]Hit, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.seen, a.called = q, a.called+1
-	return candidates(a.name, a.hits, q.Limit), nil
+	return a.hits, nil
 }
 
 // arm builds a stubArm whose hits are the named units in order with descending scores.
 func arm(name string, names ...domain.UnitID) *stubArm {
 	a := &stubArm{name: name}
 	for i, n := range names {
-		a.hits = append(a.hits, store.Hit{ID: uid(string(n)), Score: 1 - float64(i)/100})
+		a.hits = append(a.hits, Hit{ID: uid(string(n)), Score: 1 - float64(i)/100})
 	}
 	return a
 }
@@ -75,8 +96,8 @@ type env struct {
 
 // envOpts tweaks newEnv.
 type envOpts struct {
-	rerank bool        // bind RERANK (recall.rerank stays on)
-	arms   []retriever // stub arms instead of the real four
+	rerank bool  // bind RERANK (recall.rerank stays on)
+	arms   []Arm // the registered (stub) arms
 }
 
 // newEnv builds a store with testBank, the fakes and an Engine wired like production (words count as tokens).
@@ -97,10 +118,10 @@ func newEnv(t *testing.T, o envOpts) *env {
 	}
 	router := ai.NewRouter()
 	e.deps = Deps{
-		DB: e.store, Graph: e.store.Graph(), Config: config.NewResolver(e.store, server),
+		DB: e.store, Arms: o.arms, Config: config.NewResolver(e.store, server),
 		Embedder: e.emb, Reranker: e.rr, Router: router, Times: timex.New(e.llm, router, e.clock), Clock: e.clock,
 	}
-	e.rc = newEngine(e.deps, e.store.Read(), wordCounter{}, o.arms)
+	e.rc = newEngine(e.deps, e.store.Read(), wordCounter{})
 	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
 		_, err := tx.Banks().Ensure(ctx, testBank)
 		return err
@@ -166,16 +187,6 @@ func (e *env) cite(t *testing.T, obs string, srcs ...string) {
 			ev[i] = domain.Evidence{Unit: uid(s), Quote: s}
 		}
 		return tx.Evidence().Add(ctx, uid(obs), ev)
-	})
-}
-
-// link adds a semantic link from -> to.
-func (e *env) link(t *testing.T, from, to string, w float64) {
-	t.Helper()
-	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
-		return tx.Graph().AddLinks(ctx, []graph.Link{{
-			Bank: testBank, From: uid(from), To: uid(to), Kind: graph.KindSemantic, Weight: w,
-		}})
 	})
 }
 

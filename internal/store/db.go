@@ -67,11 +67,11 @@ type Reader interface {
 // Search serves retrieval: three of the four recall arms (the graph arm reads a graph.Reader), hydration and the
 // reads around them. Searches return only live units of the query's bank, best first.
 type Search interface {
-	// SearchVector is the semantic arm: HNSW cosine search with iterative scan.
+	// SearchVector serves the vector arm: HNSW cosine search with iterative scan.
 	SearchVector(ctx context.Context, q VectorQuery) ([]Hit, error)
-	// SearchText is the keyword arm: pg_search BM25 over unit text.
+	// SearchText serves the text arm: pg_search BM25 over unit text.
 	SearchText(ctx context.Context, q TextQuery) ([]Hit, error)
-	// SearchTemporal is the temporal arm: units whose occurrence overlaps the window, spread over buckets.
+	// SearchTemporal serves the temporal arm: units whose occurrence overlaps the window, spread over buckets.
 	SearchTemporal(ctx context.Context, q TemporalQuery) ([]Hit, error)
 	// GetUnits returns the live units with the given ids, in the order of ids; unknown or archived
 	// ids are skipped, not an error.

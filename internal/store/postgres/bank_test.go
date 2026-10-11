@@ -65,7 +65,7 @@ func richConfig() domain.BankConfig {
 		},
 		Recall: &domain.RecallConfig{
 			BudgetFunction: domain.BudgetFunctionAdaptive, BudgetMid: ptr(250), Rerank: ptr(true),
-			StrategyBoosts: map[string]float64{"semantic": 1.5, "graph": 0.5}, RecencyAlpha: ptr(0.3),
+			ArmBoosts: map[string]float64{"vector": 1.5, "graph": 0.5}, RecencyAlpha: ptr(0.3),
 		},
 		Reflect: &domain.ReflectConfig{
 			Mission:     "answer briefly",

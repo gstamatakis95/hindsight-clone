@@ -12,7 +12,7 @@ import (
 
 // anyListSet reports whether any of o's clearable lists or maps is non-nil (an explicit value or clear).
 func anyListSet(o domain.BankConfig) bool {
-	return o.Recall.EnabledStrategies != nil || o.Recall.StrategyBoosts != nil || o.Retain != nil ||
+	return o.Recall.Arms != nil || o.Recall.ArmBoosts != nil || o.Retain != nil ||
 		o.Observations != nil || o.Models != nil
 }
 
@@ -44,12 +44,12 @@ func TestEmptyRepeatedOverrideIsNotAClear(t *testing.T) {
 	}
 	tenant := domain.BankConfig{
 		Recall: &domain.RecallConfig{
-			EnabledStrategies: []string{"semantic"}, StrategyBoosts: map[string]float64{"semantic": 2},
+			Arms: []string{"vector"}, ArmBoosts: map[string]float64{"vector": 2},
 		},
 		Retain: &domain.RetainConfig{EntityLabels: []domain.EntityLabel{{Key: "k"}}},
 	}
 	got := config.Merge(tenant, *o)
-	if len(got.Recall.EnabledStrategies) != 1 || len(got.Recall.StrategyBoosts) != 1 || len(got.Retain.EntityLabels) != 1 {
+	if len(got.Recall.Arms) != 1 || len(got.Recall.ArmBoosts) != 1 || len(got.Retain.EntityLabels) != 1 {
 		t.Fatalf("tenant lists cleared by the override: %+v", got)
 	}
 	if got.Recall.RRFK == nil || *got.Recall.RRFK != 7 {

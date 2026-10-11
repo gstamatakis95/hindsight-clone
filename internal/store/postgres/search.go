@@ -16,14 +16,14 @@ import (
 // parameter. Each arm reads only memory_units, which holds live units (archived ones move to
 // memory_units_archive), and orders ties by id so results are deterministic.
 
-// HNSW settings of the semantic arm (SPEC "Recall pipeline"; decision 120).
+// HNSW settings of the vector search (SPEC "Recall pipeline"; decision 120).
 const (
 	hnswEfSearch      = "200"
 	hnswIterativeScan = "strict_order"
 	hnswMaxScanTuples = "100000"
 )
 
-// SearchVector is the semantic arm: HNSW cosine search with iterative scan. Score = cosine similarity
+// SearchVector serves the vector arm: HNSW cosine search with iterative scan. Score = cosine similarity
 // (1 - cosine distance); units without an embedding never match.
 func (r *reader) SearchVector(ctx context.Context, q store.VectorQuery) ([]store.Hit, error) {
 	if q.Limit <= 0 || len(q.Embedding) == 0 {
@@ -69,7 +69,7 @@ func vectorSQL(q store.VectorQuery) (string, []any) {
 	return b.String(), a.vals
 }
 
-// SearchText is the keyword arm: pg_search BM25 over unit text and context (decision 121). The raw query
+// SearchText serves the text arm: pg_search BM25 over unit text and context (decision 121). The raw query
 // text goes through the ||| (match disjunction) operator, which tokenizes it with the field's tokenizer
 // instead of parsing query syntax, so quotes and colons in user text are plain words. Score =
 // paradedb.score(id); an empty or blank query has no hits.
@@ -91,7 +91,7 @@ func (r *reader) SearchText(ctx context.Context, q store.TextQuery) ([]store.Hit
 	return queryHits(ctx, r.conn, "search text", b.String(), a.vals)
 }
 
-// SearchTemporal is the temporal arm: units whose occurrence overlaps the half-open window, scored by
+// SearchTemporal serves the temporal arm: units whose occurrence overlaps the half-open window, scored by
 // proximity and spread over q.Buckets sub-windows (decision 122).
 func (r *reader) SearchTemporal(ctx context.Context, q store.TemporalQuery) ([]store.Hit, error) {
 	w := q.Window

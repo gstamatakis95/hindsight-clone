@@ -39,6 +39,10 @@ Where a new type goes:
   too when the RPC should be able to set it, and map it in `internal/grpcapi/convert_overrides.go`. A model
   binding is atomic (one FieldMask path). Use `optional` for scalars whose unset value must differ from zero.
   Document the default in the field comment.
+- **Recall arms are named, never fielded.** Arms are open-ended (ListRecallArms lists the registered ones), so
+  anything per arm is a `map<string, ...>` or a `repeated string` keyed by arm name (`RecallRequest.arms`,
+  `RecallConfig.arms` / `arm_boosts`, `MinScores.arms`, `Scores.arms`), validated by the server against its
+  registry. Never add a field named after one arm.
 - **Keep the naming rules.** Every RPC gets its own `<Rpc>Request` / `<Rpc>Response`. Every enum value is
   prefixed with its enum name, and value 0 is `*_UNSPECIFIED`. List RPCs page with `page_size` + `page_token` /
   `next_page_token`. Patch RPCs take a `google.protobuf.FieldMask update_mask`.
