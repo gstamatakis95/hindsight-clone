@@ -12,10 +12,10 @@ import (
 // blockedFor is how long a second writer must stay blocked on Tx.Seq while the first holds the bank row.
 const blockedFor = 150 * time.Millisecond
 
-// TestSeq runs the contract tests of Tx.Seq and Reader.BankSeq: the per-bank change sequence whose
-// row lock makes seq order commit order (docs/design/architecture.md#transactions-and-the-change-sequence). newStore is called
-// once per subtest and must return a store over an empty database. The store must allow two concurrent
-// transactions (a pool of at least two connections).
+// TestSeq runs the contract tests of Tx.Seq and Reader.BankSeq: the per-bank change sequence whose row lock makes seq
+// order commit order (docs/design/architecture.md#transactions-and-the-change-sequence). newStore is called once per
+// subtest and must return a store over an empty database. The store must allow two concurrent transactions (a pool of
+// at least two connections).
 func TestSeq(t *testing.T) {
 	t.Parallel()
 	runStoreCases(t, []storeCase{

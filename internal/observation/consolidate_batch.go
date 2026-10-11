@@ -20,8 +20,8 @@ func (e *batchError) Error() string { return "consolidate call: " + e.err.Error(
 // Unwrap returns the call's error.
 func (e *batchError) Unwrap() error { return e.err }
 
-// batch decides ids in scope i and applies the decision. A failed call halves the batch; a unit failing
-// alone is deferred, and the caller settles it once the top-level batch is done (docs/design/consolidation.md#failure-handling).
+// batch decides ids in scope i and applies the decision. A failed call halves the batch; a unit failing alone is
+// deferred, and the caller settles it once the top-level batch is done (docs/design/consolidation.md#failure-handling).
 func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []domain.UnitID) error {
 	if len(ids) == 0 {
 		return nil

@@ -15,14 +15,14 @@ import (
 // Consolidate is not pre-empted.
 const defaultReconcileGrace = 10 * time.Minute
 
-// ReconcileConsolidation is the maintenance sweep that enqueues an automatic consolidate for every bank with a
-// unit left unconsolidated for longer than the bank's reconcile grace, unless the bank's effective config
-// turns automatic consolidation or observations off (docs/design/consolidation.md#enqueue-sources). One short transaction per bank.
-// jobs.EnqueueAutoConsolidate joins the bank's queued or running automatic consolidate (a running one
-// re-enqueues itself while units remain), so concurrent sweeps insert at most one, and a sweep never queues a
-// job that would make a failing running consolidate skip its retry. It takes no change seq: nothing it writes
-// is memory content. A bank being deleted (or already gone) is skipped; other errors don't stop the remaining
-// banks. It returns how many jobs it inserted.
+// ReconcileConsolidation is the maintenance sweep that enqueues an automatic consolidate for every bank with a unit
+// left unconsolidated for longer than the bank's reconcile grace, unless the bank's effective config turns automatic
+// consolidation or observations off (docs/design/consolidation.md#enqueue-sources). One short transaction per bank.
+// jobs.EnqueueAutoConsolidate joins the bank's queued or running automatic consolidate (a running one re-enqueues
+// itself while units remain), so concurrent sweeps insert at most one, and a sweep never queues a job that would make a
+// failing running consolidate skip its retry. It takes no change seq: nothing it writes is memory content. A bank being
+// deleted (or already gone) is skipped; other errors don't stop the remaining banks. It returns how many jobs it
+// inserted.
 func (s *Service) ReconcileConsolidation(ctx context.Context) (int, error) {
 	now := s.d.Clock.Now()
 	banks, err := s.d.Maintenance.UnconsolidatedBanks(ctx, now)

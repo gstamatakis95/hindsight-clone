@@ -28,9 +28,9 @@ func (r *unitRepo) DeleteByDocument(
 	return idsOf[domain.UnitID](ids), nil
 }
 
-// Archive moves a live unit to memory_units_archive, stamped with the transaction's change seq, with JSON
-// snapshots of its entities and causal links (docs/design/storage.md#archive-and-restore); its links and entity rows are deleted, its link
-// neighbours go to graph_dirty and its entities to entity_maintenance. Unknown and already archived ids are
+// Archive moves a live unit to memory_units_archive, stamped with the transaction's change seq, with JSON snapshots of
+// its entities and causal links (docs/design/storage.md#archive-and-restore); its links and entity rows are deleted,
+// its link neighbours go to graph_dirty and its entities to entity_maintenance. Unknown and already archived ids are
 // domain.ErrNotFound. As with DeleteByDocument, callers run EvidenceRepo.DeleteCiting first.
 func (r *unitRepo) Archive(ctx context.Context, b domain.BankRef, id domain.UnitID, reason string) error {
 	uid, err := parseID(id)

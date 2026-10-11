@@ -267,8 +267,8 @@ func (s *Service) resumeBankDeletes(ctx context.Context) (int, error) {
 }
 
 // reconcileGraph enqueues graph_maintenance for every bank with graph_dirty or entity_maintenance rows
-// (docs/design/retain.md#graph-maintenance). A removal that commits while the bank's graph_maintenance is finishing joins that running
-// row, so without this step its rows would wait for the next removal.
+// (docs/design/retain.md#graph-maintenance). A removal that commits while the bank's graph_maintenance is finishing
+// joins that running row, so without this step its rows would wait for the next removal.
 func (s *Service) reconcileGraph(ctx context.Context) (int, error) {
 	if s.d.Graph == nil {
 		return 0, nil

@@ -77,8 +77,8 @@
 // looks up the oldest joinable row FOR UPDATE, and inserts only when there is none, so two concurrent enqueuers of one
 // key never both insert. The effective dedupe policy: no serial key never dedupes, refresh_mental_model always dedupes
 // as Pending, a job with overrides never dedupes. New ids are UUIDv7 and created_at is clock_timestamp(), so jobs of
-// one transaction keep their order. List pages newest first with a keyset token (created_at, id) and domain.ListPage bounds
-// (default 100, cap 1000).
+// one transaction keep their order. List pages newest first with a keyset token (created_at, id) and domain.ListPage
+// bounds (default 100, cap 1000).
 //
 // The Claimer methods run on the pool, outside any caller transaction:
 //
