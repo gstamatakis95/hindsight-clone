@@ -72,6 +72,11 @@ type MaintenanceDeps struct {
 	CronRefresh CronRefresher
 	// RefreshFailures pauses models whose refresh failed; nil skips the step.
 	RefreshFailures RefreshFailureReconciler
+	// Stranded finds facts with a NULL embedding left by a failed rederive; nil skips the step.
+	Stranded StrandedFactSource
+	// StrandedRetryAfter is how long after a unit's last rederive ended the step may queue another one
+	// (default DefaultStrandedRetryAfter).
+	StrandedRetryAfter time.Duration
 	// Interval is the tick period (default DefaultMaintenanceInterval).
 	Interval time.Duration
 	// StaleAfter is the reclaim heartbeat age (default DefaultStaleAfter).
@@ -99,6 +104,9 @@ func (d MaintenanceDeps) withDefaults() MaintenanceDeps {
 	if d.OperationRetention <= 0 {
 		d.OperationRetention = DefaultOperationRetention
 	}
+	if d.StrandedRetryAfter <= 0 {
+		d.StrandedRetryAfter = DefaultStrandedRetryAfter
+	}
 	if d.EventRetention <= 0 {
 		d.EventRetention = DefaultEventRetention
 	}
@@ -109,7 +117,8 @@ func (d MaintenanceDeps) withDefaults() MaintenanceDeps {
 }
 
 // RunMaintenance ticks every 60s in every worker: reclaim stale jobs, cron refreshes, consolidation
-// reconcile, prune terminal ops and events. No leader: each step is idempotent. The refresh-failure
+// reconcile, re-queue rederives of stranded facts, prune terminal ops and events. No leader: each step is
+// idempotent. The refresh-failure
 // reconcile runs right after reclaim, so it sees refreshes that reclaim failed in the same tick. It ticks
 // once at start and returns nil when ctx is done; a failing step is logged and never stops the others.
 func RunMaintenance(ctx context.Context, d MaintenanceDeps) error {
@@ -143,6 +152,7 @@ var maintenanceSteps = []maintenanceStep{
 	{"refresh_failures", reconcileRefreshFailures},
 	{"cron_refresh", enqueueCronRefreshes},
 	{"consolidation_reconcile", reconcileConsolidation},
+	{"rederive_stranded", rederiveStranded},
 	{"prune_operations", pruneOperations},
 	{"prune_events", pruneEvents},
 }

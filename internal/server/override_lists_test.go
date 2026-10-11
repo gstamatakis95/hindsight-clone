@@ -10,6 +10,12 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
+// anyListSet reports whether any of o's clearable lists or maps is non-nil (an explicit value or clear).
+func anyListSet(o domain.BankConfig) bool {
+	return o.Recall.EnabledStrategies != nil || o.Recall.StrategyBoosts != nil || o.EntityLabels != nil ||
+		o.ConsolidationStrategies != nil || o.Models != nil
+}
+
 // TestEmptyRepeatedOverrideIsNotAClear sends a Recall override that sets only recall.rrf_k over the wire
 // and merges it over a tenant level with list and map fields: proto3 can't tell an absent repeated field from
 // an empty one, so the converter must leave them nil and the tenant's lists must survive the merge.
@@ -33,8 +39,7 @@ func TestEmptyRepeatedOverrideIsNotAClear(t *testing.T) {
 	if o == nil || o.Recall == nil {
 		t.Fatalf("overrides lost: %+v", o)
 	}
-	if o.Recall.EnabledStrategies != nil || o.Recall.StrategyBoosts != nil || o.EntityLabels != nil ||
-		o.ConsolidationStrategies != nil || o.Models != nil {
+	if anyListSet(*o) {
 		t.Fatalf("absent lists decoded as explicit clears: %+v", o)
 	}
 	tenant := domain.BankConfig{
