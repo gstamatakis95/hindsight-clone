@@ -34,11 +34,11 @@ func NewRetagger(s port.Store) Retagger {
 
 // Retag commits doc's new tag set and enqueues retag_document, or does nothing when the set is unchanged.
 // An unchanged set is a no-op only while the document's newest retag_document operation (if any) did not
-// end FAILED or CANCELLED; otherwise the committed tags never reached the units, so the job is enqueued
-// again. The common no-op path reads only: it bumps no change seq. A real change takes the bank's change seq
-// (which serializes concurrent retags of the bank), re-reads the tags under that lock and only then writes:
-// the document's tags and, in the same transaction, its units' document-derived tags (old to new; their
-// label tags stay, decision 1900).
+// end FAILED or CANCELLED; otherwise the observations derived under the old tags were never cleared, so
+// the job is enqueued again. The common no-op path reads only: it bumps no change seq. A real change takes
+// the bank's change seq (which serializes concurrent retags of the bank), re-reads the tags under that lock
+// and only then writes: the document's tags and, in the same transaction, its units' document-derived tags
+// (old to new; their label tags stay, decision 1900).
 func (r *retagger) Retag(
 	ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string,
 ) (port.OperationID, error) {

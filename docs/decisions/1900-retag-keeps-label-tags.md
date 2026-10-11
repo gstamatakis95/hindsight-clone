@@ -46,6 +46,9 @@ tags *before* the retag. `SetDocumentTags` now takes `oldTags` and `newTags` and
 - This supersedes one bullet of decision 1700. A running retain's earlier batches no longer carry stale tags
   until `retag_document`, because `Retag` rewrites them at once. The retain test
   `runRetaggedBetweenBatches` now expects 0 stale units, where it used to expect 1.
+- It also changes the reason behind decision 1307's "set-equal update after a failed retag re-enqueues". The
+  behaviour is unchanged, but the units no longer still carry the old tags after a failure. What is left
+  undone is the observation clearing and the stamp reset.
 
 ## Alternatives
 - **Payload with old tags:** rejected for the failure case above.
