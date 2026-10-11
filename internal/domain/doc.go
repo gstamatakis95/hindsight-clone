@@ -1,9 +1,77 @@
-// Package domain holds memd's plain data types: banks, configuration, memory units, entities, links,
-// observation scopes, mental models, directives, templates, operations, events and the error values
-// every layer shares.
+// Package domain holds memd's plain data types: banks and their configuration, memory units (facts and observations),
+// documents and chunks, entities, links and evidence, observation scopes and tag filters, mental models, directives,
+// templates, prompt previews, operations and lifecycle events, model slots and bindings, and the error values every
+// layer shares.
 //
-// Domain imports nothing internal (depguard enforces this). Enums are string-valued so they read well
-// in JSON columns and logs; the empty string is always the "unspecified" value and mirrors the proto's
-// *_UNSPECIFIED = 0. Optional configuration scalars are pointers (nil = unset), nested messages are
-// pointers (nil = unset) and lists are slices (nil = unset, non-nil empty = explicitly cleared).
+// # Architecture
+//
+// domain is the innermost layer of memd's ports-and-adapters layout (domain -> port -> engine/adapter -> server/worker
+// -> cmd/memd/wire.go). It imports nothing internal and nothing vendor-specific (depguard enforces both); its only
+// dependency outside the standard library is golang.org/x/text for Unicode normalization of tags. Every other package
+// may import it. Proto types never appear here: internal/server converts between memory.v1 messages and these types,
+// and the Postgres adapter stores them in columns and JSON.
+//
+// # Representation
+//
+// Enums are string-valued so they read well in JSON columns and logs; the string is the stored column value (lower
+// snake case of the proto enum without its prefix, e.g. [OperationKindRetainDocument] = "retain_document"), and the
+// empty string is always the "unspecified" value, mirroring the proto's *_UNSPECIFIED = 0. Optional configuration
+// scalars are pointers (nil = unset), nested messages are pointers (nil = unset) and lists are slices (nil = unset,
+// non-nil empty = explicitly cleared).
+//
+// [BankConfig] is the one configuration shape used at every level, merged server < tenant < bank < strategy < request
+// (< item): a set scalar replaces an unset one, model bindings merge per slot, and other lists replace rather than
+// append. The merging itself lives in internal/config; [BankConfig.Binding] only reads one level. New behaviour knobs
+// go into BankConfig so they can be overridden per request.
+//
+// # Identity and scopes
+//
+// [BankRef] (tenant, bank) names a bank; every id ([UnitID], [DocumentID], [ChunkID], [EntityID], [OperationID],
+// [MentalModelID], [DirectiveID]) is unique only within its bank, and internal/port re-exports them as aliases. Tags
+// are canonicalized by [NormalizeTags]: NFC, trimmed, lowercased, empty tags dropped, deduplicated and sorted; storage
+// compares tags as plain arrays, so writers normalize first. A [ScopeKey] is one observation scope, a canonical tag set
+// within a bank (no tags = the shared scope). Its String is a length-prefixed encoding ("3:foo,5:bar,b"), so no tag
+// content can make two scopes collide, and [ParseScopeKey] accepts only the canonical form, so a scope has exactly one
+// key.
+//
+//	k := domain.NewScopeKey(bank, []string{"Project-X ", "alice"}) // tags normalized and sorted
+//	k.String()                                                   // "5:alice,9:project-x"
+//
+// # Tag filtering
+//
+// [MatchTags] is the flat filter with Hindsight's five modes (any, all, any_strict, all_strict, exact; unset behaves as
+// any): any and all let untagged units pass, the strict modes do not, and exact with no tags selects only untagged
+// units. [MatchGroup] and [MatchFilter] evaluate the boolean group tree; their semantics are the reference that
+// port.SQLPredicate.Eval and the Postgres rendering agree with.
+//
+// # Operations
+//
+// An [Operation] is one row of the job queue; its [OperationKind] is also the job kind. [OperationKind.MaxAttempts] is
+// 3 for every kind except consolidate, which is unbounded (0) and retries with capped backoff.
+// [OperationStatus.Terminal] is true for completed, failed and cancelled. A [LifecycleEvent] carries the bank change
+// seq of the transaction that wrote it.
+//
+// # Errors
+//
+// The error values are classes: wrap them with fmt.Errorf("%w: ...", ErrX) and test with errors.Is. The server maps
+// each class to one gRPC code ([ErrNotFound] NOT_FOUND, [ErrAlreadyExists] ALREADY_EXISTS, [ErrInvalidArgument]
+// INVALID_ARGUMENT, [ErrFailedPrecondition] FAILED_PRECONDITION, [ErrUnavailable] UNAVAILABLE, [ErrResourceExhausted]
+// RESOURCE_EXHAUSTED, ...). Some wrap a broader class: [ErrBankDeleting] wraps ErrFailedPrecondition,
+// [ErrContextOverflow] wraps ErrUnavailable and [ErrTooManyScopes] wraps ErrInvalidArgument. [ErrConflict] means a
+// concurrent writer won a race and the caller may retry; [ErrCancelled] means the operation was cancelled or its bank
+// deleted.
+//
+// # Blob keys
+//
+// [DocumentBlobKey] is where a document's original text is stored:
+//
+//	{tenant}/{bank}/docs/{document_id}/{content_hash}
+//
+// [BankBlobPrefix], "{tenant}/{bank}/", is what deleting a bank removes from blob storage.
+//
+// # Testing
+//
+// scope_test.go and tags_test.go cover the scope encoding (round trips, no collisions, canonical-only parsing) and the
+// tag normalization and matching rules. Governing documents: SPEC "Ports", "Behavioural rules" and "Decisions"
+// (tenancy, embedding: [EmbeddingDim] is 768).
 package domain

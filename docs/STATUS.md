@@ -30,6 +30,8 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-20 | Fix-up: worker/cmd hardening | merged (916f85a) | wp/WP-20-worker-hardening | f14624a | — | — | see log |
 | WP-21 | Fix-up: config writes | merged (36cbff2) | wp/WP-21-config-writes | 51bdd4e | — | — | see decision 2100 |
 | WP-22 | Fix-up: partial retain stamped complete | merged (35ab2d9) | worktree branch | 4d9f65c | — | — | see decision 2200 |
+| WP-24 | Optional Datadog (dd-trace-go v2) | merged | worktree branch | 684ba2d | — | WP-24-1 approved | see decision 2400 |
+| WP-25 | Fix-up: post-build review MEDIUMs | merged (ef486f1) | worktree branch | 0bd0efe | — | WP-25-1 approved | see decisions 2500-2502 |
 
 ## Environment notes
 
@@ -365,3 +367,13 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   WP-24-1 approved (depguard deny of DataDog in engine/domain/port). Extensive doc.go for every package ->
   WP-23 (A: engines/runtime, B: adapters/contracts/tooling), CCR WP-23-1 approved (comment-only port/domain
   doc.go); runs after WP-24 so the docs cover Datadog. Then a reviewer guide and repo cleanup.
+- 2026-10-11 WP-25 merged (ef486f1): bank config RMW takes tx.Seq and re-reads; tenant config RMW takes a new
+  advisory lock (CCR WP-25-1: BankRepo.LockTenantConfig); Attach of a pruned entity is ErrConflict and InTx
+  re-runs the tx so retain re-resolves; ListEvents limit 0 -> 100, cap 1000; README documents the sync-retain
+  deadline limit. Gates incl. make e2e pass.
+- 2026-10-11 WP-24 merged: optional Datadog via dd-trace-go v2.10.1 (off unless MEMD_DATADOG_ENABLED; profiler
+  via MEMD_DATADOG_PROFILER). Spans: grpc.server, memd.job, memd.maintenance.tick, postgres.query (own pgx tracer,
+  only under a parent span), memd.gateway.call (+ http.request), S3.request; slog trace correlation. Never tags
+  content, prompts, SQL params or error messages. depguard denies DataDog in engine/domain/port (CCR WP-24-1).
+  Accepted notes: a black-holed agent address can delay startup up to 10 s; the gRPC contrib counts non-OK codes
+  (except CANCELLED) as errors. Gates incl. go mod tidy and make e2e pass. WP-23 A/B (docs) launched.
