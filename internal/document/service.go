@@ -32,7 +32,7 @@ func (s *Service) ListDocuments(ctx context.Context, req ListRequest) (Page, err
 		match = domain.TagsMatchAnyStrict
 	}
 	q := store.DocumentQuery{
-		Bank: req.Bank, Q: req.Q, Tags: domain.NormalizeTags(req.Tags.Tags), TagsMatch: match,
+		Bank: req.Bank, Q: req.DocumentIDContains, Tags: domain.NormalizeTags(req.Tags.Tags), TagsMatch: match,
 		Start: req.Start, End: req.End, TimeField: req.TimeField, After: after, Limit: size + 1,
 	}
 	if len(req.Tags.Tags) == 0 {

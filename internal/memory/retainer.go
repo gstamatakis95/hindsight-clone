@@ -303,7 +303,7 @@ func (rn *run) adopt(committed map[int]string, chunks []domain.Chunk) {
 }
 
 // docSuperseded reports whether a newer retain owns the document: its stored blob key or overrides are no
-// longer this run's. When only the tags differ (UpdateDocument retagged the document, or a newer retain of the
+// longer this run's. When only the tags differ (RetagDocument retagged the document, or a newer retain of the
 // same content and overrides changed them), the run still owns it: it adopts the document's current tags for
 // the units it writes from now on, and the retag_document job queued behind it on the same "doc:" key
 // retags the units it already wrote (decisions 807, 1700). So no run ever writes stale tags over newer ones.

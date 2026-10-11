@@ -83,6 +83,7 @@ func (t guardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 type wiredStack struct {
 	guard *txGuard
 	conn  *grpc.ClientConn
+	srv   *grpc.Server
 	deps  *deps
 }
 
@@ -139,7 +140,7 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	done := make(chan struct{})
 	go func() { _ = runWorker(ctx, d); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
-	return &wiredStack{guard: g, conn: conn, deps: d}
+	return &wiredStack{guard: g, conn: conn, srv: srv, deps: d}
 }
 
 // ctx is a context for tenant "t" with a deadline.

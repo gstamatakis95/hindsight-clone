@@ -31,8 +31,8 @@ type Deps struct {
 	Clock clock.Clock
 }
 
-// Service serves ObservationService (manual consolidation, scope listing, clears, the strategy preview) and
-// an observation's history, runs the consolidate job and the consolidation reconcile sweep.
+// Service serves ObservationService (manual consolidation, scope listing, an observation's history, clears,
+// the strategy preview), runs the consolidate job and the consolidation reconcile sweep.
 type Service struct {
 	d    Deps
 	cons *consolidator
@@ -82,16 +82,45 @@ func (s *Service) Consolidate(
 	return op, nil
 }
 
-// ListObservationHistory returns the versions of observation id in the store's order; an unknown id, bank
-// or a tombstoned bank is domain.ErrNotFound.
+// HistoryPage is one page of an observation's versions, newest first.
+type HistoryPage struct {
+	// Items are the page's versions.
+	Items []domain.ObservationVersion
+	// NextPageToken continues the listing; empty = last page.
+	NextPageToken string
+}
+
+// ListObservationHistory returns one page of observation id's versions, newest first. The page size follows
+// domain.ListPage; the page token is an opaque cursor (the last version returned) and a malformed one is
+// domain.ErrInvalidArgument. An unknown id, bank or a tombstoned bank is domain.ErrNotFound.
 func (s *Service) ListObservationHistory(
-	ctx context.Context, b domain.BankRef, id domain.UnitID,
-) ([]domain.ObservationVersion, error) {
-	vs, err := s.d.DB.Read().ObservationHistory(ctx, b, id)
+	ctx context.Context, b domain.BankRef, id domain.UnitID, size int, token string,
+) (HistoryPage, error) {
+	size, err := domain.ListPage.Size(size)
 	if err != nil {
-		return nil, fmt.Errorf("observation history %s: %w", id, err)
+		return HistoryPage{}, fmt.Errorf("observation history %s: %w", id, err)
 	}
-	return vs, nil
+	var before int64
+	if token != "" {
+		if err := domain.DecodePageToken(token, &before); err != nil {
+			return HistoryPage{}, fmt.Errorf("observation history %s: %w", id, err)
+		}
+		if before <= 0 {
+			return HistoryPage{}, domain.InvalidField("page_token", "malformed page token")
+		}
+	}
+	vs, err := s.d.DB.Read().ObservationHistory(ctx, b, id, before, size+1)
+	if err != nil {
+		return HistoryPage{}, fmt.Errorf("observation history %s: %w", id, err)
+	}
+	page := HistoryPage{Items: vs}
+	if len(vs) > size {
+		page.Items = vs[:size]
+		if page.NextPageToken, err = domain.EncodePageToken(page.Items[size-1].Version); err != nil {
+			return HistoryPage{}, fmt.Errorf("observation history %s: %w", id, err)
+		}
+	}
+	return page, nil
 }
 
 // normalizeScopes returns scopes with normalized tags.

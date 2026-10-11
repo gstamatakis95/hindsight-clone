@@ -157,6 +157,40 @@ func TestListObservationScopes(t *testing.T) {
 	}
 }
 
+// TestListObservationHistoryNewestFirst: an observation's versions come back newest first, two per page, and
+// the last page carries no token.
+func TestListObservationHistoryNewestFirst(t *testing.T) {
+	e, s := adminEnv(t)
+	e.tx(func(tx store.Tx) error {
+		for n := int64(1); n <= 3; n++ {
+			v := domain.ObservationVersion{Version: n, Text: fmt.Sprintf("v%d", n), SourceIDs: []domain.UnitID{uid("f1")}}
+			if err := tx.Units().RecordObservationVersion(t.Context(), bank, uid("o1"), v); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	var got [][]int64
+	tok := ""
+	for range 5 {
+		page, err := s.ListObservationHistory(t.Context(), bank, uid("o1"), 2, tok)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var nums []int64
+		for _, v := range page.Items {
+			nums = append(nums, v.Version)
+		}
+		got = append(got, nums)
+		if tok = page.NextPageToken; tok == "" {
+			break
+		}
+	}
+	if want := [][]int64{{3, 2}, {1}}; !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("pages = %v, want %v", got, want)
+	}
+}
+
 // TestClearObservationsScopesAndAll: a scope clear deletes only that scope and reports how many it deleted;
 // All clears every scope. Each clear queues graph_maintenance, and only the reconsolidate one queues a
 // consolidate.

@@ -51,7 +51,7 @@ func (f fixture) restore(t *testing.T, id domain.UnitID) {
 }
 
 // TestRetagKeepsLabelTags: retagging d1 [a b]→[c] replaces only the document-derived
-// tags, so a unit's write_to_tags label tag survives, on live and archived units, through UpdateDocument
+// tags, so a unit's write_to_tags label tag survives, on live and archived units, through RetagDocument
 // and through retag_document (run twice). The live unit is re-consolidated. A set-equal retag afterwards is
 // still a no-op that bumps no change seq.
 func TestRetagKeepsLabelTags(t *testing.T) {
@@ -65,7 +65,7 @@ func TestRetagKeepsLabelTags(t *testing.T) {
 		t.Fatalf("Retag = %q, %v; want an operation", id, err)
 	}
 	if us := f.units(t, "f1", "f4"); !slices.Equal(us["f4"].Tags, want) || !slices.Equal(us["f1"].Tags, []string{"c"}) {
-		t.Fatalf("after UpdateDocument: f4 %v, f1 %v; want %v and [c]", us["f4"].Tags, us["f1"].Tags, want)
+		t.Fatalf("after RetagDocument: f4 %v, f1 %v; want %v and [c]", us["f4"].Tags, us["f1"].Tags, want)
 	}
 	job := f.claimRetag(t)
 	for i := range 2 {

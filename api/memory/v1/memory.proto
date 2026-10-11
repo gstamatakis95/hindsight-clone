@@ -109,39 +109,33 @@ service MemoryService {
   rpc RestoreMemory(RestoreMemoryRequest) returns (RestoreMemoryResponse);
 }
 
-// MemoryUnitService reads the version history of observations.
-service MemoryUnitService {
-  // GetObservationHistory returns every version of an observation, oldest first.
-  rpc GetObservationHistory(GetObservationHistoryRequest) returns (GetObservationHistoryResponse);
-}
-
 // DocumentService lists, reads, retags and reprocesses retained documents.
 service DocumentService {
   // ListDocuments pages through the bank's documents with filters.
   rpc ListDocuments(ListDocumentsRequest) returns (ListDocumentsResponse);
   // GetDocument returns one document, optionally with its original text from the blob store.
   rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
-  // UpdateDocument replaces the document's tag set. A set-equal update is a no-op; a real change clears
-  // the document's observations and enqueues a retag_document job that re-consolidates under the new tags.
-  rpc UpdateDocument(UpdateDocumentRequest) returns (UpdateDocumentResponse);
-  // ReprocessDocument re-extracts the document from its original text, replacing its units and resetting
+  // RetagDocument replaces the document's tag set. A set-equal retag is a no-op. A real change rewrites the
+  // tags of the document's memories at once and, as a side effect, enqueues a retag_document job that clears
+  // every observation citing those memories and re-consolidates them under the new tags.
+  rpc RetagDocument(RetagDocumentRequest) returns (RetagDocumentResponse);
+  // ReprocessDocument re-extracts the document from its original text, replacing its memories and resetting
   // their curation. Replays the stored overrides unless new ones are given.
   rpc ReprocessDocument(ReprocessDocumentRequest) returns (ReprocessDocumentResponse);
 }
 
-// ObservationService runs and inspects consolidation.
+// ObservationService runs consolidation and lists, inspects and clears observations.
 service ObservationService {
   // Consolidate enqueues a manual consolidation, optionally limited to scopes and with its own overrides.
   // A job carrying overrides or scopes is never merged into another queued job.
   rpc Consolidate(ConsolidateRequest) returns (ConsolidateResponse);
-  // ListScopes pages through the bank's observation scopes with counts.
-  rpc ListScopes(ListScopesRequest) returns (ListScopesResponse);
-  // ClearObservations deletes observations in the given scopes (or all) and resets their sources,
-  // optionally re-consolidating.
+  // ListObservationScopes pages through the bank's observation scopes with counts.
+  rpc ListObservationScopes(ListObservationScopesRequest) returns (ListObservationScopesResponse);
+  // ListObservationHistory pages through the versions of one observation, newest first.
+  rpc ListObservationHistory(ListObservationHistoryRequest) returns (ListObservationHistoryResponse);
+  // ClearObservations deletes the observations of exact scopes, of one memory or of the whole bank, resets
+  // their sources for re-consolidation, and optionally re-consolidates at once.
   rpc ClearObservations(ClearObservationsRequest) returns (ClearObservationsResponse);
-  // ClearMemoryObservations deletes the observations citing one unit and resets their co-sources,
-  // optionally re-consolidating.
-  rpc ClearMemoryObservations(ClearMemoryObservationsRequest) returns (ClearMemoryObservationsResponse);
   // PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes without
   // saving them.
   rpc PreviewConsolidationStrategies(PreviewConsolidationStrategiesRequest) // split: 120-column limit
@@ -734,52 +728,22 @@ enum MemoryState {
   MEMORY_STATE_INVALIDATED = 2;
 }
 
-// ======================= MemoryUnitService =======================
-
-// ---- GetObservationHistory ----
-
-// GetObservationHistoryRequest names one observation.
-message GetObservationHistoryRequest {
-  // Bank owning the observation; unknown bank = NOT_FOUND.
-  string bank_id = 1;
-  // Observation id.
-  string observation_id = 2;
-}
-
-// GetObservationHistoryResponse lists an observation's versions.
-message GetObservationHistoryResponse {
-  // Versions, oldest first.
-  repeated ObservationVersion versions = 1;
-}
-
-// ObservationVersion is one row of observation_versions, written on every create and update.
-message ObservationVersion {
-  // Version number, increasing per observation.
-  int64 version = 1;
-  // Observation text at this version.
-  string text = 2;
-  // Source fact ids at this version.
-  repeated string source_ids = 3;
-  // When the version was written.
-  google.protobuf.Timestamp at = 4;
-}
-
 // ======================= DocumentService =======================
 
-// A document is one retained item: its original text lives in object storage and its units in Postgres.
-// Documents are upserted by Retain (keyed by document_id), retagged by UpdateDocument and re-extracted by
+// A document is one retained item: its original text lives in object storage and its memories in Postgres.
+// Documents are upserted by Retain (keyed by document_id), retagged by RetagDocument and re-extracted by
 // ReprocessDocument. There is no single-document delete; DeleteBank removes everything.
 
 // ---- ListDocuments ----
 
 // ListDocumentsRequest filters and pages the bank's documents.
 message ListDocumentsRequest {
-  reserved 4;
-  reserved "tags_match";
+  reserved 2, 4;
+  reserved "q", "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
-  // Case-insensitive document id substring; empty = no filter.
-  string q = 2;
+  // Case-insensitive substring the document id must contain; empty = no filter.
+  string document_id_contains = 10;
   // Tag filter on the documents' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
   // TAGS_MATCH_ANY_STRICT.
   TagFilter tags = 3;
@@ -788,11 +752,21 @@ message ListDocumentsRequest {
   // Exclusive end of the time range on time_field.
   google.protobuf.Timestamp end = 6;
   // Timestamp the range applies to.
-  DocTimeField time_field = 7;
+  TimeField time_field = 7;
   // Maximum documents per page; 0 = 100, at most 1000.
   int32 page_size = 8;
   // Token from a previous response; empty = first page.
   string page_token = 9;
+
+  // TimeField picks the document timestamp the time range applies to.
+  enum TimeField {
+    // Not set; same as TIME_FIELD_CREATED_AT.
+    TIME_FIELD_UNSPECIFIED = 0;
+    // When the document was first retained.
+    TIME_FIELD_CREATED_AT = 1;
+    // When the document was last upserted, retagged or reprocessed.
+    TIME_FIELD_UPDATED_AT = 2;
+  }
 }
 
 // ListDocumentsResponse is one page of documents.
@@ -801,16 +775,6 @@ message ListDocumentsResponse {
   repeated Document documents = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
-}
-
-// DocTimeField picks the document timestamp a ListDocuments time range applies to.
-enum DocTimeField {
-  // Not set; same as DOC_TIME_FIELD_CREATED_AT.
-  DOC_TIME_FIELD_UNSPECIFIED = 0;
-  // When the document was first retained.
-  DOC_TIME_FIELD_CREATED_AT = 1;
-  // When the document was last upserted, retagged or reprocessed.
-  DOC_TIME_FIELD_UPDATED_AT = 2;
 }
 
 // ---- GetDocument ----
@@ -831,21 +795,23 @@ message GetDocumentResponse {
   Document document = 1;
 }
 
-// ---- UpdateDocument ----
+// ---- RetagDocument ----
 
-// UpdateDocumentRequest replaces a document's tag set.
-message UpdateDocumentRequest {
+// RetagDocumentRequest replaces a document's tag set.
+message RetagDocumentRequest {
   // Bank owning the document.
   string bank_id = 1;
   // Document id.
   string document_id = 2;
-  // The new tag set; replaces the old one entirely.
+  // The new tag set; replaces the old one entirely. Required: unset = INVALID_ARGUMENT; a set but empty
+  // TagSet removes every document tag.
   TagSet tags = 3;
 }
 
-// UpdateDocumentResponse carries the retag job.
-message UpdateDocumentResponse {
-  // The retag_document operation; unset when the update was a no-op.
+// RetagDocumentResponse carries the retag job.
+message RetagDocumentResponse {
+  // The retag_document operation, which clears the observations citing the document's memories and
+  // re-consolidates them; unset when the retag was a no-op.
   Operation operation = 1;
 }
 
@@ -871,16 +837,19 @@ message ReprocessDocumentResponse {
 
 // Document is the read model of one retained document.
 message Document {
+  reserved 4, 5;
+  reserved "memory_unit_count", "units_by_fact_type";
   // Document id (the upsert key).
   string id = 1;
   // Hash of the original content; with the overrides hash, decides whether a retain is a no-op.
   string content_hash = 2;
-  // Document tags, applied to its units.
+  // Document tags, applied to its memories.
   repeated string tags = 3;
-  // Live units extracted from the document.
-  int64 memory_unit_count = 4;
-  // Live unit counts keyed by fact type name.
-  map<string, int64> units_by_fact_type = 5;
+  // Live memories extracted from the document (count).
+  int64 memory_count = 11;
+  // Live memory counts keyed by lowercase fact type: "world" and "experience" (a document has no
+  // observations). A type with no memories is absent.
+  map<string, int64> memories_by_fact_type = 12;
   // Retain overrides stored with the document (the request's merged with the item's); ReprocessDocument
   // replays them.
   RetainOverrides retain_overrides = 6;
@@ -896,9 +865,11 @@ message Document {
 
 // ======================= ObservationService =======================
 
-// Observations are derived memories that consolidation writes per tag scope from raw facts. A
-// consolidate job runs one at a time per bank; automatic runs use bank config plus any matching
-// consolidation strategy, never the overrides of the retain that triggered them.
+// Observations are derived memories that consolidation writes per tag scope from raw facts. An observation
+// is a Memory with fact_type = FACT_TYPE_OBSERVATION, so GetMemory and ListMemories read it too; a field is
+// named observation_id only where nothing but an observation is accepted. A consolidate job runs one at a
+// time per bank; automatic runs use bank config plus any matching consolidation strategy, never the
+// overrides of the retain that triggered them.
 
 // ---- Consolidate ----
 
@@ -918,10 +889,10 @@ message ConsolidateResponse {
   Operation operation = 1;
 }
 
-// ---- ListScopes ----
+// ---- ListObservationScopes ----
 
-// ListScopesRequest pages the bank's scopes.
-message ListScopesRequest {
+// ListObservationScopesRequest pages the bank's observation scopes.
+message ListObservationScopesRequest {
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Maximum scopes per page; 0 = 100, at most 1000.
@@ -930,58 +901,90 @@ message ListScopesRequest {
   string page_token = 3;
 }
 
-// ListScopesResponse is one page of scopes.
-message ListScopesResponse {
+// ListObservationScopesResponse is one page of observation scopes, ordered by the scope's tags.
+message ListObservationScopesResponse {
   // Scopes on this page.
-  repeated ScopeInfo scopes = 1;
+  repeated ObservationScope scopes = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
 }
 
-// ScopeInfo describes one observation scope.
-message ScopeInfo {
+// ObservationScope describes one observation scope: a tag set that has held an observation.
+message ObservationScope {
   // The scope's tag set; empty = the shared scope.
   TagSet scope = 1;
-  // Observations in the scope.
+  // Observations in the scope (count).
   int64 observations = 2;
-  // Units in the scope not yet consolidated.
-  int64 unconsolidated_units = 3;
+  // Memories in the scope not yet consolidated (count).
+  int64 unconsolidated_memories = 3;
+}
+
+// ---- ListObservationHistory ----
+
+// ListObservationHistoryRequest pages one observation's versions.
+message ListObservationHistoryRequest {
+  // Bank owning the observation; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Observation id; an id with no history (unknown, or not an observation) = NOT_FOUND.
+  string observation_id = 2;
+  // Maximum versions per page; 0 = 100, at most 1000.
+  int32 page_size = 3;
+  // Token from a previous response; empty = first page.
+  string page_token = 4;
+}
+
+// ListObservationHistoryResponse is one page of an observation's versions.
+message ListObservationHistoryResponse {
+  // Versions on this page, newest first.
+  repeated ObservationVersion versions = 1;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
+}
+
+// ObservationVersion is one version of an observation, written on every create and update.
+message ObservationVersion {
+  reserved 3, 4;
+  reserved "source_ids", "at";
+  // Version number, increasing per observation.
+  int64 version = 1;
+  // Observation text at this version.
+  string text = 2;
+  // Ids of the raw facts the observation cited at this version.
+  repeated string source_fact_ids = 5;
+  // When the version was written.
+  google.protobuf.Timestamp created_at = 6;
 }
 
 // ---- ClearObservations ----
 
-// ClearObservationsRequest deletes observations by scope.
+// ClearObservationsRequest selects the observations to delete: exactly one target.
 message ClearObservationsRequest {
+  reserved 2;
   // Bank to clear.
   string bank_id = 1;
-  // Scopes to clear; empty = all scopes.
-  repeated TagSet scopes = 2;
-  // Enqueue a consolidation of the cleared sources afterwards.
+  // What to clear. Required: no target, an empty scope list or all = false is INVALID_ARGUMENT.
+  oneof target {
+    // Every observation of exactly these scopes (tag sets, compared as sets); other scopes, supersets and
+    // subsets included, are kept.
+    TagSetList scopes = 4;
+    // Every observation citing this memory (unknown = NOT_FOUND); a raw fact then consolidates again.
+    string memory_id = 5;
+    // true clears every observation of the bank.
+    bool all = 6;
+  }
+  // Enqueue a consolidation of what was cleared afterwards: the same scopes, or every scope for memory_id
+  // and all.
   bool reconsolidate = 3;
+}
+
+// TagSetList is a list of tag sets, so that a oneof can carry several scopes.
+message TagSetList {
+  // The tag sets; at least one.
+  repeated TagSet tag_sets = 1;
 }
 
 // ClearObservationsResponse reports what was cleared.
 message ClearObservationsResponse {
-  // Observations deleted.
-  int64 deleted = 1;
-  // The consolidate operation; set only when reconsolidate was requested.
-  Operation operation = 2;
-}
-
-// ---- ClearMemoryObservations ----
-
-// ClearMemoryObservationsRequest deletes the observations derived from one unit.
-message ClearMemoryObservationsRequest {
-  // Bank owning the unit.
-  string bank_id = 1;
-  // Unit whose citing observations are deleted.
-  string memory_id = 2;
-  // Enqueue a consolidation of the reset sources afterwards.
-  bool reconsolidate = 3;
-}
-
-// ClearMemoryObservationsResponse reports what was cleared.
-message ClearMemoryObservationsResponse {
   // Observations deleted.
   int64 deleted = 1;
   // The consolidate operation; set only when reconsolidate was requested.

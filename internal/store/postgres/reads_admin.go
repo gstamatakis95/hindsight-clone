@@ -84,10 +84,10 @@ func (r *reader) TagCounts(
 	return out, nil
 }
 
-// ObservationHistory returns observation id's version rows, newest first; no rows (or a malformed id) is
-// domain.ErrNotFound.
+// ObservationHistory returns up to limit of observation id's version rows below before (0 = from the newest),
+// newest first; no rows when before is 0 (or a malformed id) is domain.ErrNotFound.
 func (r *reader) ObservationHistory(
-	ctx context.Context, b domain.BankRef, id domain.UnitID,
+	ctx context.Context, b domain.BankRef, id domain.UnitID, before int64, limit int,
 ) ([]domain.ObservationVersion, error) {
 	if err := r.listedBank(ctx, b); err != nil {
 		return nil, err
@@ -96,11 +96,18 @@ func (r *reader) ObservationHistory(
 	if err != nil {
 		return nil, err
 	}
+	var beforeVersion *int64
+	if before > 0 {
+		beforeVersion = &before
+	}
 	rows, err := r.queries().ReadsObservationHistory(ctx, db.ReadsObservationHistoryParams{
-		TenantID: b.Tenant, BankID: b.Bank, ObservationID: uid,
+		TenantID: b.Tenant, BankID: b.Bank, ObservationID: uid, BeforeVersion: beforeVersion, Lim: contentLimit(limit),
 	})
 	if err != nil {
 		return nil, mapErr(fmt.Sprintf("history of observation %s", id), err)
+	}
+	if len(rows) == 0 && before > 0 {
+		return nil, nil
 	}
 	if len(rows) == 0 {
 		return nil, fmt.Errorf("%w: observation %s has no history", domain.ErrNotFound, id)

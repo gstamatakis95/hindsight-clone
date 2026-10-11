@@ -283,7 +283,8 @@ type Querier interface {
 	// cited sources (live observations) and stale (a live observation with an unconsolidated live fact of the bank
 	// whose tags contain the observation's tags).
 	ReadsListUnits(ctx context.Context, arg ReadsListUnitsParams) ([]ReadsListUnitsRow, error)
-	// ReadsObservationHistory returns an observation's version rows, newest first.
+	// ReadsObservationHistory returns up to lim of an observation's version rows, newest first, below
+	// before_version (NULL = from the newest). Versions are unique per observation, so version is the cursor.
 	ReadsObservationHistory(ctx context.Context, arg ReadsObservationHistoryParams) ([]ReadsObservationHistoryRow, error)
 	// WP-15 admin reads (decision 1500): tag counts, bank stats, observation history, mental-model listings, cron and
 	// failed-refresh sweeps, and document listings. Text keysets and orderings use COLLATE "C" (byte order). LIKE

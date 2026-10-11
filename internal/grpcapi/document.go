@@ -11,7 +11,7 @@ import (
 // DocumentHandler serves memory.v1.DocumentService.
 type DocumentHandler struct {
 	pb.UnimplementedDocumentServiceServer
-	// Documents serves every DocumentService RPC (UpdateDocument through RetagDocument).
+	// Documents serves every DocumentService RPC.
 	Documents *document.Service
 }
 
@@ -55,10 +55,11 @@ func (h *DocumentHandler) GetDocument(
 	return &pb.GetDocumentResponse{Document: documentViewToProto(out)}, nil
 }
 
-// UpdateDocument replaces the document's tag set; a set-equal update returns no operation.
-func (h *DocumentHandler) UpdateDocument(
-	ctx context.Context, req *pb.UpdateDocumentRequest,
-) (*pb.UpdateDocumentResponse, error) {
+// RetagDocument replaces the document's tag set; a set-equal retag returns no operation. A real change's
+// retag_document job clears the observations citing the document's memories.
+func (h *DocumentHandler) RetagDocument(
+	ctx context.Context, req *pb.RetagDocumentRequest,
+) (*pb.RetagDocumentResponse, error) {
 	b, err := bankRef(ctx, req.GetBankId())
 	if err != nil {
 		return nil, toStatus(err)
@@ -79,9 +80,9 @@ func (h *DocumentHandler) UpdateDocument(
 		return nil, toStatus(err)
 	}
 	if op.ID == "" {
-		return &pb.UpdateDocumentResponse{}, nil
+		return &pb.RetagDocumentResponse{}, nil
 	}
-	return &pb.UpdateDocumentResponse{Operation: operationToProto(op)}, nil
+	return &pb.RetagDocumentResponse{Operation: operationToProto(op)}, nil
 }
 
 // ReprocessDocument re-extracts the document from its stored text and returns the retain operation.

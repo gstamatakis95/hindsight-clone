@@ -2,7 +2,6 @@ package grpcapi
 
 import (
 	"context"
-	"memd/internal/domain"
 	"memd/internal/observation"
 
 	pb "memd/gen/memory/v1"
@@ -41,10 +40,10 @@ func (h *ObservationHandler) Consolidate(
 	return &pb.ConsolidateResponse{Operation: operationToProto(op)}, nil
 }
 
-// ListScopes returns one page of the bank's observation scopes with their counts.
-func (h *ObservationHandler) ListScopes(
-	ctx context.Context, req *pb.ListScopesRequest,
-) (*pb.ListScopesResponse, error) {
+// ListObservationScopes returns one page of the bank's observation scopes with their counts.
+func (h *ObservationHandler) ListObservationScopes(
+	ctx context.Context, req *pb.ListObservationScopesRequest,
+) (*pb.ListObservationScopesResponse, error) {
 	b, err := bankRef(ctx, req.GetBankId())
 	if err != nil {
 		return nil, toStatus(err)
@@ -56,7 +55,23 @@ func (h *ObservationHandler) ListScopes(
 	return scopePageToProto(out), nil
 }
 
-// ClearObservations deletes the observations of the given scopes (all when empty).
+// ListObservationHistory returns one page of an observation's versions, newest first.
+func (h *ObservationHandler) ListObservationHistory(
+	ctx context.Context, req *pb.ListObservationHistoryRequest,
+) (*pb.ListObservationHistoryResponse, error) {
+	b, id, err := unitRef(ctx, req.GetBankId(), "observation_id", req.GetObservationId())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	out, err := h.Observations.ListObservationHistory(ctx, b, id, int(req.GetPageSize()), req.GetPageToken())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return observationHistoryToProto(out), nil
+}
+
+// ClearObservations deletes the observations of exact scopes, of one memory or of the whole bank; the request
+// must name exactly one target.
 func (h *ObservationHandler) ClearObservations(
 	ctx context.Context, req *pb.ClearObservationsRequest,
 ) (*pb.ClearObservationsResponse, error) {
@@ -64,35 +79,16 @@ func (h *ObservationHandler) ClearObservations(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	in := observation.ClearRequest{
-		Bank: b, Scopes: tagSetsFromProto(req.GetScopes()), Reconsolidate: req.GetReconsolidate(),
+	in, err := clearRequestFromProto(req)
+	if err != nil {
+		return nil, toStatus(err)
 	}
-	in.All = len(in.Scopes) == 0 // an empty scope list clears every scope
+	in.Bank = b
 	out, err := h.Observations.ClearObservations(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return clearResultToObservationsProto(out), nil
-}
-
-// ClearMemoryObservations deletes the observations citing one memory.
-func (h *ObservationHandler) ClearMemoryObservations(
-	ctx context.Context, req *pb.ClearMemoryObservationsRequest,
-) (*pb.ClearMemoryObservationsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	if err := requireID("memory_id", req.GetMemoryId()); err != nil {
-		return nil, toStatus(err)
-	}
-	out, err := h.Observations.ClearObservations(ctx, observation.ClearRequest{
-		Bank: b, MemoryID: domain.UnitID(req.GetMemoryId()), Reconsolidate: req.GetReconsolidate(),
-	})
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return clearResultToMemoryProto(out), nil
+	return &pb.ClearObservationsResponse{Deleted: out.Deleted, Operation: operationPtrToProto(out.Operation)}, nil
 }
 
 // PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes.

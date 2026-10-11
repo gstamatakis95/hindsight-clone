@@ -33,8 +33,8 @@ func New(d Deps) *Service {
 type ListRequest struct {
 	// Bank is the bank listed.
 	Bank domain.BankRef
-	// Q is a case-insensitive substring filter on the document id; empty = none.
-	Q string
+	// DocumentIDContains is a case-insensitive substring filter on the document id; empty = none.
+	DocumentIDContains string
 	// Tags filters by document tags, flat form only; empty tags = none, unset match = any_strict.
 	Tags domain.TagFilter
 	// Start is the inclusive lower bound on TimeField; nil = unbounded.

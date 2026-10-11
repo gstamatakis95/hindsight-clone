@@ -110,6 +110,19 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","memory_id":"<id>"
   localhost:50051 memory.v1.MemoryService/InvalidateMemory
 ```
 
+`ObservationService.ListObservationHistory` pages an observation's versions, newest first.
+`ClearObservations` deletes the observations of exact `scopes`, of one `memory_id`, or of the whole bank with
+`"all": true`. It must name exactly one target: a request with none is `INVALID_ARGUMENT`. `RetagDocument`
+replaces a document's tag set; as a side effect it clears the observations citing the document's memories and
+re-consolidates them under the new tags.
+
+```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","scopes":{"tag_sets":[{"tags":["team"]}]}}' \
+  localhost:50051 memory.v1.ObservationService/ClearObservations
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","document_id":"d1","tags":{"tags":["people"]}}' \
+  localhost:50051 memory.v1.DocumentService/RetagDocument
+```
+
 ### API conventions
 
 The header of `api/memory/v1/memory.proto` states these once:

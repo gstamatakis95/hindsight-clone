@@ -7,35 +7,71 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// scopeInfoToProto converts a ScopeInfo; its scope is always set.
-func scopeInfoToProto(s domain.ScopeInfo) *pb.ScopeInfo {
-	return &pb.ScopeInfo{
-		Scope:               &pb.TagSet{Tags: s.Scope.Tags},
-		Observations:        s.Observations,
-		UnconsolidatedUnits: s.UnconsolidatedUnits,
+// observationScopeToProto converts a ScopeInfo; its scope is always set.
+func observationScopeToProto(s domain.ScopeInfo) *pb.ObservationScope {
+	return &pb.ObservationScope{
+		Scope:                  &pb.TagSet{Tags: s.Scope.Tags},
+		Observations:           s.Observations,
+		UnconsolidatedMemories: s.UnconsolidatedUnits,
 	}
 }
 
-// scopePageToProto converts a ScopePage to a ListScopesResponse.
-func scopePageToProto(p observation.ScopePage) *pb.ListScopesResponse {
-	var scopes []*pb.ScopeInfo
+// scopePageToProto converts a ScopePage to a ListObservationScopesResponse.
+func scopePageToProto(p observation.ScopePage) *pb.ListObservationScopesResponse {
+	var scopes []*pb.ObservationScope
 	if p.Items != nil {
-		scopes = make([]*pb.ScopeInfo, len(p.Items))
+		scopes = make([]*pb.ObservationScope, len(p.Items))
 		for i := range p.Items {
-			scopes[i] = scopeInfoToProto(p.Items[i])
+			scopes[i] = observationScopeToProto(p.Items[i])
 		}
 	}
-	return &pb.ListScopesResponse{Scopes: scopes, NextPageToken: p.NextPageToken}
+	return &pb.ListObservationScopesResponse{Scopes: scopes, NextPageToken: p.NextPageToken}
 }
 
-// clearResultToObservationsProto converts a ClearResult to a ClearObservationsResponse.
-func clearResultToObservationsProto(r observation.ClearResult) *pb.ClearObservationsResponse {
-	return &pb.ClearObservationsResponse{Deleted: r.Deleted, Operation: operationPtrToProto(r.Operation)}
+// observationVersionToProto converts an ObservationVersion.
+func observationVersionToProto(v domain.ObservationVersion) *pb.ObservationVersion {
+	return &pb.ObservationVersion{
+		Version: v.Version, Text: v.Text, SourceFactIds: strs[string](v.SourceIDs), CreatedAt: tsToProto(v.At),
+	}
 }
 
-// clearResultToMemoryProto converts a ClearResult to a ClearMemoryObservationsResponse.
-func clearResultToMemoryProto(r observation.ClearResult) *pb.ClearMemoryObservationsResponse {
-	return &pb.ClearMemoryObservationsResponse{Deleted: r.Deleted, Operation: operationPtrToProto(r.Operation)}
+// observationHistoryToProto converts a HistoryPage to a ListObservationHistoryResponse, in the order given.
+func observationHistoryToProto(p observation.HistoryPage) *pb.ListObservationHistoryResponse {
+	out := &pb.ListObservationHistoryResponse{NextPageToken: p.NextPageToken}
+	if p.Items != nil {
+		out.Versions = make([]*pb.ObservationVersion, len(p.Items))
+		for i := range p.Items {
+			out.Versions[i] = observationVersionToProto(p.Items[i])
+		}
+	}
+	return out
+}
+
+// clearRequestFromProto converts a ClearObservationsRequest's target and reconsolidate flag; the caller sets
+// Bank. No target, an empty scope list, an empty memory_id or all = false is an ErrInvalidArgument naming the
+// field, so a destructive clear never falls back to a default target.
+func clearRequestFromProto(r *pb.ClearObservationsRequest) (observation.ClearRequest, error) {
+	out := observation.ClearRequest{Reconsolidate: r.GetReconsolidate()}
+	switch t := r.GetTarget().(type) {
+	case *pb.ClearObservationsRequest_Scopes:
+		if len(t.Scopes.GetTagSets()) == 0 {
+			return out, domain.InvalidField("scopes.tag_sets", "scopes must name at least one scope")
+		}
+		out.Scopes = tagSetsFromProto(t.Scopes.GetTagSets())
+	case *pb.ClearObservationsRequest_MemoryId:
+		if err := requireID("memory_id", t.MemoryId); err != nil {
+			return out, err
+		}
+		out.MemoryID = domain.UnitID(t.MemoryId)
+	case *pb.ClearObservationsRequest_All:
+		if !t.All {
+			return out, domain.InvalidField("all", "all must be true to clear every observation")
+		}
+		out.All = true
+	default:
+		return out, domain.InvalidField("target", "set one of scopes, memory_id and all")
+	}
+	return out, nil
 }
 
 // scopeKeysToProto encodes scope keys as length-prefixed tag strings; the bank is not on the wire.

@@ -49,12 +49,15 @@ SELECT b.deleting_at, b.last_memory_write_at, b.change_seq,
 FROM banks b
 WHERE b.tenant_id = @tenant_id AND b.id = @bank_id;
 
--- ReadsObservationHistory returns an observation's version rows, newest first.
+-- ReadsObservationHistory returns up to lim of an observation's version rows, newest first, below
+-- before_version (NULL = from the newest). Versions are unique per observation, so version is the cursor.
 -- name: ReadsObservationHistory :many
 SELECT v.version, v.text, v.source_ids, v.at
 FROM observation_versions v
 WHERE v.tenant_id = @tenant_id AND v.bank_id = @bank_id AND v.observation_id = @observation_id
-ORDER BY v.version DESC, v.at DESC, v.id DESC;
+  AND (sqlc.narg(before_version)::bigint IS NULL OR v.version < sqlc.narg(before_version)::bigint)
+ORDER BY v.version DESC
+LIMIT @lim::int;
 
 -- ReadsListMentalModels returns a bank's models ordered by id (byte order) after after_id ('' = from the start):
 -- folder '' or folder_path = folder or LIKE folder_like (folder escaped, then '/%'); tags with

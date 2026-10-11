@@ -321,12 +321,12 @@ func (e *env) wantSeqAfter(t *testing.T, bank string, before int64, what string)
 	return now
 }
 
-// retagReprocess: UpdateDocument rewrites the units' tags; ReprocessDocument re-extracts the document.
+// retagReprocess: RetagDocument rewrites the memories' tags; ReprocessDocument re-extracts the document.
 func (e *env) retagReprocess(t *testing.T) {
 	const bank = "sc-docs"
 	e.retain(t, bank, aliceDoc, aliceText)
 	e.idle(t, bank)
-	up, err := e.c.Documents.UpdateDocument(e.ctx(t), &pb.UpdateDocumentRequest{
+	up, err := e.c.Documents.RetagDocument(e.ctx(t), &pb.RetagDocumentRequest{
 		BankId: bank, DocumentId: aliceDoc, Tags: &pb.TagSet{Tags: []string{"people"}},
 	})
 	if err != nil {

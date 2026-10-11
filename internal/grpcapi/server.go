@@ -14,8 +14,6 @@ import (
 type Handlers struct {
 	// Memory serves MemoryService.
 	Memory *MemoryHandler
-	// MemoryUnit serves MemoryUnitService.
-	MemoryUnit *MemoryUnitHandler
 	// Tenant serves TenantService.
 	Tenant *TenantHandler
 	// Bank serves BankService.
@@ -54,9 +52,6 @@ func New(h Handlers, o Options, opts ...grpc.ServerOption) *grpc.Server {
 	s := grpc.NewServer(append(base, opts...)...)
 	if h.Memory != nil {
 		pb.RegisterMemoryServiceServer(s, h.Memory)
-	}
-	if h.MemoryUnit != nil {
-		pb.RegisterMemoryUnitServiceServer(s, h.MemoryUnit)
 	}
 	if h.Tenant != nil {
 		pb.RegisterTenantServiceServer(s, h.Tenant)

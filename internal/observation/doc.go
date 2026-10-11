@@ -1,6 +1,6 @@
 // Package observation turns facts into observations: durable, deduplicated statements per observation scope,
 // each citing the facts it rests on with exact quotes. [Service] serves ObservationService (manual
-// consolidation, scope listing, clears and the consolidation-strategy preview) and an observation's history,
+// consolidation, scope listing, an observation's history, clears and the consolidation-strategy preview),
 // runs the consolidate job ([Service.RunConsolidateJob]) and the maintenance sweep that queues consolidation
 // for banks with facts left waiting ([Service.ReconcileConsolidation]).
 //
@@ -10,9 +10,8 @@
 // prompts, and never another feature, an adapter, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It
 // reports progress through the jobs.Run it runs under, and enqueues its continuation, graph_maintenance and
 // the mental-model refreshes it triggers through the jobs catalogue, so it never imports mentalmodel.
-// cmd/memd/wire_observation.go builds the Service, hands it to grpcapi's ObservationHandler and
-// MemoryUnitHandler (GetObservationHistory), registers RunConsolidateJob for the consolidate kind and gives
-// the maintenance tick its consolidation_reconcile step.
+// cmd/memd/wire_observation.go builds the Service, hands it to grpcapi's ObservationHandler, registers
+// RunConsolidateJob for the consolidate kind and gives the maintenance tick its consolidation_reconcile step.
 //
 // # Scopes
 //
@@ -95,9 +94,11 @@
 //   - [Service.ListObservationScopes] pages the bank's observation scopes with counts, keyed by the scope's
 //     canonical string; the shared (untagged) scope's empty key maps to the cursor "0", which sorts before
 //     every tagged key, so paging past it never restarts the listing. Page size 0 is 100, the cap is 1000.
-//   - [Service.ListObservationHistory] returns an observation's versions in the store's order.
+//   - [Service.ListObservationHistory] pages an observation's versions newest first, keyed by version (unique
+//     per observation); page size 0 is 100, the cap is 1000, and an id with no versions is domain.ErrNotFound.
 //   - [Service.ClearObservations] takes a [ClearRequest] with exactly one of Scopes, MemoryID and All
-//     (domain.ErrInvalidArgument otherwise). For scopes or all it takes tx.Seq, deletes every observation of
+//     (domain.ErrInvalidArgument otherwise; the API also rejects an empty scope list and all = false, so a
+//     clear never defaults to every scope). For scopes or all it takes tx.Seq, deletes every observation of
 //     the scopes (EvidenceRepo.DeleteScopes, or DeleteAllObservations for all) and resets their sources,
 //     enqueues graph_maintenance and, when Reconsolidate is set, enqueues consolidation of the same scopes
 //     (the automatic job for all). For a memory it deletes the observations citing that live fact (absent =
@@ -143,6 +144,6 @@
 // and retags between scopes, cleared or invalidated co-sources, dedup merge and keep, observation caps, manual
 // scopes, document scope modes, strategy precedence, refresh triggers, the job's result keys, the clears
 // (counts, seq order, graph_maintenance, reconsolidation, a fact waiting for its rederive), scope paging, the
-// strategy preview and the reconcile sweep's config filter and grace. SPEC "Engines" (consolidation), "Jobs"
-// (consolidate) and "Model routing" (async slots).
+// strategy preview, history paging and the reconcile sweep's config filter and grace. SPEC "Engines"
+// (consolidation), "Jobs" (consolidate) and "Model routing" (async slots).
 package observation
