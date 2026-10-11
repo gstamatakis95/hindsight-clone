@@ -15,6 +15,8 @@ update, reproduced by the WP-25 review).
   the lock. `ResetBankConfig` goes through `UpdateBankConfig(resetPatch)`, so it is covered too.
   - Side effect: a config write bumps `change_seq` and stamps `last_memory_write_at`. Staleness looks at
     in-scope unit seqs, not at `change_seq` alone, so no mental model goes stale over a config write.
+    `last_memory_write_at` is only displayed, by GetBankStats, and it now also moves on config writes.
+    Nothing enqueues or skips work based on it.
 - **Tenant level.** CCR WP-25-1 adds `BankRepo.LockTenantConfig`. In Postgres it is
   `pg_advisory_xact_lock(hashtextextended('tenant_config/' || tenant, 0))`; in the fake it is a no-op,
   because the fake already serializes transactions. `UpdateTenantConfig` takes the lock before
