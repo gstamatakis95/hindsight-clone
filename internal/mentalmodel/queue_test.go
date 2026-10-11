@@ -63,9 +63,9 @@ func TestQueueModelRefresh(t *testing.T) {
 	}
 }
 
-// TestQueuerNeverBuiltIsLastRefreshedAtNil checks that a model whose first build ran but found nothing
+// TestQueueNeverBuiltIsLastRefreshedAtNil checks that a model whose first build ran but found nothing
 // (version 0, no content, last_refreshed_at set) counts as built: its refresh is parked, not forced full.
-func TestQueuerNeverBuiltIsLastRefreshedAtNil(t *testing.T) {
+func TestQueueNeverBuiltIsLastRefreshedAtNil(t *testing.T) {
 	e := newEnv(t)
 	e.addModel(domain.MentalModelSpec{ID: "empty"})
 	if _, err := e.svc.refresh(e.ctx, e.bank, "empty", refreshOptions{Manual: true}); err != nil {
