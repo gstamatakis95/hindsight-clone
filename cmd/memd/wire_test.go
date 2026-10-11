@@ -16,9 +16,9 @@ import (
 	"memd/test/e2e/gatewayemu"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,11 +30,21 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// txGuard counts open transactions and records any gateway call made while one is open.
+// txGuard records any gateway call made from inside a transaction body. The worker, the maintenance tick and
+// the API run concurrently in one process, so "some transaction is open somewhere" is not the test: a call
+// counts only when the calling goroutine's own stack is inside guardStore.InTx.
 type txGuard struct {
-	open       atomic.Int64
 	mu         sync.Mutex
 	violations []string
+}
+
+// inTxFrame is the stack frame prefix of a transaction body run through guardStore.InTx.
+const inTxFrame = "memd/cmd/memd.guardStore.InTx"
+
+// insideTx reports whether the calling goroutine is running inside guardStore.InTx.
+func insideTx() bool {
+	buf := make([]byte, 64<<10)
+	return strings.Contains(string(buf[:runtime.Stack(buf, false)]), inTxFrame)
 }
 
 // guardStore is a store.DB that tells the guard when a transaction is open.
@@ -46,8 +56,6 @@ type guardStore struct {
 // InTx marks the transaction open while fn runs.
 func (s guardStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
 	return s.DB.InTx(ctx, func(tx store.Tx) error { //nolint:wrapcheck // test passthrough
-		s.g.open.Add(1)
-		defer s.g.open.Add(-1)
 		return fn(tx)
 	})
 }
@@ -55,9 +63,9 @@ func (s guardStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
 // guardTransport records gateway requests sent while a transaction is open.
 type guardTransport struct{ g *txGuard }
 
-// RoundTrip forwards r after checking no transaction is open.
+// RoundTrip forwards r after checking the caller is not inside a transaction body.
 func (t guardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if t.g.open.Load() > 0 {
+	if insideTx() {
 		t.g.mu.Lock()
 		t.g.violations = append(t.g.violations, r.URL.Path)
 		t.g.mu.Unlock()
