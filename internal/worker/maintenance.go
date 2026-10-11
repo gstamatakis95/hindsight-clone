@@ -72,6 +72,8 @@ type MaintenanceDeps struct {
 	CronRefresh CronRefresher
 	// RefreshFailures pauses models whose refresh failed; nil skips the step.
 	RefreshFailures RefreshFailureReconciler
+	// Batches settles retain_batch parents whose children finished; nil skips the step.
+	Batches BatchSettler
 	// Stranded finds facts with a NULL embedding left by a failed rederive; nil skips the step.
 	Stranded StrandedFactSource
 	// StrandedRetryAfter is how long after a unit's last rederive ended the step may queue another one
@@ -117,10 +119,10 @@ func (d MaintenanceDeps) withDefaults() MaintenanceDeps {
 }
 
 // RunMaintenance ticks every 60s in every worker: reclaim stale jobs, cron refreshes, consolidation
-// reconcile, re-queue rederives of stranded facts, prune terminal ops and events. No leader: each step is
-// idempotent. The refresh-failure
-// reconcile runs right after reclaim, so it sees refreshes that reclaim failed in the same tick. It ticks
-// once at start and returns nil when ctx is done; a failing step is logged and never stops the others.
+// reconcile, re-queue rederives of stranded facts, settle retain_batch parents, prune terminal ops and
+// events. No leader: each step is idempotent. The refresh-failure reconcile runs right after reclaim, so it
+// sees refreshes that reclaim failed in the same tick. It ticks once at start and returns nil when ctx is
+// done; a failing step is logged and never stops the others.
 func RunMaintenance(ctx context.Context, d MaintenanceDeps) error {
 	if d.Claimer == nil || d.Store == nil {
 		return errors.New("worker: maintenance needs a Claimer and a Store")
@@ -153,6 +155,7 @@ var maintenanceSteps = []maintenanceStep{
 	{"cron_refresh", enqueueCronRefreshes},
 	{"consolidation_reconcile", reconcileConsolidation},
 	{"rederive_stranded", rederiveStranded},
+	{"settle_retain_batches", settleBatches},
 	{"prune_operations", pruneOperations},
 	{"prune_events", pruneEvents},
 }

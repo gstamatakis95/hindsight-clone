@@ -186,7 +186,8 @@ func wireEngines(
 	d.maintenance = worker.MaintenanceDeps{
 		Claimer: claimer, Store: store, Clock: clock, Consolidation: c.read, CronRefresh: mm.triggers,
 		RefreshFailures: mentalmodel.NewRefreshFailureReconciler(c.read, store, c.resolver, clock),
-		Stranded:        a.store, Interval: cfg.MaintenanceInterval, StaleAfter: cfg.StaleAfter, Logger: log,
+		Stranded:        a.store, Batches: a.store, Interval: cfg.MaintenanceInterval, StaleAfter: cfg.StaleAfter,
+		Logger: log,
 	}
 	return d
 }
