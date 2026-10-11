@@ -85,3 +85,6 @@ Branch `wp/WP-14a-e2e-harness`, based on main `5dbeb22`. The plan is in docs/wp/
 - **A narrow cleanup race on kill.** If the test binary is killed while `docker compose up` is still creating
   containers, the orphaned compose CLI could create them after the sweep. Deadlines make this unlikely; a
   later `make e2e` run does not sweep other runs' projects.
+- **Orphaned memd processes on kill.** Likewise, a test binary that is killed or panics orphans its memd
+  subprocesses (Darwin has no `Pdeathsig`). The sweep removes the containers, but memd keeps running and
+  retrying the database it lost. Normal failures and the deadline path kill them through `t.Cleanup`.

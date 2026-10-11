@@ -29,8 +29,11 @@ Alembic) and `MEMD_MODEL` / `MEMD_MODEL_<SLOT>` (from `config.ServerDefaults`) h
 - **Early exit and skip.**
   - `BuildMemd` builds `./cmd/memd` once per test binary.
   - If the build fails, it skips with the build output.
-  - Otherwise it runs `memd all` once as a probe. If the output says "not implemented", it skips with that
-    reason. That is the placeholder, and the probe runs before any compose project starts.
+  - Otherwise it runs `memd` with no mode once as a probe. If the output says "not implemented", it skips
+    with that reason. That is the placeholder, and the probe runs before any compose project starts.
+  - The probe's environment is scrubbed to `PATH`, `HOME` and an unreachable `MEMD_DSN`, so a real memd can
+    never reach a developer's database.
+  - `StartMemd` also drops every inherited `MEMD_*` variable before applying the harness's own.
   - `StartMemd` repeats the placeholder check on an early exit. Any other early exit fails the test with the
     process log, so a real startup crash in WP-14b is never silently skipped.
 - **Crash and restart.**

@@ -118,8 +118,13 @@ func build(root string) (bin, skip string, err error) {
 	}
 	pctx, pcancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer pcancel()
-	// The placeholder exits at once whatever the arguments; a real memd prints usage or fails on config.
-	out, _ := exec.CommandContext(pctx, bin, ModeAll).CombinedOutput()
+	// The placeholder exits at once whatever the arguments; a real memd given no mode prints usage and exits.
+	// The scrubbed environment keeps a real memd from reaching a developer's database through MEMD_*.
+	probe := exec.CommandContext(pctx, bin) //nolint:gosec // bin is the binary just built
+	probe.Env = []string{
+		"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), EnvDSN + "=postgres://probe@127.0.0.1:1/none",
+	}
+	out, _ := probe.CombinedOutput()
 	if bytes.Contains(out, []byte(placeholderMarker)) {
 		return "", "harness: cmd/memd is still the placeholder (WP-14b wires it): " + strings.TrimSpace(string(out)), nil
 	}
@@ -197,7 +202,12 @@ func (s *Stack) StartMemd(t testing.TB, bin string, o MemdOptions) *Proc {
 		env[EnvGRPCAddr] = p.Addr
 	}
 	maps.Copy(env, o.Env)
-	p.env = os.Environ()
+	// Inherited MEMD_* settings (a developer's shell, the Makefile's MEMD_DSN) never reach the process.
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "MEMD_") {
+			p.env = append(p.env, kv)
+		}
+	}
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		p.env = append(p.env, k+"="+env[k])
 	}
