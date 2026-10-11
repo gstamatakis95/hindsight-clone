@@ -6,7 +6,6 @@ import (
 	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/retain"
 	"memd/internal/jobs"
 	"memd/internal/store"
@@ -17,7 +16,6 @@ import (
 
 	mockbank "memd/internal/mocks/engine/bank"
 	mockconsolidate "memd/internal/mocks/engine/consolidate"
-	mockmentalmodel "memd/internal/mocks/engine/mentalmodel"
 	mockretain "memd/internal/mocks/engine/retain"
 )
 
@@ -133,14 +131,6 @@ func TestHandlerResults(t *testing.T) {
 				}, nil
 			},
 		},
-		refresher: &mockmentalmodel.RefreshRunner{RunFunc: func(
-			context.Context, domain.BankRef, domain.MentalModelID, mentalmodel.RefreshOptions,
-		) (mentalmodel.RefreshOutcome, error) {
-			return mentalmodel.RefreshOutcome{VersionWritten: 2, FactsUsed: 7, Trace: domain.RefreshTrace{
-				Outcome: domain.RefreshOutcomeContentWritten, EffectiveMode: domain.RefreshModeFull,
-				EffectiveStrategy: domain.RefreshStrategyAgentic, Usage: []domain.Usage{usage},
-			}}, nil
-		}},
 	}
 	cases := []struct {
 		kind    domain.OperationKind
@@ -151,8 +141,6 @@ func TestHandlerResults(t *testing.T) {
 		{domain.OperationKindRetainDocument, h.retain, `{}`, `{"chunks_skipped":0,"chunks_total":2,` +
 			`"document_id":"d","superseded":false,"unchanged":false,"units_created":3}`},
 		{domain.OperationKindConsolidate, h.consolidate, `{}`, `{"changed_scopes":1,"more":true,"processed":4}`},
-		{domain.OperationKindRefreshMentalModel, h.refresh, `{"mental_model_id":"m1"}`, `{"effective_mode":"full",` +
-			`"effective_strategy":"agentic","facts_used":7,"outcome":"content_written","version":2}`},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.kind), func(t *testing.T) {

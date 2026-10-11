@@ -41,6 +41,46 @@ linters:
               desc: use blob.Store
             - pkg: "github.com/DataDog"
               desc: observability is wired in cmd/memd via internal/observability; engines stay vendor-free
+        svc-mentalmodel:
+          files: ["**/internal/mentalmodel/**", "!$test"]   # tests use pgtest
+          deny:
+            - pkg: "memd/internal/store/postgres"
+              desc: services depend on the store interfaces only
+            - pkg: "memd/internal/ai/gateway"
+              desc: services depend on the ai interfaces only
+            - pkg: "memd/internal/blob/s3"
+              desc: services depend on blob.Store only
+            - pkg: "memd/internal/grpcapi"
+              desc: services don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the services
+            - pkg: "memd/gen"
+              desc: no proto types in services; use domain
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB
+            - pkg: "net/http"
+              desc: use ai.LLM / ai.Embedder / ai.Reranker
+            - pkg: "github.com/aws"
+              desc: use blob.Store
+            - pkg: "github.com/DataDog"
+              desc: services stay vendor-free
+        svc-mentalmodel-features:
+          files: ["**/internal/mentalmodel/**"]
+          deny:
+            - pkg: "memd/internal/engine"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
         graph:
           files: ["**/internal/graph/*.go"]   # the boundary; graphtest may use store to seed units
           deny:

@@ -11,25 +11,18 @@ import (
 	"strings"
 )
 
-// Recaller is the part of recall.Engine the single-shot synthesizer consumes; recall.Engine
-// satisfies it.
-type Recaller interface {
-	// Recall runs one recall request (bounded by RecallRequest.Seq for a stable snapshot).
-	Recall(ctx context.Context, req recall.Request) (recall.Result, error)
-}
-
-// singleShot is the REFRESH_STRATEGY_SINGLE_SHOT Synthesizer: one recall over the scope (observations
+// singleShot is the REFRESH_STRATEGY_SINGLE_SHOT synthesizer: one recall over the scope (observations
 // first), then one synthesize call (full) or one delta call (delta).
 type singleShot struct {
-	rc      Recaller
-	d       ModelDeps
+	rc      *recall.Engine
+	d       modelDeps
 	planner deltaPlanner
 }
 
-var _ Synthesizer = (*singleShot)(nil)
+var _ synthesizer = (*singleShot)(nil)
 
-// NewSingleShotSynthesizer returns the single-shot Synthesizer.
-func NewSingleShotSynthesizer(rc Recaller, d ModelDeps) Synthesizer {
+// newSingleShot returns the single-shot synthesizer over rc; d makes the synthesize and delta calls.
+func newSingleShot(rc *recall.Engine, d modelDeps) *singleShot {
 	return &singleShot{rc: rc, d: d, planner: deltaPlanner{d: d}}
 }
 
@@ -45,7 +38,7 @@ func (s *singleShot) Full(
 		return draft{}, err
 	}
 	if len(units) == 0 {
-		return draft{}, ErrNoNewFacts
+		return draft{}, errNoNewFacts
 	}
 	binding, err := s.d.Router.Resolve(cfg, domain.ModelSlotMentalModel)
 	if err != nil {
@@ -79,7 +72,7 @@ func (s *singleShot) Delta(
 		return deltaDraft{}, err
 	}
 	if len(units) == 0 {
-		return deltaDraft{ContentMD: m.ContentMD}, ErrNoNewFacts
+		return deltaDraft{ContentMD: m.ContentMD}, errNoNewFacts
 	}
 	return s.planner.plan(ctx, m, cfg, units)
 }
@@ -116,8 +109,8 @@ func (s *singleShot) render(
 		Name: m.Spec.Name, SourceQuery: m.Spec.SourceQuery, Mission: cfg.GetReflect().Mission,
 		Observations: obs, Facts: facts, MaxTokens: maxContentTokens(m, cfg), Now: s.d.Clock.Now(),
 	}
-	if s.d.Directives != nil {
-		if data.Directives, err = scopeDirectives(ctx, s.d.Directives, m); err != nil {
+	if s.d.DB != nil {
+		if data.Directives, err = scopeDirectives(ctx, s.d.DB, m); err != nil {
 			return "", "", err
 		}
 	}

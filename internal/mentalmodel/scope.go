@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/recall"
 	"memd/internal/store"
 	"slices"
 )
@@ -112,19 +113,11 @@ func compileGroup(g domain.TagGroup) domain.TagPredicate {
 	return domain.TagPredicate{Op: domain.PredicateOr}
 }
 
-// TagCompiler compiles a tag filter, resolving fuzzy leaves against the bank's tags; recall.Engine satisfies it.
-type TagCompiler interface {
-	// CompileTags resolves f's fuzzy leaves at minSimilarity and compiles f into a tag predicate.
-	CompileTags(
-		ctx context.Context, b domain.BankRef, f domain.TagFilter, minSimilarity float64,
-	) (domain.TagPredicate, error)
-}
-
-// scopeQuery is the ScopeReader query for m's scope over seq range r. A scope with a fuzzy leaf first
+// scopeQuery is the NewestSeqInScope query for m's scope over seq range r. A scope with a fuzzy leaf first
 // resolves its names to the bank's exact tags with recall's tag compiler (tc) at minSim, so staleness and the
 // pre-check see exactly the units recall would retrieve.
 func scopeQuery(
-	ctx context.Context, tc TagCompiler, m domain.MentalModel, r domain.SeqRange, stalenessOnly bool, minSim float64,
+	ctx context.Context, tc *recall.Engine, m domain.MentalModel, r domain.SeqRange, stalenessOnly bool, minSim float64,
 ) (store.ScopeQuery, error) {
 	s := resolveScope(m)
 	tags := s.tagPredicate()

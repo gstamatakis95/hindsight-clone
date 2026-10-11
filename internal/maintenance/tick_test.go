@@ -6,6 +6,7 @@ import (
 	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/jobs"
+	"memd/internal/mentalmodel"
 	"memd/internal/store"
 	"strings"
 	"sync"
@@ -44,33 +45,35 @@ func (l *stepLog) add(s string) {
 	l.steps = append(l.steps, s)
 }
 
-// countingCron is a mentalmodel.Triggers counting calls; it fails when err is set.
-type countingCron struct {
-	log   *stepLog
-	calls atomic.Int32
-	err   error
+// countingModels is the store.Maintenance the mental-model sweeps read: it counts and logs the cron sweep's
+// CronModels and the failure reconcile's FailedRefreshes (both empty), and fails CronModels when cronErr is set.
+type countingModels struct {
+	store.Maintenance
+	log      *stepLog
+	cron     atomic.Int32
+	failures atomic.Int32
+	cronErr  error
 }
 
-func (c *countingCron) EnqueueDueCronRefreshes(context.Context, time.Time) (int, error) {
-	c.calls.Add(1)
+func (c *countingModels) CronModels(context.Context) ([]store.CronModel, error) {
+	c.cron.Add(1)
 	if c.log != nil {
 		c.log.add("cron")
 	}
-	return 0, c.err
+	return nil, c.cronErr
 }
 
-// countingFailures is a mentalmodel.RefreshFailureReconciler counting calls.
-type countingFailures struct {
-	log   *stepLog
-	calls atomic.Int32
-}
-
-func (c *countingFailures) ReconcileFailedRefreshes(context.Context) (int, error) {
-	c.calls.Add(1)
+func (c *countingModels) FailedRefreshes(context.Context) ([]store.FailedRefresh, error) {
+	c.failures.Add(1)
 	if c.log != nil {
 		c.log.add("refresh_failures")
 	}
-	return 0, nil
+	return nil, nil
+}
+
+// mentalModels is a mentalmodel.Service over ops whose sweeps read m.
+func mentalModels(ops *opsDB, m *countingModels, c clock.Clock) *mentalmodel.Service {
+	return mentalmodel.New(mentalmodel.Deps{DB: ops, Maintenance: m, Clock: c})
 }
 
 // loggingClaimer records ReclaimStale in the step log.
@@ -106,10 +109,10 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 		t.Fatal("setup claim")
 	}
 	ops.ageHeartbeats(jobs.DefaultStaleAfter + time.Second)
-	cron, failures := &countingCron{}, &countingFailures{}
+	models := &countingModels{}
 	deps := Deps{
 		Claimer: ops, Store: ops, Clock: clock, Consolidation: banksOf(bankA, bankB, bankC),
-		CronRefresh: cron, RefreshFailures: failures, Config: Config{Interval: time.Millisecond}, Logger: quiet,
+		MentalModels: mentalModels(ops, models, clock), Config: Config{Interval: time.Millisecond}, Logger: quiet,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -120,7 +123,7 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 			}
 		})
 	}
-	eventually(t, "60 ticks across the three loops", func() bool { return cron.calls.Load() >= 60 })
+	eventually(t, "60 ticks across the three loops", func() bool { return models.cron.Load() >= 60 })
 	cancel()
 	wg.Wait()
 
@@ -132,8 +135,8 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 	if row := ops.row(stale); row.status != domain.OperationStatusPending || row.attempt != 1 {
 		t.Errorf("stale job: status %s attempt %d, want pending attempt 1 (reclaimed once)", row.status, row.attempt)
 	}
-	if failures.calls.Load() < 60 {
-		t.Errorf("refresh-failure reconcile ran %d times, want every tick", failures.calls.Load())
+	if models.failures.Load() < 60 {
+		t.Errorf("refresh-failure reconcile ran %d times, want every tick", models.failures.Load())
 	}
 }
 
@@ -145,11 +148,11 @@ func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 	ops.markDeleting(bankC)
 	store := &pruneStore{DB: ops}
 	log := &stepLog{}
-	cron := &countingCron{log: log, err: errors.New("cron parse failed")}
+	models := &countingModels{log: log, cronErr: errors.New("cron models failed")}
 	deps := New(Deps{
 		Claimer: &loggingClaimer{Claimer: ops, log: log}, Store: store, Clock: clock,
-		Consolidation: loggingBanks{banksOf(bankA, bankC), log}, CronRefresh: cron,
-		RefreshFailures: &countingFailures{log: log}, Logger: quiet,
+		Consolidation: loggingBanks{banksOf(bankA, bankC), log}, MentalModels: mentalModels(ops, models, clock),
+		Logger: quiet,
 	})
 	err := deps.tick(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "cron_refresh") {

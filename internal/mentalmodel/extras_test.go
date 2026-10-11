@@ -1,21 +1,13 @@
 package mentalmodel
 
 import (
-	"context"
 	"encoding/json"
 	"memd/internal/domain"
-	"memd/internal/reflect"
+	"memd/internal/prompts"
 	"memd/internal/store"
+	"strings"
 	"testing"
 )
-
-// stubProjector returns a fixed projection and records the document it saw.
-type stubProjector struct{ doc string }
-
-func (p *stubProjector) Project(_ context.Context, req reflect.ProjectRequest) (json.RawMessage, error) {
-	p.doc = req.Document
-	return json.RawMessage(`{"lead":"Alice"}`), nil
-}
 
 // TestStructuredOutputProjectedFromFinalPage checks that the page written is projected onto the
 // trigger's schema and the projection is stored with the version.
@@ -26,21 +18,20 @@ func TestStructuredOutputProjectedFromFinalPage(t *testing.T) {
 	spec.Trigger.ResponseSchemaJSON = `{"type":"object","properties":{"lead":{"type":"string"}}}`
 	spec.Trigger.KeepTrace = true
 	e.addModel(spec)
-	proj := &stubProjector{}
-	md := ModelDeps{LLM: e.llm, Router: routingRouter(), Clock: e.clock}
-	runner := NewRefreshRunner(RefreshRunnerDeps{
-		Store: e.store, Config: e.config, Scope: e.reads, Clock: e.clock, Projector: proj,
-		Synthesizers: []Synthesizer{NewSingleShotSynthesizer(e.rc, md)},
-	})
 	e.scriptSynthesize("## Status\n\nAlice leads the project.")
-	if _, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{}); err != nil {
+	e.llm.Script(domain.ModelSlotStructuredOutput, "", fakeJSON(`{"lead":"Alice"}`))
+	if _, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	m := e.model("status")
 	var structured map[string]string // jsonb: compare the value, not its spacing
 	if err := json.Unmarshal(m.StructuredOutputJSON, &structured); err != nil || structured["lead"] != "Alice" ||
-		len(structured) != 1 || proj.doc != m.ContentMD || m.LastTrace == nil {
-		t.Fatalf("structured %s, projected %q, trace %v", m.StructuredOutputJSON, proj.doc, m.LastTrace)
+		len(structured) != 1 || m.LastTrace == nil {
+		t.Fatalf("structured %s, trace %v", m.StructuredOutputJSON, m.LastTrace)
+	}
+	calls := e.llm.CallsFor(domain.ModelSlotStructuredOutput, prompts.StructuredOutputSystem)
+	if len(calls) != 1 || !strings.Contains(calls[0].Structured.User, m.ContentMD) {
+		t.Fatalf("projection calls %d: the final page was not projected", len(calls))
 	}
 }
 
@@ -59,11 +50,11 @@ func TestMaxDeltaRatioFallsBackToFull(t *testing.T) {
 		"kind": "replace_section_blocks", "section_id": doc.Sections[0].ID, "blocks_md": []string{"Rewritten."},
 	}))
 	e.scriptSynthesize("## Status\n\nAlice leads; Bob joined.")
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Trace.ModeFallbackReason != FallbackMaxDeltaRatio || out.Trace.EffectiveMode != domain.RefreshModeFull ||
+	if out.Trace.ModeFallbackReason != fallbackMaxDeltaRatio || out.Trace.EffectiveMode != domain.RefreshModeFull ||
 		e.model("status").ContentMD != "## Status\n\nAlice leads; Bob joined." {
 		t.Fatalf("trace %+v content %q", out.Trace, e.model("status").ContentMD)
 	}

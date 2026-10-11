@@ -1,7 +1,6 @@
 package mentalmodel
 
 import (
-	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/store"
 	"slices"
@@ -32,7 +31,7 @@ func TestSynthesizeDirectivesMatchReflect(t *testing.T) {
 		active, err = tx.Directives().List(e.ctx, e.bank, true)
 		return err
 	})
-	agentic := NewAgenticSynthesizer(e.rf, ModelDeps{LLM: e.llm, Router: ai.NewRouter(), Clock: e.clock})
+	ag := e.svc.synths[domain.RefreshStrategyAgentic].(*agentic)
 	for _, tc := range []struct {
 		id   domain.MentalModelID
 		tags []string
@@ -50,12 +49,10 @@ func TestSynthesizeDirectivesMatchReflect(t *testing.T) {
 		if got := directiveNames(synthesize); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: synthesize directives = %v, want %v", tc.id, got, tc.want)
 		}
-		before := len(e.rf.reqs)
-		_, _ = agentic.Full(e.ctx, m, domain.BankConfig{}, 1) // the scope is empty; only the request matters
-		if len(e.rf.reqs) != before+1 {
-			t.Fatalf("%s: the agentic strategy made %d reflect calls, want 1", tc.id, len(e.rf.reqs)-before)
+		req, err := ag.request(m, domain.BankConfig{}, domain.SeqUpTo(0, 1))
+		if err != nil {
+			t.Fatal(err)
 		}
-		req := e.rf.reqs[before]
 		if got := directiveNames(domain.SelectDirectives(active, req.Tags, req.ApplyAllDirectives)); !slices.Equal(got,
 			tc.want) {
 			t.Errorf("%s: reflect (agentic) directives = %v, want %v", tc.id, got, tc.want)

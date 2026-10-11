@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/mentalmodel"
-	"memd/internal/recall"
+	"memd/internal/mentalmodel"
 
 	pb "memd/gen/memory/v1"
 )
@@ -13,12 +12,8 @@ import (
 // MentalModelHandler serves memory.v1.MentalModelService.
 type MentalModelHandler struct {
 	pb.UnimplementedMentalModelServiceServer
-	// MentalModels serves every RPC but DryRunRefresh and SearchPages.
-	MentalModels mentalmodel.Admin
-	// Refresher serves DryRunRefresh.
-	Refresher mentalmodel.RefreshRunner
-	// Pages serves SearchPages.
-	Pages *recall.Engine
+	// MentalModels serves every RPC.
+	MentalModels *mentalmodel.Service
 }
 
 var _ pb.MentalModelServiceServer = (*MentalModelHandler)(nil)
@@ -160,7 +155,7 @@ func (h *MentalModelHandler) DryRunRefresh(
 	if d.err != nil {
 		return nil, toStatus(d.err)
 	}
-	out, err := h.Refresher.Run(ctx, b, id, mentalmodel.RefreshOptions{Manual: true, DryRun: true, Strategy: strategy})
+	out, err := h.MentalModels.PreviewMentalModelRefresh(ctx, b, id, strategy)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -195,7 +190,7 @@ func (h *MentalModelHandler) GetMentalModelHistory(
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	page, err := h.MentalModels.MentalModelHistory(ctx, in)
+	page, err := h.MentalModels.ListMentalModelHistory(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -227,7 +222,7 @@ func (h *MentalModelHandler) DeleteFolder(
 	if err := requireID("folder_path", req.GetFolderPath()); err != nil {
 		return nil, toStatus(err)
 	}
-	n, err := h.MentalModels.DeleteFolder(ctx, b, req.GetFolderPath())
+	n, err := h.MentalModels.DeleteMentalModelFolder(ctx, b, req.GetFolderPath())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -244,7 +239,7 @@ func (h *MentalModelHandler) SearchPages(
 	}
 	in := searchPagesFromProto(req)
 	in.Bank = b
-	hits, err := h.Pages.SearchPages(ctx, in)
+	hits, err := h.MentalModels.SearchMentalModels(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}

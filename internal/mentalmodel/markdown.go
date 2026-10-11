@@ -13,9 +13,9 @@ import (
 	"strings"
 )
 
-// ErrAllOpsRejected is returned (wrapped) when a delta's non-empty op list still had no op applied after
+// errAllOpsRejected is returned (wrapped) when a delta's non-empty op list still had no op applied after
 // the one retry.
-var ErrAllOpsRejected = errors.New("mentalmodel: every delta op was rejected")
+var errAllOpsRejected = errors.New("mentalmodel: every delta op was rejected")
 
 // preambleSectionID is the id of the untitled section holding content that precedes the first heading.
 const preambleSectionID = "preamble"
