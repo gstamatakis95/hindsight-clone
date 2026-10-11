@@ -289,9 +289,18 @@ func (i *ingestor) checkFanout(b port.BankRef, tags []string, s domain.Observati
 }
 
 // markUnchanged flags items whose document's last completed retain had the same content and overrides
-// hash (and no force_reextract). It reads before anything is written: Upsert would clear extracted_at.
+// hash (and no force_reextract). It reads before anything is written: Upsert would clear extracted_at. It
+// also rejects a bank being deleted (domain.ErrBankDeleting) before storeBlobs, so a retain racing
+// DeleteBank leaves no blob under the bank's prefix; an unknown bank is fine (the write creates it).
 func (i *ingestor) markUnchanged(ctx context.Context, b port.BankRef, plans []*itemPlan) error {
 	return i.d.Store.InTx(ctx, func(tx port.Tx) error {
+		bank, err := tx.Banks().Get(ctx, b)
+		switch {
+		case err == nil && bank.Deleting():
+			return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		case err != nil && !errors.Is(err, domain.ErrNotFound):
+			return err
+		}
 		for _, p := range plans {
 			p.unchanged = false
 			if p.payload.ForceReextract {
