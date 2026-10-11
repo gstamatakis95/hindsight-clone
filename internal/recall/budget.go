@@ -22,7 +22,7 @@ func budgetLimit(cfg domain.RecallConfig, b domain.Budget, maxTokens int) int {
 		maxTokens = DefaultMaxTokens
 	}
 	limit := int(math.Round(float64(level) * float64(maxTokens) / adaptiveReference))
-	lo, hi := intOr(cfg.BudgetMin, defaultBudgetMin), intOr(cfg.BudgetMax, defaultBudgetMax)
+	lo, hi := domain.ValueOr(cfg.BudgetMin, defaultBudgetMin), domain.ValueOr(cfg.BudgetMax, defaultBudgetMax)
 	if hi < lo {
 		hi = lo
 	}
@@ -33,10 +33,10 @@ func budgetLimit(cfg domain.RecallConfig, b domain.Budget, maxTokens int) int {
 func budgetLevel(cfg domain.RecallConfig, b domain.Budget) int {
 	switch b {
 	case domain.BudgetLow:
-		return intOr(cfg.BudgetLow, defaultBudgetLow)
+		return domain.ValueOr(cfg.BudgetLow, defaultBudgetLow)
 	case domain.BudgetHigh:
-		return intOr(cfg.BudgetHigh, defaultBudgetHigh)
+		return domain.ValueOr(cfg.BudgetHigh, defaultBudgetHigh)
 	default:
-		return intOr(cfg.BudgetMid, defaultBudgetMid)
+		return domain.ValueOr(cfg.BudgetMid, defaultBudgetMid)
 	}
 }

@@ -259,35 +259,11 @@ func tuningOf(cfg domain.BankConfig) tuning {
 		r = *cfg.Retain
 	}
 	return tuning{
-		temporalWindow: time.Duration(positive(r.TemporalLinkWindowHours, DefaultTemporalLinkWindowHours)) * time.Hour,
-		temporalCap:    nonNegative(r.TemporalLinkCap, DefaultTemporalLinkCap),
-		semanticK:      nonNegative(r.SemanticLinkK, DefaultSemanticLinkK),
-		semanticMinSim: floatOr(r.SemanticLinkMinSimilarity, DefaultSemanticLinkMinSimilarity),
+		temporalWindow: time.Duration(domain.PositiveOr(r.TemporalLinkWindowHours, DefaultTemporalLinkWindowHours)) * time.Hour,
+		temporalCap:    domain.NonNegativeOr(r.TemporalLinkCap, DefaultTemporalLinkCap),
+		semanticK:      domain.NonNegativeOr(r.SemanticLinkK, DefaultSemanticLinkK),
+		semanticMinSim: domain.ValueOr(r.SemanticLinkMinSimilarity, DefaultSemanticLinkMinSimilarity),
 	}
-}
-
-// positive returns *p when set and above zero, else def.
-func positive(p *int, def int) int {
-	if p != nil && *p > 0 {
-		return *p
-	}
-	return def
-}
-
-// nonNegative returns *p when set and not negative, else def.
-func nonNegative(p *int, def int) int {
-	if p != nil && *p >= 0 {
-		return *p
-	}
-	return def
-}
-
-// floatOr returns *p when set, else def.
-func floatOr(p *float64, def float64) float64 {
-	if p != nil {
-		return *p
-	}
-	return def
 }
 
 // mergeTuning merges retain config levels field by field, later levels winning.

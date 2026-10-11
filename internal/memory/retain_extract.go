@@ -91,7 +91,7 @@ func (e *llmExtractor) Extract(ctx context.Context, in extractInput) ([]domain.E
 	}
 	pc := parseConfig{
 		verbatim: s.KeepsChunkText(), chunk: in.Text, causal: tuningOf(in.Config).causal,
-		freeForm: boolOr(in.Config.GetRetain().EntitiesAllowFreeForm, true),
+		freeForm: domain.ValueOr(in.Config.GetRetain().EntitiesAllowFreeForm, true),
 	}
 	return parseFacts(resp.Facts, pc), []domain.Usage{usage}, nil
 }

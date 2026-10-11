@@ -28,43 +28,11 @@ func tuningOf(cfg domain.BankConfig) tuning {
 		r = *cfg.Retain
 	}
 	t := tuning{
-		chunkMax:       positive(r.ChunkMaxTokens, defaultChunkMaxTokens),
-		chunkOverlap:   nonNegative(r.ChunkOverlapTokens, 0),
-		matchThreshold: floatOr(r.EntityMatchThreshold, linking.DefaultEntityMatchThreshold),
-		causal:         r.ExtractCausalLinks == nil || *r.ExtractCausalLinks,
+		chunkMax:       domain.PositiveOr(r.ChunkMaxTokens, defaultChunkMaxTokens),
+		chunkOverlap:   domain.NonNegativeOr(r.ChunkOverlapTokens, 0),
+		matchThreshold: domain.ValueOr(r.EntityMatchThreshold, linking.DefaultEntityMatchThreshold),
+		causal:         domain.ValueOr(r.ExtractCausalLinks, true),
 	}
-	t.structuredMax = positive(r.StructuredChunkMaxTokens, t.chunkMax)
+	t.structuredMax = domain.PositiveOr(r.StructuredChunkMaxTokens, t.chunkMax)
 	return t
-}
-
-// positive returns *p when set and above zero, else def.
-func positive(p *int, def int) int {
-	if p != nil && *p > 0 {
-		return *p
-	}
-	return def
-}
-
-// nonNegative returns *p when set and not negative, else def.
-func nonNegative(p *int, def int) int {
-	if p != nil && *p >= 0 {
-		return *p
-	}
-	return def
-}
-
-// floatOr returns *p when set, else def.
-func floatOr(p *float64, def float64) float64 {
-	if p != nil {
-		return *p
-	}
-	return def
-}
-
-// boolOr returns *p when set, else def.
-func boolOr(p *bool, def bool) bool {
-	if p != nil {
-		return *p
-	}
-	return def
 }

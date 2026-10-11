@@ -251,11 +251,12 @@ func (r *queue) List(
 		ExcludeParents: f.ExcludeParents, Lim: int32(size + 1), //nolint:gosec // size <= domain.ListPage.Max
 	}
 	if f.PageToken != "" {
-		at, id, err := decodeOpsToken(f.PageToken)
-		if err != nil {
+		var c opsCursor
+		if err := domain.DecodePageToken(f.PageToken, &c); err != nil {
 			return nil, "", err
 		}
-		arg.AfterCreatedAt, arg.AfterID = &at, id
+		at := time.UnixMicro(c.At).UTC()
+		arg.AfterCreatedAt, arg.AfterID = &at, c.ID
 	}
 	rows, err := r.q.QueueList(ctx, arg)
 	if err != nil {
@@ -265,7 +266,9 @@ func (r *queue) List(
 	if len(rows) > size {
 		rows = rows[:size]
 		last := rows[size-1]
-		next = encodeOpsToken(last.CreatedAt, last.ID)
+		if next, err = domain.EncodePageToken(opsCursor{At: last.CreatedAt.UnixMicro(), ID: last.ID}); err != nil {
+			return nil, "", err
+		}
 	}
 	ops := make([]domain.Operation, 0, len(rows))
 	for _, row := range rows {

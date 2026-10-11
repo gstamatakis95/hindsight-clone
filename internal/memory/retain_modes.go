@@ -91,7 +91,7 @@ func (s *strategy) Prompt(cfg domain.BankConfig, in extractInput) (extractPrompt
 	data := prompts.ExtractData{
 		CustomPrompt:     cfg.GetRetain().CustomExtractionPrompt,
 		CausalLinks:      tuningOf(cfg).causal,
-		FreeFormEntities: boolOr(cfg.GetRetain().EntitiesAllowFreeForm, true),
+		FreeFormEntities: domain.ValueOr(cfg.GetRetain().EntitiesAllowFreeForm, true),
 		Labels:           cfg.GetRetain().EntityLabels,
 		Mission:          cfg.GetRetain().Mission,
 		MentionedAt:      in.MentionedAt,

@@ -314,7 +314,7 @@ func doneSpec(plain ai.ToolSpec, data *prompts.ReflectData) (ai.ToolSpec, error)
 func (r *Agent) result(rn *run, ans answer, directives []domain.DirectiveID) Result {
 	req := rn.st.Request
 	res := Result{Text: ans.text}
-	if req.Include.BasedOn == nil || *req.Include.BasedOn {
+	if domain.ValueOr(req.Include.BasedOn, true) {
 		if ans.viaDone {
 			res.BasedOn = citedBasedOn(rn.st, ans.cited)
 		} else {
@@ -326,7 +326,7 @@ func (r *Agent) result(rn *run, ans answer, directives []domain.DirectiveID) Res
 		Iterations: rn.st.Iteration, StopReason: ans.stop, DirectiveIDs: res.BasedOn.DirectiveIDs,
 	}
 	if req.Include.Trace {
-		outputs := req.Include.ToolOutputs == nil || *req.Include.ToolOutputs
+		outputs := domain.ValueOr(req.Include.ToolOutputs, true)
 		for _, c := range rn.st.ToolCalls {
 			if !outputs {
 				c.OutputJSON = ""

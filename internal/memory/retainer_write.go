@@ -160,7 +160,7 @@ func (r *retainer) writeUnits(ctx context.Context, tx store.Tx, rn *run, pb *pre
 			return fmt.Errorf("retain: labels: %w", err)
 		}
 		entityIDs, err := r.d.Entities.Resolve(ctx, tx, b, linking.ResolveInput{
-			Mentions: pf.fact.Entities, Hints: hints(rn.p), Literal: !boolOr(rn.p.ResolveEntities, true),
+			Mentions: pf.fact.Entities, Hints: hints(rn.p), Literal: !domain.ValueOr(rn.p.ResolveEntities, true),
 			At: factTime(pf.fact, rn.mentioned), Threshold: rn.t.matchThreshold,
 		})
 		if err != nil {
@@ -302,6 +302,6 @@ func (r *retainer) complete(ctx context.Context, rn *run) error {
 // consolidates reports whether the retain queues the bank's automatic consolidation: not with
 // skip_consolidation, nor when observations or automatic consolidation are disabled.
 func consolidates(rn *run) bool {
-	return !rn.p.SkipConsolidation && boolOr(rn.cfg.GetObservations().Enabled, true) &&
-		boolOr(rn.cfg.GetObservations().AutoConsolidation, true)
+	return !rn.p.SkipConsolidation && domain.ValueOr(rn.cfg.GetObservations().Enabled, true) &&
+		domain.ValueOr(rn.cfg.GetObservations().AutoConsolidation, true)
 }

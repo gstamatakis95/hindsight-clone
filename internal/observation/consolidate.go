@@ -109,11 +109,3 @@ func errStops(ctx context.Context, err error) bool {
 	return ctx.Err() != nil || errors.Is(err, domain.ErrCancelled) || errors.Is(err, context.Canceled) ||
 		store.LostJobs(err) != nil
 }
-
-// orDefault returns *p, or def when p is nil or not positive.
-func orDefault(p *int, def int) int {
-	if p == nil || *p <= 0 {
-		return def
-	}
-	return *p
-}

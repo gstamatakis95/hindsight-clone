@@ -1,14 +1,9 @@
 package postgres
 
 import (
-	"encoding/base64"
-	"fmt"
 	"memd/internal/domain"
 	"memd/internal/store"
 	"memd/internal/store/postgres/db"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -59,30 +54,9 @@ func jobOf(r db.Operation) (store.Job, error) {
 	return j, nil
 }
 
-// encodeOpsToken encodes a List cursor: the last row's created_at (Unix microseconds) and id.
-func encodeOpsToken(at time.Time, id uuid.UUID) string {
-	raw := strconv.FormatInt(at.UnixMicro(), 10) + "/" + id.String()
-	return base64.RawURLEncoding.EncodeToString([]byte(raw))
-}
-
-// decodeOpsToken decodes a List cursor; a malformed token is domain.ErrInvalidArgument.
-func decodeOpsToken(token string) (time.Time, uuid.UUID, error) {
-	bad := fmt.Errorf("%w: malformed operations page token %q", domain.ErrInvalidArgument, token)
-	raw, err := base64.RawURLEncoding.DecodeString(token)
-	if err != nil {
-		return time.Time{}, uuid.Nil, bad
-	}
-	micros, idText, ok := strings.Cut(string(raw), "/")
-	if !ok {
-		return time.Time{}, uuid.Nil, bad
-	}
-	us, err := strconv.ParseInt(micros, 10, 64)
-	if err != nil {
-		return time.Time{}, uuid.Nil, bad
-	}
-	id, err := uuid.Parse(idText)
-	if err != nil {
-		return time.Time{}, uuid.Nil, bad
-	}
-	return time.UnixMicro(us).UTC(), id, nil
+// opsCursor is the keyset position of an operations page (domain.EncodePageToken): the last row's created_at
+// in Unix microseconds and its id.
+type opsCursor struct {
+	At int64     `json:"at"`
+	ID uuid.UUID `json:"id"`
 }

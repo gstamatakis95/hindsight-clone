@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -127,11 +128,11 @@ func (c *Client) completeOnce(ctx context.Context, slot domain.ModelSlot, b doma
 }
 
 // modelOf is the model the gateway reported, or the requested one.
-func modelOf(reported, requested string) string { return orDefault(reported, requested) }
+func modelOf(reported, requested string) string { return cmp.Or(reported, requested) }
 
 // finalUsage fills in the model of a usage sum that saw no successful attempt.
 func finalUsage(u domain.Usage, model string) domain.Usage {
-	u.Model = orDefault(u.Model, model)
+	u.Model = cmp.Or(u.Model, model)
 	return u
 }
 
@@ -172,7 +173,7 @@ func schemaName(name string) string {
 	if len(s) > 64 {
 		s = s[:64]
 	}
-	return orDefault(s, "response")
+	return cmp.Or(s, "response")
 }
 
 // Structured makes one schema-constrained call (response_format json_schema), validates the output against
@@ -201,7 +202,7 @@ func (c *Client) Structured(ctx context.Context, req ai.StructuredRequest, out a
 			if err != nil {
 				return err
 			}
-			content := deref(resp.Choices[0].Message.Content)
+			content := domain.ValueOr(resp.Choices[0].Message.Content, "")
 			if verr := decodeValid(sch, content, out); verr != nil {
 				msgs = append(msgs, textMessage(ai.ChatRoleAssistant, content),
 					textMessage(ai.ChatRoleUser, verr.Error()))
@@ -234,14 +235,6 @@ func decodeValid(sch *jsonschema.Schema, content string, out any) error {
 	return nil
 }
 
-// deref returns *s, or "" for nil.
-func deref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 // Chat makes one turn of a tool-calling loop: POST /chat/completions with the conversation and tools.
 // Transient gateway errors and timeouts retry within the binding's max_retries; the returned usage sums
 // every attempt.
@@ -258,7 +251,7 @@ func (c *Client) Chat(ctx context.Context, req ai.ChatRequest) (ai.ChatResponse,
 		return ai.ChatResponse{Usage: usage}, err
 	}
 	choice := resp.Choices[0]
-	msg := ai.ChatMessage{Role: ai.ChatRoleAssistant, Content: deref(choice.Message.Content)}
+	msg := ai.ChatMessage{Role: ai.ChatRoleAssistant, Content: domain.ValueOr(choice.Message.Content, "")}
 	for _, tc := range choice.Message.ToolCalls {
 		msg.ToolCalls = append(msg.ToolCalls, ai.ToolCall{
 			ID: tc.ID, Name: tc.Function.Name, Arguments: rawArguments(tc.Function.Arguments),

@@ -56,14 +56,14 @@ func settingsOf(cfg domain.BankConfig) settings {
 		rc = *cfg.Recall
 	}
 	s := settings{
-		rerank:             rc.Rerank == nil || *rc.Rerank,
-		rerankMax:          intOr(rc.RerankerMaxCandidates, defaultRerankerMaxCandidates),
-		rrfK:               intOr(rc.RRFK, defaultRRFK),
-		recencyAlpha:       floatOr(rc.RecencyAlpha, defaultRecencyAlpha),
-		temporalAlpha:      floatOr(rc.TemporalAlpha, defaultTemporalAlpha),
-		proofAlpha:         floatOr(rc.ProofAlpha, defaultProofAlpha),
-		recencyHorizonDays: intOr(rc.RecencyHorizonDays, defaultRecencyHorizonDays),
-		fuzzyMinSimilarity: floatOr(rc.FuzzyTagMinSimilarity, defaultFuzzyTagMinSimilarity),
+		rerank:             domain.ValueOr(rc.Rerank, true),
+		rerankMax:          domain.ValueOr(rc.RerankerMaxCandidates, defaultRerankerMaxCandidates),
+		rrfK:               domain.ValueOr(rc.RRFK, defaultRRFK),
+		recencyAlpha:       domain.ValueOr(rc.RecencyAlpha, defaultRecencyAlpha),
+		temporalAlpha:      domain.ValueOr(rc.TemporalAlpha, defaultTemporalAlpha),
+		proofAlpha:         domain.ValueOr(rc.ProofAlpha, defaultProofAlpha),
+		recencyHorizonDays: domain.ValueOr(rc.RecencyHorizonDays, defaultRecencyHorizonDays),
+		fuzzyMinSimilarity: domain.ValueOr(rc.FuzzyTagMinSimilarity, defaultFuzzyTagMinSimilarity),
 		boosts:             rc.ArmBoosts,
 	}
 	if s.rrfK <= 0 {
@@ -73,20 +73,4 @@ func settingsOf(cfg domain.BankConfig) settings {
 		s.recencyHorizonDays = defaultRecencyHorizonDays
 	}
 	return s
-}
-
-// intOr returns *p, or def when p is nil.
-func intOr(p *int, def int) int {
-	if p == nil {
-		return def
-	}
-	return *p
-}
-
-// floatOr returns *p, or def when p is nil.
-func floatOr(p *float64, def float64) float64 {
-	if p == nil {
-		return def
-	}
-	return *p
 }
