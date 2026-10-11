@@ -9,6 +9,16 @@ RETURNING change_seq;
 -- name: GetBank :one
 SELECT * FROM banks WHERE tenant_id = $1 AND id = $2;
 
+-- ListBanks returns one keyset page of a tenant's live banks (tombstoned ones left out) whose id starts with
+-- id_prefix, in byte order of id, after after_id ("" = from the start).
+-- name: ListBanks :many
+SELECT * FROM banks
+WHERE tenant_id = @tenant_id AND deleting_at IS NULL
+  AND starts_with(id, @id_prefix::text)
+  AND id COLLATE "C" > @after_id::text
+ORDER BY id COLLATE "C"
+LIMIT @lim::int;
+
 -- BankChangeSeq returns the bank's latest committed change_seq.
 -- name: BankChangeSeq :one
 SELECT change_seq FROM banks WHERE tenant_id = $1 AND id = $2;

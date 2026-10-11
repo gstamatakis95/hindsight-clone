@@ -10,6 +10,35 @@ import (
 	"time"
 )
 
+const directiveCreate = `-- name: DirectiveCreate :exec
+INSERT INTO directives (tenant_id, bank_id, id, name, rules, tags, active)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type DirectiveCreateParams struct {
+	TenantID string
+	BankID   string
+	ID       string
+	Name     string
+	Rules    []string
+	Tags     []string
+	Active   bool
+}
+
+// DirectiveCreate inserts a directive; a taken id or name in the bank is a unique violation.
+func (q *Queries) DirectiveCreate(ctx context.Context, arg DirectiveCreateParams) error {
+	_, err := q.db.Exec(ctx, directiveCreate,
+		arg.TenantID,
+		arg.BankID,
+		arg.ID,
+		arg.Name,
+		arg.Rules,
+		arg.Tags,
+		arg.Active,
+	)
+	return err
+}
+
 const directiveDelete = `-- name: DirectiveDelete :execrows
 DELETE FROM directives WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
 `
@@ -27,6 +56,34 @@ func (q *Queries) DirectiveDelete(ctx context.Context, arg DirectiveDeleteParams
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const directiveGet = `-- name: DirectiveGet :one
+SELECT tenant_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives WHERE tenant_id = $1 AND bank_id = $2 AND id = $3 FOR UPDATE
+`
+
+type DirectiveGetParams struct {
+	TenantID string
+	BankID   string
+	ID       string
+}
+
+// DirectiveGet returns one directive, locked for update until the transaction ends.
+func (q *Queries) DirectiveGet(ctx context.Context, arg DirectiveGetParams) (Directive, error) {
+	row := q.db.QueryRow(ctx, directiveGet, arg.TenantID, arg.BankID, arg.ID)
+	var i Directive
+	err := row.Scan(
+		&i.TenantID,
+		&i.BankID,
+		&i.ID,
+		&i.Name,
+		&i.Rules,
+		&i.Tags,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const directiveList = `-- name: DirectiveList :many
@@ -143,34 +200,36 @@ func (q *Queries) DirectivePage(ctx context.Context, arg DirectivePageParams) ([
 	return items, nil
 }
 
-const directiveUpsert = `-- name: DirectiveUpsert :exec
-INSERT INTO directives (tenant_id, bank_id, id, name, rules, tags, active)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-ON CONFLICT (tenant_id, bank_id, id) DO UPDATE
-SET name = EXCLUDED.name, rules = EXCLUDED.rules, tags = EXCLUDED.tags, active = EXCLUDED.active,
-    updated_at = now()
+const directiveUpdate = `-- name: DirectiveUpdate :execrows
+UPDATE directives
+SET name = $1, rules = $2, tags = $3, active = $4, updated_at = now()
+WHERE tenant_id = $5 AND bank_id = $6 AND id = $7
 `
 
-type DirectiveUpsertParams struct {
-	TenantID string
-	BankID   string
-	ID       string
+type DirectiveUpdateParams struct {
 	Name     string
 	Rules    []string
 	Tags     []string
 	Active   bool
+	TenantID string
+	BankID   string
+	ID       string
 }
 
-// DirectiveUpsert creates a directive or replaces its name, rules, tags and active flag.
-func (q *Queries) DirectiveUpsert(ctx context.Context, arg DirectiveUpsertParams) error {
-	_, err := q.db.Exec(ctx, directiveUpsert,
-		arg.TenantID,
-		arg.BankID,
-		arg.ID,
+// DirectiveUpdate replaces a directive's name, rules, tags and active flag, keeping created_at; a taken name
+// is a unique violation.
+func (q *Queries) DirectiveUpdate(ctx context.Context, arg DirectiveUpdateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, directiveUpdate,
 		arg.Name,
 		arg.Rules,
 		arg.Tags,
 		arg.Active,
+		arg.TenantID,
+		arg.BankID,
+		arg.ID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

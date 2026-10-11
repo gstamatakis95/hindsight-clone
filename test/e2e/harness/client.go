@@ -34,8 +34,8 @@ type Client struct {
 	Observations memoryv1.ObservationServiceClient
 	// Operations is OperationService.
 	Operations memoryv1.OperationServiceClient
-	// Tenants is TenantService.
-	Tenants memoryv1.TenantServiceClient
+	// Config is ConfigService (tenant and bank config, prompt preview, directives).
+	Config memoryv1.ConfigServiceClient
 }
 
 // Dial connects to a memd api at addr (plaintext) on behalf of tenant; the connection closes with the test.
@@ -60,7 +60,7 @@ func newClient(conn *grpc.ClientConn, tenant string) *Client {
 		Memory: memoryv1.NewMemoryServiceClient(cc), Documents: memoryv1.NewDocumentServiceClient(cc),
 		Banks:        memoryv1.NewBankServiceClient(cc),
 		MentalModels: memoryv1.NewMentalModelServiceClient(cc), Observations: memoryv1.NewObservationServiceClient(cc),
-		Operations: memoryv1.NewOperationServiceClient(cc), Tenants: memoryv1.NewTenantServiceClient(cc),
+		Operations: memoryv1.NewOperationServiceClient(cc), Config: memoryv1.NewConfigServiceClient(cc),
 	}
 }
 

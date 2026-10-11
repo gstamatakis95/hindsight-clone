@@ -45,7 +45,8 @@ Where a new type goes:
   registry. Never add a field named after one arm.
 - **Keep the naming rules.** Every RPC gets its own `<Rpc>Request` / `<Rpc>Response`. Every enum value is
   prefixed with its enum name, and value 0 is `*_UNSPECIFIED`. Patch RPCs take a `google.protobuf.FieldMask
-  update_mask`.
+  update_mask`; reset RPCs take a required `FieldMask reset_mask` (`"*"` = everything). Every config RPC returns a
+  `ConfigView` (`own` and `effective`).
 - **One paging convention.** A List RPC takes `int32 page_size` ("0 = 100, at most 1000") and `string page_token`
   and returns `string next_page_token`; the service applies `domain.ListPage` (negative = INVALID_ARGUMENT), and
   the paging interceptor checks every `page_size` and `max_results` field by name. A search takes `max_results`

@@ -679,6 +679,12 @@ ALTER TABLE ONLY public.unit_entities
 CREATE INDEX directives_bank_created_idx ON public.directives USING btree (tenant_id, bank_id, created_at, id COLLATE "C");
 
 --
+-- Name: directives_bank_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX directives_bank_name_key ON public.directives USING btree (tenant_id, bank_id, name);
+
+--
 -- Name: documents_tags_gin; Type: INDEX; Schema: public; Owner: -
 --
 

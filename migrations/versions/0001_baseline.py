@@ -445,6 +445,8 @@ DIRECTIVES = [
     """,
     # ListDirectives pages a bank's directives oldest first by (created_at, id).
     'CREATE INDEX directives_bank_created_idx ON directives (tenant_id, bank_id, created_at, id COLLATE "C")',
+    # A directive's name is unique within its bank: CreateDirective and UpdateDirective refuse a taken one.
+    "CREATE UNIQUE INDEX directives_bank_name_key ON directives (tenant_id, bank_id, name)",
 ]
 
 JOBS = [

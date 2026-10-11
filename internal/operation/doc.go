@@ -11,8 +11,10 @@
 // # Reads
 //
 // [Service.GetOperation], [Service.ListOperations] and [Service.ListEvents] each run in one short read-only
-// transaction after checking the bank is live: an unknown or tombstoned bank is domain.ErrNotFound (SPEC: once a
-// bank is deleting, reads return NOT_FOUND; GetBank NOT_FOUND is the delete's completion signal). ListOperations
+// transaction after checking the bank: an unknown or tombstoned bank is domain.ErrNotFound (once a bank is deleting,
+// reads return NOT_FOUND), with one exception: GetOperation still answers for a tombstoned bank's delete_bank
+// operations, so a client can poll the operation DeleteBank returned; it turns NOT_FOUND when the delete's last
+// step removes the bank with all its operations, which is the delete's completion signal. ListOperations
 // pages newest first. ListEvents returns the events after a seq, of the requested types (empty = all), and the last
 // seq scanned (the next after_seq). Both apply domain.ListPage to the page size: 0 is 100, any size is capped at
 // 1000 and a negative one is domain.ErrInvalidArgument (the store's EventRepo.List treats <= 0 as no limit, so the

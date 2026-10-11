@@ -5,10 +5,9 @@ import (
 	"memd/internal/grpcapi"
 )
 
-// wireConfig builds configsvc.Service: it serves TenantService and BankService's config, directive and prompt
-// preview RPCs. It runs after wireBanks, which builds the BankHandler.
+// wireConfig builds configsvc.Service: it serves ConfigService (the tenant and bank config levels, the prompt
+// preview and the directives).
 func wireConfig(c core, d *deps) {
 	svc := configsvc.New(configsvc.Deps{DB: c.db, Config: c.resolver})
-	d.api.Tenant = &grpcapi.TenantHandler{Config: svc}
-	d.api.Bank.Config = svc
+	d.api.Config = &grpcapi.ConfigHandler{Config: svc}
 }

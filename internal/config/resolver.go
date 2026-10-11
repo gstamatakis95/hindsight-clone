@@ -33,6 +33,12 @@ func (r *Resolver) Effective(
 	return Merge(append(levels, overrides...)...), nil
 }
 
+// Resolve merges stored levels already read (the tenant's, then the bank's) over the server defaults, with no
+// store read, so a caller can resolve the levels it read or wrote in its own transaction.
+func (r *Resolver) Resolve(levels ...domain.BankConfig) domain.BankConfig {
+	return Merge(append([]domain.BankConfig{r.server}, levels...)...)
+}
+
 // ForScope merges server < tenant < bank < strategy < request, where strategy is the first consolidation
 // strategy matching s (MatchStrategy). The strategy list itself is the merged one, request included, so a Consolidate
 // call can bring its own strategies.

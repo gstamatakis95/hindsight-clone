@@ -85,7 +85,8 @@ func status(t *testing.T, db store.DB, b domain.BankRef, id domain.OperationID) 
 }
 
 // TestCancelAndRetryRules: cancelling a delete_bank is FAILED_PRECONDITION; on a deleting bank only delete_bank may
-// be retried, any other retry is FAILED_PRECONDITION (ErrBankDeleting); reads of a deleting bank are NOT_FOUND.
+// be retried, any other retry is FAILED_PRECONDITION (ErrBankDeleting); GetOperation of a deleting bank answers
+// only for its delete_bank operation, which is NOT_FOUND once the bank is gone.
 func TestCancelAndRetryRules(t *testing.T) {
 	db := pgtest.NewStore(t)
 	ctx := t.Context()
@@ -116,8 +117,15 @@ func TestCancelAndRetryRules(t *testing.T) {
 	if err != nil || op.Status != domain.OperationStatusPending {
 		t.Fatalf("Retry delete_bank on a deleting bank = %+v, %v; want PENDING", op, err)
 	}
+	if got, err := s.GetOperation(ctx, b, del); err != nil || got.ID != del {
+		t.Errorf("GetOperation(delete_bank) on a deleting bank = %+v, %v; want the operation", got, err)
+	}
+	if _, err := s.GetOperation(ctx, b, retain); !errors.Is(err, domain.ErrBankNotFound) {
+		t.Errorf("GetOperation(retain) on a deleting bank = %v, want ErrBankNotFound", err)
+	}
+	inTx(t, db, func(tx store.Tx) error { return tx.Banks().Delete(ctx, b) })
 	if _, err := s.GetOperation(ctx, b, del); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("GetOperation on a deleting bank = %v, want ErrNotFound", err)
+		t.Errorf("GetOperation(delete_bank) once the bank is gone = %v, want ErrNotFound", err)
 	}
 }
 

@@ -48,7 +48,7 @@ func (e env) withBank(t *testing.T, b domain.BankRef, base domain.BankConfig, di
 		}
 		for _, d := range dirs {
 			d.Bank = b
-			if _, err := tx.Directives().Upsert(e.ctx, d); err != nil {
+			if _, err := tx.Directives().Create(e.ctx, d); err != nil {
 				return err
 			}
 		}

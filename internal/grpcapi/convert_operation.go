@@ -68,7 +68,7 @@ func progressToProto(p *domain.Progress) *pb.Progress {
 	if p == nil {
 		return nil
 	}
-	return &pb.Progress{Stage: p.Stage, At: tsToProto(p.At), Processed: p.Processed, Total: p.Total}
+	return &pb.Progress{Stage: p.Stage, RecordedAt: tsToProto(p.At), Processed: p.Processed, Total: p.Total}
 }
 
 // listOperationsFromProto converts a ListOperationsRequest to an OperationFilter (the bank is separate).
@@ -90,7 +90,7 @@ func eventToProto(e domain.LifecycleEvent) *pb.LifecycleEvent {
 		Seq:         e.Seq,
 		Type:        toEnum[pb.EventType](e.Type),
 		BankId:      e.Bank.Bank,
-		At:          tsToProto(e.At),
+		CreatedAt:   tsToProto(e.At),
 		OperationId: string(e.OperationID),
 		SubjectId:   e.SubjectID,
 	}

@@ -43,7 +43,7 @@ func ApplyPaths[T any](dst, src *T, paths []string) error {
 // domain.ErrInvalidArgument.
 func ResetPaths(cur domain.BankConfig, paths []string) (domain.BankConfig, error) {
 	if len(paths) == 0 {
-		return domain.BankConfig{}, domain.InvalidField("paths", "reset needs at least one path (%q resets everything)",
+		return domain.BankConfig{}, domain.InvalidField("reset_mask", "reset needs at least one path (%q resets everything)",
 			ResetAll)
 	}
 	for _, p := range paths {

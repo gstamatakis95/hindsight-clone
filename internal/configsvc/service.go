@@ -16,7 +16,7 @@ type Deps struct {
 	Config *config.Resolver
 }
 
-// Service serves TenantService and the config, directive and prompt-preview RPCs of BankService.
+// Service serves ConfigService: the tenant and bank config levels, the prompt preview and the directives.
 type Service struct {
 	d Deps
 }
@@ -30,16 +30,17 @@ func New(d Deps) *Service {
 // and may run again on a retry, so a concurrent patch is never lost.
 type Patch func(cur domain.BankConfig) (domain.BankConfig, error)
 
-// View is a bank's config: its own overrides and the effective config resolved over every level.
+// View is one config level as every config RPC returns it: its own overrides and the effective config they
+// resolve to.
 type View struct {
-	// Own is the bank's own overrides.
+	// Own is what the level itself sets: the tenant's config, or the bank's own overrides.
 	Own domain.BankConfig
-	// Effective is the config the bank's operations use: server < tenant < bank.
+	// Effective is server < tenant for a tenant, and server < tenant < bank for a bank.
 	Effective domain.BankConfig
 }
 
-// GetTenantConfig returns the tenant's config; a tenant with none set returns the zero config.
-func (s *Service) GetTenantConfig(ctx context.Context, tenant string) (domain.BankConfig, error) {
+// GetTenantConfig returns the tenant's config view; a tenant with no config of its own has a zero Own.
+func (s *Service) GetTenantConfig(ctx context.Context, tenant string) (View, error) {
 	var cfg domain.BankConfig
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		var err error
@@ -47,14 +48,14 @@ func (s *Service) GetTenantConfig(ctx context.Context, tenant string) (domain.Ba
 		return err
 	})
 	if err != nil {
-		return domain.BankConfig{}, err
+		return View{}, err
 	}
-	return cfg, nil
+	return View{Own: cfg, Effective: s.d.Config.Resolve(cfg)}, nil
 }
 
 // UpdateTenantConfig reads, patches and stores the tenant config in one transaction and returns the stored result.
 // It locks the tenant config first, so concurrent patches serialize instead of one overwriting the other.
-func (s *Service) UpdateTenantConfig(ctx context.Context, tenant string, patch Patch) (domain.BankConfig, error) {
+func (s *Service) UpdateTenantConfig(ctx context.Context, tenant string, patch Patch) (View, error) {
 	var out domain.BankConfig
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		out = domain.BankConfig{}
@@ -76,38 +77,51 @@ func (s *Service) UpdateTenantConfig(ctx context.Context, tenant string, patch P
 		return err
 	})
 	if err != nil {
-		return domain.BankConfig{}, err
+		return View{}, err
 	}
-	return out, nil
+	return View{Own: out, Effective: s.d.Config.Resolve(out)}, nil
 }
 
-// GetBankConfig returns the bank's own overrides and its effective config; an unknown or tombstoned bank is
-// domain.ErrNotFound (the effective config refuses a tombstoned bank).
+// ResetTenantConfig resets the given paths of the tenant's config to unset, so they inherit the server defaults
+// again: UpdateTenantConfig with a reset patch. "*" resets everything; no paths at all, or an unknown path, is
+// domain.ErrInvalidArgument, checked before any write.
+func (s *Service) ResetTenantConfig(ctx context.Context, tenant string, paths []string) (View, error) {
+	if _, err := config.ResetPaths(domain.BankConfig{}, paths); err != nil {
+		return View{}, fmt.Errorf("reset tenant config: %w", err)
+	}
+	return s.UpdateTenantConfig(ctx, tenant, resetPatch(paths))
+}
+
+// GetBankConfig returns the bank's config view, read in one transaction; an unknown or tombstoned bank is
+// domain.ErrNotFound.
 func (s *Service) GetBankConfig(ctx context.Context, b domain.BankRef) (View, error) {
-	var bank domain.Bank
+	var tenant, own domain.BankConfig
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
-		var err error
-		bank, err = tx.Banks().Get(ctx, b)
+		bank, err := tx.Banks().Get(ctx, b)
+		if err != nil {
+			return err
+		}
+		if bank.Deleting() {
+			return fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		}
+		own = bank.Config
+		tenant, err = tx.Banks().TenantConfig(ctx, b.Tenant)
 		return err
 	})
 	if err != nil {
 		return View{}, err
 	}
-	eff, err := s.d.Config.Effective(ctx, b)
-	if err != nil {
-		return View{}, fmt.Errorf("effective config: %w", err)
-	}
-	return View{Own: bank.Config, Effective: eff}, nil
+	return View{Own: own, Effective: s.d.Config.Resolve(tenant, own)}, nil
 }
 
-// UpdateBankConfig ensures the bank, patches its own overrides and returns the bank, in one transaction. It is a
-// write: an unknown bank is created with tenant defaults (BankRepo.Ensure), a tombstoned one is
+// UpdateBankConfig ensures the bank, patches its own overrides and returns its config view, in one transaction.
+// It is a write: an unknown bank is created with tenant defaults (BankRepo.Ensure), a tombstoned one is
 // domain.ErrBankDeleting. It takes the bank's change seq (which locks the bank row) before reading the overrides,
 // so concurrent patches of different fields serialize instead of one overwriting the other.
-func (s *Service) UpdateBankConfig(ctx context.Context, b domain.BankRef, patch Patch) (domain.Bank, error) {
-	var out domain.Bank
+func (s *Service) UpdateBankConfig(ctx context.Context, b domain.BankRef, patch Patch) (View, error) {
+	var tenant, own domain.BankConfig
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
-		out = domain.Bank{}
+		tenant, own = domain.BankConfig{}, domain.BankConfig{}
 		if _, err := tx.Banks().Ensure(ctx, b); err != nil {
 			return err
 		}
@@ -125,23 +139,33 @@ func (s *Service) UpdateBankConfig(ctx context.Context, b domain.BankRef, patch 
 		if err := tx.Banks().SetConfig(ctx, b, next); err != nil {
 			return err
 		}
-		out, err = tx.Banks().Get(ctx, b)
+		stored, err := tx.Banks().Get(ctx, b)
+		if err != nil {
+			return err
+		}
+		own = stored.Config
+		tenant, err = tx.Banks().TenantConfig(ctx, b.Tenant)
 		return err
 	})
 	if err != nil {
-		return domain.Bank{}, err
+		return View{}, err
 	}
-	return out, nil
+	return View{Own: own, Effective: s.d.Config.Resolve(tenant, own)}, nil
 }
 
 // ResetBankConfig resets the given paths of the bank's own overrides to unset, so they inherit again, and returns
-// the bank: UpdateBankConfig with a reset patch. "*" resets everything; no paths at all, or an unknown path, is
-// domain.ErrInvalidArgument, checked before any write.
-func (s *Service) ResetBankConfig(ctx context.Context, b domain.BankRef, paths []string) (domain.Bank, error) {
+// its config view: UpdateBankConfig with a reset patch. "*" resets everything; no paths at all, or an unknown path,
+// is domain.ErrInvalidArgument, checked before any write.
+func (s *Service) ResetBankConfig(ctx context.Context, b domain.BankRef, paths []string) (View, error) {
 	if _, err := config.ResetPaths(domain.BankConfig{}, paths); err != nil {
-		return domain.Bank{}, fmt.Errorf("reset bank config: %w", err)
+		return View{}, fmt.Errorf("reset bank config: %w", err)
 	}
-	return s.UpdateBankConfig(ctx, b, func(cur domain.BankConfig) (domain.BankConfig, error) {
+	return s.UpdateBankConfig(ctx, b, resetPatch(paths))
+}
+
+// resetPatch is the Patch that unsets paths.
+func resetPatch(paths []string) Patch {
+	return func(cur domain.BankConfig) (domain.BankConfig, error) {
 		return config.ResetPaths(cur, paths) //nolint:wrapcheck // config errors are already domain error classes
-	})
+	}
 }

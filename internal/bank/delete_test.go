@@ -42,7 +42,7 @@ func seedBank(t *testing.T, e env, b domain.BankRef) (pending, claimed domain.Op
 		if err := tx.Units().Insert(e.ctx, units); err != nil {
 			return err
 		}
-		if _, err := tx.Directives().Upsert(e.ctx, domain.Directive{Bank: b, Name: "d", Active: true}); err != nil {
+		if _, err := tx.Directives().Create(e.ctx, domain.Directive{Bank: b, Name: "d", Active: true}); err != nil {
 			return err
 		}
 		pending, _, err = tx.Queue().Enqueue(e.ctx, store.Job{

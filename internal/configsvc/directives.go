@@ -5,38 +5,83 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/store"
-	"slices"
+	"strings"
 )
 
-// UpsertDirective creates d (empty ID) or replaces it, and returns it as stored, with normalized tags. It is a
-// write: an unknown bank is created with tenant defaults, a tombstoned one is domain.ErrBankDeleting.
-func (s *Service) UpsertDirective(ctx context.Context, d domain.Directive) (domain.Directive, error) {
-	d.Tags = domain.NormalizeTags(d.Tags)
+// CreateDirective adds d to its bank with a new id and returns it as stored, with normalized tags. The name is
+// required (empty = domain.ErrInvalidArgument) and must be new in the bank (taken = domain.ErrAlreadyExists). It is
+// a write: an unknown bank is created with tenant defaults, a tombstoned one is domain.ErrBankDeleting.
+func (s *Service) CreateDirective(ctx context.Context, d domain.Directive) (domain.Directive, error) {
+	if err := checkDirective(d); err != nil {
+		return domain.Directive{}, err
+	}
+	d.ID, d.Tags = "", domain.NormalizeTags(d.Tags)
 	var out domain.Directive
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		out = domain.Directive{}
 		if _, err := tx.Banks().Ensure(ctx, d.Bank); err != nil {
 			return err
 		}
-		id, err := tx.Directives().Upsert(ctx, d)
+		id, err := tx.Directives().Create(ctx, d)
 		if err != nil {
 			return err
 		}
-		all, err := tx.Directives().List(ctx, d.Bank, false)
-		if err != nil {
-			return err
-		}
-		i := slices.IndexFunc(all, func(x domain.Directive) bool { return x.ID == id })
-		if i < 0 {
-			return fmt.Errorf("%w: directive %s vanished after upsert", domain.ErrNotFound, id)
-		}
-		out = all[i]
-		return nil
+		out, err = tx.Directives().Get(ctx, d.Bank, id)
+		return err
 	})
 	if err != nil {
 		return domain.Directive{}, err
 	}
 	return out, nil
+}
+
+// DirectivePatch computes a directive's new name, rules, tags and active flag from the stored one. It must be pure:
+// it runs inside the write transaction and may run again on a retry.
+type DirectivePatch func(cur domain.Directive) (domain.Directive, error)
+
+// UpdateDirective patches directive id of bank b and returns it as stored, with normalized tags. It is a write that
+// never creates the bank: an unknown bank or directive is domain.ErrNotFound and a tombstoned bank
+// domain.ErrBankDeleting. The patched name must stay set (domain.ErrInvalidArgument) and unique in the bank
+// (domain.ErrAlreadyExists). The directive row is locked while it is patched, so concurrent patches serialize.
+func (s *Service) UpdateDirective(
+	ctx context.Context, b domain.BankRef, id domain.DirectiveID, patch DirectivePatch,
+) (domain.Directive, error) {
+	var out domain.Directive
+	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
+		out = domain.Directive{}
+		if err := writableBank(ctx, tx, b); err != nil {
+			return err
+		}
+		cur, err := tx.Directives().Get(ctx, b, id)
+		if err != nil {
+			return err
+		}
+		next, err := patch(cur)
+		if err != nil {
+			return fmt.Errorf("patch directive %s: %w", id, err)
+		}
+		if err := checkDirective(next); err != nil {
+			return err
+		}
+		next.ID, next.Bank, next.Tags = id, b, domain.NormalizeTags(next.Tags)
+		if err := tx.Directives().Update(ctx, next); err != nil {
+			return err
+		}
+		out, err = tx.Directives().Get(ctx, b, id)
+		return err
+	})
+	if err != nil {
+		return domain.Directive{}, err
+	}
+	return out, nil
+}
+
+// checkDirective rejects a directive without a name: the name identifies it within the bank.
+func checkDirective(d domain.Directive) error {
+	if strings.TrimSpace(d.Name) == "" {
+		return domain.InvalidField("directive.name", "a directive needs a name")
+	}
+	return nil
 }
 
 // ListDirectivesRequest mirrors memory.v1.ListDirectivesRequest.
@@ -130,15 +175,24 @@ func directiveQuery(req ListDirectivesRequest) (store.DirectiveQuery, error) {
 // is domain.ErrNotFound and a tombstoned bank domain.ErrBankDeleting.
 func (s *Service) DeleteDirective(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error {
 	return s.d.DB.InTx(ctx, func(tx store.Tx) error {
-		bank, err := tx.Banks().Get(ctx, b)
-		if err != nil {
+		if err := writableBank(ctx, tx, b); err != nil {
 			return err
-		}
-		if bank.Deleting() {
-			return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
 		}
 		return tx.Directives().Delete(ctx, b, id)
 	})
+}
+
+// writableBank returns nil when b exists and is not tombstoned: unknown is domain.ErrNotFound and tombstoned
+// domain.ErrBankDeleting. Directive writes other than a create use it, so they never create the bank.
+func writableBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
+	bank, err := tx.Banks().Get(ctx, b)
+	if err != nil {
+		return err
+	}
+	if bank.Deleting() {
+		return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+	}
+	return nil
 }
 
 // readDirectives lists bank b's directives in a short transaction (only active ones when activeOnly); an unknown

@@ -136,7 +136,7 @@ func (h *harness) addDirective(d domain.Directive) domain.DirectiveID {
 	var id domain.DirectiveID
 	h.tx(func(ctx context.Context, tx store.Tx) error {
 		var err error
-		id, err = tx.Directives().Upsert(ctx, d)
+		id, err = tx.Directives().Create(ctx, d)
 		return err
 	})
 	return id

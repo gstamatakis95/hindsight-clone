@@ -148,8 +148,14 @@ type EventRepo interface {
 
 // DirectiveRepo stores a bank's directives.
 type DirectiveRepo interface {
-	// Upsert creates the directive (a new id when d.ID is empty) or replaces it; it returns the id.
-	Upsert(ctx context.Context, d domain.Directive) (domain.DirectiveID, error)
+	// Create inserts the directive (a new id when d.ID is empty) and returns its id. A taken id or name in the
+	// bank is domain.ErrAlreadyExists; an unknown bank is domain.ErrNotFound.
+	Create(ctx context.Context, d domain.Directive) (domain.DirectiveID, error)
+	// Get returns one directive, locked until the transaction ends; unknown = domain.ErrNotFound.
+	Get(ctx context.Context, b domain.BankRef, id domain.DirectiveID) (domain.Directive, error)
+	// Update replaces the name, rules, tags and active flag of directive d.ID. Unknown = domain.ErrNotFound; a
+	// name taken by another directive of the bank is domain.ErrAlreadyExists.
+	Update(ctx context.Context, d domain.Directive) error
 	// List returns the bank's directives (only active ones when activeOnly), oldest first. Tag selection
 	// is domain.SelectDirectives.
 	List(ctx context.Context, b domain.BankRef, activeOnly bool) ([]domain.Directive, error)

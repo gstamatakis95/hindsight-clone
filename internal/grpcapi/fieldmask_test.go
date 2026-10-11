@@ -146,6 +146,25 @@ func TestFieldMaskInvalid(t *testing.T) {
 	}
 }
 
+// TestResetMask checks a reset_mask: "*" resets everything, BankConfig paths pass normalized, and an empty mask or a
+// path outside BankConfig is INVALID_ARGUMENT naming reset_mask.
+func TestResetMask(t *testing.T) {
+	if got, err := resetPaths(mask("recall.rrf_k", "*")); err != nil || !reflect.DeepEqual(got, []string{"*"}) {
+		t.Errorf(`with "*": %v %v, want [*]`, got, err)
+	}
+	if got, err := resetPaths(mask("retain.mission", "models.extract")); err != nil ||
+		!reflect.DeepEqual(got, []string{"models.extract", "retain.mission"}) {
+		t.Errorf("paths: %v %v", got, err)
+	}
+	for _, m := range []*fieldmaskpb.FieldMask{nil, mask(), mask("nope")} {
+		_, err := resetPaths(m)
+		v := domain.FieldViolations(err)
+		if !errors.Is(err, domain.ErrInvalidArgument) || len(v) != 1 || v[0].Field != "reset_mask" {
+			t.Errorf("mask %v: err = %v, want INVALID_ARGUMENT on reset_mask", m.GetPaths(), err)
+		}
+	}
+}
+
 // TestFieldMaskSpecPatch checks a spec patch, including a nested schedule path and RefreshOverrides paths
 // mapped onto the stored config; the id is kept.
 func TestFieldMaskSpecPatch(t *testing.T) {

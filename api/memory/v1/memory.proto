@@ -49,7 +49,7 @@
 //   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
 //                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
 //   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
-//                        read of a bank being deleted)
+//                        read of a bank being deleted except GetOperation of its delete_bank operations)
 //   ALREADY_EXISTS       ALREADY_EXISTS (a create collided with an existing id)
 //   FAILED_PRECONDITION  FAILED_PRECONDITION (the state forbids the call), BANK_DELETING (a write to a bank
 //                        being deleted), MODEL_UNBOUND (a model slot the call needs has no binding),
@@ -168,53 +168,68 @@ service MentalModelService {
   rpc SearchMentalModels(SearchMentalModelsRequest) returns (SearchMentalModelsResponse);
 }
 
-// BankService manages banks, their config, directives and templates.
+// BankService manages the calling tenant's banks: create (optionally from a template), get, list, delete,
+// stats, tags and template export.
 service BankService {
-  // CreateBank creates a bank with optional config overrides.
+  // CreateBank creates a bank with initial config overrides, or from a template (its config, directives and
+  // mental models, whose first builds it enqueues). An existing bank = ALREADY_EXISTS; a bank being deleted =
+  // FAILED_PRECONDITION (BANK_DELETING).
   rpc CreateBank(CreateBankRequest) returns (CreateBankResponse);
-  // GetBank returns a bank and its own config overrides.
+  // GetBank returns one bank. Unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
   rpc GetBank(GetBankRequest) returns (GetBankResponse);
-  // GetBankConfig returns the resolved config (server < tenant < bank) and the bank's own overrides.
-  rpc GetBankConfig(GetBankConfigRequest) returns (GetBankConfigResponse);
-  // UpdateBankConfig patches the bank's own overrides with a FieldMask.
-  rpc UpdateBankConfig(UpdateBankConfigRequest) returns (UpdateBankConfigResponse);
-  // ResetBankConfig removes the bank's own overrides at the given paths, so they inherit again.
-  rpc ResetBankConfig(ResetBankConfigRequest) returns (ResetBankConfigResponse);
+  // ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
+  rpc ListBanks(ListBanksRequest) returns (ListBanksResponse);
+  // DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one transaction, and
+  // returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
+  // (BANK_DELETING) and reads NOT_FOUND (BANK_NOT_FOUND), except GetOperation of the bank's delete_bank
+  // operations. To observe completion, poll GetOperation with the returned operation id: it answers while the
+  // delete runs, and NOT_FOUND once the bank is gone, because the delete's last step removes the bank with all
+  // its operations and events. A large delete runs in bounded steps, so the returned operation may end
+  // COMPLETED while a later step finishes the work. Once the bank is gone, a write creates a new, empty bank.
+  rpc DeleteBank(DeleteBankRequest) returns (DeleteBankResponse);
   // GetBankStats returns counts from indexed COUNT queries; poll pending_operations_by_kind as an eval
   // barrier.
   rpc GetBankStats(GetBankStatsRequest) returns (GetBankStatsResponse);
   // ListTags pages through the bank's tags with usage counts.
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+  // ExportBankTemplate exports the bank's own config, directives and mental-model specs.
+  rpc ExportBankTemplate(ExportBankTemplateRequest) returns (ExportBankTemplateResponse);
+}
+
+// ConfigService reads and writes how the tenant's banks behave: the tenant and bank config levels, the prompt
+// preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
+// the effective config they resolve to.
+service ConfigService {
+  // GetTenantConfig returns the tenant's own config and the effective tenant defaults (server < tenant).
+  rpc GetTenantConfig(GetTenantConfigRequest) returns (GetTenantConfigResponse);
+  // UpdateTenantConfig patches the tenant's own config with a FieldMask.
+  rpc UpdateTenantConfig(UpdateTenantConfigRequest) returns (UpdateTenantConfigResponse);
+  // ResetTenantConfig removes the tenant's own config at the given paths, so they inherit the server defaults
+  // again.
+  rpc ResetTenantConfig(ResetTenantConfigRequest) returns (ResetTenantConfigResponse);
+  // GetBankConfig returns the bank's own overrides and its effective config (server < tenant < bank).
+  rpc GetBankConfig(GetBankConfigRequest) returns (GetBankConfigResponse);
+  // UpdateBankConfig patches the bank's own overrides with a FieldMask.
+  rpc UpdateBankConfig(UpdateBankConfigRequest) returns (UpdateBankConfigResponse);
+  // ResetBankConfig removes the bank's own overrides at the given paths, so they inherit again.
+  rpc ResetBankConfig(ResetBankConfigRequest) returns (ResetBankConfigResponse);
   // PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
   rpc PreviewPrompt(PreviewPromptRequest) returns (PreviewPromptResponse);
-  // DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one
-  // transaction. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION and reads
-  // NOT_FOUND. Once delete_bank has removed the bank row, a write creates a new, empty bank with no old
-  // events or operations.
-  rpc DeleteBank(DeleteBankRequest) returns (DeleteBankResponse);
-  // ExportBankTemplate exports the bank's config, directives and mental-model specs.
-  rpc ExportBankTemplate(ExportBankTemplateRequest) returns (ExportBankTemplateResponse);
-  // CreateBankFromTemplate creates a bank from a template and enqueues builds of its mental models.
-  rpc CreateBankFromTemplate(CreateBankFromTemplateRequest) returns (CreateBankFromTemplateResponse);
-  // UpsertDirective creates (empty id) or replaces a directive.
-  rpc UpsertDirective(UpsertDirectiveRequest) returns (UpsertDirectiveResponse);
+  // CreateDirective adds a directive to the bank; its name must be new in the bank.
+  rpc CreateDirective(CreateDirectiveRequest) returns (CreateDirectiveResponse);
+  // UpdateDirective patches a directive with a FieldMask.
+  rpc UpdateDirective(UpdateDirectiveRequest) returns (UpdateDirectiveResponse);
   // ListDirectives pages through the bank's directives, oldest first, optionally by tag and active state.
   rpc ListDirectives(ListDirectivesRequest) returns (ListDirectivesResponse);
   // DeleteDirective deletes one directive.
   rpc DeleteDirective(DeleteDirectiveRequest) returns (DeleteDirectiveResponse);
 }
 
-// TenantService reads and patches the calling tenant's config defaults.
-service TenantService {
-  // GetTenantConfig returns the tenant-level BankConfig overrides.
-  rpc GetTenantConfig(GetTenantConfigRequest) returns (GetTenantConfigResponse);
-  // UpdateTenantConfig patches the tenant-level BankConfig with a FieldMask.
-  rpc UpdateTenantConfig(UpdateTenantConfigRequest) returns (UpdateTenantConfigResponse);
-}
-
 // OperationService reads and controls background operations and serves the lifecycle event feed.
 service OperationService {
-  // GetOperation returns one operation of the bank.
+  // GetOperation returns one operation of the bank. For a bank being deleted it answers only for the bank's
+  // delete_bank operations (any other id = NOT_FOUND, BANK_NOT_FOUND); once the delete is done they are
+  // NOT_FOUND too.
   rpc GetOperation(GetOperationRequest) returns (GetOperationResponse);
   // ListOperations pages through the bank's operations, optionally filtered by status and kind.
   rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
@@ -1511,8 +1526,8 @@ enum RefreshOutcome {
 
 // ======================= BankService =======================
 
-// Bank lifecycle, config (resolved and own overrides), stats, tag listing, prompt preview, templates and
-// directives.
+// Bank lifecycle and inventory: create (optionally from a template), get, list, delete, stats, tag listing and
+// template export. How a bank behaves (its config and directives) is ConfigService.
 
 // ---- CreateBank ----
 
@@ -1522,80 +1537,81 @@ message CreateBankRequest {
   string bank_id = 1;
   // Display name.
   string name = 2;
-  // Initial config overrides; unset fields inherit tenant and server defaults.
-  BankConfig config = 3;
+  // What the bank starts with; unset = no own config (everything inherits tenant and server defaults).
+  oneof initial {
+    // Initial config overrides; unset fields inherit tenant and server defaults.
+    BankConfig config = 3;
+    // A template (ExportBankTemplate): its config becomes the bank's own overrides, its directives are created
+    // with new ids, and its mental models are created with their first builds enqueued.
+    BankTemplate template = 4;
+  }
 }
 
-// CreateBankResponse carries the new bank.
+// CreateBankResponse carries the new bank and, for a template, its mental-model builds.
 message CreateBankResponse {
-  // The newly created bank, with its own config overrides.
+  // The newly created bank.
   Bank bank = 1;
+  // One refresh_mental_model operation per template mental model, building its first version, in template
+  // order; empty without a template.
+  repeated Operation mental_model_operations = 2;
+}
+
+// BankTemplate is a portable bank definition: config, directives and mental-model specs (no memories).
+message BankTemplate {
+  // Config overrides of the bank.
+  BankConfig config = 1;
+  // Directives of the bank (ids are not carried: CreateBank assigns new ones). Names must be set and unique.
+  repeated Directive directives = 2;
+  // Mental-model specs; content is rebuilt, not copied.
+  repeated MentalModelSpec mental_models = 3;
 }
 
 // ---- GetBank ----
 
 // GetBankRequest names one bank.
 message GetBankRequest {
-  // Bank id; unknown = NOT_FOUND.
+  // Bank id; unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
   string bank_id = 1;
 }
 
 // GetBankResponse carries the bank.
 message GetBankResponse {
-  // The bank, with its own config overrides (not the resolved config).
+  // The bank; its config is ConfigService.GetBankConfig.
   Bank bank = 1;
 }
 
-// ---- GetBankConfig ----
+// ---- ListBanks ----
 
-// GetBankConfigRequest names one bank.
-message GetBankConfigRequest {
+// ListBanksRequest pages the tenant's banks.
+message ListBanksRequest {
+  // Maximum banks per page; 0 = 100, at most 1000.
+  int32 page_size = 1;
+  // Token from a previous response; empty = first page.
+  string page_token = 2;
+  // Only banks whose id starts with this; empty = all.
+  string id_prefix = 3;
+}
+
+// ListBanksResponse is one page of banks, in id order.
+message ListBanksResponse {
+  // Banks on this page; banks being deleted are left out.
+  repeated Bank banks = 1;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
+}
+
+// ---- DeleteBank ----
+
+// DeleteBankRequest names the bank to delete.
+message DeleteBankRequest {
   // Bank id; unknown = NOT_FOUND.
   string bank_id = 1;
 }
 
-// GetBankConfigResponse carries the resolved config and the bank's own overrides.
-message GetBankConfigResponse {
-  // Effective config: server < tenant < bank, merged.
-  BankConfig resolved = 1;
-  // Only what the bank itself sets.
-  BankConfig overrides = 2;
-}
-
-// ---- UpdateBankConfig ----
-
-// UpdateBankConfigRequest patches the bank's own overrides.
-message UpdateBankConfigRequest {
-  // Bank id.
-  string bank_id = 1;
-  // New values for the fields named in update_mask.
-  BankConfig config = 2;
-  // BankConfig paths to replace (for example observations.dedup_threshold or models.extract; a model binding
-  // is replaced whole). A path set to an empty value clears it (this is how a list is cleared). Unset = every
-  // populated field of config.
-  google.protobuf.FieldMask update_mask = 3;
-}
-
-// UpdateBankConfigResponse carries the bank after the patch.
-message UpdateBankConfigResponse {
-  // The bank with its updated overrides.
-  Bank bank = 1;
-}
-
-// ---- ResetBankConfig ----
-
-// ResetBankConfigRequest removes some or all of the bank's own overrides.
-message ResetBankConfigRequest {
-  // Bank id.
-  string bank_id = 1;
-  // BankConfig paths to reset, so they inherit again; "*" resets everything. Empty = INVALID_ARGUMENT.
-  repeated string paths = 2;
-}
-
-// ResetBankConfigResponse carries the bank after the reset.
-message ResetBankConfigResponse {
-  // The bank with its remaining overrides.
-  Bank bank = 1;
+// DeleteBankResponse carries the delete job.
+message DeleteBankResponse {
+  // The delete_bank operation. Poll GetOperation with its id: NOT_FOUND means the bank is gone.
+  Operation operation = 1;
 }
 
 // ---- GetBankStats ----
@@ -1614,20 +1630,24 @@ message GetBankStatsResponse {
 
 // BankStats summarizes a bank, read with indexed COUNT queries (no counter tables).
 message BankStats {
-  // Live units keyed by fact type name.
-  map<string, int64> units_by_fact_type = 1;
-  // Units archived by invalidation (count).
-  int64 invalidated_units = 2;
+  reserved 1, 2, 7;
+  reserved "units_by_fact_type", "invalidated_units", "unconsolidated_units";
+  // Live memory counts keyed by lowercase fact type: "world", "experience" and "observation". A type with no
+  // memories is absent.
+  map<string, int64> memories_by_fact_type = 10;
+  // Memories archived by invalidation (count).
+  int64 invalidated_memories = 11;
   // Documents retained in the bank (count).
   int64 documents = 3;
   // Entities (free-form and label) in the bank (count).
   int64 entities = 4;
   // Mental models in the bank (count).
   int64 mental_models = 5;
-  // Pending and processing operations keyed by kind. Eval barrier: poll until empty.
+  // Pending and processing operation counts keyed by lowercase operation kind (for example "consolidate",
+  // "retain_document"); a kind with none is absent. Eval barrier: poll until empty.
   map<string, int64> pending_operations_by_kind = 6;
-  // Live units not yet consolidated (count).
-  int64 unconsolidated_units = 7;
+  // Live facts not yet consolidated (count).
+  int64 unconsolidated_memories = 12;
   // Time of the last write to memory content.
   google.protobuf.Timestamp last_memory_write_at = 8;
   // The bank's commit-ordered change counter: the same counter as LifecycleEvent.seq and
@@ -1663,7 +1683,7 @@ message ListTagsResponse {
 enum TagSource {
   // Not set; same as TAG_SOURCE_MEMORIES.
   TAG_SOURCE_UNSPECIFIED = 0;
-  // Tags of memory units.
+  // Tags of memories.
   TAG_SOURCE_MEMORIES = 1;
   // Tags of mental models.
   TAG_SOURCE_MENTAL_MODELS = 2;
@@ -1677,6 +1697,146 @@ message TagCount {
   string tag = 1;
   // Objects of the requested source carrying it.
   int64 count = 2;
+}
+
+// ---- ExportBankTemplate ----
+
+// ExportBankTemplateRequest names the bank to export.
+message ExportBankTemplateRequest {
+  // Bank id; unknown = NOT_FOUND.
+  string bank_id = 1;
+}
+
+// ExportBankTemplateResponse carries the template.
+message ExportBankTemplateResponse {
+  // Config overrides, directives and mental-model specs of the bank; pass it to CreateBank.template.
+  BankTemplate template = 1;
+}
+
+// ---- Resources ----
+
+// Bank is a memory bank. Its config is read and written through ConfigService.
+message Bank {
+  reserved 3, 5;
+  reserved "config", "deleting";
+  // Bank id, unique within the tenant.
+  string id = 1;
+  // Display name.
+  string name = 2;
+  // When the bank was created.
+  google.protobuf.Timestamp created_at = 4;
+}
+
+// ======================= ConfigService =======================
+
+// The config levels a tenant controls and what they feed. A tenant's BankConfig sits between the server
+// defaults and each bank's own config in the hierarchy server < tenant < bank < strategy < request. Update
+// sets the masked paths (a masked path left empty is an explicit empty value, which is how a list is
+// cleared); Reset unsets them, so they inherit from the less specific level again. Directives are standing
+// reflect instructions; the prompt preview shows how config and directives render.
+
+// ---- GetTenantConfig ----
+
+// GetTenantConfigRequest is empty: the tenant comes from request metadata.
+message GetTenantConfigRequest {}
+
+// GetTenantConfigResponse carries the tenant's config.
+message GetTenantConfigResponse {
+  reserved 1;
+  // own: the tenant's overrides (unset fields inherit server defaults); effective: server < tenant.
+  ConfigView config = 2;
+}
+
+// ---- UpdateTenantConfig ----
+
+// UpdateTenantConfigRequest patches the tenant config.
+message UpdateTenantConfigRequest {
+  // New values for the fields named in update_mask.
+  BankConfig config = 1;
+  // BankConfig paths to replace; a path set to an empty value clears it (this is how a list is cleared).
+  // Unset = every populated field of config.
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+// UpdateTenantConfigResponse carries the tenant config after the patch.
+message UpdateTenantConfigResponse {
+  reserved 1;
+  // The tenant's config after the patch.
+  ConfigView config = 2;
+}
+
+// ---- ResetTenantConfig ----
+
+// ResetTenantConfigRequest removes some or all of the tenant's own config.
+message ResetTenantConfigRequest {
+  // BankConfig paths to reset, so they inherit the server defaults again; the single path "*" resets
+  // everything. Empty = INVALID_ARGUMENT.
+  google.protobuf.FieldMask reset_mask = 1;
+}
+
+// ResetTenantConfigResponse carries the tenant config after the reset.
+message ResetTenantConfigResponse {
+  // The tenant's config after the reset.
+  ConfigView config = 1;
+}
+
+// ---- GetBankConfig ----
+
+// GetBankConfigRequest names one bank.
+message GetBankConfigRequest {
+  // Bank id; unknown, or being deleted = NOT_FOUND.
+  string bank_id = 1;
+}
+
+// GetBankConfigResponse carries the bank's config.
+message GetBankConfigResponse {
+  reserved 1, 2;
+  reserved "resolved", "overrides";
+  // own: only what the bank itself sets; effective: server < tenant < bank, merged.
+  ConfigView config = 3;
+}
+
+// ---- UpdateBankConfig ----
+
+// UpdateBankConfigRequest patches the bank's own overrides. An unknown bank is created with tenant defaults.
+message UpdateBankConfigRequest {
+  // Bank id.
+  string bank_id = 1;
+  // New values for the fields named in update_mask.
+  BankConfig config = 2;
+  // BankConfig paths to replace (for example observations.dedup_threshold or models.extract; a model binding
+  // is replaced whole). A path set to an empty value clears it (this is how a list is cleared). Unset = every
+  // populated field of config.
+  google.protobuf.FieldMask update_mask = 3;
+}
+
+// UpdateBankConfigResponse carries the bank's config after the patch.
+message UpdateBankConfigResponse {
+  reserved 1;
+  reserved "bank";
+  // The bank's config after the patch.
+  ConfigView config = 2;
+}
+
+// ---- ResetBankConfig ----
+
+// ResetBankConfigRequest removes some or all of the bank's own overrides.
+message ResetBankConfigRequest {
+  reserved 2;
+  reserved "paths";
+  // Bank id.
+  string bank_id = 1;
+  // BankConfig paths to reset, so they inherit again; the single path "*" resets everything. Empty =
+  // INVALID_ARGUMENT.
+  google.protobuf.FieldMask reset_mask = 3;
+}
+
+// ResetBankConfigResponse carries the bank's config after the reset.
+message ResetBankConfigResponse {
+  reserved 1;
+  reserved "bank";
+  // The bank's config after the reset.
+  ConfigView config = 2;
 }
 
 // ---- PreviewPrompt ----
@@ -1777,79 +1937,42 @@ enum PromptSource {
   PROMPT_SOURCE_CONFIG = 2;
 }
 
-// ---- DeleteBank ----
+// ---- CreateDirective ----
 
-// DeleteBankRequest names the bank to delete.
-message DeleteBankRequest {
-  // Bank id.
-  string bank_id = 1;
-}
-
-// DeleteBankResponse carries the delete job.
-message DeleteBankResponse {
-  // The delete_bank operation.
-  Operation operation = 1;
-}
-
-// ---- ExportBankTemplate ----
-
-// ExportBankTemplateRequest names the bank to export.
-message ExportBankTemplateRequest {
-  // Bank id; unknown = NOT_FOUND.
-  string bank_id = 1;
-}
-
-// ExportBankTemplateResponse carries the template.
-message ExportBankTemplateResponse {
-  // Config overrides, directives and mental-model specs of the bank.
-  BankTemplate template = 1;
-}
-
-// BankTemplate is a portable bank definition: config, directives and mental-model specs (no memories).
-message BankTemplate {
-  // Config overrides of the bank.
-  BankConfig config = 1;
-  // Directives of the bank.
-  repeated Directive directives = 2;
-  // Mental-model specs; content is rebuilt, not copied.
-  repeated MentalModelSpec mental_models = 3;
-}
-
-// ---- CreateBankFromTemplate ----
-
-// CreateBankFromTemplateRequest creates a bank from a template.
-message CreateBankFromTemplateRequest {
-  // New bank id.
-  string bank_id = 1;
-  // Display name.
-  string name = 2;
-  // Template to apply.
-  BankTemplate template = 3;
-}
-
-// CreateBankFromTemplateResponse carries the new bank and its model builds.
-message CreateBankFromTemplateResponse {
-  reserved 2;
-  reserved "mental_model_builds";
-  // The newly created bank, with the template config as its own overrides.
-  Bank bank = 1;
-  // One refresh_mental_model operation per template model, building its first version.
-  repeated Operation mental_model_operations = 3;
-}
-
-// ---- UpsertDirective ----
-
-// UpsertDirectiveRequest creates or replaces a directive.
-message UpsertDirectiveRequest {
+// CreateDirectiveRequest adds a directive to a bank. An unknown bank is created with tenant defaults.
+message CreateDirectiveRequest {
   // Bank owning the directive.
   string bank_id = 1;
-  // The directive; empty id = create.
+  // The directive. Its id is assigned by the server (a set id is ignored); its name is required and must be
+  // new in the bank (taken = ALREADY_EXISTS).
   Directive directive = 2;
 }
 
-// UpsertDirectiveResponse carries the stored directive.
-message UpsertDirectiveResponse {
-  // The directive, with its id set.
+// CreateDirectiveResponse carries the stored directive.
+message CreateDirectiveResponse {
+  // The directive, with its id set and its tags normalized.
+  Directive directive = 1;
+}
+
+// ---- UpdateDirective ----
+
+// UpdateDirectiveRequest patches one directive.
+message UpdateDirectiveRequest {
+  // Bank owning the directive; unknown = NOT_FOUND.
+  string bank_id = 1;
+  // Directive id; unknown = NOT_FOUND.
+  string directive_id = 2;
+  // New values for the fields named in update_mask.
+  Directive directive = 3;
+  // Directive paths to replace: name, rules, tags, active (id cannot be changed). A masked field left unset
+  // clears it (so active=false needs an explicit mask); the name must stay set and unique in the bank (taken =
+  // ALREADY_EXISTS). Unset = every populated field of directive.
+  google.protobuf.FieldMask update_mask = 4;
+}
+
+// UpdateDirectiveResponse carries the directive after the patch.
+message UpdateDirectiveResponse {
+  // The directive, with its tags normalized.
   Directive directive = 1;
 }
 
@@ -1893,26 +2016,20 @@ message DeleteDirectiveResponse {}
 
 // ---- Resources ----
 
-// Bank is a memory bank.
-message Bank {
-  // Bank id, unique within the tenant.
-  string id = 1;
-  // Display name.
-  string name = 2;
-  // The bank's own config overrides (not the resolved config).
-  BankConfig config = 3;
-  // When the bank was created.
-  google.protobuf.Timestamp created_at = 4;
-  // Tombstoned by DeleteBank; writes fail FAILED_PRECONDITION and reads NOT_FOUND.
-  bool deleting = 5;
+// ConfigView is one config level as every config RPC returns it.
+message ConfigView {
+  // Only what this level itself sets (the tenant's config, or the bank's own overrides).
+  BankConfig own = 1;
+  // The config this level resolves to: server < tenant for a tenant, server < tenant < bank for a bank.
+  BankConfig effective = 2;
 }
 
 // Directive is a standing instruction injected into reflect prompts. Active directives whose tags match
 // the request apply; untagged directives are global.
 message Directive {
-  // Directive id; empty on UpsertDirective = create.
+  // Directive id, assigned by CreateDirective.
   string id = 1;
-  // Human-readable name.
+  // Name, unique within the bank; required.
   string name = 2;
   // Rules, rendered into the reflect system prompt in order.
   repeated string rules = 3;
@@ -1920,38 +2037,6 @@ message Directive {
   repeated string tags = 4;
   // Inactive directives are stored but never applied.
   bool active = 5;
-}
-
-// ======================= TenantService =======================
-
-// A tenant's BankConfig sits between the server defaults and each bank's own config in the hierarchy
-// server < tenant < bank < strategy < request.
-
-// ---- GetTenantConfig ----
-
-// GetTenantConfigRequest is empty: the tenant comes from request metadata.
-message GetTenantConfigRequest {}
-
-// GetTenantConfigResponse carries the tenant's own overrides.
-message GetTenantConfigResponse {
-  // Tenant-level overrides; unset fields inherit server defaults.
-  BankConfig config = 1;
-}
-
-// ---- UpdateTenantConfig ----
-
-// UpdateTenantConfigRequest patches the tenant config.
-message UpdateTenantConfigRequest {
-  // New values for the fields named in update_mask.
-  BankConfig config = 1;
-  // BankConfig paths to replace; a path set to an empty value clears it (this is how a list is cleared).
-  google.protobuf.FieldMask update_mask = 2;
-}
-
-// UpdateTenantConfigResponse carries the tenant config after the patch.
-message UpdateTenantConfigResponse {
-  // Tenant-level overrides after the patch.
-  BankConfig config = 1;
 }
 
 // ======================= OperationService =======================
@@ -1966,7 +2051,8 @@ message UpdateTenantConfigResponse {
 
 // GetOperationRequest names one operation.
 message GetOperationRequest {
-  // Bank owning the operation; unknown bank = NOT_FOUND.
+  // Bank owning the operation; unknown bank = NOT_FOUND. A bank being deleted serves only its delete_bank
+  // operations.
   string bank_id = 1;
   // Operation id.
   string operation_id = 2;
@@ -2068,6 +2154,8 @@ message ListEventsResponse {
 
 // LifecycleEvent is one row of the lifecycle_events table, written in the state change's transaction.
 message LifecycleEvent {
+  reserved 4;
+  reserved "at";
   // The bank's change_seq for the change: commit-ordered within the bank, so polling by seq never skips.
   // All events written by one transaction share its seq.
   int64 seq = 1;
@@ -2076,7 +2164,7 @@ message LifecycleEvent {
   // Bank the event belongs to.
   string bank_id = 3;
   // Commit time of the change.
-  google.protobuf.Timestamp at = 4;
+  google.protobuf.Timestamp created_at = 7;
   // Operation that caused the change, if any.
   string operation_id = 5;
   // Document, memory or mental-model id the event is about.
@@ -2127,10 +2215,12 @@ message Operation {
 
 // Progress is the last checkpoint a handler reported.
 message Progress {
+  reserved 2;
+  reserved "at";
   // Handler-defined stage name.
   string stage = 1;
   // When the checkpoint was written.
-  google.protobuf.Timestamp at = 2;
+  google.protobuf.Timestamp recorded_at = 5;
   // Items done so far in this stage.
   int64 processed = 3;
   // Items in this stage, if known; 0 = unknown.

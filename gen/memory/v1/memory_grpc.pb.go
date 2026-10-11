@@ -49,7 +49,7 @@
 //   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
 //                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
 //   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
-//                        read of a bank being deleted)
+//                        read of a bank being deleted except GetOperation of its delete_bank operations)
 //   ALREADY_EXISTS       ALREADY_EXISTS (a create collided with an existing id)
 //   FAILED_PRECONDITION  FAILED_PRECONDITION (the state forbids the call), BANK_DELETING (a write to a bank
 //                        being deleted), MODEL_UNBOUND (a model slot the call needs has no binding),
@@ -1517,60 +1517,45 @@ var MentalModelService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	BankService_CreateBank_FullMethodName             = "/memory.v1.BankService/CreateBank"
-	BankService_GetBank_FullMethodName                = "/memory.v1.BankService/GetBank"
-	BankService_GetBankConfig_FullMethodName          = "/memory.v1.BankService/GetBankConfig"
-	BankService_UpdateBankConfig_FullMethodName       = "/memory.v1.BankService/UpdateBankConfig"
-	BankService_ResetBankConfig_FullMethodName        = "/memory.v1.BankService/ResetBankConfig"
-	BankService_GetBankStats_FullMethodName           = "/memory.v1.BankService/GetBankStats"
-	BankService_ListTags_FullMethodName               = "/memory.v1.BankService/ListTags"
-	BankService_PreviewPrompt_FullMethodName          = "/memory.v1.BankService/PreviewPrompt"
-	BankService_DeleteBank_FullMethodName             = "/memory.v1.BankService/DeleteBank"
-	BankService_ExportBankTemplate_FullMethodName     = "/memory.v1.BankService/ExportBankTemplate"
-	BankService_CreateBankFromTemplate_FullMethodName = "/memory.v1.BankService/CreateBankFromTemplate"
-	BankService_UpsertDirective_FullMethodName        = "/memory.v1.BankService/UpsertDirective"
-	BankService_ListDirectives_FullMethodName         = "/memory.v1.BankService/ListDirectives"
-	BankService_DeleteDirective_FullMethodName        = "/memory.v1.BankService/DeleteDirective"
+	BankService_CreateBank_FullMethodName         = "/memory.v1.BankService/CreateBank"
+	BankService_GetBank_FullMethodName            = "/memory.v1.BankService/GetBank"
+	BankService_ListBanks_FullMethodName          = "/memory.v1.BankService/ListBanks"
+	BankService_DeleteBank_FullMethodName         = "/memory.v1.BankService/DeleteBank"
+	BankService_GetBankStats_FullMethodName       = "/memory.v1.BankService/GetBankStats"
+	BankService_ListTags_FullMethodName           = "/memory.v1.BankService/ListTags"
+	BankService_ExportBankTemplate_FullMethodName = "/memory.v1.BankService/ExportBankTemplate"
 )
 
 // BankServiceClient is the client API for BankService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// BankService manages banks, their config, directives and templates.
+// BankService manages the calling tenant's banks: create (optionally from a template), get, list, delete,
+// stats, tags and template export.
 type BankServiceClient interface {
-	// CreateBank creates a bank with optional config overrides.
+	// CreateBank creates a bank with initial config overrides, or from a template (its config, directives and
+	// mental models, whose first builds it enqueues). An existing bank = ALREADY_EXISTS; a bank being deleted =
+	// FAILED_PRECONDITION (BANK_DELETING).
 	CreateBank(ctx context.Context, in *CreateBankRequest, opts ...grpc.CallOption) (*CreateBankResponse, error)
-	// GetBank returns a bank and its own config overrides.
+	// GetBank returns one bank. Unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
 	GetBank(ctx context.Context, in *GetBankRequest, opts ...grpc.CallOption) (*GetBankResponse, error)
-	// GetBankConfig returns the resolved config (server < tenant < bank) and the bank's own overrides.
-	GetBankConfig(ctx context.Context, in *GetBankConfigRequest, opts ...grpc.CallOption) (*GetBankConfigResponse, error)
-	// UpdateBankConfig patches the bank's own overrides with a FieldMask.
-	UpdateBankConfig(ctx context.Context, in *UpdateBankConfigRequest, opts ...grpc.CallOption) (*UpdateBankConfigResponse, error)
-	// ResetBankConfig removes the bank's own overrides at the given paths, so they inherit again.
-	ResetBankConfig(ctx context.Context, in *ResetBankConfigRequest, opts ...grpc.CallOption) (*ResetBankConfigResponse, error)
+	// ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
+	ListBanks(ctx context.Context, in *ListBanksRequest, opts ...grpc.CallOption) (*ListBanksResponse, error)
+	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one transaction, and
+	// returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
+	// (BANK_DELETING) and reads NOT_FOUND (BANK_NOT_FOUND), except GetOperation of the bank's delete_bank
+	// operations. To observe completion, poll GetOperation with the returned operation id: it answers while the
+	// delete runs, and NOT_FOUND once the bank is gone, because the delete's last step removes the bank with all
+	// its operations and events. A large delete runs in bounded steps, so the returned operation may end
+	// COMPLETED while a later step finishes the work. Once the bank is gone, a write creates a new, empty bank.
+	DeleteBank(ctx context.Context, in *DeleteBankRequest, opts ...grpc.CallOption) (*DeleteBankResponse, error)
 	// GetBankStats returns counts from indexed COUNT queries; poll pending_operations_by_kind as an eval
 	// barrier.
 	GetBankStats(ctx context.Context, in *GetBankStatsRequest, opts ...grpc.CallOption) (*GetBankStatsResponse, error)
 	// ListTags pages through the bank's tags with usage counts.
 	ListTags(ctx context.Context, in *ListTagsRequest, opts ...grpc.CallOption) (*ListTagsResponse, error)
-	// PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
-	PreviewPrompt(ctx context.Context, in *PreviewPromptRequest, opts ...grpc.CallOption) (*PreviewPromptResponse, error)
-	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one
-	// transaction. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION and reads
-	// NOT_FOUND. Once delete_bank has removed the bank row, a write creates a new, empty bank with no old
-	// events or operations.
-	DeleteBank(ctx context.Context, in *DeleteBankRequest, opts ...grpc.CallOption) (*DeleteBankResponse, error)
-	// ExportBankTemplate exports the bank's config, directives and mental-model specs.
+	// ExportBankTemplate exports the bank's own config, directives and mental-model specs.
 	ExportBankTemplate(ctx context.Context, in *ExportBankTemplateRequest, opts ...grpc.CallOption) (*ExportBankTemplateResponse, error)
-	// CreateBankFromTemplate creates a bank from a template and enqueues builds of its mental models.
-	CreateBankFromTemplate(ctx context.Context, in *CreateBankFromTemplateRequest, opts ...grpc.CallOption) (*CreateBankFromTemplateResponse, error)
-	// UpsertDirective creates (empty id) or replaces a directive.
-	UpsertDirective(ctx context.Context, in *UpsertDirectiveRequest, opts ...grpc.CallOption) (*UpsertDirectiveResponse, error)
-	// ListDirectives pages through the bank's directives, oldest first, optionally by tag and active state.
-	ListDirectives(ctx context.Context, in *ListDirectivesRequest, opts ...grpc.CallOption) (*ListDirectivesResponse, error)
-	// DeleteDirective deletes one directive.
-	DeleteDirective(ctx context.Context, in *DeleteDirectiveRequest, opts ...grpc.CallOption) (*DeleteDirectiveResponse, error)
 }
 
 type bankServiceClient struct {
@@ -1601,30 +1586,20 @@ func (c *bankServiceClient) GetBank(ctx context.Context, in *GetBankRequest, opt
 	return out, nil
 }
 
-func (c *bankServiceClient) GetBankConfig(ctx context.Context, in *GetBankConfigRequest, opts ...grpc.CallOption) (*GetBankConfigResponse, error) {
+func (c *bankServiceClient) ListBanks(ctx context.Context, in *ListBanksRequest, opts ...grpc.CallOption) (*ListBanksResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetBankConfigResponse)
-	err := c.cc.Invoke(ctx, BankService_GetBankConfig_FullMethodName, in, out, cOpts...)
+	out := new(ListBanksResponse)
+	err := c.cc.Invoke(ctx, BankService_ListBanks_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *bankServiceClient) UpdateBankConfig(ctx context.Context, in *UpdateBankConfigRequest, opts ...grpc.CallOption) (*UpdateBankConfigResponse, error) {
+func (c *bankServiceClient) DeleteBank(ctx context.Context, in *DeleteBankRequest, opts ...grpc.CallOption) (*DeleteBankResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateBankConfigResponse)
-	err := c.cc.Invoke(ctx, BankService_UpdateBankConfig_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *bankServiceClient) ResetBankConfig(ctx context.Context, in *ResetBankConfigRequest, opts ...grpc.CallOption) (*ResetBankConfigResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ResetBankConfigResponse)
-	err := c.cc.Invoke(ctx, BankService_ResetBankConfig_FullMethodName, in, out, cOpts...)
+	out := new(DeleteBankResponse)
+	err := c.cc.Invoke(ctx, BankService_DeleteBank_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -1651,26 +1626,6 @@ func (c *bankServiceClient) ListTags(ctx context.Context, in *ListTagsRequest, o
 	return out, nil
 }
 
-func (c *bankServiceClient) PreviewPrompt(ctx context.Context, in *PreviewPromptRequest, opts ...grpc.CallOption) (*PreviewPromptResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(PreviewPromptResponse)
-	err := c.cc.Invoke(ctx, BankService_PreviewPrompt_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *bankServiceClient) DeleteBank(ctx context.Context, in *DeleteBankRequest, opts ...grpc.CallOption) (*DeleteBankResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteBankResponse)
-	err := c.cc.Invoke(ctx, BankService_DeleteBank_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *bankServiceClient) ExportBankTemplate(ctx context.Context, in *ExportBankTemplateRequest, opts ...grpc.CallOption) (*ExportBankTemplateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ExportBankTemplateResponse)
@@ -1681,84 +1636,36 @@ func (c *bankServiceClient) ExportBankTemplate(ctx context.Context, in *ExportBa
 	return out, nil
 }
 
-func (c *bankServiceClient) CreateBankFromTemplate(ctx context.Context, in *CreateBankFromTemplateRequest, opts ...grpc.CallOption) (*CreateBankFromTemplateResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateBankFromTemplateResponse)
-	err := c.cc.Invoke(ctx, BankService_CreateBankFromTemplate_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *bankServiceClient) UpsertDirective(ctx context.Context, in *UpsertDirectiveRequest, opts ...grpc.CallOption) (*UpsertDirectiveResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpsertDirectiveResponse)
-	err := c.cc.Invoke(ctx, BankService_UpsertDirective_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *bankServiceClient) ListDirectives(ctx context.Context, in *ListDirectivesRequest, opts ...grpc.CallOption) (*ListDirectivesResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListDirectivesResponse)
-	err := c.cc.Invoke(ctx, BankService_ListDirectives_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *bankServiceClient) DeleteDirective(ctx context.Context, in *DeleteDirectiveRequest, opts ...grpc.CallOption) (*DeleteDirectiveResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(DeleteDirectiveResponse)
-	err := c.cc.Invoke(ctx, BankService_DeleteDirective_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // BankServiceServer is the server API for BankService service.
 // All implementations must embed UnimplementedBankServiceServer
 // for forward compatibility.
 //
-// BankService manages banks, their config, directives and templates.
+// BankService manages the calling tenant's banks: create (optionally from a template), get, list, delete,
+// stats, tags and template export.
 type BankServiceServer interface {
-	// CreateBank creates a bank with optional config overrides.
+	// CreateBank creates a bank with initial config overrides, or from a template (its config, directives and
+	// mental models, whose first builds it enqueues). An existing bank = ALREADY_EXISTS; a bank being deleted =
+	// FAILED_PRECONDITION (BANK_DELETING).
 	CreateBank(context.Context, *CreateBankRequest) (*CreateBankResponse, error)
-	// GetBank returns a bank and its own config overrides.
+	// GetBank returns one bank. Unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
 	GetBank(context.Context, *GetBankRequest) (*GetBankResponse, error)
-	// GetBankConfig returns the resolved config (server < tenant < bank) and the bank's own overrides.
-	GetBankConfig(context.Context, *GetBankConfigRequest) (*GetBankConfigResponse, error)
-	// UpdateBankConfig patches the bank's own overrides with a FieldMask.
-	UpdateBankConfig(context.Context, *UpdateBankConfigRequest) (*UpdateBankConfigResponse, error)
-	// ResetBankConfig removes the bank's own overrides at the given paths, so they inherit again.
-	ResetBankConfig(context.Context, *ResetBankConfigRequest) (*ResetBankConfigResponse, error)
+	// ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
+	ListBanks(context.Context, *ListBanksRequest) (*ListBanksResponse, error)
+	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one transaction, and
+	// returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
+	// (BANK_DELETING) and reads NOT_FOUND (BANK_NOT_FOUND), except GetOperation of the bank's delete_bank
+	// operations. To observe completion, poll GetOperation with the returned operation id: it answers while the
+	// delete runs, and NOT_FOUND once the bank is gone, because the delete's last step removes the bank with all
+	// its operations and events. A large delete runs in bounded steps, so the returned operation may end
+	// COMPLETED while a later step finishes the work. Once the bank is gone, a write creates a new, empty bank.
+	DeleteBank(context.Context, *DeleteBankRequest) (*DeleteBankResponse, error)
 	// GetBankStats returns counts from indexed COUNT queries; poll pending_operations_by_kind as an eval
 	// barrier.
 	GetBankStats(context.Context, *GetBankStatsRequest) (*GetBankStatsResponse, error)
 	// ListTags pages through the bank's tags with usage counts.
 	ListTags(context.Context, *ListTagsRequest) (*ListTagsResponse, error)
-	// PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
-	PreviewPrompt(context.Context, *PreviewPromptRequest) (*PreviewPromptResponse, error)
-	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one
-	// transaction. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION and reads
-	// NOT_FOUND. Once delete_bank has removed the bank row, a write creates a new, empty bank with no old
-	// events or operations.
-	DeleteBank(context.Context, *DeleteBankRequest) (*DeleteBankResponse, error)
-	// ExportBankTemplate exports the bank's config, directives and mental-model specs.
+	// ExportBankTemplate exports the bank's own config, directives and mental-model specs.
 	ExportBankTemplate(context.Context, *ExportBankTemplateRequest) (*ExportBankTemplateResponse, error)
-	// CreateBankFromTemplate creates a bank from a template and enqueues builds of its mental models.
-	CreateBankFromTemplate(context.Context, *CreateBankFromTemplateRequest) (*CreateBankFromTemplateResponse, error)
-	// UpsertDirective creates (empty id) or replaces a directive.
-	UpsertDirective(context.Context, *UpsertDirectiveRequest) (*UpsertDirectiveResponse, error)
-	// ListDirectives pages through the bank's directives, oldest first, optionally by tag and active state.
-	ListDirectives(context.Context, *ListDirectivesRequest) (*ListDirectivesResponse, error)
-	// DeleteDirective deletes one directive.
-	DeleteDirective(context.Context, *DeleteDirectiveRequest) (*DeleteDirectiveResponse, error)
 	mustEmbedUnimplementedBankServiceServer()
 }
 
@@ -1775,14 +1682,11 @@ func (UnimplementedBankServiceServer) CreateBank(context.Context, *CreateBankReq
 func (UnimplementedBankServiceServer) GetBank(context.Context, *GetBankRequest) (*GetBankResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetBank not implemented")
 }
-func (UnimplementedBankServiceServer) GetBankConfig(context.Context, *GetBankConfigRequest) (*GetBankConfigResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetBankConfig not implemented")
+func (UnimplementedBankServiceServer) ListBanks(context.Context, *ListBanksRequest) (*ListBanksResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListBanks not implemented")
 }
-func (UnimplementedBankServiceServer) UpdateBankConfig(context.Context, *UpdateBankConfigRequest) (*UpdateBankConfigResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateBankConfig not implemented")
-}
-func (UnimplementedBankServiceServer) ResetBankConfig(context.Context, *ResetBankConfigRequest) (*ResetBankConfigResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ResetBankConfig not implemented")
+func (UnimplementedBankServiceServer) DeleteBank(context.Context, *DeleteBankRequest) (*DeleteBankResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteBank not implemented")
 }
 func (UnimplementedBankServiceServer) GetBankStats(context.Context, *GetBankStatsRequest) (*GetBankStatsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetBankStats not implemented")
@@ -1790,26 +1694,8 @@ func (UnimplementedBankServiceServer) GetBankStats(context.Context, *GetBankStat
 func (UnimplementedBankServiceServer) ListTags(context.Context, *ListTagsRequest) (*ListTagsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTags not implemented")
 }
-func (UnimplementedBankServiceServer) PreviewPrompt(context.Context, *PreviewPromptRequest) (*PreviewPromptResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method PreviewPrompt not implemented")
-}
-func (UnimplementedBankServiceServer) DeleteBank(context.Context, *DeleteBankRequest) (*DeleteBankResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DeleteBank not implemented")
-}
 func (UnimplementedBankServiceServer) ExportBankTemplate(context.Context, *ExportBankTemplateRequest) (*ExportBankTemplateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportBankTemplate not implemented")
-}
-func (UnimplementedBankServiceServer) CreateBankFromTemplate(context.Context, *CreateBankFromTemplateRequest) (*CreateBankFromTemplateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateBankFromTemplate not implemented")
-}
-func (UnimplementedBankServiceServer) UpsertDirective(context.Context, *UpsertDirectiveRequest) (*UpsertDirectiveResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpsertDirective not implemented")
-}
-func (UnimplementedBankServiceServer) ListDirectives(context.Context, *ListDirectivesRequest) (*ListDirectivesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListDirectives not implemented")
-}
-func (UnimplementedBankServiceServer) DeleteDirective(context.Context, *DeleteDirectiveRequest) (*DeleteDirectiveResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method DeleteDirective not implemented")
 }
 func (UnimplementedBankServiceServer) mustEmbedUnimplementedBankServiceServer() {}
 func (UnimplementedBankServiceServer) testEmbeddedByValue()                     {}
@@ -1868,56 +1754,38 @@ func _BankService_GetBank_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _BankService_GetBankConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetBankConfigRequest)
+func _BankService_ListBanks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListBanksRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(BankServiceServer).GetBankConfig(ctx, in)
+		return srv.(BankServiceServer).ListBanks(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: BankService_GetBankConfig_FullMethodName,
+		FullMethod: BankService_ListBanks_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).GetBankConfig(ctx, req.(*GetBankConfigRequest))
+		return srv.(BankServiceServer).ListBanks(ctx, req.(*ListBanksRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _BankService_UpdateBankConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateBankConfigRequest)
+func _BankService_DeleteBank_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteBankRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(BankServiceServer).UpdateBankConfig(ctx, in)
+		return srv.(BankServiceServer).DeleteBank(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: BankService_UpdateBankConfig_FullMethodName,
+		FullMethod: BankService_DeleteBank_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).UpdateBankConfig(ctx, req.(*UpdateBankConfigRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _BankService_ResetBankConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ResetBankConfigRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BankServiceServer).ResetBankConfig(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BankService_ResetBankConfig_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).ResetBankConfig(ctx, req.(*ResetBankConfigRequest))
+		return srv.(BankServiceServer).DeleteBank(ctx, req.(*DeleteBankRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1958,42 +1826,6 @@ func _BankService_ListTags_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
-func _BankService_PreviewPrompt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PreviewPromptRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BankServiceServer).PreviewPrompt(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BankService_PreviewPrompt_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).PreviewPrompt(ctx, req.(*PreviewPromptRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _BankService_DeleteBank_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteBankRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BankServiceServer).DeleteBank(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BankService_DeleteBank_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).DeleteBank(ctx, req.(*DeleteBankRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _BankService_ExportBankTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExportBankTemplateRequest)
 	if err := dec(in); err != nil {
@@ -2008,78 +1840,6 @@ func _BankService_ExportBankTemplate_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(BankServiceServer).ExportBankTemplate(ctx, req.(*ExportBankTemplateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _BankService_CreateBankFromTemplate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateBankFromTemplateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BankServiceServer).CreateBankFromTemplate(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BankService_CreateBankFromTemplate_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).CreateBankFromTemplate(ctx, req.(*CreateBankFromTemplateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _BankService_UpsertDirective_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpsertDirectiveRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BankServiceServer).UpsertDirective(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BankService_UpsertDirective_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).UpsertDirective(ctx, req.(*UpsertDirectiveRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _BankService_ListDirectives_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListDirectivesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BankServiceServer).ListDirectives(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BankService_ListDirectives_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).ListDirectives(ctx, req.(*ListDirectivesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _BankService_DeleteDirective_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteDirectiveRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(BankServiceServer).DeleteDirective(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: BankService_DeleteDirective_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(BankServiceServer).DeleteDirective(ctx, req.(*DeleteDirectiveRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2100,16 +1860,12 @@ var BankService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _BankService_GetBank_Handler,
 		},
 		{
-			MethodName: "GetBankConfig",
-			Handler:    _BankService_GetBankConfig_Handler,
+			MethodName: "ListBanks",
+			Handler:    _BankService_ListBanks_Handler,
 		},
 		{
-			MethodName: "UpdateBankConfig",
-			Handler:    _BankService_UpdateBankConfig_Handler,
-		},
-		{
-			MethodName: "ResetBankConfig",
-			Handler:    _BankService_ResetBankConfig_Handler,
+			MethodName: "DeleteBank",
+			Handler:    _BankService_DeleteBank_Handler,
 		},
 		{
 			MethodName: "GetBankStats",
@@ -2120,32 +1876,8 @@ var BankService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _BankService_ListTags_Handler,
 		},
 		{
-			MethodName: "PreviewPrompt",
-			Handler:    _BankService_PreviewPrompt_Handler,
-		},
-		{
-			MethodName: "DeleteBank",
-			Handler:    _BankService_DeleteBank_Handler,
-		},
-		{
 			MethodName: "ExportBankTemplate",
 			Handler:    _BankService_ExportBankTemplate_Handler,
-		},
-		{
-			MethodName: "CreateBankFromTemplate",
-			Handler:    _BankService_CreateBankFromTemplate_Handler,
-		},
-		{
-			MethodName: "UpsertDirective",
-			Handler:    _BankService_UpsertDirective_Handler,
-		},
-		{
-			MethodName: "ListDirectives",
-			Handler:    _BankService_ListDirectives_Handler,
-		},
-		{
-			MethodName: "DeleteDirective",
-			Handler:    _BankService_DeleteDirective_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -2153,147 +1885,513 @@ var BankService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	TenantService_GetTenantConfig_FullMethodName    = "/memory.v1.TenantService/GetTenantConfig"
-	TenantService_UpdateTenantConfig_FullMethodName = "/memory.v1.TenantService/UpdateTenantConfig"
+	ConfigService_GetTenantConfig_FullMethodName    = "/memory.v1.ConfigService/GetTenantConfig"
+	ConfigService_UpdateTenantConfig_FullMethodName = "/memory.v1.ConfigService/UpdateTenantConfig"
+	ConfigService_ResetTenantConfig_FullMethodName  = "/memory.v1.ConfigService/ResetTenantConfig"
+	ConfigService_GetBankConfig_FullMethodName      = "/memory.v1.ConfigService/GetBankConfig"
+	ConfigService_UpdateBankConfig_FullMethodName   = "/memory.v1.ConfigService/UpdateBankConfig"
+	ConfigService_ResetBankConfig_FullMethodName    = "/memory.v1.ConfigService/ResetBankConfig"
+	ConfigService_PreviewPrompt_FullMethodName      = "/memory.v1.ConfigService/PreviewPrompt"
+	ConfigService_CreateDirective_FullMethodName    = "/memory.v1.ConfigService/CreateDirective"
+	ConfigService_UpdateDirective_FullMethodName    = "/memory.v1.ConfigService/UpdateDirective"
+	ConfigService_ListDirectives_FullMethodName     = "/memory.v1.ConfigService/ListDirectives"
+	ConfigService_DeleteDirective_FullMethodName    = "/memory.v1.ConfigService/DeleteDirective"
 )
 
-// TenantServiceClient is the client API for TenantService service.
+// ConfigServiceClient is the client API for ConfigService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// TenantService reads and patches the calling tenant's config defaults.
-type TenantServiceClient interface {
-	// GetTenantConfig returns the tenant-level BankConfig overrides.
+// ConfigService reads and writes how the tenant's banks behave: the tenant and bank config levels, the prompt
+// preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
+// the effective config they resolve to.
+type ConfigServiceClient interface {
+	// GetTenantConfig returns the tenant's own config and the effective tenant defaults (server < tenant).
 	GetTenantConfig(ctx context.Context, in *GetTenantConfigRequest, opts ...grpc.CallOption) (*GetTenantConfigResponse, error)
-	// UpdateTenantConfig patches the tenant-level BankConfig with a FieldMask.
+	// UpdateTenantConfig patches the tenant's own config with a FieldMask.
 	UpdateTenantConfig(ctx context.Context, in *UpdateTenantConfigRequest, opts ...grpc.CallOption) (*UpdateTenantConfigResponse, error)
+	// ResetTenantConfig removes the tenant's own config at the given paths, so they inherit the server defaults
+	// again.
+	ResetTenantConfig(ctx context.Context, in *ResetTenantConfigRequest, opts ...grpc.CallOption) (*ResetTenantConfigResponse, error)
+	// GetBankConfig returns the bank's own overrides and its effective config (server < tenant < bank).
+	GetBankConfig(ctx context.Context, in *GetBankConfigRequest, opts ...grpc.CallOption) (*GetBankConfigResponse, error)
+	// UpdateBankConfig patches the bank's own overrides with a FieldMask.
+	UpdateBankConfig(ctx context.Context, in *UpdateBankConfigRequest, opts ...grpc.CallOption) (*UpdateBankConfigResponse, error)
+	// ResetBankConfig removes the bank's own overrides at the given paths, so they inherit again.
+	ResetBankConfig(ctx context.Context, in *ResetBankConfigRequest, opts ...grpc.CallOption) (*ResetBankConfigResponse, error)
+	// PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
+	PreviewPrompt(ctx context.Context, in *PreviewPromptRequest, opts ...grpc.CallOption) (*PreviewPromptResponse, error)
+	// CreateDirective adds a directive to the bank; its name must be new in the bank.
+	CreateDirective(ctx context.Context, in *CreateDirectiveRequest, opts ...grpc.CallOption) (*CreateDirectiveResponse, error)
+	// UpdateDirective patches a directive with a FieldMask.
+	UpdateDirective(ctx context.Context, in *UpdateDirectiveRequest, opts ...grpc.CallOption) (*UpdateDirectiveResponse, error)
+	// ListDirectives pages through the bank's directives, oldest first, optionally by tag and active state.
+	ListDirectives(ctx context.Context, in *ListDirectivesRequest, opts ...grpc.CallOption) (*ListDirectivesResponse, error)
+	// DeleteDirective deletes one directive.
+	DeleteDirective(ctx context.Context, in *DeleteDirectiveRequest, opts ...grpc.CallOption) (*DeleteDirectiveResponse, error)
 }
 
-type tenantServiceClient struct {
+type configServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewTenantServiceClient(cc grpc.ClientConnInterface) TenantServiceClient {
-	return &tenantServiceClient{cc}
+func NewConfigServiceClient(cc grpc.ClientConnInterface) ConfigServiceClient {
+	return &configServiceClient{cc}
 }
 
-func (c *tenantServiceClient) GetTenantConfig(ctx context.Context, in *GetTenantConfigRequest, opts ...grpc.CallOption) (*GetTenantConfigResponse, error) {
+func (c *configServiceClient) GetTenantConfig(ctx context.Context, in *GetTenantConfigRequest, opts ...grpc.CallOption) (*GetTenantConfigResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetTenantConfigResponse)
-	err := c.cc.Invoke(ctx, TenantService_GetTenantConfig_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ConfigService_GetTenantConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *tenantServiceClient) UpdateTenantConfig(ctx context.Context, in *UpdateTenantConfigRequest, opts ...grpc.CallOption) (*UpdateTenantConfigResponse, error) {
+func (c *configServiceClient) UpdateTenantConfig(ctx context.Context, in *UpdateTenantConfigRequest, opts ...grpc.CallOption) (*UpdateTenantConfigResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(UpdateTenantConfigResponse)
-	err := c.cc.Invoke(ctx, TenantService_UpdateTenantConfig_FullMethodName, in, out, cOpts...)
+	err := c.cc.Invoke(ctx, ConfigService_UpdateTenantConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// TenantServiceServer is the server API for TenantService service.
-// All implementations must embed UnimplementedTenantServiceServer
-// for forward compatibility.
-//
-// TenantService reads and patches the calling tenant's config defaults.
-type TenantServiceServer interface {
-	// GetTenantConfig returns the tenant-level BankConfig overrides.
-	GetTenantConfig(context.Context, *GetTenantConfigRequest) (*GetTenantConfigResponse, error)
-	// UpdateTenantConfig patches the tenant-level BankConfig with a FieldMask.
-	UpdateTenantConfig(context.Context, *UpdateTenantConfigRequest) (*UpdateTenantConfigResponse, error)
-	mustEmbedUnimplementedTenantServiceServer()
+func (c *configServiceClient) ResetTenantConfig(ctx context.Context, in *ResetTenantConfigRequest, opts ...grpc.CallOption) (*ResetTenantConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetTenantConfigResponse)
+	err := c.cc.Invoke(ctx, ConfigService_ResetTenantConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
-// UnimplementedTenantServiceServer must be embedded to have
+func (c *configServiceClient) GetBankConfig(ctx context.Context, in *GetBankConfigRequest, opts ...grpc.CallOption) (*GetBankConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBankConfigResponse)
+	err := c.cc.Invoke(ctx, ConfigService_GetBankConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpdateBankConfig(ctx context.Context, in *UpdateBankConfigRequest, opts ...grpc.CallOption) (*UpdateBankConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateBankConfigResponse)
+	err := c.cc.Invoke(ctx, ConfigService_UpdateBankConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ResetBankConfig(ctx context.Context, in *ResetBankConfigRequest, opts ...grpc.CallOption) (*ResetBankConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetBankConfigResponse)
+	err := c.cc.Invoke(ctx, ConfigService_ResetBankConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) PreviewPrompt(ctx context.Context, in *PreviewPromptRequest, opts ...grpc.CallOption) (*PreviewPromptResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PreviewPromptResponse)
+	err := c.cc.Invoke(ctx, ConfigService_PreviewPrompt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) CreateDirective(ctx context.Context, in *CreateDirectiveRequest, opts ...grpc.CallOption) (*CreateDirectiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateDirectiveResponse)
+	err := c.cc.Invoke(ctx, ConfigService_CreateDirective_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpdateDirective(ctx context.Context, in *UpdateDirectiveRequest, opts ...grpc.CallOption) (*UpdateDirectiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateDirectiveResponse)
+	err := c.cc.Invoke(ctx, ConfigService_UpdateDirective_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ListDirectives(ctx context.Context, in *ListDirectivesRequest, opts ...grpc.CallOption) (*ListDirectivesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDirectivesResponse)
+	err := c.cc.Invoke(ctx, ConfigService_ListDirectives_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) DeleteDirective(ctx context.Context, in *DeleteDirectiveRequest, opts ...grpc.CallOption) (*DeleteDirectiveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteDirectiveResponse)
+	err := c.cc.Invoke(ctx, ConfigService_DeleteDirective_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ConfigServiceServer is the server API for ConfigService service.
+// All implementations must embed UnimplementedConfigServiceServer
+// for forward compatibility.
+//
+// ConfigService reads and writes how the tenant's banks behave: the tenant and bank config levels, the prompt
+// preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
+// the effective config they resolve to.
+type ConfigServiceServer interface {
+	// GetTenantConfig returns the tenant's own config and the effective tenant defaults (server < tenant).
+	GetTenantConfig(context.Context, *GetTenantConfigRequest) (*GetTenantConfigResponse, error)
+	// UpdateTenantConfig patches the tenant's own config with a FieldMask.
+	UpdateTenantConfig(context.Context, *UpdateTenantConfigRequest) (*UpdateTenantConfigResponse, error)
+	// ResetTenantConfig removes the tenant's own config at the given paths, so they inherit the server defaults
+	// again.
+	ResetTenantConfig(context.Context, *ResetTenantConfigRequest) (*ResetTenantConfigResponse, error)
+	// GetBankConfig returns the bank's own overrides and its effective config (server < tenant < bank).
+	GetBankConfig(context.Context, *GetBankConfigRequest) (*GetBankConfigResponse, error)
+	// UpdateBankConfig patches the bank's own overrides with a FieldMask.
+	UpdateBankConfig(context.Context, *UpdateBankConfigRequest) (*UpdateBankConfigResponse, error)
+	// ResetBankConfig removes the bank's own overrides at the given paths, so they inherit again.
+	ResetBankConfig(context.Context, *ResetBankConfigRequest) (*ResetBankConfigResponse, error)
+	// PreviewPrompt renders the exact messages an operation would send; no LLM call is made.
+	PreviewPrompt(context.Context, *PreviewPromptRequest) (*PreviewPromptResponse, error)
+	// CreateDirective adds a directive to the bank; its name must be new in the bank.
+	CreateDirective(context.Context, *CreateDirectiveRequest) (*CreateDirectiveResponse, error)
+	// UpdateDirective patches a directive with a FieldMask.
+	UpdateDirective(context.Context, *UpdateDirectiveRequest) (*UpdateDirectiveResponse, error)
+	// ListDirectives pages through the bank's directives, oldest first, optionally by tag and active state.
+	ListDirectives(context.Context, *ListDirectivesRequest) (*ListDirectivesResponse, error)
+	// DeleteDirective deletes one directive.
+	DeleteDirective(context.Context, *DeleteDirectiveRequest) (*DeleteDirectiveResponse, error)
+	mustEmbedUnimplementedConfigServiceServer()
+}
+
+// UnimplementedConfigServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedTenantServiceServer struct{}
+type UnimplementedConfigServiceServer struct{}
 
-func (UnimplementedTenantServiceServer) GetTenantConfig(context.Context, *GetTenantConfigRequest) (*GetTenantConfigResponse, error) {
+func (UnimplementedConfigServiceServer) GetTenantConfig(context.Context, *GetTenantConfigRequest) (*GetTenantConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTenantConfig not implemented")
 }
-func (UnimplementedTenantServiceServer) UpdateTenantConfig(context.Context, *UpdateTenantConfigRequest) (*UpdateTenantConfigResponse, error) {
+func (UnimplementedConfigServiceServer) UpdateTenantConfig(context.Context, *UpdateTenantConfigRequest) (*UpdateTenantConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateTenantConfig not implemented")
 }
-func (UnimplementedTenantServiceServer) mustEmbedUnimplementedTenantServiceServer() {}
-func (UnimplementedTenantServiceServer) testEmbeddedByValue()                       {}
+func (UnimplementedConfigServiceServer) ResetTenantConfig(context.Context, *ResetTenantConfigRequest) (*ResetTenantConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetTenantConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) GetBankConfig(context.Context, *GetBankConfigRequest) (*GetBankConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetBankConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) UpdateBankConfig(context.Context, *UpdateBankConfigRequest) (*UpdateBankConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateBankConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) ResetBankConfig(context.Context, *ResetBankConfigRequest) (*ResetBankConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetBankConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) PreviewPrompt(context.Context, *PreviewPromptRequest) (*PreviewPromptResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PreviewPrompt not implemented")
+}
+func (UnimplementedConfigServiceServer) CreateDirective(context.Context, *CreateDirectiveRequest) (*CreateDirectiveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateDirective not implemented")
+}
+func (UnimplementedConfigServiceServer) UpdateDirective(context.Context, *UpdateDirectiveRequest) (*UpdateDirectiveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateDirective not implemented")
+}
+func (UnimplementedConfigServiceServer) ListDirectives(context.Context, *ListDirectivesRequest) (*ListDirectivesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDirectives not implemented")
+}
+func (UnimplementedConfigServiceServer) DeleteDirective(context.Context, *DeleteDirectiveRequest) (*DeleteDirectiveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteDirective not implemented")
+}
+func (UnimplementedConfigServiceServer) mustEmbedUnimplementedConfigServiceServer() {}
+func (UnimplementedConfigServiceServer) testEmbeddedByValue()                       {}
 
-// UnsafeTenantServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to TenantServiceServer will
+// UnsafeConfigServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ConfigServiceServer will
 // result in compilation errors.
-type UnsafeTenantServiceServer interface {
-	mustEmbedUnimplementedTenantServiceServer()
+type UnsafeConfigServiceServer interface {
+	mustEmbedUnimplementedConfigServiceServer()
 }
 
-func RegisterTenantServiceServer(s grpc.ServiceRegistrar, srv TenantServiceServer) {
-	// If the following call panics, it indicates UnimplementedTenantServiceServer was
+func RegisterConfigServiceServer(s grpc.ServiceRegistrar, srv ConfigServiceServer) {
+	// If the following call panics, it indicates UnimplementedConfigServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&TenantService_ServiceDesc, srv)
+	s.RegisterService(&ConfigService_ServiceDesc, srv)
 }
 
-func _TenantService_GetTenantConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ConfigService_GetTenantConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetTenantConfigRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TenantServiceServer).GetTenantConfig(ctx, in)
+		return srv.(ConfigServiceServer).GetTenantConfig(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TenantService_GetTenantConfig_FullMethodName,
+		FullMethod: ConfigService_GetTenantConfig_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantServiceServer).GetTenantConfig(ctx, req.(*GetTenantConfigRequest))
+		return srv.(ConfigServiceServer).GetTenantConfig(ctx, req.(*GetTenantConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TenantService_UpdateTenantConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _ConfigService_UpdateTenantConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(UpdateTenantConfigRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TenantServiceServer).UpdateTenantConfig(ctx, in)
+		return srv.(ConfigServiceServer).UpdateTenantConfig(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: TenantService_UpdateTenantConfig_FullMethodName,
+		FullMethod: ConfigService_UpdateTenantConfig_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantServiceServer).UpdateTenantConfig(ctx, req.(*UpdateTenantConfigRequest))
+		return srv.(ConfigServiceServer).UpdateTenantConfig(ctx, req.(*UpdateTenantConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// TenantService_ServiceDesc is the grpc.ServiceDesc for TenantService service.
+func _ConfigService_ResetTenantConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetTenantConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ResetTenantConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_ResetTenantConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ResetTenantConfig(ctx, req.(*ResetTenantConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_GetBankConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBankConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetBankConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_GetBankConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetBankConfig(ctx, req.(*GetBankConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpdateBankConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateBankConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpdateBankConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_UpdateBankConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpdateBankConfig(ctx, req.(*UpdateBankConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ResetBankConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetBankConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ResetBankConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_ResetBankConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ResetBankConfig(ctx, req.(*ResetBankConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_PreviewPrompt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PreviewPromptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).PreviewPrompt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_PreviewPrompt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).PreviewPrompt(ctx, req.(*PreviewPromptRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_CreateDirective_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateDirectiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).CreateDirective(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_CreateDirective_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).CreateDirective(ctx, req.(*CreateDirectiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpdateDirective_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateDirectiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpdateDirective(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_UpdateDirective_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpdateDirective(ctx, req.(*UpdateDirectiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ListDirectives_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDirectivesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ListDirectives(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_ListDirectives_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ListDirectives(ctx, req.(*ListDirectivesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_DeleteDirective_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteDirectiveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).DeleteDirective(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_DeleteDirective_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).DeleteDirective(ctx, req.(*DeleteDirectiveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// ConfigService_ServiceDesc is the grpc.ServiceDesc for ConfigService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var TenantService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "memory.v1.TenantService",
-	HandlerType: (*TenantServiceServer)(nil),
+var ConfigService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "memory.v1.ConfigService",
+	HandlerType: (*ConfigServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "GetTenantConfig",
-			Handler:    _TenantService_GetTenantConfig_Handler,
+			Handler:    _ConfigService_GetTenantConfig_Handler,
 		},
 		{
 			MethodName: "UpdateTenantConfig",
-			Handler:    _TenantService_UpdateTenantConfig_Handler,
+			Handler:    _ConfigService_UpdateTenantConfig_Handler,
+		},
+		{
+			MethodName: "ResetTenantConfig",
+			Handler:    _ConfigService_ResetTenantConfig_Handler,
+		},
+		{
+			MethodName: "GetBankConfig",
+			Handler:    _ConfigService_GetBankConfig_Handler,
+		},
+		{
+			MethodName: "UpdateBankConfig",
+			Handler:    _ConfigService_UpdateBankConfig_Handler,
+		},
+		{
+			MethodName: "ResetBankConfig",
+			Handler:    _ConfigService_ResetBankConfig_Handler,
+		},
+		{
+			MethodName: "PreviewPrompt",
+			Handler:    _ConfigService_PreviewPrompt_Handler,
+		},
+		{
+			MethodName: "CreateDirective",
+			Handler:    _ConfigService_CreateDirective_Handler,
+		},
+		{
+			MethodName: "UpdateDirective",
+			Handler:    _ConfigService_UpdateDirective_Handler,
+		},
+		{
+			MethodName: "ListDirectives",
+			Handler:    _ConfigService_ListDirectives_Handler,
+		},
+		{
+			MethodName: "DeleteDirective",
+			Handler:    _ConfigService_DeleteDirective_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -2314,7 +2412,9 @@ const (
 //
 // OperationService reads and controls background operations and serves the lifecycle event feed.
 type OperationServiceClient interface {
-	// GetOperation returns one operation of the bank.
+	// GetOperation returns one operation of the bank. For a bank being deleted it answers only for the bank's
+	// delete_bank operations (any other id = NOT_FOUND, BANK_NOT_FOUND); once the delete is done they are
+	// NOT_FOUND too.
 	GetOperation(ctx context.Context, in *GetOperationRequest, opts ...grpc.CallOption) (*GetOperationResponse, error)
 	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
 	ListOperations(ctx context.Context, in *ListOperationsRequest, opts ...grpc.CallOption) (*ListOperationsResponse, error)
@@ -2393,7 +2493,9 @@ func (c *operationServiceClient) ListEvents(ctx context.Context, in *ListEventsR
 //
 // OperationService reads and controls background operations and serves the lifecycle event feed.
 type OperationServiceServer interface {
-	// GetOperation returns one operation of the bank.
+	// GetOperation returns one operation of the bank. For a bank being deleted it answers only for the bank's
+	// delete_bank operations (any other id = NOT_FOUND, BANK_NOT_FOUND); once the delete is done they are
+	// NOT_FOUND too.
 	GetOperation(context.Context, *GetOperationRequest) (*GetOperationResponse, error)
 	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
 	ListOperations(context.Context, *ListOperationsRequest) (*ListOperationsResponse, error)

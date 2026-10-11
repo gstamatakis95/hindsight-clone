@@ -102,8 +102,12 @@ type Querier interface {
 	ClaimStale(ctx context.Context, staleSecs float64) ([]ClaimStaleRow, error)
 	// CreateBank inserts a new bank with its name and config.
 	CreateBank(ctx context.Context, arg CreateBankParams) error
+	// DirectiveCreate inserts a directive; a taken id or name in the bank is a unique violation.
+	DirectiveCreate(ctx context.Context, arg DirectiveCreateParams) error
 	// DirectiveDelete removes one directive.
 	DirectiveDelete(ctx context.Context, arg DirectiveDeleteParams) (int64, error)
+	// DirectiveGet returns one directive, locked for update until the transaction ends.
+	DirectiveGet(ctx context.Context, arg DirectiveGetParams) (Directive, error)
 	// DirectiveList returns a bank's directives (only active ones when active_only), oldest first.
 	DirectiveList(ctx context.Context, arg DirectiveListParams) ([]Directive, error)
 	// DirectivePage returns one keyset page of a bank's directives, oldest first (created_at, then id in byte
@@ -111,8 +115,9 @@ type Querier interface {
 	// filtered by tags under tags_match with the listing semantics of ReadsListDocuments (no filter_tags = no
 	// filter).
 	DirectivePage(ctx context.Context, arg DirectivePageParams) ([]Directive, error)
-	// DirectiveUpsert creates a directive or replaces its name, rules, tags and active flag.
-	DirectiveUpsert(ctx context.Context, arg DirectiveUpsertParams) error
+	// DirectiveUpdate replaces a directive's name, rules, tags and active flag, keeping created_at; a taken name
+	// is a unique violation.
+	DirectiveUpdate(ctx context.Context, arg DirectiveUpdateParams) (int64, error)
 	// DocumentComplete stamps the hashes and extracted_at of a finished retain.
 	DocumentComplete(ctx context.Context, arg DocumentCompleteParams) (int64, error)
 	// DocumentGet returns one document of a bank.
@@ -199,6 +204,9 @@ type Querier interface {
 	LinkDirty(ctx context.Context, arg LinkDirtyParams) ([]uuid.UUID, error)
 	// LinkInsert stores one edge; an existing (from, to, kind) edge keeps its row with the new weight.
 	LinkInsert(ctx context.Context, arg LinkInsertParams) error
+	// ListBanks returns one keyset page of a tenant's live banks (tombstoned ones left out) whose id starts with
+	// id_prefix, in byte order of id, after after_id ("" = from the start).
+	ListBanks(ctx context.Context, arg ListBanksParams) ([]Bank, error)
 	// MarkBankDeleting sets deleting_at unless already set.
 	MarkBankDeleting(ctx context.Context, arg MarkBankDeletingParams) (int64, error)
 	// MentalModelAppendHistory adds one history entry; a NULL changed_at takes the database's now().

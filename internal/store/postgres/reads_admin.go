@@ -121,6 +121,24 @@ func (r *reader) ObservationHistory(
 	return out, nil
 }
 
+// ListBanks returns up to q.Limit of q.Tenant's live banks whose id starts with q.IDPrefix, in byte order of id,
+// after q.After.
+func (r *reader) ListBanks(ctx context.Context, q store.BankQuery) ([]domain.Bank, error) {
+	rows, err := r.queries().ListBanks(ctx, db.ListBanksParams{
+		TenantID: q.Tenant, IDPrefix: q.IDPrefix, AfterID: q.After, Lim: toInt32Sat(q.Limit),
+	})
+	if err != nil {
+		return nil, mapErr(fmt.Sprintf("list banks of tenant %s", q.Tenant), err)
+	}
+	out := make([]domain.Bank, len(rows))
+	for i, row := range rows {
+		if out[i], err = bankOf(row); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // BankStats returns b's counts and change state, read in one statement.
 func (r *reader) BankStats(ctx context.Context, b domain.BankRef) (domain.BankStats, error) {
 	row, err := r.queries().ReadsBankStats(ctx, db.ReadsBankStatsParams{TenantID: b.Tenant, BankID: b.Bank})

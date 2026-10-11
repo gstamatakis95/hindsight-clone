@@ -205,8 +205,8 @@ func testGapDirectives(t *testing.T, s store.DB) {
 	theirs := domain.Directive{ID: "dir-1", Bank: bankOtherTenant, Name: "theirs", Rules: []string{"x"}, Active: true}
 	only := domain.Directive{ID: "dir-only-a", Bank: bankA, Name: "only", Rules: []string{"y"}, Active: true}
 	for _, d := range []domain.Directive{mine, theirs, only} {
-		if id := upsertDirective(t, s, d); id != d.ID {
-			t.Errorf("Upsert(%s in %v) returned %s", d.ID, d.Bank, id)
+		if id := createDirective(t, s, d); id != d.ID {
+			t.Errorf("Create(%s in %v) returned %s", d.ID, d.Bank, id)
 		}
 	}
 	wantTheirs := func(step string) {
@@ -217,11 +217,11 @@ func testGapDirectives(t *testing.T, s store.DB) {
 			compareDirective(t, got[0], theirs)
 		}
 	}
-	wantTheirs("after Upsert")
+	wantTheirs("after Create")
 	wantSeq(t, "List(bank A)", directiveIDs(listDirectives(t, s, bankA, false)), []domain.DirectiveID{mine.ID, only.ID})
 	mine.Name, mine.Active = "mine v2", false
-	upsertDirective(t, s, mine)
-	wantTheirs("after bank A's replace")
+	updateDirective(t, s, mine)
+	wantTheirs("after bank A's Update")
 	err := txErr(t, s, func(tx store.Tx) error { return tx.Directives().Delete(t.Context(), bankOtherTenant, only.ID) })
 	wantErrIs(t, "Delete(other tenant, id only bank A has)", err, domain.ErrNotFound)
 	wantSeq(t, "List(bank A) after the other tenant's failed Delete",

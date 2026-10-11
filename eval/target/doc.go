@@ -19,7 +19,8 @@
 //   - Recall passes the question's query time and the harness.RecallOptions (budget, max_tokens, and source chunks up
 //     to a token budget) and returns the memories in result order as harness.Recalled; Reflect passes the query time
 //     and returns the reflect text and its usage.
-//   - Models reads GetBankConfig's resolved config and returns the model bound to each slot, for the run metadata.
+//   - Models reads ConfigService.GetBankConfig's effective config and returns the model bound to each slot, for the run
+//     metadata.
 //   - Background pages ListOperations (100 per page, retain_batch parents excluded so their children's usage is not
 //     counted twice), sums usage per slot and counts FAILED operations; a repeating page token is an error.
 //

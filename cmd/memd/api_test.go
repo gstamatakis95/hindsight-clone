@@ -25,8 +25,6 @@ func fillRequest(m protoreflect.Message) {
 	for i := range fields.Len() {
 		fd := fields.Get(i)
 		switch {
-		case fd.IsList() && fd.Name() == "paths": // a reset needs a mask
-			m.Mutable(fd).List().Append(protoreflect.ValueOfString("*"))
 		case fd.IsList() || fd.IsMap():
 		case fd.Kind() == protoreflect.StringKind && (strings.HasSuffix(string(fd.Name()), "id") ||
 			strings.HasSuffix(string(fd.Name()), "_path")):
@@ -109,58 +107,61 @@ type configWrite struct {
 	send func(ctx context.Context, w *wiredStack, id string, c *pb.BankConfig) *status.Status
 }
 
-// configWrites are the RPCs that take a whole config: CreateBank, UpdateBankConfig (no mask and a mask),
-// UpdateTenantConfig and CreateBankFromTemplate.
+// configWrites are the RPCs that take a whole config: CreateBank (with a config and with a template),
+// UpdateBankConfig (no mask and a mask) and UpdateTenantConfig.
 func configWrites() map[string]configWrite {
 	masked := &fieldmaskpb.FieldMask{Paths: []string{"models", "reflect.disposition", "observations.strategies"}}
 	banks := func(w *wiredStack) pb.BankServiceClient { return pb.NewBankServiceClient(w.conn) }
+	configs := func(w *wiredStack) pb.ConfigServiceClient { return pb.NewConfigServiceClient(w.conn) }
 	return map[string]configWrite{
 		"CreateBank": {creates: true, send: func(
 			ctx context.Context, w *wiredStack, id string, c *pb.BankConfig,
 		) *status.Status {
-			_, err := banks(w).CreateBank(ctx, &pb.CreateBankRequest{BankId: id, Config: c})
+			_, err := banks(w).CreateBank(ctx, &pb.CreateBankRequest{
+				BankId: id, Initial: &pb.CreateBankRequest_Config{Config: c},
+			})
 			return status.Convert(err)
 		}},
-		"CreateBankFromTemplate": {creates: true, send: func(
+		"CreateBank/template": {creates: true, send: func(
 			ctx context.Context, w *wiredStack, id string, c *pb.BankConfig,
 		) *status.Status {
-			_, err := banks(w).CreateBankFromTemplate(ctx, &pb.CreateBankFromTemplateRequest{
-				BankId: id, Template: &pb.BankTemplate{Config: c},
+			_, err := banks(w).CreateBank(ctx, &pb.CreateBankRequest{
+				BankId: id, Initial: &pb.CreateBankRequest_Template{Template: &pb.BankTemplate{Config: c}},
 			})
 			return status.Convert(err)
 		}},
 		"UpdateBankConfig": {send: func(ctx context.Context, w *wiredStack, id string, c *pb.BankConfig) *status.Status {
-			_, err := banks(w).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{BankId: id, Config: c})
+			_, err := configs(w).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{BankId: id, Config: c})
 			return status.Convert(err)
 		}},
 		"UpdateBankConfig/masked": {send: func(
 			ctx context.Context, w *wiredStack, id string, c *pb.BankConfig,
 		) *status.Status {
-			_, err := banks(w).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
+			_, err := configs(w).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
 				BankId: id, Config: c, UpdateMask: masked,
 			})
 			return status.Convert(err)
 		}},
 		"UpdateTenantConfig": {send: func(ctx context.Context, w *wiredStack, _ string, c *pb.BankConfig) *status.Status {
-			_, err := pb.NewTenantServiceClient(w.conn).UpdateTenantConfig(ctx,
-				&pb.UpdateTenantConfigRequest{Config: c})
+			_, err := configs(w).UpdateTenantConfig(ctx, &pb.UpdateTenantConfigRequest{Config: c})
 			return status.Convert(err)
 		}},
 	}
 }
 
-// storedConfigs reads the tenant's config and the bank's own overrides (nil when the bank does not exist).
+// storedConfigs reads the tenant's own config and the bank's own overrides (nil when the bank does not exist).
 func (w *wiredStack) storedConfigs(t *testing.T, ctx context.Context, bank string) []proto.Message {
 	t.Helper()
-	tc, err := pb.NewTenantServiceClient(w.conn).GetTenantConfig(ctx, &pb.GetTenantConfigRequest{})
+	configs := pb.NewConfigServiceClient(w.conn)
+	tc, err := configs.GetTenantConfig(ctx, &pb.GetTenantConfigRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := pb.NewBankServiceClient(w.conn).GetBank(ctx, &pb.GetBankRequest{BankId: bank})
+	b, err := configs.GetBankConfig(ctx, &pb.GetBankConfigRequest{BankId: bank})
 	if status.Code(err) != codes.NotFound && err != nil {
 		t.Fatal(err)
 	}
-	return []proto.Message{tc.GetConfig(), b.GetBank().GetConfig()}
+	return []proto.Message{tc.GetConfig().GetOwn(), b.GetConfig().GetOwn()}
 }
 
 // TestConfigWritesValidated checks every config write rejects each invalid config with INVALID_ARGUMENT and
@@ -177,7 +178,7 @@ func TestConfigWritesValidated(t *testing.T) {
 				ctx := w.ctxAs(t, tenant)
 				if !cw.creates {
 					if _, err := pb.NewBankServiceClient(w.conn).CreateBank(ctx, &pb.CreateBankRequest{
-						BankId: bank, Config: seed,
+						BankId: bank, Initial: &pb.CreateBankRequest_Config{Config: seed},
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -211,16 +212,16 @@ func TestConfigWritesValidated(t *testing.T) {
 	}
 }
 
-// TestSpecOverridesValidated checks UpdateMentalModel and CreateBankFromTemplate validate mental-model spec
+// TestSpecOverridesValidated checks UpdateMentalModel and CreateBank from a template validate mental-model spec
 // overrides the way CreateMentalModel does.
 func TestSpecOverridesValidated(t *testing.T) {
 	w := startWired(t)
 	ctx := w.ctx(t)
 	bad := &pb.RefreshOverrides{Reflect: &pb.ReflectConfig{Disposition: &pb.Disposition{Empathy: 9}}}
 	banks := pb.NewBankServiceClient(w.conn)
-	_, err := banks.CreateBankFromTemplate(ctx, &pb.CreateBankFromTemplateRequest{
-		BankId: "tpl", Template: &pb.BankTemplate{MentalModels: []*pb.MentalModelSpec{{Id: "m", Overrides: bad}}},
-	})
+	_, err := banks.CreateBank(ctx, &pb.CreateBankRequest{BankId: "tpl", Initial: &pb.CreateBankRequest_Template{
+		Template: &pb.BankTemplate{MentalModels: []*pb.MentalModelSpec{{Id: "m", Overrides: bad}}},
+	}})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("template spec: err = %v, want INVALID_ARGUMENT", err)
 	}
