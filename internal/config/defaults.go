@@ -62,7 +62,7 @@ func specDefaults() domain.BankConfig {
 		AutoConsolidation:               ptr(true),
 		DedupThreshold:                  ptr(0.97),
 		Recall:                          recallDefaults(),
-		Retain:                          &domain.RetainTuning{TemporalLinkCap: ptr(20)},
+		Retain:                          &domain.RetainTuning{TemporalLinkCap: ptr(20), EntityMatchThreshold: ptr(0.6)},
 		Reflect:                         reflectDefaults(),
 		MentalModels:                    mentalModelDefaults(),
 		DefaultObservationScopes:        &domain.ObservationScopes{Mode: domain.ScopeModeCombined, MaxCombinations: ptr(15)},

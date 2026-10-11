@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/port"
@@ -53,7 +54,7 @@ func (s *mentalModelServer) CreateMentalModel(
 	if d.err != nil {
 		return nil, toStatus(d.err)
 	}
-	if err := s.d.validate("CreateMentalModel", spec.Overrides); err != nil {
+	if err := s.d.validate(config.RPCMentalModelSpec, spec.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	m, op, err := s.d.MentalModels.CreateMentalModel(ctx, b, spec)

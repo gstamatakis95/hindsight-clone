@@ -3,6 +3,7 @@ package server_test
 import (
 	"errors"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
 	"memd/internal/engine/curate"
@@ -164,12 +165,15 @@ func fwdCases() map[protoreflect.FullName]fwdCase {
 		"memory.v1.BankService.DeleteBank":         {mock: "BankDeleter.Tombstone"},
 		"memory.v1.BankService.ExportBankTemplate": {mock: "TemplateCodec.Export"},
 		"memory.v1.BankService.CreateBankFromTemplate": {
-			req: &pb.CreateBankFromTemplateRequest{Template: &pb.BankTemplate{
+			req: &pb.CreateBankFromTemplateRequest{Name: "n", Template: &pb.BankTemplate{
 				Config: &pb.BankConfig{RetainMission: "t"},
 			}},
-			mock: "TemplateCodec.Create",
+			mock: "TemplateCodec.CreateNamed",
 			check: func(a []any) error {
-				return want("template mission", a[1].(domain.BankTemplate).Config.RetainMission, "t")
+				if err := want("name", a[1], "n"); err != nil {
+					return err
+				}
+				return want("template mission", a[2].(domain.BankTemplate).Config.RetainMission, "t")
 			},
 		},
 		"memory.v1.BankService.UpsertDirective": {
@@ -422,8 +426,8 @@ func TestSpecOverridesValidated(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("template spec: err = %v, want INVALID_ARGUMENT", err)
 	}
-	if _, called := h.calls.args("TemplateCodec.Create"); called {
-		t.Error("template with invalid spec overrides reached TemplateCodec.Create")
+	if _, called := h.calls.args("TemplateCodec.CreateNamed"); called {
+		t.Error("template with invalid spec overrides reached TemplateCodec.CreateNamed")
 	}
 	_, err = pb.NewMentalModelServiceClient(h.conn).UpdateMentalModel(ctx, &pb.UpdateMentalModelRequest{
 		BankId: "x", MentalModelId: "m", Spec: &pb.MentalModelSpec{Overrides: bad},
@@ -436,8 +440,8 @@ func TestSpecOverridesValidated(t *testing.T) {
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("patched spec with invalid overrides: err = %v, want ErrInvalidArgument", err)
 	}
-	if !slices.Contains(rpcs, "CreateMentalModel") {
-		t.Errorf("validator saw %v, want CreateMentalModel", rpcs)
+	if !slices.Contains(rpcs, config.RPCMentalModelSpec) {
+		t.Errorf("validator saw %v, want %s", rpcs, config.RPCMentalModelSpec)
 	}
 }
 

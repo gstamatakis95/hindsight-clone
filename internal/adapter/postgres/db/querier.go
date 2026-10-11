@@ -291,6 +291,17 @@ type Querier interface {
 	ScopeObservationCount(ctx context.Context, arg ScopeObservationCountParams) (int64, error)
 	// ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
 	ScopeUnconsolidated(ctx context.Context, arg ScopeUnconsolidatedParams) ([]ScopeUnconsolidatedRow, error)
+	// SettleRetainBatches ends every PENDING retain_batch parent whose retain_document children are all terminal
+	// (SPEC "Operations": the parent's status aggregates its children; WP-14b, decision 1453): FAILED when a child
+	// failed, else CANCELLED when a child was cancelled, else COMPLETED, with the counts as its result. A parent is
+	// never claimed or run; the worker's maintenance tick calls this. It is idempotent: settled parents are no
+	// longer PENDING.
+	SettleRetainBatches(ctx context.Context) (int64, error)
+	// StrandedFacts returns live facts left with a NULL embedding by a rederive_memory operation that ended
+	// FAILED or CANCELLED (WP-14b, decision 1452), on banks that are not tombstoned, when no rederive of the unit
+	// is pending or processing and none ended within retry_after_seconds. It walks the operations table (pruned
+	// after the retention period), not memory_units, so the maintenance tick never scans every unit.
+	StrandedFacts(ctx context.Context, arg StrandedFactsParams) ([]StrandedFactsRow, error)
 	// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
 	UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error
 	// UnitArchive copies a live unit into memory_units_archive, stamped with seq, with JSON snapshots of its entities ({id, name}) and causal links ({from, to, kind, weight, created_at}).
