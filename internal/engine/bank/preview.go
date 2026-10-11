@@ -185,7 +185,8 @@ func previewConsolidation(cfg domain.BankConfig) (domain.PromptPreview, error) {
 func previewReflect(cfg domain.BankConfig, dirs []domain.Directive) (domain.PromptPreview, error) {
 	data := prompts.ReflectData{
 		Mission: cfg.ReflectMission, Disposition: cfg.Disposition, Directives: dirs,
-		MentalModels: true, Observations: true, Expand: true, Budget: string(domain.BudgetLow), Query: phQuery,
+		SearchMentalModels: true, ReadMentalModels: true, Observations: true, Recall: true, Expand: true,
+		Budget: string(domain.BudgetLow), Query: phQuery,
 	}
 	s, err := message(domain.PromptRoleSystem, prompts.ReflectSystem, data,
 		cfgBlock("reflect_mission", "mission", cfg.ReflectMission),
