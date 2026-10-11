@@ -2,7 +2,7 @@ package grpcapi
 
 import (
 	"context"
-	"memd/internal/engine/bank"
+	"memd/internal/configsvc"
 
 	pb "memd/gen/memory/v1"
 )
@@ -10,8 +10,8 @@ import (
 // TenantHandler serves memory.v1.TenantService.
 type TenantHandler struct {
 	pb.UnimplementedTenantServiceServer
-	// Tenants reads and patches the tenant-level config.
-	Tenants bank.TenantAdmin
+	// Config reads and patches the tenant-level config.
+	Config *configsvc.Service
 }
 
 var _ pb.TenantServiceServer = (*TenantHandler)(nil)
@@ -33,7 +33,7 @@ func (h *TenantHandler) GetTenantConfig(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Tenants.TenantConfig(ctx, t)
+	out, err := h.Config.GetTenantConfig(ctx, t)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -53,7 +53,7 @@ func (h *TenantHandler) UpdateTenantConfig(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Tenants.UpdateTenantConfig(ctx, t, patch)
+	out, err := h.Config.UpdateTenantConfig(ctx, t, patch)
 	if err != nil {
 		return nil, toStatus(err)
 	}

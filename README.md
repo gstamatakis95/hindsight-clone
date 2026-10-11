@@ -9,7 +9,7 @@ pg_search, pg_trgm) and object storage; LLMs, the reranker and the embedder sit 
 OpenAI-compatible AI gateway.
 
 > Status: integrated and through the final review (fix-ups WP-18..21 merged). `memd api`, `memd worker`
-> and `memd all` run every engine; `make e2e` exercises the whole service against Postgres, MinIO and an
+> and `memd all` run every service; `make e2e` exercises the whole service against Postgres, MinIO and an
 > emulated gateway. The behaviour is specified in `docs/SPEC.md`; `docs/rules.md` maps every behavioural rule
 > to its tests; accepted gaps are listed in `docs/STATUS.md`.
 
@@ -146,7 +146,7 @@ make e2e       # compose stack + emulated gateway + memd api/worker processes: e
 
 Every test that touches the store gets its own database, cloned from a migrated template
 (`internal/store/postgres/pgtest`). One ParadeDB container serves the whole `go test ./...` run and is
-removed when it ends. The gRPC API is tested through the real engines, with only model calls and blob storage
+removed when it ends. The gRPC API is tested through the real services, with only model calls and blob storage
 stubbed, on a wired in-process stack (`cmd/memd/stack_test.go`: pgtest, the gateway emulator in
 `test/e2e/gatewayemu`, the worker, bufconn), and `internal/grpcapi` keeps only database-free tests (conversion
 goldens, interceptors, status mapping, FieldMask patches, health). Environment:

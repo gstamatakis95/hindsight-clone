@@ -4,15 +4,15 @@
 //
 // # Where it sits
 //
-// grpcapi sits above the engines and below cmd/memd. It imports domain, store (for request types), config,
-// gen/memory/v1, the engine packages whose request and result types it converts, and jobs (for OperationControl);
-// depguard forbids it to import adapters, pgx or maintenance. Handlers are thin: validate the tenant and ids,
-// convert the proto request to domain types, check request overrides, call the engine, and convert the result
-// back. Business rules live in the engines.
+// grpcapi sits above the services and below cmd/memd. It imports domain, store (for request types), config,
+// gen/memory/v1, and the services and libraries whose request and result types it converts; depguard forbids it to
+// import adapters, pgx, jobs or maintenance. Handlers are thin: validate the tenant and ids, convert the proto
+// request to domain types, check request overrides, call the service, and convert the result back. Business rules
+// live in the services.
 //
 // # Usage
 //
-// Each cmd/memd/wire_<area>.go builds its area's handlers with exactly the engines they call, and wire.go calls
+// Each cmd/memd/wire_<area>.go builds its area's handlers with exactly the services they call, and wire.go calls
 // [New]:
 //
 //	h := grpcapi.Handlers{Memory: &grpcapi.MemoryHandler{Memory: mem}, ...}
@@ -47,9 +47,9 @@
 //
 // Each RPC that does work takes its own overrides message (RetainOverrides, RecallOverrides, ReflectOverrides,
 // ConsolidateOverrides, RederiveOverrides, RefreshOverrides), so the schema says what it can change;
-// convert_overrides.go turns each into the BankConfig level the engines merge, and reads stored levels back (a
+// convert_overrides.go turns each into the BankConfig level the services merge, and reads stored levels back (a
 // document's retain_overrides, a model's spec overrides). PreviewPrompt takes one of them, matching its
-// operation. Every config the server is given passes config.Validate before the engine sees it: request and
+// operation. Every config the server is given passes config.Validate before the service sees it: request and
 // item overrides, mental-model specs, and whole levels (CreateBank, CreateBankFromTemplate, UpdateBankConfig,
 // UpdateTenantConfig), the latter against the patched level inside the patch. ResetBankConfig is not checked:
 // it only unsets fields; it needs at least one path, and "*" resets everything.

@@ -154,8 +154,8 @@
 // set. TestStore (DB, Tx, Reader, every repository, the curation writes and tenant isolation), TestSeq, TestQueue
 // (Queue and Claimer), TestReads, TestCurationReads, TestMaintenanceReads and TestObservationAdmin are case tables
 // over the store semantics; the *_accept_test.go files, store_sql_test.go and the race tests pin behaviour that needs
-// raw SQL or load: seq order, claims, reclaim, the small-bank HNSW search, TestConcurrentBankConfigPatchesKeepBoth and
-// TestAttachAfterConcurrentPruneReresolves.
+// raw SQL or load: seq order, claims, reclaim, the small-bank HNSW search and
+// TestAttachAfterConcurrentPruneReresolves. The config-patch locking is tested in internal/configsvc.
 //
 // Governing SPEC sections: "Ports", "Jobs", "Behavioural rules" and "Recall pipeline".
 package postgres

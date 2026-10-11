@@ -1,11 +1,11 @@
 // Package prompts holds every LLM prompt as an embedded text/template under templates/ and renders them by
-// name. Engines never build prompt text inline (AGENTS.md "Prompts live in internal/prompts/templates").
+// name. Go code never builds prompt text inline (AGENTS.md "Prompts live in internal/prompts/templates").
 //
 // # Where it sits
 //
-// prompts is a leaf package imported by the engines that call models: retain (extraction), consolidate
+// prompts is a leaf package imported by the packages that call models: retain (extraction), consolidate
 // (CONSOLIDATE, DEDUP_CHECK), reflect (the tool loop, final answer, structured output), mentalmodel
-// (synthesize, the delta prompts, the agentic refresh context), timex (TIME_PARSE) and bank (prompt
+// (synthesize, the delta prompts, the agentic refresh context), timex (TIME_PARSE) and configsvc (prompt
 // preview). It imports only the standard library and domain. Everything is read from an embed.FS, so the
 // binary carries its prompts and no file system access happens at run time.
 //
@@ -68,7 +68,7 @@
 // # Tests
 //
 // prompts_test.go renders every template with its fixture testdata/<name>.json (decoded into the family's
-// data struct with unknown fields rejected, so field names engines use are checked against the templates)
+// data struct with unknown fields rejected, so field names the callers use are checked against the templates)
 // and with zero data, renders rarely taken branches, pairs schemas with templates, validates every JSON
 // asset, and pins Hindsight parity points (fact_type labels, id-less source memories, the N/A marker, the
 // narrator rule, the gated causal section, directive rules in done tools, tool files in Version).

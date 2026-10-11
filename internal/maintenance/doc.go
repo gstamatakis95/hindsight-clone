@@ -4,12 +4,13 @@
 //
 // # Where it sits
 //
-// maintenance sits above the engines and jobs: it calls the services' sweeps (mentalmodel.Service's cron
-// refreshes and failed-refresh reconcile, memory.Service's stranded-fact and retain-batch sweeps), the cross-bank
-// scans of store.Maintenance and the jobs catalogue,
-// and never an adapter. No engine imports it. cmd/memd builds it and runs [Service.Run] beside the job runner
-// in the worker and all modes. Its [Config] holds the operator settings (tick interval, reclaim age, retention
-// of terminal operations and lifecycle events, graph budget); zero values take the defaults.
+// maintenance sits above the services and jobs: it calls the services' sweeps (bank.Service's delete resume,
+// mentalmodel.Service's cron refreshes and failed-refresh reconcile, observation.Service's consolidation
+// reconcile, memory.Service's stranded-fact and retain-batch sweeps), the cross-bank scans of store.Maintenance
+// and the jobs catalogue, and never an adapter. No service imports it. cmd/memd/wire_maintenance.go builds it and
+// registers [Service.RunGraphJob]; the worker and all modes run [Service.Run] beside the job runner. Its [Config] holds
+// the operator settings (tick interval, reclaim age, retention of terminal operations and lifecycle events, graph
+// budget); zero values take the defaults.
 //
 // # Tick
 //
@@ -19,7 +20,8 @@
 //
 //  1. reclaim_stale: Claimer.ReclaimStale(StaleAfter) re-queues PROCESSING rows with an old heartbeat, or
 //     fails them past their attempt cap.
-//  2. resume_bank_deletes: re-enqueues delete_bank for tombstoned banks with none pending or running.
+//  2. resume_bank_deletes: bank.Service.ResumeStalledDeletes re-enqueues delete_bank for tombstoned banks with
+//     none pending or running.
 //  3. refresh_failures: mentalmodel.Service.ReconcileFailedRefreshes pauses models whose latest refresh failed
 //     for good.
 //  4. cron_refresh: mentalmodel.Service.EnqueueDueCronRefreshes enqueues refreshes whose refresh_cron fired.
@@ -52,7 +54,7 @@
 //     (temporal_link_cap, semantic_link_k).
 //   - entity_maintenance: the removed units' entities, whose last referencing unit may be gone.
 //
-// The engines on those paths then enqueue graph_maintenance (jobs.EnqueueGraph), and step 6 of the tick
+// The services on those paths then enqueue graph_maintenance (jobs.EnqueueGraph), and step 6 of the tick
 // enqueues it for every bank with rows in either queue. [Service.RunGraphJob] computes deadline = now +
 // GraphBudget (default 240 s) on the injected clock and loops, one DB.InTx per batch:
 //

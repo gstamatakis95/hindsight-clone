@@ -18,104 +18,60 @@ linters:
         "memd/internal/jobs"]
     depguard:
       rules:
-        engines:
-          files: ["**/internal/engine/**", "!$test"]   # tests may use pgtest and pgx: store code runs on real Postgres
+        domain:
+          files: ["**/internal/domain/**"]
+          deny:
+            - pkg: "memd/internal"
+              desc: domain imports nothing internal
+            - pkg: "memd/gen"
+              desc: no proto types in domain
+            - pkg: "github.com/DataDog"
+              desc: domain stays vendor-free
+        contracts:
+          files: ["**/internal/store/*.go", "**/internal/ai/*.go", "**/internal/blob/*.go", "**/internal/clock/*.go"]
           deny:
             - pkg: "memd/internal/store/postgres"
-              desc: engines depend on the store interfaces only
+              desc: contracts never see adapters
             - pkg: "memd/internal/ai/gateway"
-              desc: engines depend on the ai interfaces only
+              desc: contracts never see adapters
             - pkg: "memd/internal/blob/s3"
-              desc: engines depend on blob.Store only
-            - pkg: "memd/internal/grpcapi"
-              desc: engines don't know about gRPC
-            - pkg: "memd/internal/maintenance"
-              desc: the maintenance tick sits above the engines
-            - pkg: "memd/gen"
-              desc: no proto types in engines; use domain
-            - pkg: "github.com/jackc/pgx"
-              desc: use store.DB
-            - pkg: "net/http"
-              desc: use ai.LLM / ai.Embedder / ai.Reranker
-            - pkg: "github.com/aws"
-              desc: use blob.Store
-            - pkg: "github.com/DataDog"
-              desc: observability is wired in cmd/memd via internal/observability; engines stay vendor-free
-        svc-mentalmodel:
-          files: ["**/internal/mentalmodel/**", "**/internal/observation/**", "**/internal/document/**",
-            "!$test"]   # tests use pgtest
-          deny:
-            - pkg: "memd/internal/store/postgres"
-              desc: services depend on the store interfaces only
-            - pkg: "memd/internal/ai/gateway"
-              desc: services depend on the ai interfaces only
-            - pkg: "memd/internal/blob/s3"
-              desc: services depend on blob.Store only
-            - pkg: "memd/internal/grpcapi"
-              desc: services don't know about gRPC
-            - pkg: "memd/internal/maintenance"
-              desc: the maintenance tick sits above the services
-            - pkg: "memd/gen"
-              desc: no proto types in services; use domain
-            - pkg: "github.com/jackc/pgx"
-              desc: use store.DB
-            - pkg: "net/http"
-              desc: use ai.LLM / ai.Embedder / ai.Reranker
-            - pkg: "github.com/aws"
-              desc: use blob.Store
-            - pkg: "github.com/DataDog"
-              desc: services stay vendor-free
-        svc-mentalmodel-features:
-          files: ["**/internal/mentalmodel/**"]
-          deny:
-            - pkg: "memd/internal/engine"
-              desc: services never import each other; enqueue the other service's job instead
+              desc: contracts never see adapters
+            - pkg: "memd/internal/config"
+              desc: contracts sit below config (this also covers configsvc)
+            - pkg: "memd/internal/jobs"
+              desc: contracts sit below jobs
+            - pkg: "memd/internal/recall"
+              desc: contracts sit below the libraries
+            - pkg: "memd/internal/reflect"
+              desc: contracts sit below the libraries
+            - pkg: "memd/internal/timex"
+              desc: contracts sit below the libraries
+            - pkg: "memd/internal/linking"
+              desc: contracts sit below the libraries
             - pkg: "memd/internal/memory"
-              desc: services never import each other; enqueue the other service's job instead
+              desc: contracts sit below the services
             - pkg: "memd/internal/document"
-              desc: services never import each other; enqueue the other service's job instead
+              desc: contracts sit below the services
             - pkg: "memd/internal/observation"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/bank"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/configsvc"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/operation"
-              desc: services never import each other; enqueue the other service's job instead
-        svc-observation-features:
-          files: ["**/internal/observation/**"]
-          deny:
-            - pkg: "memd/internal/engine"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/memory"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/document"
-              desc: services never import each other; enqueue the other service's job instead
+              desc: contracts sit below the services
             - pkg: "memd/internal/mentalmodel"
-              desc: services never import each other; enqueue the other service's job instead
+              desc: contracts sit below the services
             - pkg: "memd/internal/bank"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/configsvc"
-              desc: services never import each other; enqueue the other service's job instead
+              desc: contracts sit below the services
             - pkg: "memd/internal/operation"
-              desc: services never import each other; enqueue the other service's job instead
-        svc-document-features:
-          files: ["**/internal/document/**"]
-          deny:
-            - pkg: "memd/internal/engine"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/memory"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/observation"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/mentalmodel"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/bank"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/configsvc"
-              desc: services never import each other; enqueue the other service's job instead
-            - pkg: "memd/internal/operation"
-              desc: services never import each other; enqueue the other service's job instead
+              desc: contracts sit below the services
+            - pkg: "memd/internal/grpcapi"
+              desc: contracts sit below the gRPC API
+            - pkg: "memd/internal/maintenance"
+              desc: contracts sit below maintenance
+            - pkg: "memd/gen"
+              desc: no proto types in contracts
+            - pkg: "github.com/jackc/pgx"
+              desc: only store/postgres uses pgx
+            - pkg: "github.com/aws"
+              desc: only blob/s3 uses the AWS SDK
+            - pkg: "github.com/DataDog"
+              desc: contracts stay vendor-free
         graph:
           files: ["**/internal/graph/*.go"]   # the boundary; graphtest may use store to seed units
           deny:
@@ -129,8 +85,6 @@ linters:
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/blob"
               desc: the graph boundary imports only domain
-            - pkg: "memd/internal/engine"
-              desc: the graph boundary imports only domain
             - pkg: "memd/internal/recall"
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/reflect"
@@ -138,6 +92,18 @@ linters:
             - pkg: "memd/internal/timex"
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/linking"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/memory"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/document"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/observation"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/mentalmodel"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/bank"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/operation"
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/grpcapi"
               desc: the graph boundary imports only domain
@@ -149,18 +115,159 @@ linters:
               desc: only store/postgres uses pgx
             - pkg: "github.com/DataDog"
               desc: the graph boundary stays vendor-free
-        libraries:
-          files: ["**/internal/recall/**", "**/internal/reflect/**", "**/internal/timex/**", "**/internal/linking/**",
-            "!$test"]   # tests use pgtest
+        adapters:
+          files: ["**/internal/store/postgres/**", "**/internal/ai/gateway/**", "**/internal/blob/s3/**", "!$test"]
           deny:
-            - pkg: "memd/internal/engine"
-              desc: libraries never import the engines (services)
+            - pkg: "memd/internal/config"
+              desc: adapters translate; they never decide (this also covers configsvc)
+            - pkg: "memd/internal/jobs"
+              desc: adapters satisfy jobs.Claimer structurally; they never import jobs
+            - pkg: "memd/internal/recall"
+              desc: adapters never import libraries
+            - pkg: "memd/internal/reflect"
+              desc: adapters never import libraries
+            - pkg: "memd/internal/timex"
+              desc: adapters never import libraries
+            - pkg: "memd/internal/linking"
+              desc: adapters never import libraries
             - pkg: "memd/internal/memory"
+              desc: adapters never import services
+            - pkg: "memd/internal/document"
+              desc: adapters never import services
+            - pkg: "memd/internal/observation"
+              desc: adapters never import services
+            - pkg: "memd/internal/mentalmodel"
+              desc: adapters never import services
+            - pkg: "memd/internal/bank"
+              desc: adapters never import services
+            - pkg: "memd/internal/operation"
+              desc: adapters never import services
+            - pkg: "memd/internal/grpcapi"
+              desc: adapters never import the gRPC API
+            - pkg: "memd/internal/maintenance"
+              desc: adapters never import maintenance
+            - pkg: "memd/gen"
+              desc: no proto types in adapters
+        infra:
+          files: ["**/internal/config/**", "**/internal/prompts/**", "**/internal/jsonschema/**"]
+          deny:
+            - pkg: "memd/internal/jobs"
+              desc: config, prompts and jsonschema sit beside jobs
+            - pkg: "memd/internal/recall"
+              desc: infrastructure sits below the libraries
+            - pkg: "memd/internal/reflect"
+              desc: infrastructure sits below the libraries
+            - pkg: "memd/internal/timex"
+              desc: infrastructure sits below the libraries
+            - pkg: "memd/internal/linking"
+              desc: infrastructure sits below the libraries
+            - pkg: "memd/internal/memory"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/document"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/observation"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/mentalmodel"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/bank"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/configsvc"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/operation"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/grpcapi"
+              desc: infrastructure doesn't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: infrastructure sits below maintenance
+        infra-vendors:
+          files: ["**/internal/config/**", "**/internal/prompts/**", "**/internal/jsonschema/**", "!$test"]
+          deny:
+            - pkg: "memd/internal/store/postgres"
+              desc: use the store interfaces
+            - pkg: "memd/internal/ai/gateway"
+              desc: use the ai interfaces
+            - pkg: "memd/internal/blob/s3"
+              desc: use blob.Store
+            - pkg: "memd/gen"
+              desc: no proto types in infrastructure
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB
+            - pkg: "net/http"
+              desc: use ai.LLM / ai.Embedder / ai.Reranker
+            - pkg: "github.com/aws"
+              desc: use blob.Store
+            - pkg: "github.com/DataDog"
+              desc: infrastructure stays vendor-free
+        jobs:
+          files: ["**/internal/jobs/**", "!$test"]   # tests run the runner on pgtest
+          deny:
+            - pkg: "memd/internal/config"
+              desc: jobs sits beside config, below the services (this also covers configsvc)
+            - pkg: "memd/internal/recall"
+              desc: jobs sits below the libraries
+            - pkg: "memd/internal/reflect"
+              desc: jobs sits below the libraries
+            - pkg: "memd/internal/timex"
+              desc: jobs sits below the libraries
+            - pkg: "memd/internal/linking"
+              desc: jobs sits below the libraries
+            - pkg: "memd/internal/memory"
+              desc: jobs sits below the services; they import it
+            - pkg: "memd/internal/document"
+              desc: jobs sits below the services; they import it
+            - pkg: "memd/internal/observation"
+              desc: jobs sits below the services; they import it
+            - pkg: "memd/internal/mentalmodel"
+              desc: jobs sits below the services; they import it
+            - pkg: "memd/internal/bank"
+              desc: jobs sits below the services; they import it
+            - pkg: "memd/internal/operation"
+              desc: jobs sits below the services; they import it
+            - pkg: "memd/internal/grpcapi"
+              desc: jobs doesn't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above jobs
+            - pkg: "memd/internal/store/postgres"
+              desc: jobs depends on store and jobs.Claimer only
+            - pkg: "memd/internal/ai"
+              desc: no model calls in the job runtime
+            - pkg: "memd/internal/blob"
+              desc: no blob calls in the job runtime
+            - pkg: "memd/gen"
+              desc: no proto types in jobs
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB and jobs.Claimer
+            - pkg: "net/http"
+              desc: no network calls in the job runtime
+            - pkg: "github.com/aws"
+              desc: no blob calls in the job runtime
+            - pkg: "github.com/DataDog"
+              desc: tracing comes in through Config.TraceJob
+        libraries:
+          files: ["**/internal/recall/**", "**/internal/reflect/**", "**/internal/timex/**", "**/internal/linking/**"]
+          deny:
+            - pkg: "memd/internal/memory"
+              desc: libraries never import the services
+            - pkg: "memd/internal/document"
+              desc: libraries never import the services
+            - pkg: "memd/internal/observation"
+              desc: libraries never import the services
+            - pkg: "memd/internal/mentalmodel"
+              desc: libraries never import the services
+            - pkg: "memd/internal/bank"
+              desc: libraries never import the services
+            - pkg: "memd/internal/configsvc"
+              desc: libraries never import the services
+            - pkg: "memd/internal/operation"
               desc: libraries never import the services
             - pkg: "memd/internal/grpcapi"
               desc: libraries don't know about gRPC
             - pkg: "memd/internal/maintenance"
               desc: the maintenance tick sits above the libraries
+        libraries-infra:
+          files: ["**/internal/recall/**", "**/internal/reflect/**", "**/internal/timex/**",
+            "**/internal/linking/**", "!$test"]   # tests use pgtest
+          deny:
             - pkg: "memd/internal/store/postgres"
               desc: libraries depend on the store and graph interfaces only
             - pkg: "memd/internal/ai/gateway"
@@ -196,8 +303,10 @@ linters:
           deny:
             - pkg: "memd/internal/recall/arms"
               desc: the engine never names an arm; arms implement recall.Arm and are registered in cmd/memd/wire.go
-        svc-memory:
-          files: ["**/internal/memory/**", "!$test"]   # tests use pgtest
+        services-infra:
+          files: ["**/internal/memory/**", "**/internal/document/**", "**/internal/observation/**",
+            "**/internal/mentalmodel/**", "**/internal/bank/**", "**/internal/configsvc/**",
+            "**/internal/operation/**", "!$test"]   # tests use pgtest
           deny:
             - pkg: "memd/internal/store/postgres"
               desc: services depend on the store interfaces only
@@ -215,11 +324,9 @@ linters:
               desc: use blob.Store
             - pkg: "github.com/DataDog"
               desc: services stay vendor-free
-        svc-memory-features:
-          files: ["**/internal/memory/**"]   # tests included: they commit other services' effects through store
+        feature-memory:
+          files: ["**/internal/memory/**"]   # tests included
           deny:
-            - pkg: "memd/internal/engine"
-              desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/document"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/observation"
@@ -236,122 +343,120 @@ linters:
               desc: services don't know about gRPC
             - pkg: "memd/internal/maintenance"
               desc: the maintenance tick sits above the services
-        grpcapi:
-          files: ["**/internal/grpcapi/**"]
-
+        feature-document:
+          files: ["**/internal/document/**"]   # tests included
           deny:
-            - pkg: "memd/internal/store/postgres"
-              desc: handlers call engines
-            - pkg: "memd/internal/ai/gateway"
-              desc: handlers call engines
-            - pkg: "memd/internal/blob/s3"
-              desc: handlers call engines
-            - pkg: "memd/internal/maintenance"
-              desc: handlers never run the maintenance tick
-            - pkg: "github.com/jackc/pgx"
-              desc: handlers call engines; the Postgres probe takes the pool's Ping
-        domain:
-          files: ["**/internal/domain/**"]
-          deny:
-            - pkg: "memd/internal"
-              desc: domain imports nothing internal
-            - pkg: "memd/gen"
-              desc: no proto types in domain
-            - pkg: "github.com/DataDog"
-              desc: domain stays vendor-free
-        contracts:
-          files: ["**/internal/store/*.go", "**/internal/ai/*.go", "**/internal/blob/*.go", "**/internal/clock/*.go"]
-          deny:
-            - pkg: "memd/internal/store/postgres"
-              desc: contracts never see adapters
-            - pkg: "memd/internal/ai/gateway"
-              desc: contracts never see adapters
-            - pkg: "memd/internal/blob/s3"
-              desc: contracts never see adapters
-            - pkg: "memd/internal/config"
-              desc: contracts sit below config
-            - pkg: "memd/internal/engine"
-              desc: contracts sit below the engines
-            - pkg: "memd/internal/recall"
-              desc: contracts sit below the libraries
-            - pkg: "memd/internal/reflect"
-              desc: contracts sit below the libraries
-            - pkg: "memd/internal/timex"
-              desc: contracts sit below the libraries
-            - pkg: "memd/internal/linking"
-              desc: contracts sit below the libraries
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/grpcapi"
-              desc: contracts sit below the gRPC API
-            - pkg: "memd/internal/jobs"
-              desc: contracts sit below jobs
+              desc: services don't know about gRPC
             - pkg: "memd/internal/maintenance"
-              desc: contracts sit below maintenance
-            - pkg: "memd/gen"
-              desc: no proto types in contracts
-            - pkg: "github.com/jackc/pgx"
-              desc: only store/postgres uses pgx
-            - pkg: "github.com/aws"
-              desc: only blob/s3 uses the AWS SDK
-            - pkg: "github.com/DataDog"
-              desc: contracts stay vendor-free
-        adapters:
-          files: ["**/internal/store/postgres/**", "**/internal/ai/gateway/**", "**/internal/blob/s3/**", "!$test"]
+              desc: the maintenance tick sits above the services
+        feature-observation:
+          files: ["**/internal/observation/**"]   # tests included
           deny:
-            - pkg: "memd/internal/config"
-              desc: adapters translate; they never decide
-            - pkg: "memd/internal/engine"
-              desc: adapters never import engines
-            - pkg: "memd/internal/recall"
-              desc: adapters never import libraries
-            - pkg: "memd/internal/reflect"
-              desc: adapters never import libraries
-            - pkg: "memd/internal/timex"
-              desc: adapters never import libraries
-            - pkg: "memd/internal/linking"
-              desc: adapters never import libraries
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/grpcapi"
-              desc: adapters never import the gRPC API
-            - pkg: "memd/internal/jobs"
-              desc: adapters satisfy jobs.Claimer structurally; they never import jobs
+              desc: services don't know about gRPC
             - pkg: "memd/internal/maintenance"
-              desc: adapters never import maintenance
-            - pkg: "memd/gen"
-              desc: no proto types in adapters
-        jobs:
-          files: ["**/internal/jobs/**", "!$test"]   # tests run the runner on pgtest
+              desc: the maintenance tick sits above the services
+        feature-mentalmodel:
+          files: ["**/internal/mentalmodel/**"]   # tests included
           deny:
-            - pkg: "memd/internal/engine"
-              desc: jobs sits below the engines; they import it
-            - pkg: "memd/internal/recall"
-              desc: jobs sits below the libraries
-            - pkg: "memd/internal/reflect"
-              desc: jobs sits below the libraries
-            - pkg: "memd/internal/timex"
-              desc: jobs sits below the libraries
-            - pkg: "memd/internal/linking"
-              desc: jobs sits below the libraries
-            - pkg: "memd/internal/config"
-              desc: jobs sits beside config, below the engines
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/grpcapi"
-              desc: jobs doesn't know about gRPC
+              desc: services don't know about gRPC
             - pkg: "memd/internal/maintenance"
-              desc: the maintenance tick sits above jobs
-            - pkg: "memd/internal/store/postgres"
-              desc: jobs depends on store and jobs.Claimer only
-            - pkg: "memd/internal/ai"
-              desc: no model calls in the job runtime
-            - pkg: "memd/internal/blob"
-              desc: no blob calls in the job runtime
-            - pkg: "memd/gen"
-              desc: no proto types in jobs
-            - pkg: "github.com/jackc/pgx"
-              desc: use store.DB and jobs.Claimer
-            - pkg: "net/http"
-              desc: no network calls in the job runtime
-            - pkg: "github.com/aws"
-              desc: no blob calls in the job runtime
-            - pkg: "github.com/DataDog"
-              desc: tracing comes in through Config.TraceJob
+              desc: the maintenance tick sits above the services
+        feature-bank:
+          files: ["**/internal/bank/**"]   # tests included
+          deny:
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/grpcapi"
+              desc: services don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the services
+        feature-configsvc:
+          files: ["**/internal/configsvc/**"]   # tests included
+          deny:
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/grpcapi"
+              desc: services don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the services
+        feature-operation:
+          files: ["**/internal/operation/**"]   # tests included
+          deny:
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/grpcapi"
+              desc: services don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the services
         maintenance:
           files: ["**/internal/maintenance/**", "!$test"]   # tests use pgtest
           deny:
@@ -373,5 +478,20 @@ linters:
               desc: use blob.Store
             - pkg: "github.com/DataDog"
               desc: tracing comes in through Deps.TraceTick
+        grpcapi:
+          files: ["**/internal/grpcapi/**"]
+          deny:
+            - pkg: "memd/internal/store/postgres"
+              desc: handlers call services
+            - pkg: "memd/internal/ai/gateway"
+              desc: handlers call services
+            - pkg: "memd/internal/blob/s3"
+              desc: handlers call services
+            - pkg: "memd/internal/jobs"
+              desc: handlers never enqueue; services do
+            - pkg: "memd/internal/maintenance"
+              desc: handlers never run the maintenance tick
+            - pkg: "github.com/jackc/pgx"
+              desc: handlers call services; the Postgres probe takes the pool's Ping
 formatters:
   enable: [gofumpt, goimports]

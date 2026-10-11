@@ -2,8 +2,8 @@ package grpcapi
 
 import (
 	"fmt"
+	"memd/internal/bank"
 	"memd/internal/domain"
-	"memd/internal/engine/bank"
 
 	pb "memd/gen/memory/v1"
 )

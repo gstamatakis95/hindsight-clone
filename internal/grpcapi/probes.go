@@ -3,6 +3,7 @@ package grpcapi
 import (
 	"context"
 	"fmt"
+	"memd/internal/clock"
 	"net/http"
 	"sync"
 	"time"
@@ -31,8 +32,9 @@ const gatewayProbeTTL = 10 * time.Second
 // model call (health checks must not spend tokens or show up as model traffic) and caches the answer for 10 s, so
 // frequent health polls don't hit the gateway each time.
 type GatewayProbe struct {
-	url string
-	hc  *http.Client
+	url   string
+	hc    *http.Client
+	clock clock.Clock
 
 	mu      sync.Mutex
 	checked time.Time
@@ -41,20 +43,20 @@ type GatewayProbe struct {
 
 var _ ReadinessProbe = (*GatewayProbe)(nil)
 
-// NewGatewayProbe returns a probe of the gateway at url, sent with hc.
-func NewGatewayProbe(url string, hc *http.Client) *GatewayProbe {
-	return &GatewayProbe{url: url, hc: hc}
+// NewGatewayProbe returns a probe of the gateway at url, sent with hc; clk dates the cached answer.
+func NewGatewayProbe(url string, hc *http.Client, clk clock.Clock) *GatewayProbe {
+	return &GatewayProbe{url: url, hc: hc, clock: clk}
 }
 
 // Ready reports whether the gateway answered recently.
 func (g *GatewayProbe) Ready(ctx context.Context) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if !g.checked.IsZero() && time.Since(g.checked) < gatewayProbeTTL {
+	if !g.checked.IsZero() && g.clock.Now().Sub(g.checked) < gatewayProbeTTL {
 		return g.err
 	}
 	g.err = g.check(ctx)
-	g.checked = time.Now()
+	g.checked = g.clock.Now()
 	return g.err
 }
 

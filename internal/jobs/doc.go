@@ -5,9 +5,9 @@
 // # Where it sits
 //
 // jobs imports domain, store and clock only. The [Claimer] interface is its boundary to the operations
-// table; the Postgres store implements it. Engines import jobs for the catalogue and for [Run]; cmd/memd
-// registers one [Handler] per kind and runs [Runner.Run] in its worker and all modes. The api side uses
-// [OperationControl] for CancelOperation and RetryOperation.
+// table; the Postgres store implements it. Services import jobs for the catalogue and for [Run]; cmd/memd
+// registers one [Handler] per kind and runs [Runner.Run] in its worker and all modes. CancelOperation and
+// RetryOperation are internal/operation's.
 //
 // # Catalogue
 //
@@ -85,13 +85,6 @@
 // cancels the rest and releases their rows with Fail at now (which charges an attempt), heartbeating until
 // the last handler has been settled. A shutdown can take ShutdownGrace + 30 s, so the pod's termination grace
 // period must be at least that (60 s recommended).
-//
-// # Operation control
-//
-// [OperationControl.Cancel] marks a pending operation CANCELLED at once and records the request on a
-// processing one, which ends CANCELLED when its handler stops; a delete_bank cannot be cancelled
-// (FAILED_PRECONDITION). [OperationControl.Retry] re-queues a FAILED or CANCELLED operation (attempt reset);
-// on a bank being deleted only delete_bank may be retried.
 //
 // # Tracing
 //

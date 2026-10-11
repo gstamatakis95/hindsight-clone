@@ -31,9 +31,9 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// The shared test stack: the whole composition (wireEngines, the gRPC server and the worker) over a fresh pgtest
+// The shared test stack: the whole composition (wireServices, the gRPC server and the worker) over a fresh pgtest
 // database, an in-memory blob store, the real gateway client and the gateway emulator, served over bufconn. Tests of
-// the API's behaviour through the real engines (api_test.go) and of the wiring itself (wire_test.go) run on it.
+// the API's behaviour through the real services (api_test.go) and of the wiring itself (wire_test.go) run on it.
 
 // txGuard records any gateway call made from inside a transaction body. The worker, the maintenance tick and
 // the API run concurrently in one process, so "some transaction is open somewhere" is not the test: a call
@@ -78,7 +78,7 @@ func (t guardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r) //nolint:wrapcheck // test passthrough
 }
 
-// wiredStack is the whole composition (wireEngines) over pgtest, a fake blob store, the real gateway client and
+// wiredStack is the whole composition (wireServices) over pgtest, a fake blob store, the real gateway client and
 // the emulated gateway, served over bufconn, with one worker slot so jobs run one at a time.
 type wiredStack struct {
 	guard *txGuard
@@ -122,9 +122,8 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	in := infra{db: guardStore{DB: db, g: g}, graph: db.Graph(), claimer: db, maint: db, blob: fake.NewBlob(), gw: gw}
-	d := wireEngines(cfg, in, tok, serverCfg, clock.System{}, log)
+	d := wireServices(cfg, in, tok, serverCfg, clock.System{}, log, tel)
 	d.probes = nil
-	d.tel = tel
 	lis := bufconn.Listen(1 << 20)
 	srv := newGRPCServer(d)
 	go func() { _ = srv.Serve(lis) }()

@@ -4,7 +4,7 @@
 // # Where it sits
 //
 // jsonschema is a leaf utility package: it imports only the standard library and domain (for
-// domain.ErrInvalidArgument), so adapters, fakes and engines may all use it. Three places do:
+// domain.ErrInvalidArgument), so adapters, fakes and services may all use it. Three places do:
 //
 //   - the gateway adapter (internal/ai/gateway) compiles the schema of every ai.LLM.Structured call
 //     and validates the model's reply before decoding it; the mismatch text is what its retry sends back to

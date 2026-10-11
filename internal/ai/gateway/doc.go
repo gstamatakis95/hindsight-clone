@@ -9,9 +9,9 @@
 // # Architecture
 //
 // The package is the adapter of internal/ai: *Client implements ai.LLM, ai.Embedder and ai.Reranker, and cmd/memd
-// builds it. It imports internal/ai, internal/domain and internal/jsonschema and never internal/engine,
-// internal/grpcapi or internal/jobs; engines must not import net/http, so every model call goes through this package.
-// It holds no business logic: which model serves a slot, prompt text and token budgets are decided by the engines and
+// builds it. It imports internal/ai, internal/domain and internal/jsonschema and never a service, a library,
+// internal/grpcapi or internal/jobs; services must not import net/http, so every model call goes through this package.
+// It holds no business logic: which model serves a slot, prompt text and token budgets are decided by the services and
 // internal/config, which pass a domain.ModelBinding with every call.
 //
 // # Usage

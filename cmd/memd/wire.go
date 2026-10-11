@@ -37,10 +37,10 @@ import (
 )
 
 // The composition root. wire.go opens the infrastructure (Postgres, blob storage, the AI gateway), builds the shared
-// libraries once (core) and runs the two modes; each wire_<area>.go builds one area's engines, its gRPC handlers, its
+// libraries once (core) and runs the two modes; each wire_<area>.go builds one area's service, its gRPC handlers, its
 // job handlers and its part of the maintenance tick.
 
-// modelGateway is the AI gateway as the engines see it: one client serves all three model interfaces.
+// modelGateway is the AI gateway as the services see it: one client serves all three model interfaces.
 type modelGateway interface {
 	ai.LLM
 	ai.Embedder
@@ -59,14 +59,24 @@ type infra struct {
 	ping    func(ctx context.Context) error
 }
 
+// jobHandlers are the worker's job handlers by kind: every service's RunXJob and maintenance's graph job, which
+// each wire_<area>.go adds. retain_batch has none: it is a parent row whose status aggregates its children, not a
+// job a worker runs.
+type jobHandlers map[domain.OperationKind]jobs.Handler
+
+// add registers fn as the handler of kind.
+func (h jobHandlers) add(kind domain.OperationKind, fn jobs.Handler) { h[kind] = fn }
+
 // deps is everything the two modes run.
 type deps struct {
-	cfg         Config
-	log         *slog.Logger
-	api         grpcapi.Handlers
-	probes      []grpcapi.ReadinessProbe
-	handlers    handlers
+	cfg      Config
+	log      *slog.Logger
+	api      grpcapi.Handlers
+	probes   []grpcapi.ReadinessProbe
+	handlers jobHandlers
+	// maintenance collects the tick's dependencies; wireMaintenance builds maint from it.
 	maintenance maintenance.Deps
+	maint       *maintenance.Service
 	claimer     jobs.Claimer
 	db          store.DB
 	clock       clock.Clock
@@ -76,7 +86,7 @@ type deps struct {
 	tel *observability.Telemetry
 }
 
-// buildDeps connects the adapters, checks the gateway's embedding dimension and builds every engine. The
+// buildDeps connects the adapters, checks the gateway's embedding dimension and builds every service. The
 // returned closer releases the Postgres pool. tel (nil = Datadog off) instruments the adapters, the gRPC
 // server and the worker.
 func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observability.Telemetry,
@@ -98,12 +108,11 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observabi
 		closer()
 		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
-	d := wireEngines(cfg, in, tok, serverCfg, clock.System{}, log)
+	d := wireServices(cfg, in, tok, serverCfg, clock.System{}, log, tel)
 	if err := config.CheckArms(serverCfg, d.recallArms); err != nil {
 		closer()
 		return nil, nil, fmt.Errorf("memd: config file: defaults: %w", err)
 	}
-	d.tel = tel
 	return d, closer, nil
 }
 
@@ -186,7 +195,7 @@ func checkEmbedding(ctx context.Context, emb ai.Embedder) error {
 	return nil
 }
 
-// core are the libraries and engines several areas share.
+// core are the libraries several services share.
 type core struct {
 	db       store.DB
 	read     store.Reader
@@ -201,16 +210,18 @@ type core struct {
 	agent    *reflect.Agent
 }
 
-// wireEngines builds the shared libraries, then every area over them.
-func wireEngines(
+// wireServices builds the shared libraries, then every service over them; tel (nil = Datadog off) traces the
+// gRPC server, the jobs and the maintenance tick.
+func wireServices(
 	cfg Config, in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock, log *slog.Logger,
+	tel *observability.Telemetry,
 ) *deps {
 	c := wireCore(in, tok, serverCfg, clk)
 	d := &deps{
-		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk, recallArms: armNames(c.recall),
-		handlers: handlers{db: in.db, clock: clk},
+		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk, tel: tel, handlers: jobHandlers{},
+		recallArms: armNames(c.recall),
 		probes: []grpcapi.ReadinessProbe{
-			grpcapi.PostgresProbe{Ping: in.ping}, grpcapi.NewGatewayProbe(cfg.GatewayURL, &http.Client{}),
+			grpcapi.PostgresProbe{Ping: in.ping}, grpcapi.NewGatewayProbe(cfg.GatewayURL, &http.Client{}, clk),
 		},
 	}
 	wireMemory(c, in, d)
@@ -310,12 +321,9 @@ func runWorker(ctx context.Context, d *deps) error {
 		Logger:   d.log,
 		TraceJob: d.tel.JobHook(),
 	})
-	md := d.maintenance
-	md.TraceTick = d.tel.TickHook()
-	maint := maintenance.New(md)
-	h := d.handlers
-	h.graph = maint
-	h.register(r)
+	for kind, fn := range d.handlers {
+		r.Handle(kind, fn)
+	}
 	var lis net.Listener
 	if d.cfg.WorkerHealthAddr != "" {
 		var err error
@@ -325,7 +333,7 @@ func runWorker(ctx context.Context, d *deps) error {
 	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return r.Run(gctx) })
-	g.Go(func() error { return maint.Run(gctx) })
+	g.Go(func() error { return d.maint.Run(gctx) })
 	if lis != nil {
 		g.Go(func() error { return grpcapi.ServeHealth(gctx, lis, d.probes, apiShutdownGrace) })
 		d.log.Info("memd worker health serving", "addr", lis.Addr().String())

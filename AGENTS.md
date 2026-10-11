@@ -18,15 +18,15 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
     (the recall graph arm's Reader); graph/doc.go explains how a graph database would plug in
   - internal/clock (Clock; System and Manual)
 - internal/config: config resolution, merge (incl. model routing), defaults, validation, FieldMask patches.
-  internal/prompts: templates.
+  internal/prompts: templates. internal/jsonschema: JSON Schema checks.
 - internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
-  kind's payload, serial key and Enqueue helper. internal/maintenance: the 60 s tick and the graph_maintenance job.
+  kind's payload, serial key and Enqueue helper.
 - Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, Arms, CheckArms, CompileTags,
   SearchPages, ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking
   (Linker, Resolver, LabelResolver). Recall arms are the one extension point inside a library: the recall.Arm
   interface, the built-in vector, text, graph and temporal arms in internal/recall/arms (one file each), and their
   contract suite in internal/recall/armtest.
-- Services, one package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC
+- Services, one package per gRPC service area, each exporting one `Service` built by `New(Deps)`; each owns its RPC
   logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
   - internal/memory: MemoryService (Retain, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory,
     InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
@@ -35,26 +35,33 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
     reconcile sweep.
   - internal/document: DocumentService (list, get, retag, reprocess); retag_document.
   - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
-- internal/engine/*: the remaining business logic over the boundaries and libraries.
-- internal/grpcapi: thin gRPC handlers, one file and handler struct per service (holding only the engines it
-  calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes.
+  - internal/bank: BankService's bank lifecycle (create, from a template too, get, delete, stats, tags, export);
+    delete_bank; the stalled-delete sweep.
+  - internal/configsvc: TenantService and BankService's config, directive and prompt-preview RPCs.
+  - internal/operation: OperationService (operation and event reads, cancel, retry).
+- internal/maintenance: the 60 s tick (ordered steps calling the services' sweeps) and the graph_maintenance job.
+- internal/grpcapi: thin gRPC handlers, one file and handler struct per proto service (holding only the services it
+  calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes. No logic.
+- internal/observability: the optional Datadog instrumentation, wired in cmd/memd only.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
-  area builds its engines or service and gRPC handlers; handlers.go adapts the engines to job handlers and
-  registers the services' own RunXJob handlers. config.go reads
-  the environment (deployment, infrastructure and secrets only), configfile.go the server config file
-  (memd.example.yaml).
+  service builds it, hands it to its gRPC handlers, registers its job handlers and sets its tick steps
+  (wire_maintenance.go runs last). config.go reads the environment (deployment, infrastructure and secrets only),
+  configfile.go the server config file (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
 
 ## Rules
-- The boundaries (store, graph, ai, blob, clock) are interfaces; put `var _ Iface = (*impl)(nil)` next to each
-  implementation. ai.Router, ai.Tokenizer, clock.System, config.Resolver and the libraries are concrete; take them
-  as pointers.
-- Engines, services and libraries never import adapters, grpcapi, maintenance, gen, pgx, net/http or the S3 SDK;
-  libraries never import engines or services, and services never import each other or the engines; cross-service
-  effects go through a jobs.Enqueue* helper (depguard enforces this).
+- Interfaces exist only at I/O boundaries (store, graph, ai, blob, clock, jobs.Claimer, grpcapi.ReadinessProbe) and
+  for in-package polymorphism (recall.Arm, reflect's tools, retain's extraction modes, the mental-model
+  synthesizers). Put `var _ Iface = (*impl)(nil)` next to each implementation. Accept
+  interfaces, return structs: ai.Router, ai.Tokenizer, clock.System, config.Resolver, the libraries and the
+  services are concrete; take them as pointers.
+- Services, libraries and infrastructure never import adapters, grpcapi, maintenance, gen, pgx, net/http or the S3
+  SDK; libraries never import services; services never import each other. To affect another service, enqueue its
+  job with a jobs.Enqueue* helper inside your transaction; shared pure rules go in domain. depguard enforces this.
 - Enqueue jobs only through the jobs.Enqueue* helpers (jobs/kinds.go), inside the transaction of the change. The
   helpers never call tx.Seq: call tx.Seq(bank) first yourself when the transaction changes memory content.
-- Inject clock.Clock; never call time.Now for logic. Every LLM call resolves its binding with ai.Router.
+- Inject clock.Clock; never call time.Now (or time.Since, time.After) for logic: recency, debounce, interval
+  floors and budgets must be deterministic in tests. Every LLM call resolves its binding with ai.Router.
 - Doc comment on every exported identifier, every method in an interface and every package (doc.go).
 - McCabe complexity <= 15 and lines <= 120. Split the function; don't suppress the linter.
 - No `//nolint` without a reason comment.
@@ -65,12 +72,17 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - New retrieval arms implement recall.Arm, take only the boundary they read, run armtest, and are registered in
   recallArms (cmd/memd/wire.go); clients reach them by name. Never special-case an arm in the engine.
 - No per-memory delete API. Invalidate archives a unit; upsert and reprocess replace a document's units.
-- Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim. Report
-  progress and results through jobs.Run; keep result keys stable (GetOperation shows them).
-- Never call an LLM, embedder or reranker inside DB.InTx. Call first, then write in a short tx.
-  tools/txcheck enforces the lexical case (a model call written inside the InTx literal).
-- Any tx that changes memory content calls tx.Seq(bank) and stamps the rows it writes with it.
+- Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim. A handler
+  takes the `*jobs.Run` it runs under: report progress with run.Report (it returns domain.ErrCancelled once the
+  job is cancelled or its bank deleted), check run.Alive before an irreversible step, and record results with
+  run.SetResult; keep result keys stable (GetOperation shows them).
+- Never call an LLM, embedder, reranker, recall, reflect or timex inside DB.InTx: read, call, then write in a
+  short tx. tools/txcheck enforces the lexical case (a model call written inside the InTx literal).
+- Any tx that changes memory content calls tx.Seq(bank) first and stamps the rows it writes with it.
   tools/txcheck flags an Enqueue before tx.Seq in the same InTx literal.
+- InTx bodies must be re-runnable: InTx retries on deadlock, serialization failure and pruned-entity conflicts,
+  so reset every captured output at the top of the closure and do no side effects outside the tx.
+- Links are written through tx.Graph() (the graph boundary), in the transaction that writes the units.
 
 ## Commands
 - make gen      # buf generate, sqlc, mockery
@@ -83,9 +95,12 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 ## Before you finish
 - make gen && make lint && make test pass, with no diff left in gen/, schema/ or internal/mocks/.
 - Store code is tested against real Postgres: pgtest.NewStore(t) gives each test its own migrated database.
-  Fakes (internal/fake) exist only for the LLM, embedder, reranker and blob; tests use clock.Manual for time.
-- API behaviour through the real engines is tested in cmd/memd on the wired stack (stack_test.go: pgtest, the
-  gateway emulator, the worker), not with engine mocks.
+  Postgres judges due-ness and heartbeats by its own clock: move run_at or heartbeat_at with SQL rather than
+  advancing the test clock. Fakes (internal/fake) exist only for the LLM, embedder, reranker and blob; mocks
+  (internal/mocks, generated by mockery, never hand-written) only for the ai boundary; tests use clock.Manual.
+  A job test passes jobs.Inline(job), or jobs.NewRun over a claimer when it tests fencing.
+- Each _test.go sits next to the code it tests. API behaviour through the real services is tested in cmd/memd on
+  the wired stack (stack_test.go: pgtest, the gateway emulator, the worker).
 - A proto change comments every new element.
 
 ## API changes

@@ -24,7 +24,9 @@
 //     assertion. Import only this package, internal/domain and the provider SDK; keep the SDK out of every other
 //     package.
 //  2. Map the provider's errors as above, and follow the method comments on Store exactly: List pages in byte order
-//     strictly after the given key, the empty-prefix and limit refusals, and DeletePrefix's partial-failure count.
+//     strictly after the given key and returns a short page only when nothing is left (follow the provider's own
+//     pages until limit keys are read; the bank delete stops at a short page), the empty-prefix and limit
+//     refusals, and DeletePrefix's partial-failure count.
 //  3. Run the shared contract suite from its tests: blobtest.Run(t, func(t *testing.T) blob.Store { ... }), giving
 //     every call a fresh, empty store (a new bucket or container on the provider's emulator in testcontainers).
 //  4. Add the provider's settings to cmd/memd's Config and a case to the MEMD_BLOB_PROVIDER switch in wire.go, and
