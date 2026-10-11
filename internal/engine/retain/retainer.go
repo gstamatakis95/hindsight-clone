@@ -35,7 +35,8 @@ type RetainResult struct { //nolint:revive // stutter: name fixed by the spec
 	Unchanged bool
 	// Superseded reports that a newer retain of the document took over (its blob or overrides replaced this
 	// run's, or it rewrote a chunk this run committed). The run stopped without completing the document;
-	// whatever it committed before was replaced by, or is replaced by, the newer retain (decision 807).
+	// whatever it committed before was replaced by, or is replaced by, the newer retain (decision 807). A
+	// change of the document's tags alone never supersedes: the run adopts them (decision 1700).
 	Superseded bool
 	// ChunksTotal is the number of chunks the document split into.
 	ChunksTotal int
@@ -151,12 +152,13 @@ func (r *retainer) ProcessDocument(ctx context.Context, j port.Job) (RetainResul
 	}
 	committed = trustedCommitted(committed, chunks, doc)
 	rn.adopt(committed, chunks)
-	res.ChunksTotal, res.Scopes = len(chunks), r.scopes(rn)
+	res.ChunksTotal = len(chunks)
 	err = r.processChunks(ctx, rn, chunks, committed, &res)
 	if err == nil {
 		err = r.complete(ctx, rn)
 	}
-	res.UnitsCreated, res.Usage = len(res.UnitIDs), SumUsage(res.Usage)
+	// The scopes follow the tags the run ended with: a retag mid-run is adopted (docSuperseded).
+	res.UnitsCreated, res.Usage, res.Scopes = len(res.UnitIDs), SumUsage(res.Usage), r.scopes(rn)
 	if errors.Is(err, errSuperseded) {
 		res.Superseded, res.UnitsCreated, res.UnitIDs = true, 0, nil
 		return res, nil
@@ -302,22 +304,32 @@ func (rn *run) adopt(committed map[int]string, chunks []domain.Chunk) {
 	rn.replaced = len(rn.owned) > 0
 }
 
-// docSuperseded reports whether a newer retain owns the document: its stored blob key, tags or overrides are
-// no longer this run's (an older run of the same content must not write its tags over newer ones).
+// docSuperseded reports whether a newer retain owns the document: its stored blob key or overrides are no
+// longer this run's. When only the tags differ (UpdateDocument retagged the document, or a newer retain of the
+// same content and overrides changed them), the run still owns it: it adopts the document's current tags for
+// the units it writes from now on, and the retag_document job queued behind it on the same "doc:" key
+// retags the units it already wrote (decisions 807, 1700). So no run ever writes stale tags over newer ones.
 func (r *retainer) docSuperseded(doc domain.Document, rn *run) (bool, error) {
-	if doc.BlobKey != rn.p.BlobKey || !domain.SameTagSet(doc.Tags, rn.tags) {
+	if doc.BlobKey != rn.p.BlobKey {
 		return true, nil
 	}
 	oh, err := OverridesHash(doc.Overrides)
 	if err != nil {
 		return false, err
 	}
-	return oh != rn.ownOH, nil
+	if oh != rn.ownOH {
+		return true, nil
+	}
+	if !domain.SameTagSet(doc.Tags, rn.tags) {
+		rn.tags = domain.NormalizeTags(doc.Tags)
+	}
+	return false, nil
 }
 
 // checkOwner runs inside a write transaction, after Tx.Seq has row-locked the bank (so it cannot race
-// another retain's write): it fails with errSuperseded when a newer retain owns the document or rewrote a
-// chunk this run committed.
+// another retain's write or a retag): it fails with errSuperseded when a newer retain owns the document or
+// rewrote a chunk this run committed, and otherwise adopts the document's current tags (docSuperseded), so
+// the units this transaction writes carry them.
 func (r *retainer) checkOwner(ctx context.Context, tx port.Tx, rn *run) error {
 	doc, err := tx.Documents().Get(ctx, rn.j.Bank, rn.p.DocumentID)
 	if err != nil {

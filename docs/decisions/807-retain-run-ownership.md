@@ -18,6 +18,14 @@ Salting chunk hashes per run (decision 801) is not enough on its own. Two failur
 - **Before any model call.** The Retainer re-reads the document. If its `blob_key` or its stored overrides
   are no longer this run's, a newer retain owns the document: the run ends as superseded (see the last two
   bullets).
+- **Tags alone are not ownership (WP-17, decision 1700).** If the blob key and overrides still match and
+  only the document's tags differ, the run still owns the document. The tags changed because UpdateDocument
+  retagged it, or because a newer retain of the same content and overrides did. The run adopts the
+  document's current tags and stamps every unit it writes from then on with them. This happens both in the
+  check before the model calls and in every transaction check (under the Seq lock, see below).
+  The retag_document job queued on the same `doc:` key runs after this job and retags the units the run had
+  already written. Before WP-17 a tag difference superseded the run, which lost the facts of every chunk not
+  yet committed.
 - **Trusting committed chunks.** Committed chunk hashes are trusted only when two things hold:
   - index 0 carries this run's salted hash;
   - the document is still in flight (`extracted_at` unset).
@@ -26,7 +34,8 @@ Salting chunk hashes per run (decision 801) is not enough on its own. Two failur
   ignored.
 - **Inside every write transaction.** Each batch transaction and the completing transaction check, right
   after `Tx.Seq` (which row-locks the bank, so the check cannot race another retain's write):
-  - that the document still has this run's blob key and overrides;
+  - that the document still has this run's blob key and overrides (then it re-reads the tags and adopts
+    them, see above);
   - that every chunk this run committed still carries its salted hash.
 
   A newer run's first batch always rewrites chunk 0, so it is caught. If either check fails, the transaction
@@ -48,4 +57,5 @@ SPEC "Behavioural rules" (retain idempotency, resume), "Jobs" (`retain_document`
 (RetryOperation). Tests:
 - `TestRetainSupersededAfterInterveningRetain`;
 - `TestRetainRetryOperationAfterNewerRetain`;
-- `TestRetainOverlappingRetainsOfOneDocument`.
+- `TestRetainOverlappingRetainsOfOneDocument`;
+- `TestRetainOverridesChangeMidRunSupersedes` and `TestRetainOlderRunCannotOverwriteNewerTags` (WP-17).

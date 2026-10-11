@@ -291,6 +291,7 @@ func classify(ctx, actx context.Context, a attempt, err error) error {
 // overflowMarkers are the (lowercased) body fragments providers use for a prompt over the context window.
 var overflowMarkers = []string{
 	"context_length_exceeded", "maximum context length", "prompt is too long", "input is too long",
+	"context length exceeded", "prompt_too_long", "context window",
 }
 
 // contextOverflow reports whether a response with status code and body raw (the whole body read, capped at
