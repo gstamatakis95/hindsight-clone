@@ -30,6 +30,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/reflection"
 )
 
 // wire.go is the only composition root: it builds the adapters (Postgres, S3, gateway), narrows each to the
@@ -321,6 +322,7 @@ func runAPI(ctx context.Context, d *deps) error {
 		return fmt.Errorf("memd: listen %s: %w", d.cfg.GRPCAddr, err)
 	}
 	srv := server.New(d.server)
+	reflection.Register(srv) // lets grpcurl and similar tools discover the services
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(lis) }()
 	d.log.Info("memd api serving", "addr", lis.Addr().String())

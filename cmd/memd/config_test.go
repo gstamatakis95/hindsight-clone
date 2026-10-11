@@ -48,6 +48,20 @@ func TestLoadConfigEnvAndFlags(t *testing.T) {
 	}
 }
 
+// TestNormalizeDSN checks the Alembic-style DSN the Makefile exports is accepted.
+func TestNormalizeDSN(t *testing.T) {
+	cases := map[string]string{
+		"postgresql+psycopg://memd:memd@localhost:55432/memd": "postgresql://memd:memd@localhost:55432/memd",
+		"postgres://u@h/db?sslmode=disable":                   "postgres://u@h/db?sslmode=disable",
+		"host=localhost dbname=memd":                          "host=localhost dbname=memd",
+	}
+	for in, want := range cases {
+		if got := normalizeDSN(in); got != want {
+			t.Errorf("normalizeDSN(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestValidateRejects checks each invalid configuration fails before anything connects.
 func TestValidateRejects(t *testing.T) {
 	cases := map[string]func(env map[string]string) []string{

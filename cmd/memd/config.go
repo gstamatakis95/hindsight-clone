@@ -290,7 +290,21 @@ func LoadConfig(args []string, env func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("memd: %s: %w", s.env, err)
 		}
 	}
+	c.DSN = normalizeDSN(c.DSN)
 	return c, nil
+}
+
+// normalizeDSN drops a SQLAlchemy driver suffix from the URL scheme ("postgresql+psycopg://" ->
+// "postgresql://"), so the one MEMD_DSN the Makefile exports for Alembic also works for memd.
+func normalizeDSN(dsn string) string {
+	scheme, rest, ok := strings.Cut(dsn, "://")
+	if !ok {
+		return dsn
+	}
+	if base, _, driver := strings.Cut(scheme, "+"); driver {
+		return base + "://" + rest
+	}
+	return dsn
 }
 
 // lookup returns env's value of key when set and non-empty.
