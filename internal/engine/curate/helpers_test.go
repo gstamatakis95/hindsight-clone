@@ -5,9 +5,11 @@ import (
 	"errors"
 	"memd/internal/ai"
 	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/retain"
 	"memd/internal/fake"
+	"memd/internal/graph"
+	"memd/internal/linking"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
@@ -90,9 +92,9 @@ func (e *env) seed() {
 		if err := tx.Entities().Attach(e.ctx, idF1, []domain.EntityID{ent}); err != nil {
 			return err
 		}
-		return tx.Links().Insert(e.ctx, []domain.Link{
-			{Bank: testBank, From: idF1, To: idF2, Kind: domain.LinkCausal, Weight: 1},
-			{Bank: testBank, From: idF1, To: idF2, Kind: domain.LinkTemporal, Weight: 0.5},
+		return tx.Graph().AddLinks(e.ctx, []graph.Link{
+			{Bank: testBank, From: idF1, To: idF2, Kind: graph.KindCausal, Weight: 1},
+			{Bank: testBank, From: idF1, To: idF2, Kind: graph.KindTemporal, Weight: 0.5},
 		})
 	})
 }
@@ -118,7 +120,7 @@ func (e *env) inTx(fn func(tx store.Tx) error) {
 func (e *env) curator() Curator {
 	return NewCurator(CuratorDeps{
 		Store: e.store, Clock: e.clock, Citing: e.citing, Resolver: resolverStub{},
-		Config: configStub{},
+		Config: config.NewResolver(e.fake, domain.BankConfig{}),
 	})
 }
 
@@ -191,10 +193,15 @@ func (e *env) events() []domain.LifecycleEvent {
 }
 
 // hitIDs returns the unit ids of hits.
-func hitIDs(hs []store.Hit) []domain.UnitID {
+func hitIDs[H store.Hit | graph.Hit](hs []H) []domain.UnitID {
 	ids := make([]domain.UnitID, len(hs))
 	for i, h := range hs {
-		ids[i] = h.ID
+		switch h := any(h).(type) {
+		case store.Hit:
+			ids[i] = h.ID
+		case graph.Hit:
+			ids[i] = h.ID
+		}
 	}
 	return ids
 }
@@ -297,7 +304,7 @@ type resolverStub struct{}
 
 // Resolve upserts one entity per mention.
 func (resolverStub) Resolve(
-	ctx context.Context, tx store.Tx, b domain.BankRef, in retain.ResolveInput,
+	ctx context.Context, tx store.Tx, b domain.BankRef, in linking.ResolveInput,
 ) ([]domain.EntityID, error) {
 	var ids []domain.EntityID
 	for _, m := range in.Mentions {
@@ -329,7 +336,7 @@ type linkerStub struct {
 
 // Link records the call and inserts a temporal edge to f2.
 func (l *linkerStub) Link(
-	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, _ retain.CauseMap,
+	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, _ linking.CauseMap,
 ) error {
 	ids := make([]domain.UnitID, len(units))
 	for i, u := range units {
@@ -338,24 +345,11 @@ func (l *linkerStub) Link(
 	l.mu.Lock()
 	l.calls = append(l.calls, ids)
 	l.mu.Unlock()
-	var ls []domain.Link
+	var ls []graph.Link
 	for _, u := range units {
 		if u.ID != idF2 {
-			ls = append(ls, domain.Link{Bank: b, From: u.ID, To: idF2, Kind: domain.LinkTemporal, Weight: 0.9})
+			ls = append(ls, graph.Link{Bank: b, From: u.ID, To: idF2, Kind: graph.KindTemporal, Weight: 0.9})
 		}
 	}
-	return tx.Links().Insert(ctx, ls)
-}
-
-// configStub is a config.Resolver returning the empty config.
-type configStub struct{}
-
-// Effective returns the zero config.
-func (configStub) Effective(context.Context, domain.BankRef, ...domain.BankConfig) (domain.BankConfig, error) {
-	return domain.BankConfig{}, nil
-}
-
-// ForScope returns the zero config.
-func (configStub) ForScope(context.Context, domain.ScopeKey, *domain.BankConfig) (domain.BankConfig, error) {
-	return domain.BankConfig{}, nil
+	return tx.Graph().AddLinks(ctx, ls)
 }

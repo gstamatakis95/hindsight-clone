@@ -12,19 +12,18 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/bank"
-	"memd/internal/engine/consolidate"
-	"memd/internal/engine/mentalmodel"
-	"memd/internal/engine/recall"
-	"memd/internal/engine/reflect"
 	"memd/internal/engine/retain"
-	"memd/internal/engine/timex"
+	"memd/internal/graph"
 	"memd/internal/grpcapi"
 	"memd/internal/jobs"
+	"memd/internal/linking"
 	"memd/internal/maintenance"
 	"memd/internal/observability"
+	"memd/internal/recall"
+	"memd/internal/reflect"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
+	"memd/internal/timex"
 	"net"
 	"net/http"
 	"os"
@@ -52,6 +51,7 @@ type modelGateway interface {
 // appear; tests build infra over pgtest and internal/fake.
 type infra struct {
 	db      store.DB
+	graph   graph.Reader
 	claimer jobs.Claimer
 	maint   store.Maintenance
 	blob    blob.Store
@@ -134,7 +134,7 @@ func openInfra(ctx context.Context, cfg Config, embedModel string, tel *observab
 		TraceCall: tel.GatewayHook(),
 	}, tel.HTTPClient(nil))
 	pg := postgres.New(pool)
-	return infra{db: pg, claimer: pg, maint: pg, blob: bs, gw: gw, ping: pool.Ping}, pool.Close, nil
+	return infra{db: pg, graph: pg.Graph(), claimer: pg, maint: pg, blob: bs, gw: gw, ping: pool.Ping}, pool.Close, nil
 }
 
 // openBlob builds the blob.Store adapter MEMD_BLOB_PROVIDER selects (Config.Validate has already rejected an
@@ -182,21 +182,18 @@ func checkEmbedding(ctx context.Context, emb ai.Embedder) error {
 
 // core are the libraries and engines several areas share.
 type core struct {
-	db        store.DB
-	read      store.Reader
-	clock     clock.Clock
-	tok       *ai.Tokenizer
-	resolver  config.Resolver
-	router    *ai.Router
-	matcher   consolidate.StrategyMatcher
-	times     timex.TimeNormalizer
-	scopes    consolidate.ScopeExpander
-	linker    retain.Linker
-	entities  retain.EntityResolver
-	retainer  retain.Retainer
-	recaller  recall.Recaller
-	reflector reflect.Reflector
-	dirs      bank.DirectiveSelector
+	db       store.DB
+	read     store.Reader
+	clock    clock.Clock
+	tok      *ai.Tokenizer
+	resolver *config.Resolver
+	router   *ai.Router
+	times    *timex.Normalizer
+	linker   *linking.Linker
+	entities *linking.Resolver
+	retainer retain.Retainer
+	recall   *recall.Engine
+	agent    *reflect.Agent
 }
 
 // wireEngines builds the shared libraries, then every area over them.
@@ -222,30 +219,26 @@ func wireEngines(
 	return d
 }
 
-// wireCore builds config resolution, routing, time normalization, retain's shared pieces, recall and reflect.
+// wireCore builds the libraries: config resolution, routing, time normalization, linking, retain's shared retainer,
+// recall (over the store and the graph reader) and the reflect agent.
 func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock) core {
 	db, gw := in.db, in.gw
 	c := core{db: db, read: db.Read(), clock: clk, tok: tok, router: ai.NewRouter()}
-	c.matcher = consolidate.NewStrategyMatcher(c.read)
-	c.resolver = config.NewResolver(db, c.matcher, serverCfg)
-	c.times = timex.NewNormalizer(gw, c.router, clk)
-	c.scopes = consolidate.NewScopeExpander()
-	c.linker = retain.NewLinker()
-	c.entities = retain.NewEntityResolver(retain.ResolverConfig{})
+	c.resolver = config.NewResolver(db, serverCfg)
+	c.times = timex.New(gw, c.router, clk)
+	c.linker = linking.NewLinker()
+	c.entities = linking.NewResolver(linking.ResolverConfig{})
 	c.retainer = retain.NewRetainer(retain.RetainerDeps{
 		Store: db, Blob: in.blob, Config: c.resolver, Extractor: retain.NewExtractor(gw, c.router),
-		Dates: c.times, Embedder: gw, Entities: c.entities, Labels: retain.NewLabelResolver(), Linker: c.linker,
-		Scopes: c.scopes, Tokens: tok, Clock: clk,
+		Dates: c.times, Embedder: gw, Entities: c.entities, Labels: linking.NewLabelResolver(), Linker: c.linker,
+		Tokens: tok, Clock: clk,
 	})
-	c.recaller = recall.NewRecaller(recall.RecallerDeps{
-		Reader: c.read, Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router, Times: c.times,
-		Clock: clk, Count: tok,
+	c.recall = recall.New(recall.Deps{
+		DB: db, Graph: in.graph, Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router, Times: c.times,
+		Clock: clk, Tokens: tok,
 	})
-	c.dirs = bank.NewDirectiveSelector(db)
-	pages := &pageReader{search: mentalmodel.NewPageSearcher(c.read, gw), s: db}
-	c.reflector = reflect.NewReflector(reflect.ReflectorDeps{
-		Store: db, Config: c.resolver, Router: c.router, LLM: gw, Clock: clk,
-		Tools: reflect.DefaultTools(c.recaller, pages, c.read),
+	c.agent = reflect.New(reflect.Deps{
+		DB: db, Config: c.resolver, Router: c.router, LLM: gw, Clock: clk, Recall: c.recall,
 	})
 	return c
 }

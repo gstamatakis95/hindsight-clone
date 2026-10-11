@@ -167,36 +167,3 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 		t.Fatalf("options not passed through: %+v", c)
 	}
 }
-
-// downEmbedder is a ai.Embedder that always fails.
-type downEmbedder struct{}
-
-// EmbedDocuments implements ai.Embedder.
-func (downEmbedder) EmbedDocuments(context.Context, []string) ([][]float32, error) {
-	return nil, errors.New("embedder down")
-}
-
-// EmbedQuery implements ai.Embedder.
-func (downEmbedder) EmbedQuery(context.Context, string) ([]float32, error) {
-	return nil, errors.New("embedder down")
-}
-
-// TestSearchPagesEmbedderDown checks that SearchPages ranks by terms only when the embedder fails.
-func TestSearchPagesEmbedderDown(t *testing.T) {
-	e := newEnv(t)
-	for id, content := range map[domain.MentalModelID]string{
-		"deploy": "# Deploy\n\nWe deploy with Argo every Tuesday.",
-		"hiring": "# Hiring\n\nInterviews take two rounds.",
-	} {
-		e.addModel(domain.MentalModelSpec{ID: id, Name: string(id)})
-		m := e.model(id)
-		m.ContentMD = content
-		e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
-	}
-	hits, err := NewPageSearcher(e.reads, downEmbedder{}).Search(e.ctx, SearchPagesRequest{
-		Bank: e.bank, Query: "how do we deploy?",
-	})
-	if err != nil || len(hits) != 1 || hits[0].MentalModelID != "deploy" {
-		t.Fatalf("hits %+v: %v", hits, err)
-	}
-}

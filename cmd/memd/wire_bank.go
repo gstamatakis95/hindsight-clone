@@ -11,7 +11,7 @@ func wireBanks(c core, in infra, d *deps) {
 	deleter := bank.NewBankDeleter(c.db, in.blob, c.clock, bank.DeleterConfig{})
 	d.api.Bank = &grpcapi.BankHandler{
 		Banks: bank.NewBankAdmin(c.db), Config: c.resolver, Stats: bank.NewStatsReader(c.read),
-		Previewer: bank.NewPromptPreviewer(c.resolver, c.dirs), Deleter: deleter,
+		Previewer: bank.NewPromptPreviewer(c.resolver, c.db), Deleter: deleter,
 		Templates: bank.NewTemplateCodec(c.db, c.clock), Directives: bank.NewDirectiveAdmin(c.db),
 	}
 	d.handlers.deleter = deleter

@@ -4,16 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"memd/internal/ai"
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/timex"
 	"memd/internal/fake"
+	"memd/internal/linking"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
+	"memd/internal/timex"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +33,7 @@ type env struct {
 	llm      *fake.LLM
 	emb      *fake.Embedder
 	blob     *fake.Blob
-	cfg      config.Resolver
+	cfg      *config.Resolver
 	retainer Retainer
 	ingestor Ingestor
 }
@@ -50,13 +52,14 @@ func newEnv(t *testing.T, batch int) *env {
 		emb: fake.NewEmbedder(fake.EmbedSimilar), blob: fake.NewBlob(),
 	}
 	e.store = pgtest.NewStore(t)
-	e.cfg = config.NewResolver(e.store, nil, server)
+	e.cfg = config.NewResolver(e.store, server)
 	router := ai.NewRouter()
 	e.retainer = NewRetainer(RetainerDeps{
 		Store: e.store, Blob: e.blob, Config: e.cfg, Extractor: NewExtractor(e.llm, router),
-		Dates: timex.NewNormalizer(e.llm, router, e.clock), Embedder: e.emb,
-		Entities: NewEntityResolver(ResolverConfig{}), Labels: NewLabelResolver(), Linker: NewLinker(),
-		Clock: e.clock, BatchChunks: batch,
+		Dates: timex.New(e.llm, router, e.clock), Embedder: e.emb,
+		Entities: linking.NewResolver(linking.ResolverConfig{}), Labels: linking.NewLabelResolver(),
+		Linker: linking.NewLinker(),
+		Clock:  e.clock, BatchChunks: batch,
 	})
 	e.ingestor = NewIngestor(IngestorDeps{
 		Store: e.store, Blob: e.blob, Config: e.cfg, Retainer: e.retainer, Merge: config.Merge, Clock: e.clock,
@@ -205,3 +208,25 @@ func (e *env) units(ids []domain.UnitID) []domain.Unit {
 
 // ptr returns a pointer to v.
 func ptr[T any](v T) *T { return &v }
+
+// inTx runs fn in a transaction on a bank that exists, failing the test on error.
+func (e *env) inTx(fn func(tx store.Tx) error) {
+	e.t.Helper()
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error {
+		if _, err := tx.Banks().Ensure(e.ctx, testBank); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// wrap adds test context to an error (nil stays nil).
+func wrap(err error) error {
+	if err != nil {
+		return fmt.Errorf("test: %w", err)
+	}
+	return nil
+}

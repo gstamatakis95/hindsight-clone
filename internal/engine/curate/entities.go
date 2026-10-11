@@ -4,20 +4,16 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/retain"
+	"memd/internal/linking"
 	"memd/internal/store"
 	"time"
 )
-
-// defaultEntityMatchThreshold is the resolver threshold when the effective config sets none (server
-// defaults don't set retain.entity_match_threshold yet; see the WP-13 PR gaps).
-const defaultEntityMatchThreshold = 0.6
 
 // entityChange is the entity rewrite an Update commits in its own transaction: the names to resolve and the
 // resolver input (At is filled in the transaction from the unit). nil = leave the attachments alone.
 type entityChange struct {
 	names []string
-	in    retain.ResolveInput
+	in    linking.ResolveInput
 }
 
 // planEntities decides, before the transaction, whether the Update rewrites the unit's entities: an edit's
@@ -40,7 +36,7 @@ func (c *curator) planEntities(ctx context.Context, req UpdateMemoryRequest, sna
 	if err != nil {
 		return nil, err
 	}
-	return &entityChange{names: names, in: retain.ResolveInput{
+	return &entityChange{names: names, in: linking.ResolveInput{
 		Mentions: mentions(names), Literal: literal, Threshold: threshold,
 	}}, nil
 }
@@ -48,7 +44,7 @@ func (c *curator) planEntities(ctx context.Context, req UpdateMemoryRequest, sna
 // threshold resolves the entity merge threshold with the request overrides.
 func (c *curator) threshold(ctx context.Context, req UpdateMemoryRequest) (float64, error) {
 	if c.d.Config == nil {
-		return defaultEntityMatchThreshold, nil
+		return linking.DefaultEntityMatchThreshold, nil
 	}
 	var ov []domain.BankConfig
 	if req.Overrides != nil {
@@ -56,12 +52,12 @@ func (c *curator) threshold(ctx context.Context, req UpdateMemoryRequest) (float
 	}
 	cfg, err := c.d.Config.Effective(ctx, req.Bank, ov...)
 	if err != nil {
-		return 0, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
+		return 0, fmt.Errorf("curate: %w", err)
 	}
 	if cfg.Retain != nil && cfg.Retain.EntityMatchThreshold != nil {
 		return *cfg.Retain.EntityMatchThreshold, nil
 	}
-	return defaultEntityMatchThreshold, nil
+	return linking.DefaultEntityMatchThreshold, nil
 }
 
 // commitEntities applies change to u in tx when the request names entities or a restore brought the unit

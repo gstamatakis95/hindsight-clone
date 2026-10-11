@@ -8,7 +8,6 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
 	"memd/internal/jobs"
 	"memd/internal/store"
 
@@ -52,7 +51,7 @@ type ConsolidatorDeps struct {
 	// Store reads units and applies decisions in short transactions.
 	Store store.DB
 	// Config resolves the effective config per run (Effective) and per scope (ForScope, strategy < request).
-	Config config.Resolver
+	Config *config.Resolver
 	// Router resolves the CONSOLIDATE and DEDUP_CHECK bindings.
 	Router *ai.Router
 	// LLM makes the CONSOLIDATE calls (and DEDUP_CHECK through the default Deduper).
@@ -61,38 +60,41 @@ type ConsolidatorDeps struct {
 	Embedder ai.Embedder
 	// Clock stamps consolidated_at, versions and events.
 	Clock clock.Clock
-	// Scopes expands units into scopes; nil = NewScopeExpander().
-	Scopes ScopeExpander
 	// Deduper checks new observations for near-duplicates; nil = NewDeduper(LLM, Router, Store.Read()).
 	Deduper Deduper
 	// Tokens counts tokens for the source-fact budgets; nil = about four characters per token.
-	Tokens recall.TokenCounter
+	Tokens *ai.Tokenizer
 	// NewID makes observation ids; nil = random UUIDs.
 	NewID func() domain.UnitID
 }
 
 // consolidator implements Consolidator.
 type consolidator struct {
-	d ConsolidatorDeps
+	d      ConsolidatorDeps
+	tokens tokenCounter
+}
+
+// tokenCounter counts tokens: the wired ai.Tokenizer, else approxTokens.
+type tokenCounter interface {
+	// Count returns text's token count.
+	Count(text string) int
 }
 
 var _ Consolidator = (*consolidator)(nil)
 
 // NewConsolidator returns the Consolidator, filling optional dependencies with their defaults.
 func NewConsolidator(d ConsolidatorDeps) Consolidator {
-	if d.Scopes == nil {
-		d.Scopes = NewScopeExpander()
-	}
 	if d.Deduper == nil {
 		d.Deduper = NewDeduper(d.LLM, d.Router, d.Store.Read())
 	}
-	if d.Tokens == nil {
-		d.Tokens = approxTokens{}
+	var tokens tokenCounter = approxTokens{}
+	if d.Tokens != nil {
+		tokens = d.Tokens
 	}
 	if d.NewID == nil {
 		d.NewID = func() domain.UnitID { return domain.UnitID(uuid.NewString()) }
 	}
-	return &consolidator{d: d}
+	return &consolidator{d: d, tokens: tokens}
 }
 
 // approxTokens counts about four characters per token.

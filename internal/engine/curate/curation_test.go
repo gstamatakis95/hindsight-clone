@@ -6,6 +6,7 @@ import (
 	"errors"
 	"memd/internal/ai"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
@@ -147,8 +148,8 @@ func (e *env) restoreF1(c Curator) store.Job {
 // assertCausalF1F2 checks the causal edge f1 -> f2 exists.
 func (e *env) assertCausalF1F2() {
 	e.t.Helper()
-	hits, err := e.fake.Read().ExpandGraph(e.ctx, store.GraphQuery{
-		Bank: testBank, Seeds: []domain.UnitID{idF1}, MaxHops: 1, Kinds: []domain.LinkKind{domain.LinkCausal},
+	hits, err := e.fake.Graph().Expand(e.ctx, graph.Query{
+		Bank: testBank, Seeds: []domain.UnitID{idF1}, MaxHops: 1, Kinds: []graph.Kind{graph.KindCausal},
 		Limit: 10,
 	})
 	if err != nil || !slices.Contains(hitIDs(hits), idF2) {

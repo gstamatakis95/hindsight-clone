@@ -24,13 +24,10 @@ const aiPkg = "memd/internal/ai"
 var modelInterfaces = []string{"LLM", "Embedder", "Reranker"}
 
 // modelTypes are the concrete types (package path, type name) whose methods must not be called inside a
-// transaction. Current and planned locations are both listed; a path that does not exist is harmless.
+// transaction: they call models (or, for recall, read outside the transaction).
 var modelTypes = []struct{ pkg, name string }{
-	{"memd/internal/engine/recall", "Engine"},
 	{"memd/internal/recall", "Engine"},
-	{"memd/internal/engine/reflect", "Agent"},
 	{"memd/internal/reflect", "Agent"},
-	{"memd/internal/engine/timex", "Normalizer"},
 	{"memd/internal/timex", "Normalizer"},
 	{aiPkg, "Router"},
 }

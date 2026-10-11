@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"memd/internal/clock"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/jobs"
+	"memd/internal/linking"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
@@ -27,7 +29,7 @@ type stubLinker struct {
 }
 
 func (l *stubLinker) Link(
-	_ context.Context, _ store.Tx, _ domain.BankRef, units []domain.Unit, _ map[domain.UnitID][]domain.UnitID,
+	_ context.Context, _ store.Tx, _ domain.BankRef, units []domain.Unit, _ linking.CauseMap,
 ) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -44,7 +46,7 @@ func (l *stubLinker) Link(
 
 // LinkWith is Link; the graph job never passes a config.
 func (l *stubLinker) LinkWith(
-	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes map[domain.UnitID][]domain.UnitID,
+	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes linking.CauseMap,
 	_ domain.BankConfig,
 ) error {
 	return l.Link(ctx, tx, b, units, causes)
@@ -81,19 +83,19 @@ func seedHub(t *testing.T, db *postgres.DB, n int) (orphan, kept domain.EntityID
 			}
 		}
 		units := []domain.Unit{{ID: hub, Bank: testBank, DocumentID: "hub", Type: domain.FactTypeWorld, Seq: seq}}
-		var links []domain.Link
+		var links []graph.Link
 		for i := range n {
 			id := pgtest.ID[domain.UnitID](fmt.Sprintf("n%03d", i))
 			units = append(units, domain.Unit{
 				ID: id, Bank: testBank, DocumentID: "rest", Type: domain.FactTypeWorld,
 				Seq: seq,
 			})
-			links = append(links, domain.Link{Bank: testBank, From: id, To: hub, Kind: domain.LinkTemporal, Weight: 1})
+			links = append(links, graph.Link{Bank: testBank, From: id, To: hub, Kind: graph.KindTemporal, Weight: 1})
 		}
 		if err := tx.Units().Insert(ctx, units); err != nil {
 			return err
 		}
-		if err := tx.Links().Insert(ctx, links); err != nil {
+		if err := tx.Graph().AddLinks(ctx, links); err != nil {
 			return err
 		}
 		if orphan, err = tx.Entities().Upsert(ctx, domain.Entity{Bank: testBank, CanonicalName: "Orphan"}); err != nil {
@@ -123,7 +125,7 @@ func queues(t *testing.T, db *postgres.DB) (dirty []domain.UnitID, pending []dom
 	ctx := context.Background()
 	err := db.InTx(ctx, func(tx store.Tx) error {
 		var err error
-		if dirty, err = tx.Links().Dirty(ctx, testBank, 1000); err != nil {
+		if dirty, err = tx.Units().DirtyLinks(ctx, testBank, 1000); err != nil {
 			return err
 		}
 		pending, err = tx.Entities().PendingMaintenance(ctx, testBank, 1000)
@@ -251,7 +253,7 @@ type archivingLinker struct {
 }
 
 func (l *archivingLinker) Link(
-	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes map[domain.UnitID][]domain.UnitID,
+	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes linking.CauseMap,
 ) error {
 	if len(l.calls) == 0 {
 		if err := tx.Units().Archive(ctx, b, l.victim, "test"); err != nil {
@@ -277,8 +279,8 @@ func TestGraphMaintenanceRechecksAfterFinalBatch(t *testing.T) {
 		if err := tx.Units().Insert(ctx, units); err != nil {
 			return err
 		}
-		return tx.Links().Insert(ctx, []domain.Link{
-			{Bank: testBank, From: z, To: w, Kind: domain.LinkTemporal, Weight: 1},
+		return tx.Graph().AddLinks(ctx, []graph.Link{
+			{Bank: testBank, From: z, To: w, Kind: graph.KindTemporal, Weight: 1},
 		})
 	})
 	if err != nil {
@@ -315,9 +317,9 @@ func dirtyNeighbour(t *testing.T, db *postgres.DB) {
 		}); err != nil {
 			return err
 		}
-		return tx.Links().Insert(ctx, []domain.Link{
-			{Bank: testBank, From: a, To: b, Kind: domain.LinkTemporal, Weight: 1},
-			{Bank: testBank, From: b, To: a, Kind: domain.LinkTemporal, Weight: 1},
+		return tx.Graph().AddLinks(ctx, []graph.Link{
+			{Bank: testBank, From: a, To: b, Kind: graph.KindTemporal, Weight: 1},
+			{Bank: testBank, From: b, To: a, Kind: graph.KindTemporal, Weight: 1},
 		})
 	}); err != nil {
 		t.Fatal(err)

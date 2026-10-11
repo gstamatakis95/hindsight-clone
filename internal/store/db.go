@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"time"
 )
 
@@ -38,8 +39,9 @@ type Tx interface {
 	Units() UnitRepo
 	// Entities returns the entity repository bound to this transaction.
 	Entities() EntityRepo
-	// Links returns the link repository bound to this transaction.
-	Links() LinkRepo
+	// Graph returns the memory graph bound to this transaction: its link writes commit with the transaction and its
+	// reads see them.
+	Graph() graph.Tx
 	// Evidence returns the observation-evidence repository bound to this transaction.
 	Evidence() EvidenceRepo
 	// MentalModels returns the mental-model repository bound to this transaction.
@@ -62,8 +64,8 @@ type Reader interface {
 	Freshness
 }
 
-// Search serves retrieval; Postgres serves all four recall arms. Searches return only live units of the query's
-// bank, best first.
+// Search serves retrieval: three of the four recall arms (the graph arm reads a graph.Reader), hydration and the
+// reads around them. Searches return only live units of the query's bank, best first.
 type Search interface {
 	// SearchVector is the semantic arm: HNSW cosine search with iterative scan.
 	SearchVector(ctx context.Context, q VectorQuery) ([]Hit, error)
@@ -71,8 +73,6 @@ type Search interface {
 	SearchText(ctx context.Context, q TextQuery) ([]Hit, error)
 	// SearchTemporal is the temporal arm: units whose occurrence overlaps the window, spread over buckets.
 	SearchTemporal(ctx context.Context, q TemporalQuery) ([]Hit, error)
-	// ExpandGraph is the graph arm: a recursive CTE over memory_links from the seed units.
-	ExpandGraph(ctx context.Context, q GraphQuery) ([]Hit, error)
 	// GetUnits returns the live units with the given ids, in the order of ids; unknown or archived
 	// ids are skipped, not an error.
 	GetUnits(ctx context.Context, b domain.BankRef, ids []domain.UnitID) ([]domain.Unit, error)

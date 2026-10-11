@@ -121,7 +121,7 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	in := infra{db: guardStore{DB: db, g: g}, claimer: db, maint: db, blob: fake.NewBlob(), gw: gw}
+	in := infra{db: guardStore{DB: db, g: g}, graph: db.Graph(), claimer: db, maint: db, blob: fake.NewBlob(), gw: gw}
 	d := wireEngines(cfg, in, tok, serverCfg, clock.System{}, log)
 	d.probes = nil
 	d.tel = tel

@@ -1,7 +1,8 @@
 // Package domain holds memd's plain data types: banks and their configuration, memory units (facts and observations),
-// documents and chunks, entities, links and evidence, observation scopes and tag filters, mental models, directives,
-// templates, prompt previews, operations and lifecycle events, model slots and bindings, and the error values every
-// layer shares.
+// documents and chunks, entities and evidence, observation scopes, tag filters and predicates, seq ranges, mental
+// models, directives, templates, prompt previews, operations and lifecycle events, model slots and bindings, and the
+// error values every layer shares; plus the pure rules several packages share: [ExpandScopes], [SelectDirectives]
+// and [RefreshDueAt].
 //
 // # Architecture
 //
@@ -35,7 +36,7 @@
 // normalize first. A [ScopeKey] is one observation scope, a canonical tag set
 // within a bank (no tags = the shared scope). Its String is a length-prefixed encoding ("3:foo,5:bar,b"), so no tag
 // content can make two scopes collide, and [ParseScopeKey] accepts only the canonical form, so a scope has exactly one
-// key.
+// key. [ExpandScopes] fans a unit's tags out into the scopes it consolidates under, by the observation scope mode.
 //
 //	k := domain.NewScopeKey(bank, []string{"Project-X ", "alice"}) // tags normalized and sorted
 //	k.String()                                                   // "5:alice,9:project-x"
@@ -45,7 +46,14 @@
 // [MatchTags] is the flat filter with Hindsight's five modes (any, all, any_strict, all_strict, exact; unset behaves as
 // any): any and all let untagged units pass, the strict modes do not, and exact with no tags selects only untagged
 // units. [MatchGroup] and [MatchFilter] evaluate the boolean group tree; their semantics are the reference that
-// store.SQLPredicate.Eval and the Postgres rendering agree with.
+// [TagPredicate.Eval] and the Postgres rendering agree with. A [TagPredicate] is a compiled filter (fuzzy leaves
+// resolved) that the searches and the graph take, and a [SeqRange] bounds them to a snapshot.
+//
+// # Directives
+//
+// [SelectDirectives] is the one rule for which directives apply to a request: reflect, the mental-model synthesize
+// prompt and the prompt preview all use it. Inactive directives never apply; untagged ones always do; a tagged one
+// applies only when the request's tag filter is set and its tags satisfy it, or with apply_all_directives.
 //
 // # Operations
 //

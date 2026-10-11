@@ -54,7 +54,7 @@ func (s *Service) continueGraph(ctx context.Context, j store.Job, done bool) err
 func (s *Service) graphWorkLeft(ctx context.Context, b domain.BankRef) (bool, error) {
 	left := false
 	err := s.d.Store.InTx(ctx, func(tx store.Tx) error {
-		dirty, err := tx.Links().Dirty(ctx, b, 1)
+		dirty, err := tx.Units().DirtyLinks(ctx, b, 1)
 		if err != nil {
 			return err
 		}
@@ -133,7 +133,7 @@ func checkBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 // they lack (it fills up to the per-unit caps and keeps existing edges), and clears them from the queue
 // whether or not anything was added. It returns how many queue entries it consumed.
 func (s *Service) topUpLinks(ctx context.Context, tx store.Tx, b domain.BankRef, limit int) (int, error) {
-	ids, err := tx.Links().Dirty(ctx, b, limit)
+	ids, err := tx.Units().DirtyLinks(ctx, b, limit)
 	if err != nil || len(ids) == 0 {
 		return 0, err
 	}
@@ -146,7 +146,7 @@ func (s *Service) topUpLinks(ctx context.Context, tx store.Tx, b domain.BankRef,
 			return 0, fmt.Errorf("top up links of %d units: %w", len(units), err)
 		}
 	}
-	if err := tx.Links().ClearDirty(ctx, b, ids); err != nil {
+	if err := tx.Units().ClearDirtyLinks(ctx, b, ids); err != nil {
 		return 0, err
 	}
 	return len(ids), nil

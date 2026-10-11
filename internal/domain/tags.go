@@ -183,7 +183,7 @@ func MatchTags(unitTags, filterTags []string, mode TagsMatch) bool {
 }
 
 // MatchGroup evaluates a tag group against a unit's tags. Leaves use MatchTags with their own mode
-// (unset = any_strict) and must already hold resolved names. Semantics match store.SQLPredicate.Eval: an
+// (unset = any_strict) and must already hold resolved names. Semantics match [TagPredicate.Eval]: an
 // empty all_of is true, an empty any_of is false, a leaf with no tags is no filter (except exact), and a
 // malformed group (unknown kind, missing leaf or child) matches nothing.
 func MatchGroup(unitTags []string, g TagGroup) bool {

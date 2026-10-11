@@ -152,6 +152,6 @@ func dedupRequest(binding domain.ModelBinding, text, existing string) (ai.Struct
 
 // scopePredicate selects exactly the observations of scope s (its exact tag set; the shared scope is
 // the untagged one).
-func scopePredicate(s domain.ScopeKey) *store.SQLPredicate {
-	return &store.SQLPredicate{Op: store.PredicateTags, Tags: s.Tags, Match: domain.TagsMatchExact}
+func scopePredicate(s domain.ScopeKey) *domain.TagPredicate {
+	return &domain.TagPredicate{Op: domain.PredicateTags, Tags: s.Tags, Match: domain.TagsMatchExact}
 }

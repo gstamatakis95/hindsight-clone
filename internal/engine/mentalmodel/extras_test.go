@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"memd/internal/domain"
-	"memd/internal/engine/reflect"
+	"memd/internal/reflect"
 	"memd/internal/store"
 	"testing"
 )

@@ -3,6 +3,7 @@ package maintenance
 import (
 	"context"
 	"maps"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
 	"memd/internal/store"
@@ -10,20 +11,22 @@ import (
 	"time"
 )
 
-// bankConfigs is a config.Resolver serving a fixed effective config per bank; unknown banks are
-// domain.ErrNotFound.
-type bankConfigs map[domain.BankRef]domain.BankConfig
-
-func (c bankConfigs) Effective(_ context.Context, b domain.BankRef, _ ...domain.BankConfig) (domain.BankConfig, error) {
-	cfg, ok := c[b]
-	if !ok {
-		return domain.BankConfig{}, domain.ErrNotFound
+// bankConfigs stores each bank's config and returns a resolver over ops (no server level); a bank that does not
+// exist resolves to domain.ErrNotFound.
+func bankConfigs(t *testing.T, ops *opsDB, cfgs map[domain.BankRef]domain.BankConfig) *config.Resolver {
+	t.Helper()
+	err := ops.InTx(t.Context(), func(tx store.Tx) error {
+		for b, cfg := range cfgs {
+			if err := tx.Banks().SetConfig(t.Context(), b, cfg); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	return cfg, nil
-}
-
-func (c bankConfigs) ForScope(context.Context, domain.ScopeKey, *domain.BankConfig) (domain.BankConfig, error) {
-	panic("not used")
+	return config.NewResolver(ops, domain.BankConfig{})
 }
 
 // waitingBanks is a store.Maintenance whose UnconsolidatedBanks returns fixed banks with their oldest waiting
@@ -65,11 +68,11 @@ func TestConsolidationReconcileSkipsDisabledBanks(t *testing.T) {
 	deps := New(Deps{
 		Claimer: ops, Store: ops, Clock: clock, Logger: quiet,
 		Consolidation: waiting(bankA, bankB, bankC, bankD),
-		Resolver: bankConfigs{
+		Resolver: bankConfigs(t, ops, map[domain.BankRef]domain.BankConfig{
 			bankA: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(true), Enabled: ptrBool(true)}),
 			bankB: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(false), Enabled: ptrBool(true)}),
 			bankC: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(true), Enabled: ptrBool(false)}),
-		},
+		}),
 	})
 	n, err := deps.reconcileConsolidation(context.Background())
 	if err != nil || n != 1 {
@@ -96,11 +99,11 @@ func TestConsolidationReconcileGrace(t *testing.T) {
 	}}
 	deps := New(Deps{
 		Claimer: ops, Store: ops, Clock: clock, Logger: quiet, Consolidation: src,
-		Resolver: bankConfigs{
+		Resolver: bankConfigs(t, ops, map[domain.BankRef]domain.BankConfig{
 			bankA: observations(domain.ObservationConfig{ReconcileGraceSeconds: ptrInt(180)}),
 			bankB: {},
 			bankC: observations(domain.ObservationConfig{ReconcileGraceSeconds: ptrInt(600)}),
-		},
+		}),
 	})
 	if _, err := deps.reconcileConsolidation(context.Background()); err != nil {
 		t.Fatal(err)

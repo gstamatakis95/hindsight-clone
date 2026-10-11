@@ -1,13 +1,13 @@
 package postgres
 
 import (
-	"memd/internal/store"
+	"memd/internal/graph"
 	"strings"
 
 	"github.com/google/uuid"
 )
 
-// graphMaxHops is the deepest expansion ExpandGraph runs; the port bounds MaxHops to 1-2 (decision 123).
+// graphMaxHops is the deepest expansion Expand runs; the port bounds MaxHops to 1-2 (decision 123).
 const graphMaxHops = 2
 
 // clampHops bounds the hop count to [1, graphMaxHops].
@@ -20,7 +20,7 @@ func clampHops(h int) int {
 // every step. Every link is bound to the query's tenant and bank, at the anchor and at each step. A reached
 // unit scores the best (max) weight over its paths. Seeds are never hits; reached units must be live units of
 // the bank and pass Types, Tags and Seq (intermediate units on a path are not filtered).
-func graphSQL(q store.GraphQuery, seeds []uuid.UUID) (string, []any) {
+func graphSQL(q graph.Query, seeds []uuid.UUID) (string, []any) {
 	var a sqlArgs
 	tenant, bank := a.add(q.Bank.Tenant, "::text"), a.add(q.Bank.Bank, "::text")
 	seedArg := a.add(seeds, "::uuid[]")

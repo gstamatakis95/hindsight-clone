@@ -13,10 +13,10 @@ func wireObservations(c core, in infra, d *deps) {
 		Observations: curate.NewObservationAdmin(curate.ObservationAdminDeps{
 			Store: c.db, Scopes: c.read, Clearer: consolidate.NewInvalidator(),
 		}),
-		Strategies: c.matcher,
+		Strategies: consolidate.NewStrategyPreviewer(c.read),
 	}
 	d.handlers.consolidator = consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
 		Store: c.db, Config: c.resolver, Router: c.router, LLM: in.gw, Embedder: in.gw, Clock: c.clock,
-		Scopes: c.scopes, Tokens: c.tok,
+		Tokens: c.tok,
 	})
 }

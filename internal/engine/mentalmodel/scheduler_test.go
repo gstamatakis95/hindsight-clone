@@ -13,7 +13,7 @@ import (
 // untagged memories (tags_match any), and that a retracted source stales the model.
 func TestUntaggedWriteNeverStalesTaggedModel(t *testing.T) {
 	e := newEnv(t)
-	det := NewChangeDetector(e.store.Read(), e.reads)
+	det := NewChangeDetector(e.store.Read(), e.reads, e.tags)
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
 	spec.Trigger.TagsMatch = domain.TagsMatchAny
 	m := e.addModel(spec)
@@ -49,7 +49,7 @@ func TestUntaggedWriteNeverStalesTaggedModel(t *testing.T) {
 // TestDecide checks pause, freshness, debounce, the interval floor and run-now.
 func TestDecide(t *testing.T) {
 	e := newEnv(t)
-	sched := NewRefreshScheduler(NewChangeDetector(e.store.Read(), e.reads), e.config)
+	sched := NewRefreshScheduler(NewChangeDetector(e.store.Read(), e.reads, e.tags), e.config)
 	m := e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	now := e.clock.Now()
 	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionSkip || d.Reason != ReasonNotStale {
@@ -79,7 +79,7 @@ func TestDecide(t *testing.T) {
 
 // newTriggers builds the Triggers and Admin over e.
 func newTriggers(e *env) (Triggers, Admin) {
-	det := NewChangeDetector(e.store.Read(), e.reads)
+	det := NewChangeDetector(e.store.Read(), e.reads, e.tags)
 	tr := NewTriggers(TriggerDeps{
 		Store: e.store, Scheduler: NewRefreshScheduler(det, e.config), Cron: e.reads, Clock: e.clock,
 	})

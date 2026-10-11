@@ -4,7 +4,7 @@ import (
 	"context"
 	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/engine/retain"
+	"memd/internal/linking"
 	"memd/internal/store"
 )
 
@@ -19,18 +19,17 @@ type Rederiver interface {
 	Rederive(ctx context.Context, j store.Job) error
 }
 
-// EntityResolver is the part of retain.EntityResolver the curator consumes (no model call, so it runs
-// inside the RPC's transaction); retain.EntityResolver
-// satisfies it.
+// EntityResolver is the part of linking.Resolver the curator consumes (no model call, so it runs inside the RPC's
+// transaction); linking.Resolver satisfies it.
 type EntityResolver interface {
 	// Resolve maps the mentions of one fact to existing or new entities inside tx.
-	Resolve(ctx context.Context, tx store.Tx, b domain.BankRef, in retain.ResolveInput) ([]domain.EntityID, error)
+	Resolve(ctx context.Context, tx store.Tx, b domain.BankRef, in linking.ResolveInput) ([]domain.EntityID, error)
 }
 
-// Linker is the part of retain.Linker the rederiver consumes; retain.Linker satisfies it.
+// Linker is the part of linking.Linker the rederiver consumes; linking.Linker satisfies it.
 type Linker interface {
 	// Link adds temporal + semantic (+ causal) edges for units within the per-unit caps, in tx.
-	Link(ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes retain.CauseMap) error
+	Link(ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes linking.CauseMap) error
 }
 
 // RederiverDeps are the Rederiver's dependencies.

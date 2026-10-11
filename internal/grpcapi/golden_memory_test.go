@@ -2,15 +2,15 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
 	"memd/internal/engine/retain"
+	"memd/internal/recall"
 	"reflect"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	reflecteng "memd/internal/engine/reflect"
+	reflecteng "memd/internal/reflect"
 
 	pb "memd/gen/memory/v1"
 )
@@ -121,7 +121,7 @@ func TestGoldenRecallRequest(t *testing.T) {
 			RerankModel: &pb.ModelBinding{Model: "recall-rerank"},
 		},
 	}
-	want := recall.RecallRequest{
+	want := recall.Request{
 		Bank:  domain.BankRef{Bank: "bank-2"},
 		Query: "what happened",
 		Types: []domain.FactType{domain.FactTypeExperience, domain.FactTypeObservation},
@@ -181,7 +181,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 			RerankModel:           &pb.ModelBinding{Model: "reflect-rerank"},
 		},
 	}
-	want := reflecteng.ReflectRequest{
+	want := reflecteng.Request{
 		Bank:  domain.BankRef{Bank: "bank-3"},
 		Query: "why",
 		Tags: domain.TagFilter{
@@ -197,7 +197,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		ExtraDirectives: []domain.Directive{{
 			ID: "dir-1", Name: "dir-name", Rules: []string{"be brief"}, Tags: []string{"dir-tag"}, Active: true,
 		}},
-		Include:   reflecteng.ReflectInclude{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
+		Include:   reflecteng.Include{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
 		QueryTime: ptr(goldenTime(5)),
 		Overrides: &domain.BankConfig{
 			Reflect: &domain.ReflectConfig{Mission: "reflect-overrides", Disposition: &domain.Disposition{Skepticism: 2}},

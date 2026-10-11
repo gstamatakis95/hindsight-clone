@@ -299,18 +299,6 @@ func TestRunVersionsAndQuotesRecorded(t *testing.T) {
 	}
 }
 
-// TestScopeExpanderRejectsNonPositiveCap: max_combinations <= 0 is INVALID_ARGUMENT.
-func TestScopeExpanderRejectsNonPositiveCap(t *testing.T) {
-	for _, n := range []int{0, -1} {
-		_, err := NewScopeExpander().Expand(bank, []string{"a"}, domain.ObservationScopes{
-			Mode: domain.ScopeModeAllCombinations, MaxCombinations: ptr(n),
-		})
-		if !errors.Is(err, domain.ErrInvalidArgument) {
-			t.Errorf("max_combinations %d: err = %v", n, err)
-		}
-	}
-}
-
 // idsString joins unit ids with commas.
 func idsString(ids []domain.UnitID) string {
 	b, _ := json.Marshal(sortedNames(ids))

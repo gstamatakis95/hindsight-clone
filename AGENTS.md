@@ -6,18 +6,25 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 
 ## Layout
 - api/memory/v1/memory.proto: the whole API, one file (rules in api/AGENTS.md). Run `make gen` after any change.
-- internal/domain: plain types and errors.
+- internal/domain: plain types, errors and pure rules (tag filters and predicates, scope expansion, directive
+  selection, refresh due time).
 - Boundaries (interfaces), each with its adapter (rules in internal/store/AGENTS.md):
   - internal/store (DB, Tx, Reader = Search + Catalog + Freshness, repos, Queue, Maintenance) —
     internal/store/postgres (sqlc in postgres/db, test harness in postgres/pgtest; also implements jobs.Claimer)
   - internal/ai (LLM, Embedder, Reranker; Router and Tokenizer are concrete) — internal/ai/gateway
   - internal/blob (Store, Key; contract suite in blob/blobtest) — internal/blob/s3, chosen by MEMD_BLOB_PROVIDER
+  - internal/graph (Reader, Writer, Tx: the memory links; contract suite in graph/graphtest) — served by
+    internal/store/postgres through store.Tx.Graph (writes, in the caller's transaction) and postgres.DB.Graph
+    (the recall graph arm's Reader); graph/doc.go explains how a graph database would plug in
   - internal/clock (Clock; System and Manual)
 - internal/config: config resolution, merge (incl. model routing), defaults, validation, FieldMask patches.
   internal/prompts: templates.
 - internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
   kind's payload, serial key and Enqueue helper. internal/maintenance: the 60 s tick and the graph_maintenance job.
-- internal/engine/*: business logic over the boundaries.
+- Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, CompileTags, SearchPages,
+  ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking (Linker,
+  Resolver, LabelResolver).
+- internal/engine/*: the remaining business logic over the boundaries and libraries.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per service (holding only the engines it
   calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
@@ -27,9 +34,11 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
 
 ## Rules
-- The boundaries (store, ai, blob, clock) are interfaces; put `var _ Iface = (*impl)(nil)` next to each
-  implementation. ai.Router, ai.Tokenizer and clock.System are concrete.
-- Engines never import adapters, grpcapi, maintenance, gen, pgx, net/http or the S3 SDK (depguard enforces this).
+- The boundaries (store, graph, ai, blob, clock) are interfaces; put `var _ Iface = (*impl)(nil)` next to each
+  implementation. ai.Router, ai.Tokenizer, clock.System, config.Resolver and the libraries are concrete; take them
+  as pointers.
+- Engines and libraries never import adapters, grpcapi, maintenance, gen, pgx, net/http or the S3 SDK; libraries
+  never import engines (depguard enforces this).
 - Enqueue jobs only through the jobs.Enqueue* helpers (jobs/kinds.go), inside the transaction of the change. The
   helpers never call tx.Seq: call tx.Seq(bank) first yourself when the transaction changes memory content.
 - Inject clock.Clock; never call time.Now for logic. Every LLM call resolves its binding with ai.Router.

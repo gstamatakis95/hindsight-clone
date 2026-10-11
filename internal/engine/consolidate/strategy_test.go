@@ -4,50 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"memd/internal/config"
 	"memd/internal/domain"
 	"testing"
 )
-
-// The StrategyMatcher is what config.NewResolver consumes.
-var _ config.StrategyMatcher = NewStrategyMatcher(nil)
-
-// TestStrategyMatch: the first strategy with a matching pattern wins; unspecified tags_match is
-// all_strict (containment, never the shared scope); exact needs the same set; an empty pattern only
-// matches the shared scope under exact.
-func TestStrategyMatch(t *testing.T) {
-	strategies := []domain.ConsolidationStrategy{
-		{Name: "exact-acme", Scopes: []domain.ScopePattern{
-			{Tags: []string{"company:acme"}, TagsMatch: domain.TagsMatchExact},
-		}},
-		{Name: "team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}}, {Tags: []string{"squad"}}}},
-		{Name: "any-acme", Scopes: []domain.ScopePattern{{Tags: []string{"company:acme"}}}},
-		{Name: "empty", Scopes: []domain.ScopePattern{{}}},
-		{Name: "shared", Scopes: []domain.ScopePattern{{TagsMatch: domain.TagsMatchExact}}},
-	}
-	tests := []struct {
-		tags []string
-		want string
-	}{
-		{[]string{"company:acme"}, "exact-acme"},
-		{[]string{"company:acme", "team"}, "team"},
-		{[]string{"squad", "x"}, "team"},
-		{[]string{"company:acme", "user:dana"}, "any-acme"},
-		{nil, "shared"},
-		{[]string{"other"}, ""},
-	}
-	m := NewStrategyMatcher(nil)
-	for _, tc := range tests {
-		st, ok := m.Match(strategies, scopeOf(tc.tags...))
-		got := ""
-		if ok {
-			got = st.Name
-		}
-		if got != tc.want {
-			t.Errorf("Match(%q) = %q, want %q", tc.tags, got, tc.want)
-		}
-	}
-}
 
 // manyScopes is a test-only ScopeLister reporting more scopes than Preview examines.
 type manyScopes struct{}
@@ -62,7 +21,7 @@ func (manyScopes) ListScopes(_ context.Context, _ domain.BankRef, after string, 
 
 // TestStrategyPreviewIncomplete: more scopes than the preview limit make Complete false.
 func TestStrategyPreviewIncomplete(t *testing.T) {
-	p, err := NewStrategyMatcher(manyScopes{}).Preview(t.Context(), bank, nil)
+	p, err := NewStrategyPreviewer(manyScopes{}).Preview(t.Context(), bank, nil)
 	if err != nil || p.Complete {
 		t.Fatalf("preview = %+v, %v; want incomplete", p.Complete, err)
 	}
@@ -77,7 +36,7 @@ func TestStrategyPreview(t *testing.T) {
 		e.fact(id, "fact "+id, tags...)
 		e.observation("obs-"+id, "obs "+id, tags, id)
 	}
-	m := NewStrategyMatcher(e.store.Read())
+	m := NewStrategyPreviewer(e.store.Read())
 	draft := []domain.ConsolidationStrategy{
 		{Name: "exact-team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}, TagsMatch: domain.TagsMatchExact}}},
 		{Name: "team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}}}},
@@ -106,7 +65,8 @@ func TestStrategyPreview(t *testing.T) {
 	if got := keys(p.Matches[1].ShadowedScopes); len(got) != 1 || got[0] != scopeOf("team").String() {
 		t.Errorf("team shadowed = %v", got)
 	}
-	if _, err := NewStrategyMatcher(nil).Preview(t.Context(), bank, draft); !errors.Is(err, domain.ErrFailedPrecondition) {
+	_, err = NewStrategyPreviewer(nil).Preview(t.Context(), bank, draft)
+	if !errors.Is(err, domain.ErrFailedPrecondition) {
 		t.Fatalf("preview without a lister: err = %v", err)
 	}
 }

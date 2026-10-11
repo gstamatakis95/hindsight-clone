@@ -104,7 +104,7 @@ func (r *run) pendingScopes(
 		if err != nil {
 			return nil, nil, err
 		}
-		keys, err := r.c.d.Scopes.Expand(r.job.Bank, u.Tags, mode)
+		keys, err := domain.ExpandScopes(r.job.Bank, u.Tags, mode)
 		if err != nil {
 			// The mode changed since retain (which rejects this synchronously): fall back to the combined
 			// scope rather than strand the unit (decision 1003).

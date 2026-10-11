@@ -38,9 +38,10 @@ func TestPreview(t *testing.T) {
 		Observations: &domain.ObservationConfig{Mission: "group habits"},
 		Reflect:      &domain.ReflectConfig{Mission: "answer kindly", Disposition: &domain.Disposition{Skepticism: 4}},
 	}
-	dirs := dirStub{{ID: "d1", Name: "polite", Rules: []string{"never swear"}, Active: true}}
-	p := NewPromptPreviewer(cfgStub{base: base}, dirs)
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	p := newEnv(t).previewer(t, b, base,
+		domain.Directive{Name: "polite", Rules: []string{"never swear"}, Active: true},
+		domain.Directive{Name: "scoped", Rules: []string{"tagged rule"}, Tags: []string{"team"}, Active: true})
 	cases := []struct {
 		op       domain.PromptOperation
 		o        domain.BankConfig
@@ -78,15 +79,7 @@ func TestPreview(t *testing.T) {
 				got.Messages[1].Role != domain.PromptRoleUser {
 				t.Fatalf("messages = %+v", got.Messages)
 			}
-			text := previewText(got)
-			for _, want := range tc.contains {
-				if !strings.Contains(text, want) {
-					t.Errorf("preview lacks %q", want)
-				}
-			}
-			if strings.Contains(text, zeroNow) {
-				t.Error("zero time leaked into the preview")
-			}
+			checkPreviewText(t, previewText(got), tc.contains)
 			if tc.schema != (got.ResponseSchemaJSON != "") || (tc.schema && !json.Valid([]byte(got.ResponseSchemaJSON))) {
 				t.Errorf("schema = %q, want present=%v", got.ResponseSchemaJSON, tc.schema)
 			}
@@ -99,11 +92,27 @@ func TestPreview(t *testing.T) {
 	}
 }
 
+// checkPreviewText checks text holds every want, and neither the tagged directive (a preview has no request tags)
+// nor the zero time.
+func checkPreviewText(t *testing.T, text string, want []string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(text, w) {
+			t.Errorf("preview lacks %q", w)
+		}
+	}
+	for _, leak := range []string{"tagged rule", zeroNow} {
+		if strings.Contains(text, leak) {
+			t.Errorf("%q leaked into the preview", leak)
+		}
+	}
+}
+
 // TestPreviewRetainCausalLinksDefault checks that the retain preview treats an unset
 // retain.extract_causal_links as retain does (on) and omits the causal section only when it is false.
 func TestPreviewRetainCausalLinksDefault(t *testing.T) {
-	p := NewPromptPreviewer(cfgStub{}, dirStub{})
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	p := newEnv(t).previewer(t, b, domain.BankConfig{})
 	off := false
 	for _, tc := range []struct {
 		name string
@@ -125,8 +134,8 @@ func TestPreviewRetainCausalLinksDefault(t *testing.T) {
 }
 
 func TestPreviewChunksSkipsAndUnknownOp(t *testing.T) {
-	p := NewPromptPreviewer(cfgStub{}, dirStub{})
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	p := newEnv(t).previewer(t, b, domain.BankConfig{})
 	got, err := p.Preview(t.Context(), b, domain.PromptOperationRetain,
 		domain.BankConfig{Retain: &domain.RetainConfig{ExtractionMode: domain.ExtractionModeChunks}})
 	if err != nil || got.SkippedReason == "" || len(got.Messages) != 0 {

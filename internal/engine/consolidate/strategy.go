@@ -3,16 +3,16 @@ package consolidate
 import (
 	"context"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
 )
 
 // previewScopeLimit is how many existing scopes Preview examines; beyond it the preview is incomplete.
 const previewScopeLimit = 1000
 
-// StrategyMatcher picks the first strategy whose patterns match a scope.
-type StrategyMatcher interface {
-	// Match returns the first strategy with a pattern matching s, and whether there is one.
-	Match(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool)
+// StrategyPreviewer shows which existing scopes draft consolidation strategies would govern (config.MatchStrategy
+// picks the strategy of one scope).
+type StrategyPreviewer interface {
 	// Preview evaluates draft strategies against existing scopes without saving.
 	Preview(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (StrategyPreview, error)
 }
@@ -35,63 +35,22 @@ type StrategyMatch struct {
 	ShadowedScopes []domain.ScopeKey
 }
 
-// strategyMatcher implements StrategyMatcher.
-type strategyMatcher struct {
+// strategyPreviewer implements StrategyPreviewer.
+type strategyPreviewer struct {
 	scopes ScopeLister
 }
 
-var _ StrategyMatcher = (*strategyMatcher)(nil)
+var _ StrategyPreviewer = (*strategyPreviewer)(nil)
 
-// NewStrategyMatcher returns the StrategyMatcher. scopes (store.Reader) lists a bank's existing observation
-// scopes for Preview; nil makes Preview fail with FAILED_PRECONDITION, while Match works without it.
-func NewStrategyMatcher(scopes ScopeLister) StrategyMatcher {
-	return &strategyMatcher{scopes: scopes}
-}
-
-// Match returns the first strategy in list order with a pattern matching s; the winner applies whole
-// (a later strategy never fills its gaps).
-func (m *strategyMatcher) Match(
-	strategies []domain.ConsolidationStrategy, s domain.ScopeKey,
-) (*domain.ConsolidationStrategy, bool) {
-	for i := range strategies {
-		if strategyClaims(strategies[i], s.Tags) {
-			st := strategies[i]
-			return &st, true
-		}
-	}
-	return nil, false
-}
-
-// strategyClaims reports whether any pattern of st matches a scope with tags.
-func strategyClaims(st domain.ConsolidationStrategy, tags []string) bool {
-	for _, p := range st.Scopes {
-		if patternMatches(p, tags) {
-			return true
-		}
-	}
-	return false
-}
-
-// patternMatches compares a scope's tags against one pattern with domain.MatchTags. Unspecified mode is
-// all_strict: the scope holds every pattern tag (others allowed) and the shared scope never matches, as
-// in Hindsight. A pattern with no tags matches only under exact (the shared scope); otherwise it is
-// ignored, so an empty pattern never claims every scope. An explicit any or all pattern follows
-// MatchTags, which admits untagged units, so it also matches the shared scope; use any_strict or
-// all_strict (or leave the mode unset) to exclude it.
-func patternMatches(p domain.ScopePattern, tags []string) bool {
-	mode := p.TagsMatch
-	if mode == domain.TagsMatchUnspecified {
-		mode = domain.TagsMatchAllStrict
-	}
-	if len(domain.NormalizeTags(p.Tags)) == 0 && mode != domain.TagsMatchExact {
-		return false
-	}
-	return domain.MatchTags(tags, p.Tags, mode)
+// NewStrategyPreviewer returns the StrategyPreviewer. scopes (store.Reader) lists a bank's existing observation
+// scopes; nil makes Preview fail with FAILED_PRECONDITION.
+func NewStrategyPreviewer(scopes ScopeLister) StrategyPreviewer {
+	return &strategyPreviewer{scopes: scopes}
 }
 
 // Preview lists up to previewScopeLimit existing scopes and reports, per draft strategy, the scopes it
 // would win and those an earlier strategy shadows.
-func (m *strategyMatcher) Preview(
+func (m *strategyPreviewer) Preview(
 	ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy,
 ) (StrategyPreview, error) {
 	if m.scopes == nil {
@@ -114,7 +73,7 @@ func (m *strategyMatcher) Preview(
 	for _, s := range scopes {
 		won := false
 		for i := range draft {
-			if !strategyClaims(draft[i], s.Tags) {
+			if _, ok := config.MatchStrategy(draft[i:i+1], s); !ok {
 				continue
 			}
 			if won {

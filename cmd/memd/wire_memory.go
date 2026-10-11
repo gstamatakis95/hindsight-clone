@@ -13,9 +13,9 @@ func wireMemory(c core, in infra, d *deps) {
 	d.api.Memory = &grpcapi.MemoryHandler{
 		Ingestor: retain.NewIngestor(retain.IngestorDeps{
 			Store: c.db, Blob: in.blob, Config: c.resolver, Retainer: c.retainer, Merge: config.Merge,
-			Scopes: c.scopes, Clock: c.clock,
+			Clock: c.clock,
 		}),
-		Recaller: c.recaller, Reflector: c.reflector,
+		Engine: c.recall, Agent: c.agent,
 	}
 	d.api.MemoryUnit = &grpcapi.MemoryUnitHandler{
 		Lister: curate.NewMemoryLister(c.read),

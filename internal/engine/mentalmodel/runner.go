@@ -6,9 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
-	"memd/internal/engine/reflect"
 	"memd/internal/jobs"
+	"memd/internal/recall"
+	"memd/internal/reflect"
 	"memd/internal/store"
 	"slices"
 	"strings"
@@ -41,7 +41,7 @@ type refreshPlan struct {
 	mode      domain.RefreshMode
 	reason    string
 	upTo      int64
-	window    store.SeqRange
+	window    domain.SeqRange
 	// automatic: neither manual, force_full nor a dry run; such a run re-checks staleness and the
 	// interval floor before drafting.
 	automatic bool
@@ -147,9 +147,9 @@ func (r *runner) plan(
 			p.mode = domain.RefreshModeFull
 		}
 	}
-	p.window = store.SeqUpTo(0, upTo)
+	p.window = domain.SeqUpTo(0, upTo)
 	if p.mode == domain.RefreshModeDelta {
-		p.window = store.SeqUpTo(m.LastSeqSeen, upTo)
+		p.window = domain.SeqUpTo(m.LastSeqSeen, upTo)
 	}
 	return p, nil
 }
@@ -188,7 +188,7 @@ func (r *runner) draft(ctx context.Context, p *refreshPlan) (drafted, error) {
 	if fresh {
 		return drafted{content: p.m.ContentMD, noNewFacts: true, fresh: true}, nil
 	}
-	q, err := scopeQuery(ctx, r.d.Scope, p.m, p.window, false, recall.FuzzyTagMinSimilarity(p.cfg))
+	q, err := scopeQuery(ctx, r.d.Tags, p.m, p.window, false, recall.FuzzyTagMinSimilarity(p.cfg))
 	if err != nil {
 		return drafted{content: p.m.ContentMD}, err
 	}
@@ -252,7 +252,7 @@ func (r *runner) freshAutomatic(ctx context.Context, p *refreshPlan) (bool, erro
 	if !p.automatic {
 		return false, nil
 	}
-	stale, _, err := NewChangeDetector(r.d.Store.Read(), r.d.Scope).NeedsRefresh(ctx, p.m)
+	stale, _, err := NewChangeDetector(r.d.Store.Read(), r.d.Scope, r.d.Tags).NeedsRefresh(ctx, p.m)
 	if err != nil {
 		return false, fmt.Errorf("mentalmodel: recheck staleness: %w", err)
 	}
@@ -288,7 +288,7 @@ func (r *runner) delta(ctx context.Context, p *refreshPlan) (drafted, error) {
 	}
 	if limit := maxDeltaRatio(p.cfg); limit > 0 && changedFraction(p.m.ContentMD, dr.content) > limit {
 		p.mode, p.reason = domain.RefreshModeFull, FallbackMaxDeltaRatio
-		p.window = store.SeqUpTo(0, p.upTo)
+		p.window = domain.SeqUpTo(0, p.upTo)
 	}
 	return dr, nil
 }

@@ -15,7 +15,7 @@ type ObservationHandler struct {
 	// Observations serves Consolidate, ListScopes, ClearObservations and ClearMemoryObservations.
 	Observations curate.ObservationAdmin
 	// Strategies serves PreviewConsolidationStrategies.
-	Strategies consolidate.StrategyMatcher
+	Strategies consolidate.StrategyPreviewer
 }
 
 var _ pb.ObservationServiceServer = (*ObservationHandler)(nil)

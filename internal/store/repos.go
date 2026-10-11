@@ -58,6 +58,11 @@ type UnitRepo interface {
 	// transaction's change seq (the caller calls Tx.Seq first). The embedding stays empty until rederive
 	// recomputes it. An id that is not archived returns domain.ErrNotFound.
 	Restore(ctx context.Context, b domain.BankRef, id domain.UnitID) error
+	// DirtyLinks returns up to limit live units queued in graph_dirty for b (units whose links need a top-up after
+	// a neighbour was removed or archived), oldest first.
+	DirtyLinks(ctx context.Context, b domain.BankRef, limit int) ([]domain.UnitID, error)
+	// ClearDirtyLinks removes ids from b's graph_dirty.
+	ClearDirtyLinks(ctx context.Context, b domain.BankRef, ids []domain.UnitID) error
 }
 
 // DocumentRepo tracks documents and whether their last retain finished.
@@ -103,21 +108,6 @@ type EntityRepo interface {
 	PruneOrphans(ctx context.Context, b domain.BankRef, ids []domain.EntityID) (int, error)
 }
 
-// LinkRepo stores temporal, semantic and causal edges.
-type LinkRepo interface {
-	// Insert stores links; an existing (from, to, kind) edge is kept with the new weight.
-	Insert(ctx context.Context, ls []domain.Link) error
-	// DeleteForUnit removes the links of the given kinds (empty = all) touching unit in either direction,
-	// so rederive can rebuild them, and returns how many it removed.
-	DeleteForUnit(ctx context.Context, unit domain.UnitID, kinds []domain.LinkKind) (int, error)
-	// Count returns how many links of kind touch unit (either direction), for the per-unit caps.
-	Count(ctx context.Context, unit domain.UnitID, kind domain.LinkKind) (int, error)
-	// Dirty returns up to limit live units queued in graph_dirty for b, oldest first.
-	Dirty(ctx context.Context, b domain.BankRef, limit int) ([]domain.UnitID, error)
-	// ClearDirty removes ids from graph_dirty.
-	ClearDirty(ctx context.Context, b domain.BankRef, ids []domain.UnitID) error
-}
-
 // EvidenceRepo links observations to the facts they rest on.
 type EvidenceRepo interface {
 	// Add records evidence for an observation; unique (observation, unit), so re-adding is a no-op.
@@ -161,7 +151,7 @@ type DirectiveRepo interface {
 	// Upsert creates the directive (a new id when d.ID is empty) or replaces it; it returns the id.
 	Upsert(ctx context.Context, d domain.Directive) (domain.DirectiveID, error)
 	// List returns the bank's directives (only active ones when activeOnly), oldest first. Tag selection
-	// is the DirectiveSelector's job.
+	// is domain.SelectDirectives.
 	List(ctx context.Context, b domain.BankRef, activeOnly bool) ([]domain.Directive, error)
 	// Delete removes the directive; unknown = domain.ErrNotFound.
 	Delete(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error

@@ -2,12 +2,11 @@ package postgres
 
 import (
 	"memd/internal/domain"
-	"memd/internal/store"
 	"strconv"
 	"strings"
 )
 
-// The recall arms build their SQL at run time: the tag filter is a variable tree (store.SQLPredicate) and the
+// The recall arms build their SQL at run time: the tag filter is a variable tree (domain.TagPredicate) and the
 // other filters are optional, which sqlc's static queries can't express. Every value is passed as a bind
 // parameter through sqlArgs; only fixed SQL text and $n placeholders are ever concatenated.
 
@@ -28,8 +27,8 @@ func (a *sqlArgs) add(v any, cast string) string {
 type unitFilter struct {
 	bank  domain.BankRef
 	types []domain.FactType
-	tags  *store.SQLPredicate
-	seq   store.SeqRange
+	tags  *domain.TagPredicate
+	seq   domain.SeqRange
 }
 
 // render returns one WHERE fragment over memory_units columns prefixed with col (e.g. "u." or ""): the bank
@@ -58,20 +57,20 @@ func (f unitFilter) render(col string, a *sqlArgs) string {
 }
 
 // renderPredicate renders p as a boolean SQL expression over the text[] column tags. It agrees with
-// (*store.SQLPredicate).Eval: an empty and is TRUE, an empty or is FALSE, and a malformed node (unknown op,
+// (*domain.TagPredicate).Eval: an empty and is TRUE, an empty or is FALSE, and a malformed node (unknown op,
 // a not without exactly one argument) is FALSE. A nil p is TRUE.
-func renderPredicate(p *store.SQLPredicate, tags string, a *sqlArgs) string {
+func renderPredicate(p *domain.TagPredicate, tags string, a *sqlArgs) string {
 	if p == nil {
 		return "TRUE"
 	}
 	switch p.Op {
-	case store.PredicateTags:
+	case domain.PredicateTags:
 		return renderLeaf(p.Tags, p.Match, tags, a)
-	case store.PredicateAnd:
+	case domain.PredicateAnd:
 		return joinArgs(p.Args, " AND ", "TRUE", tags, a)
-	case store.PredicateOr:
+	case domain.PredicateOr:
 		return joinArgs(p.Args, " OR ", "FALSE", tags, a)
-	case store.PredicateNot:
+	case domain.PredicateNot:
 		if len(p.Args) != 1 {
 			return "FALSE"
 		}
@@ -82,7 +81,7 @@ func renderPredicate(p *store.SQLPredicate, tags string, a *sqlArgs) string {
 }
 
 // joinArgs renders the children of an and / or node joined by op; no children renders empty.
-func joinArgs(args []store.SQLPredicate, op, empty, tags string, a *sqlArgs) string {
+func joinArgs(args []domain.TagPredicate, op, empty, tags string, a *sqlArgs) string {
 	if len(args) == 0 {
 		return empty
 	}

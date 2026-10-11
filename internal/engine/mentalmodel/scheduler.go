@@ -55,14 +55,14 @@ type refreshDecision struct {
 // scheduler is the RefreshScheduler.
 type scheduler struct {
 	detect ChangeDetector
-	config config.Resolver
+	config *config.Resolver
 }
 
 var _ RefreshScheduler = (*scheduler)(nil)
 
 // NewRefreshScheduler returns the RefreshScheduler. Call Decide outside any transaction (it reads config
 // and the change detector).
-func NewRefreshScheduler(d ChangeDetector, c config.Resolver) RefreshScheduler {
+func NewRefreshScheduler(d ChangeDetector, c *config.Resolver) RefreshScheduler {
 	return &scheduler{detect: d, config: c}
 }
 

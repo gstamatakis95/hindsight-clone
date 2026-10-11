@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
 	"memd/internal/prompts"
+	"memd/internal/recall"
 	"memd/internal/store"
 	"strings"
 )
 
-// Recaller is the part of recall.Recaller the single-shot synthesizer consumes; recall.Recaller
+// Recaller is the part of recall.Engine the single-shot synthesizer consumes; recall.Engine
 // satisfies it.
 type Recaller interface {
 	// Recall runs one recall request (bounded by RecallRequest.Seq for a stable snapshot).
-	Recall(ctx context.Context, req recall.RecallRequest) (recall.RecallResult, error)
+	Recall(ctx context.Context, req recall.Request) (recall.Result, error)
 }
 
 // singleShot is the REFRESH_STRATEGY_SINGLE_SHOT Synthesizer: one recall over the scope (observations
@@ -40,7 +40,7 @@ func (*singleShot) Strategy() domain.RefreshStrategy { return domain.RefreshStra
 func (s *singleShot) Full(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (draft, error) {
-	units, err := s.recall(ctx, m, cfg, store.SeqUpTo(0, upTo))
+	units, err := s.recall(ctx, m, cfg, domain.SeqUpTo(0, upTo))
 	if err != nil {
 		return draft{}, err
 	}
@@ -74,7 +74,7 @@ func (s *singleShot) Full(
 func (s *singleShot) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (deltaDraft, error) {
-	units, err := s.recall(ctx, m, cfg, store.SeqUpTo(m.LastSeqSeen, upTo))
+	units, err := s.recall(ctx, m, cfg, domain.SeqUpTo(m.LastSeqSeen, upTo))
 	if err != nil {
 		return deltaDraft{}, err
 	}
@@ -86,10 +86,10 @@ func (s *singleShot) Delta(
 
 // recall runs one recall over m's scope and window; observations come back first.
 func (s *singleShot) recall(
-	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, window store.SeqRange,
+	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, window domain.SeqRange,
 ) ([]domain.Unit, error) {
 	scope := resolveScope(m)
-	req := recall.RecallRequest{
+	req := recall.Request{
 		Bank: m.Bank, Query: m.Spec.SourceQuery, Types: scope.FactTypes, Tags: scope.tagFilter(),
 		Budget: budget(m), PreferObservations: true, Overrides: &cfg, Seq: window,
 	}
@@ -117,9 +117,8 @@ func (s *singleShot) render(
 		Observations: obs, Facts: facts, MaxTokens: maxContentTokens(m, cfg), Now: s.d.Clock.Now(),
 	}
 	if s.d.Directives != nil {
-		data.Directives, err = s.d.Directives.Select(ctx, m.Bank, m.Spec.Tags, false)
-		if err != nil {
-			return "", "", fmt.Errorf("mentalmodel: directives: %w", err)
+		if data.Directives, err = scopeDirectives(ctx, s.d.Directives, m); err != nil {
+			return "", "", err
 		}
 	}
 	if system, err = prompts.Render(prompts.SynthesizeSystem, data); err != nil {
@@ -137,4 +136,20 @@ func budget(m domain.MentalModel) domain.Budget {
 		return domain.BudgetMid
 	}
 	return m.Spec.Trigger.Budget
+}
+
+// scopeDirectives returns the directives synthesize applies to m: the bank's active directives that
+// domain.SelectDirectives picks for the model's scope filter, the filter the agentic strategy hands reflect, so
+// both strategies (and the reflect they mirror) apply the same directives. They are read in a short transaction.
+func scopeDirectives(ctx context.Context, s store.DB, m domain.MentalModel) ([]domain.Directive, error) {
+	var active []domain.Directive
+	err := s.InTx(ctx, func(tx store.Tx) error {
+		var err error
+		active, err = tx.Directives().List(ctx, m.Bank, true)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mentalmodel: directives: %w", err)
+	}
+	return domain.SelectDirectives(active, resolveScope(m).tagFilter(), false), nil
 }

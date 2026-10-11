@@ -2,7 +2,7 @@
 // enforces the lexical case of two rules:
 //
 //   - no model call inside a transaction: the literal must not call a method on an ai.LLM, ai.Embedder or
-//     ai.Reranker (or any type that implements one) nor on the engine types listed in modelTypes;
+//     ai.Reranker (or any type that implements one) nor on the library types listed in modelTypes;
 //   - sequence first: a call to Enqueue*, or QueueModelRefresh, must not come before the first tx.Seq call in
 //     the same literal when both occur.
 //

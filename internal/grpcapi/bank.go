@@ -16,7 +16,7 @@ type BankHandler struct {
 	// Banks serves CreateBank, GetBank, GetBankConfig (overrides), UpdateBankConfig and ResetBankConfig.
 	Banks bank.BankAdmin
 	// Config resolves GetBankConfig's effective view.
-	Config config.Resolver
+	Config *config.Resolver
 	// Stats serves GetBankStats and ListTags.
 	Stats bank.StatsReader
 	// Previewer serves PreviewPrompt.

@@ -6,9 +6,9 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
-	"memd/internal/engine/reflect"
 	"memd/internal/fake"
+	"memd/internal/recall"
+	"memd/internal/reflect"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
@@ -34,7 +34,8 @@ type env struct {
 	llm    *fake.LLM
 	emb    *fake.Embedder
 	reads  *stubReads
-	config config.Resolver
+	config *config.Resolver
+	tags   *recall.Engine
 	rc     *stubRecaller
 	rf     *stubReflector
 	runner RefreshRunner
@@ -57,14 +58,15 @@ func newEnv(t *testing.T) *env {
 	e := &env{
 		t: t, ctx: context.Background(), bank: domain.BankRef{Tenant: "t1", Bank: "b1"}, clock: clock,
 		store: pg, pool: db.Pool, llm: fake.NewLLM(), emb: fake.NewEmbedder(fake.EmbedSimilar),
-		config: config.NewResolver(pg, nil, server),
+		config: config.NewResolver(pg, server),
 	}
 	e.reads = &stubReads{Reader: pg.Read(), store: pg}
+	e.tags = recall.New(recall.Deps{DB: pg, Config: e.config, Clock: clock})
 	e.rc = &stubRecaller{reads: e.reads}
 	e.rf = &stubReflector{reads: e.reads}
 	md := ModelDeps{LLM: e.llm, Router: ai.NewRouter(), Clock: clock}
 	e.runner = NewRefreshRunner(RefreshRunnerDeps{
-		Store: pg, Config: e.config, Scope: e.reads, Clock: clock, Embedder: e.emb,
+		Store: pg, Config: e.config, Scope: e.reads, Tags: e.tags, Clock: clock, Embedder: e.emb,
 		Synthesizers: []Synthesizer{NewAgenticSynthesizer(e.rf, md), NewSingleShotSynthesizer(e.rc, md)},
 	})
 	e.tx(func(tx store.Tx) error {
@@ -227,15 +229,15 @@ func (s *stubReads) FailedRefreshes(context.Context) ([]store.FailedRefresh, err
 type stubRecaller struct {
 	reads *stubReads
 	mu    sync.Mutex
-	reqs  []recall.RecallRequest
+	reqs  []recall.Request
 }
 
 // Recall implements Recaller.
-func (r *stubRecaller) Recall(ctx context.Context, req recall.RecallRequest) (recall.RecallResult, error) {
+func (r *stubRecaller) Recall(ctx context.Context, req recall.Request) (recall.Result, error) {
 	r.mu.Lock()
 	r.reqs = append(r.reqs, req)
 	r.mu.Unlock()
-	var res recall.RecallResult
+	var res recall.Result
 	for _, u := range r.reads.liveUnits(ctx, req.Bank) {
 		if (len(req.Types) == 0 || slices.Contains(req.Types, u.Type)) && domain.MatchFilter(u.Tags, req.Tags) &&
 			req.Seq.Contains(u.Seq) {
@@ -249,20 +251,20 @@ func (r *stubRecaller) Recall(ctx context.Context, req recall.RecallRequest) (re
 type stubReflector struct {
 	reads *stubReads
 	mu    sync.Mutex
-	reqs  []reflect.ReflectRequest
+	reqs  []reflect.Request
 	err   error
 }
 
 // Reflect implements Reflector.
-func (r *stubReflector) Reflect(ctx context.Context, req reflect.ReflectRequest) (reflect.ReflectResult, error) {
+func (r *stubReflector) Reflect(ctx context.Context, req reflect.Request) (reflect.Result, error) {
 	r.mu.Lock()
 	r.reqs = append(r.reqs, req)
 	err := r.err
 	r.mu.Unlock()
 	if err != nil {
-		return reflect.ReflectResult{}, err
+		return reflect.Result{}, err
 	}
-	res := reflect.ReflectResult{Usage: []domain.Usage{{Slot: domain.ModelSlotReflect, Model: "test-model"}}}
+	res := reflect.Result{Usage: []domain.Usage{{Slot: domain.ModelSlotReflect, Model: "test-model"}}}
 	lines := []string{"## Summary"}
 	for _, u := range r.reads.liveUnits(ctx, req.Bank) {
 		if domain.MatchFilter(u.Tags, req.Tags) && req.Seq.Contains(u.Seq) {

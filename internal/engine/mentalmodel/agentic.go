@@ -4,18 +4,16 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/reflect"
 	"memd/internal/prompts"
-	"memd/internal/store"
+	"memd/internal/reflect"
 	"slices"
 	"strings"
 )
 
-// Reflector is the part of reflect.Reflector the agentic synthesizer consumes; reflect.Reflector
-// satisfies it.
+// Reflector is the part of reflect.Agent the agentic synthesizer consumes; reflect.Agent satisfies it.
 type Reflector interface {
 	// Reflect runs one reflect loop (answering as a document for refreshes).
-	Reflect(ctx context.Context, req reflect.ReflectRequest) (reflect.ReflectResult, error)
+	Reflect(ctx context.Context, req reflect.Request) (reflect.Result, error)
 }
 
 // agentic is the REFRESH_STRATEGY_AGENTIC Synthesizer: the reflect loop answering as a document over the
@@ -39,7 +37,7 @@ func (*agentic) Strategy() domain.RefreshStrategy { return domain.RefreshStrateg
 
 // Full runs the reflect loop over everything in scope with seq <= upTo.
 func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (draft, error) {
-	req, err := a.request(m, cfg, store.SeqUpTo(0, upTo))
+	req, err := a.request(m, cfg, domain.SeqUpTo(0, upTo))
 	if err != nil {
 		return draft{}, err
 	}
@@ -67,7 +65,7 @@ func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.Ban
 func (a *agentic) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (deltaDraft, error) {
-	req, err := a.request(m, cfg, store.SeqUpTo(m.LastSeqSeen, upTo))
+	req, err := a.request(m, cfg, domain.SeqUpTo(m.LastSeqSeen, upTo))
 	if err != nil {
 		return deltaDraft{ContentMD: m.ContentMD}, err
 	}
@@ -88,14 +86,14 @@ func (a *agentic) Delta(
 // answering as a document, with the rendered mm_refresh_context as its context. The model itself is always
 // excluded from the page tools.
 func (a *agentic) request(
-	m domain.MentalModel, cfg domain.BankConfig, window store.SeqRange,
-) (reflect.ReflectRequest, error) {
+	m domain.MentalModel, cfg domain.BankConfig, window domain.SeqRange,
+) (reflect.Request, error) {
 	scope := resolveScope(m)
 	t := m.Spec.Trigger
 	facts, outputs := true, false
-	req := reflect.ReflectRequest{
+	req := reflect.Request{
 		Bank: m.Bank, Query: m.Spec.SourceQuery, Tags: scope.tagFilter(), Budget: budget(m),
-		Include:   reflect.ReflectInclude{Facts: &facts, ToolCalls: true, ToolOutputs: &outputs},
+		Include:   reflect.Include{Facts: &facts, ToolCalls: true, ToolOutputs: &outputs},
 		Overrides: &cfg, Seq: window, Types: scope.FactTypes,
 		ExcludeMentalModels:   t.ExcludeMentalModels,
 		ExcludeMentalModelIDs: appendUnique(slices.Clone(t.ExcludeMentalModelIDs), m.Spec.ID),
@@ -112,7 +110,7 @@ func (a *agentic) request(
 
 // refreshContext renders the reflect context of an agentic refresh over window: the document's name and
 // whether the loop sees only the delta window.
-func refreshContext(m domain.MentalModel, window store.SeqRange) (string, error) {
+func refreshContext(m domain.MentalModel, window domain.SeqRange) (string, error) {
 	out, err := prompts.Render(prompts.MentalModelRefreshContext,
 		prompts.RefreshContextData{Name: m.Spec.Name, Delta: window.After > 0})
 	if err != nil {
@@ -122,7 +120,7 @@ func refreshContext(m domain.MentalModel, window store.SeqRange) (string, error)
 }
 
 // toolCalls returns the loop's tool calls, if traced.
-func toolCalls(res reflect.ReflectResult) []domain.ToolCallTrace {
+func toolCalls(res reflect.Result) []domain.ToolCallTrace {
 	if res.Trace == nil {
 		return nil
 	}

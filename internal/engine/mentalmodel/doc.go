@@ -7,14 +7,13 @@
 //
 // mentalmodel is an engine package: it imports domain, the boundary packages, prompts, recall and reflect (for their
 // request types) and must never import adapters, server, gen, pgx, net/http, the S3 SDK or Datadog (depguard);
-// recall and reflect never import it. It declares the small interfaces it consumes: [Reflector], [Recaller],
-// [Projector], [DirectiveSelector] (bank.DirectiveSelector) and the store.Reader subsets in reads.go ([ScopeReader],
-// [ModelLister], [CronSource], [FailureSource]). cmd/memd/wire.go builds:
+// recall and reflect never import it. It declares the small interfaces it consumes: [Reflector], [Projector]
+// (reflect.Agent), [Recaller] and [TagCompiler] (recall.Engine) and the store.Reader subsets in reads.go
+// ([ScopeReader], [ModelLister], [CronSource], [FailureSource]). cmd/memd/wire.go builds:
 //
 //   - [NewRefreshRunner] with both synthesizers, for the worker's refresh_mental_model handler ([RunJob])
 //     and the DryRunRefresh RPC;
-//   - [NewAdmin] for the MentalModelService RPCs, and [NewPageSearcher] for SearchPages and for reflect's
-//     page tools;
+//   - [NewAdmin] for the MentalModelService RPCs (SearchPages is served by recall.Engine.SearchPages);
 //   - [NewTriggers] (its cron sweep runs in the worker's maintenance tick) and
 //     [NewRefreshFailureReconciler] (also run by the tick).
 //
@@ -107,9 +106,8 @@
 // and the watermark, keeping the cleared content as a history entry), History, Delete and DeleteFolder
 // (recursive; an empty path is rejected). Create, Update, Refresh and Clear take tx.Seq first.
 //
-// [PageSearcher.Search] ranks a folder's pages in memory by term overlap (name weighted double) and cosine
-// similarity to the query embedding, fused with RRF (k = 60), default 10 hits; without an embedder, or if
-// embedding fails, it ranks by terms only.
+// The single-shot synthesize prompt carries the bank's directives that domain.SelectDirectives picks for the model's
+// scope filter: the filter the agentic strategy hands reflect, so both strategies apply the same directives.
 //
 // # Config knobs
 //

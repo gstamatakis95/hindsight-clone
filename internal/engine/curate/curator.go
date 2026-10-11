@@ -76,7 +76,7 @@ type CuratorDeps struct {
 	// nil rejects such requests with domain.ErrFailedPrecondition.
 	Resolver EntityResolver
 	// Config resolves the entity match threshold (with the request overrides) before the transaction.
-	Config config.Resolver
+	Config *config.Resolver
 	// Archived reads an archived unit's snapshot entity names before a restore, so the rederive re-creates
 	// entities graph maintenance pruned meanwhile; nil = rely on the entities Restore reattaches.
 	Archived UnitGetter

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"memd/internal/blob"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/store"
 	"testing"
 )
@@ -32,21 +33,21 @@ func newArmFixture(t *testing.T, s store.DB) armFixture {
 	f := armFixture{seed: fact(bankA, "graph seed")}
 	f.seed.Timeless = true
 	insertUnits(t, s, f.seed)
-	links := make([]domain.Link, len(armTagSets))
+	links := make([]graph.Link, len(armTagSets))
 	for i, tags := range armTagSets {
 		u := dated(bankA, fmt.Sprintf("zebra sighting number %d", i), day(70+i), day(71+i))
 		u.Tags = domain.NormalizeTags(tags)
 		u.Embedding = angleVec(float64(10 * i))
 		u.Seq = insertUnits(t, s, u)
 		f.units = append(f.units, u)
-		links[i] = link(bankA, f.seed.ID, u.ID, domain.LinkSemantic, 0.9-0.1*float64(i))
+		links[i] = link(bankA, f.seed.ID, u.ID, graph.KindSemantic, 0.9-0.1*float64(i))
 	}
 	insertLinks(t, s, links...)
 	return f
 }
 
 // want returns the fixture units, in insertion order, that tags and seq both admit.
-func (f armFixture) want(tags *store.SQLPredicate, seq store.SeqRange) []domain.UnitID {
+func (f armFixture) want(tags *domain.TagPredicate, seq domain.SeqRange) []domain.UnitID {
 	var out []domain.UnitID
 	for _, u := range f.units {
 		if tags.Eval(u.Tags) && seq.Contains(u.Seq) {
@@ -61,27 +62,27 @@ type recallArm struct {
 	name string
 	// ordered arms have a known hit order (the vector arm: fixture order is nearest first).
 	ordered bool
-	search  func(t *testing.T, s store.DB, f armFixture, tags *store.SQLPredicate, seq store.SeqRange) []store.Hit
+	search  func(t *testing.T, s store.DB, f armFixture, tags *domain.TagPredicate, seq domain.SeqRange) []store.Hit
 }
 
 // recallArms are the four Reader arms, each querying the arm fixture.
 func recallArms() []recallArm {
 	return []recallArm{
-		{"SearchVector", true, func(t *testing.T, s store.DB, _ armFixture, p *store.SQLPredicate, r store.SeqRange,
+		{"SearchVector", true, func(t *testing.T, s store.DB, _ armFixture, p *domain.TagPredicate, r domain.SeqRange,
 		) []store.Hit {
 			return searchVector(t, s, store.VectorQuery{Bank: bankA, Embedding: angleVec(0), Tags: p, Seq: r, Limit: 10})
 		}},
-		{"SearchText", false, func(t *testing.T, s store.DB, _ armFixture, p *store.SQLPredicate, r store.SeqRange,
+		{"SearchText", false, func(t *testing.T, s store.DB, _ armFixture, p *domain.TagPredicate, r domain.SeqRange,
 		) []store.Hit {
 			return searchText(t, s, store.TextQuery{Bank: bankA, Text: "zebra", Tags: p, Seq: r, Limit: 10})
 		}},
-		{"SearchTemporal", false, func(t *testing.T, s store.DB, _ armFixture, p *store.SQLPredicate, r store.SeqRange,
+		{"SearchTemporal", false, func(t *testing.T, s store.DB, _ armFixture, p *domain.TagPredicate, r domain.SeqRange,
 		) []store.Hit {
 			return searchTemporal(t, s, store.TemporalQuery{Bank: bankA, Window: armWindow, Tags: p, Seq: r, Limit: 10})
 		}},
-		{"ExpandGraph", false, func(t *testing.T, s store.DB, f armFixture, p *store.SQLPredicate, r store.SeqRange,
+		{"ExpandGraph", false, func(t *testing.T, s store.DB, f armFixture, p *domain.TagPredicate, r domain.SeqRange,
 		) []store.Hit {
-			q := store.GraphQuery{Bank: bankA, Seeds: []domain.UnitID{f.seed.ID}, MaxHops: 1, Tags: p, Seq: r, Limit: 10}
+			q := graph.Query{Bank: bankA, Seeds: []domain.UnitID{f.seed.ID}, MaxHops: 1, Tags: p, Seq: r, Limit: 10}
 			return expandGraph(t, s, q)
 		}},
 	}
@@ -109,12 +110,12 @@ func wantArmHits(t *testing.T, a recallArm, what string, hs []store.Hit, want []
 	wantSet(t, what, hitIDs(hs), want)
 }
 
-// testArmTags: every tag predicate selects exactly the units (*SQLPredicate).Eval accepts.
+// testArmTags: every tag predicate selects exactly the units (*domain.TagPredicate).Eval accepts.
 func testArmTags(t *testing.T, s store.DB, a recallArm) {
 	f := newArmFixture(t, s)
 	for _, c := range tagPredicates() {
-		hs := a.search(t, s, f, c.p, store.SeqRange{})
-		wantArmHits(t, a, a.name+" Tags="+c.name, hs, f.want(c.p, store.SeqRange{}))
+		hs := a.search(t, s, f, c.p, domain.SeqRange{})
+		wantArmHits(t, a, a.name+" Tags="+c.name, hs, f.want(c.p, domain.SeqRange{}))
 	}
 }
 
@@ -124,14 +125,14 @@ func testArmSeq(t *testing.T, s store.DB, a recallArm) {
 	seq := func(i int) int64 { return f.units[i].Seq }
 	ranges := []struct {
 		name string
-		r    store.SeqRange
+		r    domain.SeqRange
 	}{
-		{"zero range", store.SeqRange{}},
-		{"(u0, u2]", store.SeqUpTo(seq(0), seq(2))},
-		{"after u2", store.SeqRange{After: seq(2)}},
-		{"up to u1", store.SeqUpTo(0, seq(1))},
-		{"up to 0 (empty snapshot)", store.SeqUpTo(0, 0)},
-		{"after the last unit", store.SeqRange{After: seq(len(f.units) - 1)}},
+		{"zero range", domain.SeqRange{}},
+		{"(u0, u2]", domain.SeqUpTo(seq(0), seq(2))},
+		{"after u2", domain.SeqRange{After: seq(2)}},
+		{"up to u1", domain.SeqUpTo(0, seq(1))},
+		{"up to 0 (empty snapshot)", domain.SeqUpTo(0, 0)},
+		{"after the last unit", domain.SeqRange{After: seq(len(f.units) - 1)}},
 	}
 	for _, c := range ranges {
 		want := f.want(nil, c.r)
@@ -188,7 +189,7 @@ func testTenantIsolation(t *testing.T, s store.DB) {
 	insertUnits(t, s, mine)
 	insertUnits(t, s, mine2)
 	insertUnits(t, s, theirs)
-	insertLinks(t, s, link(bankA, mine.ID, mine2.ID, domain.LinkSemantic, 0.9))
+	insertLinks(t, s, link(bankA, mine.ID, mine2.ID, graph.KindSemantic, 0.9))
 	appendEvents(t, s, bankA, "event-a")
 	appendEvents(t, s, other, "event-other")
 
@@ -221,6 +222,6 @@ func assertTenantSearches(t *testing.T, s store.DB, theirs, mine domain.UnitID) 
 		hitIDs(searchText(t, s, store.TextQuery{Bank: other, Text: "zebra", Limit: 10})), want)
 	wantSeq(t, "SearchTemporal(other tenant)",
 		hitIDs(searchTemporal(t, s, store.TemporalQuery{Bank: other, Window: armWindow, Limit: 10})), want)
-	q := store.GraphQuery{Bank: other, Seeds: []domain.UnitID{mine}, MaxHops: 2, Limit: 10}
+	q := graph.Query{Bank: other, Seeds: []domain.UnitID{mine}, MaxHops: 2, Limit: 10}
 	wantSeq(t, "ExpandGraph(other tenant, tenant-1 seed)", hitIDs(expandGraph(t, s, q)), nil)
 }

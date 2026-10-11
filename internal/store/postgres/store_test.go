@@ -6,7 +6,9 @@ import (
 	"maps"
 	"math"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/store"
+	"memd/internal/store/postgres"
 	"slices"
 	"testing"
 	"time"
@@ -29,7 +31,6 @@ func TestStore(t *testing.T) {
 		{"SearchVectorFilters", testSearchVectorFilters},
 		{"SearchText", testSearchText},
 		{"SearchTemporal", testSearchTemporal},
-		{"ExpandGraph", testExpandGraph},
 		{"ReaderReusedAcrossCommits", testReaderReuse},
 		{"TenantIsolation", testTenantIsolation},
 	}
@@ -469,19 +470,19 @@ func testSearchVectorFilters(t *testing.T, s store.DB) {
 // namedPredicate is one tag filter of the arm tag tests.
 type namedPredicate struct {
 	name string
-	p    *store.SQLPredicate
+	p    *domain.TagPredicate
 }
 
-// tagPredicates are filters whose expected results come from (*store.SQLPredicate).Eval.
+// tagPredicates are filters whose expected results come from (*domain.TagPredicate).Eval.
 func tagPredicates() []namedPredicate {
-	leaf := func(m domain.TagsMatch, tags ...string) store.SQLPredicate {
-		return store.SQLPredicate{Op: store.PredicateTags, Tags: tags, Match: m}
+	leaf := func(m domain.TagsMatch, tags ...string) domain.TagPredicate {
+		return domain.TagPredicate{Op: domain.PredicateTags, Tags: tags, Match: m}
 	}
-	and := func(args ...store.SQLPredicate) *store.SQLPredicate {
-		return &store.SQLPredicate{Op: store.PredicateAnd, Args: args}
+	and := func(args ...domain.TagPredicate) *domain.TagPredicate {
+		return &domain.TagPredicate{Op: domain.PredicateAnd, Args: args}
 	}
-	or := func(args ...store.SQLPredicate) *store.SQLPredicate {
-		return &store.SQLPredicate{Op: store.PredicateOr, Args: args}
+	or := func(args ...domain.TagPredicate) *domain.TagPredicate {
+		return &domain.TagPredicate{Op: domain.PredicateOr, Args: args}
 	}
 	alpha, beta := leaf(domain.TagsMatchAnyStrict, "alpha"), leaf(domain.TagsMatchAnyStrict, "beta")
 	return []namedPredicate{
@@ -504,8 +505,8 @@ func tagPredicates() []namedPredicate {
 }
 
 // notOf wraps p in a not node.
-func notOf(p store.SQLPredicate) store.SQLPredicate {
-	return store.SQLPredicate{Op: store.PredicateNot, Args: []store.SQLPredicate{p}}
+func notOf(p domain.TagPredicate) domain.TagPredicate {
+	return domain.TagPredicate{Op: domain.PredicateNot, Args: []domain.TagPredicate{p}}
 }
 
 // ---------- SearchText, SearchTemporal, ExpandGraph ----------
@@ -596,47 +597,28 @@ func searchTemporal(t *testing.T, s store.DB, q store.TemporalQuery) []store.Hit
 	return hs
 }
 
-// expandGraph runs ExpandGraph through Read() and fails the test on error.
-func expandGraph(t *testing.T, s store.DB, q store.GraphQuery) []store.Hit {
+// expandGraph runs Expand through the pool-backed graph (DB.Graph) and returns the hits as store hits; it fails
+// the test on error.
+func expandGraph(t *testing.T, s store.DB, q graph.Query) []store.Hit {
 	t.Helper()
-	hs, err := s.Read().ExpandGraph(t.Context(), q)
+	hs, err := s.(*postgres.DB).Graph().Expand(t.Context(), q)
 	if err != nil {
-		t.Fatalf("ExpandGraph: %v", err)
+		t.Fatalf("Expand: %v", err)
 	}
-	return hs
+	out := make([]store.Hit, len(hs))
+	for i, h := range hs {
+		out[i] = store.Hit{ID: h.ID, Score: h.Score}
+	}
+	return out
 }
 
 // link builds a link of bank b.
-func link(b domain.BankRef, from, to domain.UnitID, kind domain.LinkKind, w float64) domain.Link {
-	return domain.Link{Bank: b, From: from, To: to, Kind: kind, Weight: w}
+func link(b domain.BankRef, from, to domain.UnitID, kind graph.Kind, w float64) graph.Link {
+	return graph.Link{Bank: b, From: from, To: to, Kind: kind, Weight: w}
 }
 
 // insertLinks stores links in one transaction.
-func insertLinks(t *testing.T, s store.DB, ls ...domain.Link) {
+func insertLinks(t *testing.T, s store.DB, ls ...graph.Link) {
 	t.Helper()
-	inTx(t, s, func(tx store.Tx) error { return tx.Links().Insert(t.Context(), ls) })
-}
-
-// testExpandGraph: seed -> a -> b -> c (plus a -> seed); one hop reaches a, two hops a and b; seeds and
-// unlinked units are never hits.
-func testExpandGraph(t *testing.T, s store.DB) {
-	ensureBanks(t, s, bankA)
-	seed, a, b, c, lone := fact(bankA, "seed"), fact(bankA, "a"), fact(bankA, "b"), fact(bankA, "c"), fact(bankA, "lone")
-	insertUnits(t, s, seed, a, b, c, lone)
-	insertLinks(t, s,
-		link(bankA, seed.ID, a.ID, domain.LinkSemantic, 0.9),
-		link(bankA, a.ID, seed.ID, domain.LinkSemantic, 0.9),
-		link(bankA, a.ID, b.ID, domain.LinkTemporal, 0.8),
-		link(bankA, b.ID, c.ID, domain.LinkCausal, 0.7),
-	)
-	q := store.GraphQuery{Bank: bankA, Seeds: []domain.UnitID{seed.ID}, MaxHops: 1, Limit: 10}
-	wantSet(t, "ExpandGraph 1 hop", hitIDs(expandGraph(t, s, q)), []domain.UnitID{a.ID})
-	q.MaxHops = 2
-	hs := expandGraph(t, s, q)
-	wantSet(t, "ExpandGraph 2 hops", hitIDs(hs), []domain.UnitID{a.ID, b.ID})
-	wantScoresDescending(t, "ExpandGraph", hs)
-	q = store.GraphQuery{Bank: bankA, Seeds: []domain.UnitID{seed.ID, a.ID}, MaxHops: 1, Limit: 10}
-	wantSet(t, "ExpandGraph seeds {seed, a}", hitIDs(expandGraph(t, s, q)), []domain.UnitID{b.ID})
-	q = store.GraphQuery{Bank: bankA, Seeds: []domain.UnitID{lone.ID}, MaxHops: 2, Limit: 10}
-	wantSet(t, "ExpandGraph from an unlinked seed", hitIDs(expandGraph(t, s, q)), nil)
+	inTx(t, s, func(tx store.Tx) error { return tx.Graph().AddLinks(t.Context(), ls) })
 }

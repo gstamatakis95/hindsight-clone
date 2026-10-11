@@ -102,17 +102,6 @@ func (r *reader) SearchTemporal(ctx context.Context, q store.TemporalQuery) ([]s
 	return queryHits(ctx, r.conn, "search temporal", sql, args)
 }
 
-// ExpandGraph is the graph arm: a recursive CTE over the bank's forward links from the seeds, at most
-// MaxHops (at least 1) hops, scored by the best path weight (decision 123).
-func (r *reader) ExpandGraph(ctx context.Context, q store.GraphQuery) ([]store.Hit, error) {
-	seeds := parseIDs(q.Seeds)
-	if q.Limit <= 0 || len(seeds) == 0 {
-		return []store.Hit{}, nil
-	}
-	sql, args := graphSQL(q, seeds)
-	return queryHits(ctx, r.conn, "expand graph", sql, args)
-}
-
 // queryHits runs a query returning (id uuid, score float8) rows and converts them to hits in row order.
 func queryHits(ctx context.Context, conn db.DBTX, what, sql string, args []any) ([]store.Hit, error) {
 	rows, err := conn.Query(ctx, sql, args...)

@@ -255,3 +255,11 @@ type AuditEntry struct {
 	// At is when the action committed.
 	At time.Time
 }
+
+// Evidence ties an observation to one fact it rests on, with the exact supporting quote.
+type Evidence struct {
+	// Unit is the cited fact.
+	Unit UnitID
+	// Quote is the exact text of the fact that supports the observation.
+	Quote string
+}

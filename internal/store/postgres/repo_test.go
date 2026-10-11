@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"memd/internal/blob"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/store"
 	"slices"
 	"testing"
@@ -27,7 +28,6 @@ func repoCases() []storeCase {
 		{"EntitiesLabelResolvesExisting", testEntityLabel},
 		{"EntitiesAttachCooccurrence", testEntityCooccurrence},
 		{"EntitiesAttachPrunedIsConflict", testEntityAttachPruned},
-		{"LinksInsertNoDuplicates", testLinksIdempotent},
 		{"EvidenceAddIdempotentAndCites", testEvidenceCites},
 		{"EvidenceDeleteCiting", testEvidenceDeleteCiting},
 		{"EventsAppendList", testEvents},
@@ -197,7 +197,7 @@ func testDeleteByDocument(t *testing.T, s store.DB) {
 	u1, u2, u3 := fact(bankA, "u1"), fact(bankA, "u2"), fact(bankA, "u3")
 	u1.DocumentID, u2.DocumentID, u3.DocumentID = "doc-1", "doc-1", "doc-2"
 	insertUnits(t, s, u1, u2, u3)
-	insertLinks(t, s, link(bankA, u1.ID, u3.ID, domain.LinkSemantic, 0.5))
+	insertLinks(t, s, link(bankA, u1.ID, u3.ID, graph.KindSemantic, 0.5))
 	var deleted []domain.UnitID
 	inTx(t, s, func(tx store.Tx) error {
 		if _, err := tx.Seq(t.Context(), bankA); err != nil {
@@ -231,8 +231,8 @@ func testArchiveRestore(t *testing.T, s store.DB) {
 	u.Embedding, keep.Embedding = angleVec(0), angleVec(20)
 	u.Tags = []string{"zoology"}
 	insertUnits(t, s, u, keep, partner)
-	insertLinks(t, s, link(bankA, keep.ID, u.ID, domain.LinkCausal, 0.9),
-		link(bankA, u.ID, partner.ID, domain.LinkCausal, 0.8))
+	insertLinks(t, s, link(bankA, keep.ID, u.ID, graph.KindCausal, 0.9),
+		link(bankA, u.ID, partner.ID, graph.KindCausal, 0.8))
 	ent := upsertEntity(t, s, domain.Entity{Bank: bankA, CanonicalName: "Platypus", Kind: "animal"})
 	inTx(t, s, func(tx store.Tx) error { return tx.Entities().Attach(t.Context(), u.ID, []domain.EntityID{ent}) })
 	archive(t, s, u.ID)
@@ -243,7 +243,7 @@ func testArchiveRestore(t *testing.T, s store.DB) {
 		store.VectorQuery{Bank: bankA, Embedding: angleVec(0), Limit: 10}), u.ID)
 	wantNoHit(t, "SearchText archived", searchText(t, s, store.TextQuery{Bank: bankA, Text: "platypus", Limit: 10}), u.ID)
 	wantNoHit(t, "ExpandGraph archived", expandGraph(t, s,
-		store.GraphQuery{Bank: bankA, Seeds: []domain.UnitID{keep.ID}, MaxHops: 2, Limit: 10}), u.ID)
+		graph.Query{Bank: bankA, Seeds: []domain.UnitID{keep.ID}, MaxHops: 2, Limit: 10}), u.ID)
 	inTx(t, s, func(tx store.Tx) error {
 		if _, err := tx.Seq(t.Context(), bankA); err != nil {
 			return err
@@ -258,8 +258,8 @@ func testArchiveRestore(t *testing.T, s store.DB) {
 		t.Errorf("restored unit = %q %q %v, want %q %q %v", got[0].Text, got[0].Type, got[0].Tags,
 			u.Text, u.Type, u.Tags)
 	}
-	q := store.GraphQuery{
-		Bank: bankA, Seeds: []domain.UnitID{u.ID}, MaxHops: 1, Kinds: []domain.LinkKind{domain.LinkCausal},
+	q := graph.Query{
+		Bank: bankA, Seeds: []domain.UnitID{u.ID}, MaxHops: 1, Kinds: []graph.Kind{graph.KindCausal},
 		Limit: 10,
 	}
 	wantSeq(t, "ExpandGraph(causal) from the restored unit", hitIDs(expandGraph(t, s, q)), []domain.UnitID{partner.ID})
@@ -559,23 +559,6 @@ func testEntityAttachPruned(t *testing.T, s store.DB) {
 			t.Errorf("Ann's MentionCount after the failed Attach = %d, want 0", c.Entity.MentionCount)
 		}
 	}
-}
-
-// ---------- LinkRepo ----------
-
-// testLinksIdempotent: inserted links are traversed; re-inserting an edge keeps one edge.
-func testLinksIdempotent(t *testing.T, s store.DB) {
-	ensureBanks(t, s, bankA)
-	seed, a, b := fact(bankA, "seed"), fact(bankA, "a"), fact(bankA, "b")
-	insertUnits(t, s, seed, a, b)
-	insertLinks(t, s, link(bankA, seed.ID, a.ID, domain.LinkSemantic, 0.5), link(bankA, a.ID, b.ID, domain.LinkCausal, 1))
-	q := store.GraphQuery{Bank: bankA, Seeds: []domain.UnitID{seed.ID}, MaxHops: 2, Limit: 10}
-	wantSet(t, "ExpandGraph after Insert", hitIDs(expandGraph(t, s, q)), []domain.UnitID{a.ID, b.ID})
-	insertLinks(t, s, link(bankA, seed.ID, a.ID, domain.LinkSemantic, 0.9))
-	q.MaxHops = 1
-	wantSeq(t, "ExpandGraph after re-Insert", hitIDs(expandGraph(t, s, q)), []domain.UnitID{a.ID})
-	q.Kinds = []domain.LinkKind{domain.LinkTemporal}
-	wantSeq(t, "ExpandGraph Kinds=[temporal]", hitIDs(expandGraph(t, s, q)), nil)
 }
 
 // ---------- EvidenceRepo ----------
