@@ -111,7 +111,7 @@ type Admin interface {
 type AdminDeps struct {
 	// Store reads and writes models and queues refreshes.
 	Store port.Store
-	// Models lists a bank's models (CCR WP-12-1).
+	// Models lists a bank's models (port.Reader).
 	Models ModelLister
 	// Detector computes is_stale on reads; nil = never stale.
 	Detector ChangeDetector
@@ -190,7 +190,7 @@ func (a *admin) ListMentalModels(ctx context.Context, req ListRequest) (ModelPag
 	if size <= 0 {
 		size = defaultPageSize
 	}
-	items, next, err := a.d.Models.ListModels(ctx, ModelQuery{
+	items, next, err := a.d.Models.ListMentalModels(ctx, ModelQuery{
 		Bank: req.Bank, FolderPrefix: normalizeFolder(req.FolderPrefix), Tags: domain.NormalizeTags(req.Tags),
 		TagsMatch: req.TagsMatch, PageSize: min(size, maxPageSize), PageToken: req.PageToken,
 	})

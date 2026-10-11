@@ -22,10 +22,9 @@ type Recaller interface {
 
 // RecallerDeps are the Recaller's dependencies.
 type RecallerDeps struct {
-	// Reader serves the four arms, hydration and source facts.
+	// Reader serves the four arms, hydration, source facts, fuzzy tags (TagCounts), chunks, entity state and
+	// the stale flag (StaleScopes).
 	Reader port.Reader
-	// Lookups serves fuzzy tags, chunks and entity state (CCR WP-09-1); nil = those features are off.
-	Lookups Lookups
 	// Config merges server < tenant < bank < request.
 	Config port.ConfigResolver
 	// Embedder embeds the query.
@@ -67,14 +66,10 @@ func NewRecaller(d RecallerDeps) Recaller {
 	if arms == nil {
 		arms = []Retriever{NewSemantic(d.Reader), NewKeyword(d.Reader), NewGraph(d.Reader), NewTemporal(d.Reader)}
 	}
-	var vocab TagVocabulary
-	if d.Lookups != nil {
-		vocab = d.Lookups
-	}
 	return &recaller{
-		d: d, arms: arms, tags: NewTagFilterCompiler(vocab), fuser: NewRRF(),
+		d: d, arms: arms, tags: NewTagFilterCompiler(d.Reader), fuser: NewRRF(),
 		scorer: NewScorer(d.Reranker, d.Router, d.Clock), gate: NewScoreGate(), packer: NewPacker(d.Count),
-		prefer: NewObservationPreference(), includer: NewIncluder(d.Reader, d.Lookups, d.Count),
+		prefer: NewObservationPreference(), includer: NewIncluder(d.Reader, d.Count),
 	}
 }
 
@@ -122,7 +117,11 @@ func (r *recaller) Recall(ctx context.Context, req RecallRequest) (RecallResult,
 	if err != nil {
 		return RecallResult{}, fmt.Errorf("recall: include: %w", err)
 	}
-	out := result(packed, enr)
+	stale, err := r.staleScopes(ctx, req.Bank, packed)
+	if err != nil {
+		return RecallResult{}, fmt.Errorf("recall: stale scopes: %w", err)
+	}
+	out := result(packed, enr, stale)
 	if req.Trace {
 		out.Trace = &RecallTrace{
 			Arms: arms, Fused: len(fused), Reranked: reranked, Packed: len(packed),
@@ -231,14 +230,47 @@ func (r *recaller) hydrate(ctx context.Context, b port.BankRef, seq port.SeqRang
 	return out, nil
 }
 
-// result builds the RecallResult from the packed candidates and the enrichment.
-func result(packed []Candidate, e Enrichment) RecallResult {
+// staleScopes returns the canonical keys of the packed observations' scopes that still hold unconsolidated
+// facts (Reader.StaleScopes, one call over the distinct scopes).
+func (r *recaller) staleScopes(ctx context.Context, b port.BankRef, packed []Candidate) (map[string]bool, error) {
+	var scopes []port.ScopeKey
+	seen := map[string]bool{}
+	for _, c := range packed {
+		if c.Unit == nil || c.Unit.Type != domain.FactTypeObservation {
+			continue
+		}
+		s := domain.NewScopeKey(b, c.Unit.Tags)
+		if k := s.String(); !seen[k] {
+			seen[k] = true
+			scopes = append(scopes, s)
+		}
+	}
+	if len(scopes) == 0 {
+		return nil, nil
+	}
+	stale, err := r.d.Reader.StaleScopes(ctx, b, scopes)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(stale))
+	for _, s := range stale {
+		out[s.String()] = true
+	}
+	return out, nil
+}
+
+// result builds the RecallResult from the packed candidates, the enrichment and the stale scope keys.
+func result(packed []Candidate, e Enrichment, stale map[string]bool) RecallResult {
 	out := RecallResult{
 		Results: make([]Memory, 0, len(packed)), SourceFacts: e.SourceFacts,
 		SourceFactsTruncated: e.SourceFactsTruncated, Chunks: e.Chunks, Entities: e.Entities,
 	}
 	for _, c := range packed {
-		out.Results = append(out.Results, Memory{Unit: *c.Unit, Scores: scoresOf(c)})
+		m := Memory{Unit: *c.Unit, Scores: scoresOf(c)}
+		if c.Unit.Type == domain.FactTypeObservation {
+			m.Stale = stale[domain.NewScopeKey(c.Unit.Bank, c.Unit.Tags).String()]
+		}
+		out.Results = append(out.Results, m)
 	}
 	return out
 }

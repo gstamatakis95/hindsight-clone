@@ -2,110 +2,15 @@ package consolidate
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
 	"testing"
 )
 
-// searchClearer is the test ObservationClearer over the fake store's searches. DeleteScopes deletes the
-// observations citing the scopes' sources, which equals deleting the scopes' observations when no source
-// is shared with another scope (true in these tests).
-type searchClearer struct{}
-
-var _ ObservationClearer = searchClearer{}
-
-// all lists b's live units of types through a zero-vector semantic search (the fake returns every unit
-// with an embedding).
-func all(ctx context.Context, tx port.Tx, b port.BankRef, types ...domain.FactType) ([]domain.Unit, error) {
-	hits, err := tx.SearchVector(ctx, port.VectorQuery{
-		Bank: b, Embedding: make([]float32, domain.EmbeddingDim), Types: types,
-	})
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]port.UnitID, 0, len(hits))
-	for _, h := range hits {
-		ids = append(ids, h.ID)
-	}
-	return tx.GetUnits(ctx, b, ids)
-}
-
-// CitingScopes returns the scopes of observations citing any of ids.
-func (searchClearer) CitingScopes(
-	ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID,
-) ([]port.ScopeKey, error) {
-	obs, err := all(ctx, tx, b, domain.FactTypeObservation)
-	if err != nil {
-		return nil, err
-	}
-	var sets [][]string
-	for _, o := range obs {
-		if slices.ContainsFunc(o.SourceIDs, func(id port.UnitID) bool { return slices.Contains(ids, id) }) {
-			sets = append(sets, o.Tags)
-		}
-	}
-	return scopeKeys(b, sets), nil
-}
-
-// DeleteScopes deletes the observations of scopes (all when empty) through DeleteCiting of their sources.
-func (searchClearer) DeleteScopes(
-	ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey,
-) ([]port.UnitID, []port.UnitID, error) {
-	obs, err := all(ctx, tx, b, domain.FactTypeObservation)
-	if err != nil {
-		return nil, nil, err
-	}
-	var sources []port.UnitID
-	for _, o := range obs {
-		inScope := slices.ContainsFunc(scopes, func(s port.ScopeKey) bool { return domain.SameTagSet(s.Tags, o.Tags) })
-		if len(scopes) == 0 || inScope {
-			sources = append(sources, o.SourceIDs...)
-		}
-	}
-	deleted, _, err := tx.Evidence().DeleteCiting(ctx, b, sources)
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := resetStamps(ctx, tx, sources); err != nil {
-		return nil, nil, err
-	}
-	return deleted, sources, nil
-}
-
-// resetStamps clears consolidated_at on ids by re-writing them with Update (the only port that clears it).
-func resetStamps(ctx context.Context, tx port.Tx, ids []port.UnitID) error {
-	us, err := tx.GetUnits(ctx, bank, ids)
-	if err != nil {
-		return err
-	}
-	for _, u := range us {
-		if err := tx.Units().Update(ctx, u); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// DocumentUnits returns the live facts of doc.
-func (searchClearer) DocumentUnits(
-	ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID,
-) ([]port.UnitID, error) {
-	facts, err := all(ctx, tx, b, domain.FactTypeWorld, domain.FactTypeExperience)
-	if err != nil {
-		return nil, err
-	}
-	var out []port.UnitID
-	for _, f := range facts {
-		if f.DocumentID == doc {
-			out = append(out, f.ID)
-		}
-	}
-	return out, nil
-}
-
 // TestInvalidatorClearForMemory: the observations citing the unit are deleted, their other sources reset,
-// the automatic consolidate queued and the scopes returned.
+// the automatic consolidate queued and the scopes returned (EvidenceRepo.CitingScopes on the fake).
 func TestInvalidatorClearForMemory(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	e.fact("f1", "Kim sails", "x")
@@ -115,7 +20,7 @@ func TestInvalidatorClearForMemory(t *testing.T) {
 	e.observation("obs-row", "Lee rows", []string{"y"}, "f3")
 	var scopes []port.ScopeKey
 	scopes = e.scopesTx(func(tx port.Tx) ([]port.ScopeKey, error) {
-		return NewInvalidator(searchClearer{}).ClearForMemory(t.Context(), tx, bank, "f1")
+		return NewInvalidator().ClearForMemory(t.Context(), tx, bank, "f1")
 	})
 	if len(scopes) != 1 || scopes[0].String() != scopeOf("x").String() {
 		t.Fatalf("scopes = %v", scopes)
@@ -132,17 +37,16 @@ func TestInvalidatorClearForMemory(t *testing.T) {
 	}
 	// Nothing to clear: no job, no scopes.
 	scopes = e.scopesTx(func(tx port.Tx) ([]port.ScopeKey, error) {
-		return NewInvalidator(searchClearer{}).ClearForMemory(t.Context(), tx, bank, "f3x")
+		return NewInvalidator().ClearForMemory(t.Context(), tx, bank, "f3x")
 	})
 	if len(scopes) != 0 || len(e.jobs(domain.OperationKindConsolidate)) != 1 {
 		t.Fatalf("no-op clear: scopes %v", scopes)
 	}
 }
 
-// TestInvalidatorClearScopesAndDocument: ClearScopes removes only the named scopes; ClearDocumentUnits
-// clears what the document's units support.
-func TestInvalidatorClearScopesAndDocument(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{})
+// seedDocScopes seeds scopes x, y and z, each with one fact and one observation; f3 belongs to document d1.
+func seedDocScopes(t *testing.T, e *env) {
+	t.Helper()
 	e.tx(func(tx port.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{ID: "d1", Bank: bank})
 	})
@@ -152,7 +56,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 	e.tx(func(tx port.Tx) error {
 		seq, err := tx.Seq(t.Context(), bank)
 		if err != nil {
-			return err
+			return wrapErr(err)
 		}
 		return tx.Units().Insert(t.Context(), []domain.Unit{{
 			ID: "f3", Bank: bank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Ola dives",
@@ -162,10 +66,24 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 	e.observation("obs-x", "Max surfs", []string{"x"}, "f1")
 	e.observation("obs-y", "Ned skis", []string{"y"}, "f2")
 	e.observation("obs-z", "Ola dives", []string{"z"}, "f3")
-	inv := NewInvalidator(searchClearer{})
-	e.tx(func(tx port.Tx) error { return inv.ClearScopes(t.Context(), tx, bank, []port.ScopeKey{scopeOf("x")}) })
-	if ids := obsIDs(e.observations()); !slices.Equal(ids, []port.UnitID{"obs-y", "obs-z"}) {
-		t.Fatalf("after ClearScopes(x): %v", ids)
+}
+
+// TestInvalidatorClearScopesAndDocument: ClearScopes removes only the named scopes and returns the deleted
+// observations; ClearDocumentUnits clears what the document's units (UnitRepo.IDsByDocument) support; an
+// explicit empty ClearScopes (the RPC's "every scope") clears the rest.
+func TestInvalidatorClearScopesAndDocument(t *testing.T) {
+	e := newEnv(t, domain.BankConfig{})
+	seedDocScopes(t, e)
+	inv := NewInvalidator()
+	var deleted []port.UnitID
+	e.tx(func(tx port.Tx) error {
+		var err error
+		deleted, err = inv.ClearScopes(t.Context(), tx, bank, []port.ScopeKey{scopeOf("x")})
+		return wrapErr(err)
+	})
+	if ids := obsIDs(e.observations()); !slices.Equal(ids, []port.UnitID{"obs-y", "obs-z"}) ||
+		!slices.Equal(deleted, []port.UnitID{"obs-x"}) {
+		t.Fatalf("after ClearScopes(x): left %v, deleted %v", ids, deleted)
 	}
 	if e.unit("f1").ConsolidatedAt != nil {
 		t.Fatal("f1 not reset")
@@ -181,6 +99,158 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 	if n := len(e.jobs(domain.OperationKindConsolidate)); n != 1 {
 		t.Fatalf("pending consolidate = %d, want 1 (from ClearDocumentUnits)", n)
 	}
+	e.tx(func(tx port.Tx) error {
+		var err error
+		deleted, err = inv.ClearScopes(t.Context(), tx, bank, nil)
+		return wrapErr(err)
+	})
+	if left := e.observations(); len(left) != 0 || !slices.Equal(deleted, []port.UnitID{"obs-y"}) {
+		t.Fatalf("after ClearScopes(all): left %+v, deleted %v", left, deleted)
+	}
+}
+
+// callLog records, in order, the Seq and observation-delete calls a transaction sees.
+type callLog []string
+
+// loggingTx wraps the fake's transaction and logs Seq and the evidence and unit calls the Invalidator makes.
+type loggingTx struct {
+	port.Tx
+	log *callLog
+}
+
+// Seq logs "Seq".
+func (t loggingTx) Seq(ctx context.Context, b port.BankRef) (int64, error) {
+	*t.log = append(*t.log, "Seq")
+	return t.Tx.Seq(ctx, b)
+}
+
+// Evidence wraps the evidence repository.
+func (t loggingTx) Evidence() port.EvidenceRepo { return loggingEvidence{t.Tx.Evidence(), t.log} }
+
+// Units wraps the unit repository.
+func (t loggingTx) Units() port.UnitRepo { return loggingUnits{t.Tx.Units(), t.log} }
+
+// loggingEvidence logs the evidence calls.
+type loggingEvidence struct {
+	port.EvidenceRepo
+	log *callLog
+}
+
+// CitingScopes logs and delegates.
+func (r loggingEvidence) CitingScopes(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error) {
+	*r.log = append(*r.log, "CitingScopes")
+	return r.EvidenceRepo.CitingScopes(ctx, b, ids)
+}
+
+// DeleteCiting logs and delegates.
+func (r loggingEvidence) DeleteCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) (
+	[]port.UnitID, []port.UnitID, error,
+) {
+	*r.log = append(*r.log, "DeleteCiting")
+	return r.EvidenceRepo.DeleteCiting(ctx, b, ids)
+}
+
+// DeleteScopes logs and delegates.
+func (r loggingEvidence) DeleteScopes(ctx context.Context, b port.BankRef, s []port.ScopeKey) (
+	[]port.UnitID, []port.UnitID, error,
+) {
+	*r.log = append(*r.log, "DeleteScopes")
+	return r.EvidenceRepo.DeleteScopes(ctx, b, s)
+}
+
+// DeleteAllObservations logs and delegates.
+func (r loggingEvidence) DeleteAllObservations(ctx context.Context, b port.BankRef) (
+	[]port.UnitID, []port.UnitID, error,
+) {
+	*r.log = append(*r.log, "DeleteAllObservations")
+	return r.EvidenceRepo.DeleteAllObservations(ctx, b)
+}
+
+// loggingUnits logs IDsByDocument.
+type loggingUnits struct {
+	port.UnitRepo
+	log *callLog
+}
+
+// IDsByDocument logs and delegates.
+func (r loggingUnits) IDsByDocument(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
+	*r.log = append(*r.log, "IDsByDocument")
+	return r.UnitRepo.IDsByDocument(ctx, b, doc)
+}
+
+// TestInvalidatorSeqBeforeDelete: every Invalidator method takes tx.Seq before its first read or delete,
+// and ClearScopes maps an empty list to DeleteAllObservations and a non-empty one to DeleteScopes.
+func TestInvalidatorSeqBeforeDelete(t *testing.T) {
+	inv := NewInvalidator()
+	for _, c := range []struct {
+		name string
+		call func(ctx context.Context, tx port.Tx) error
+		want callLog
+	}{
+		{"ClearScopes(x)", func(ctx context.Context, tx port.Tx) error {
+			_, err := inv.ClearScopes(ctx, tx, bank, []port.ScopeKey{scopeOf("x")})
+			return wrapErr(err)
+		}, callLog{"Seq", "DeleteScopes"}},
+		{"ClearScopes(all)", func(ctx context.Context, tx port.Tx) error {
+			_, err := inv.ClearScopes(ctx, tx, bank, nil)
+			return wrapErr(err)
+		}, callLog{"Seq", "DeleteAllObservations"}},
+		{"ClearForMemory", func(ctx context.Context, tx port.Tx) error {
+			_, err := inv.ClearForMemory(ctx, tx, bank, "f1")
+			return wrapErr(err)
+		}, callLog{"Seq", "CitingScopes", "DeleteCiting"}},
+		{"ClearDocumentUnits", func(ctx context.Context, tx port.Tx) error {
+			_, err := inv.ClearDocumentUnits(ctx, tx, bank, "d1")
+			return wrapErr(err)
+		}, callLog{"Seq", "IDsByDocument", "CitingScopes", "DeleteCiting"}},
+	} {
+		e := newEnv(t, domain.BankConfig{})
+		seedDocScopes(t, e)
+		var log callLog
+		e.tx(func(tx port.Tx) error { return c.call(t.Context(), loggingTx{tx, &log}) })
+		if !slices.Equal(log, c.want) {
+			t.Errorf("%s: calls %v, want %v", c.name, log, c.want)
+		}
+	}
+}
+
+// TestInvalidatorDataDerivedEmptyNeverClearsAll: the data-derived paths (a unit no observation cites, a
+// document with no units, a document whose units nothing cites) never reach DeleteAllObservations and leave
+// every observation in place.
+func TestInvalidatorDataDerivedEmptyNeverClearsAll(t *testing.T) {
+	e := newEnv(t, domain.BankConfig{})
+	seedDocScopes(t, e)
+	e.tx(func(tx port.Tx) error {
+		return tx.Documents().Upsert(t.Context(), domain.Document{ID: "d-empty", Bank: bank})
+	})
+	inv := NewInvalidator()
+	var log callLog
+	e.tx(func(tx port.Tx) error {
+		ltx := loggingTx{tx, &log}
+		if _, err := inv.ClearForMemory(t.Context(), ltx, bank, "uncited"); err != nil {
+			return wrapErr(err)
+		}
+		if _, err := inv.ClearDocumentUnits(t.Context(), ltx, bank, "d-empty"); err != nil {
+			return wrapErr(err)
+		}
+		_, err := inv.ClearDocumentUnits(t.Context(), ltx, bank, "d-unknown")
+		return wrapErr(err)
+	})
+	if slices.Contains(log, "DeleteAllObservations") || slices.Contains(log, "DeleteScopes") {
+		t.Fatalf("data-derived clears called %v", log)
+	}
+	if ids := obsIDs(e.observations()); !slices.Equal(ids, []port.UnitID{"obs-x", "obs-y", "obs-z"}) {
+		t.Fatalf("observations after data-derived empty clears: %v, want all three", ids)
+	}
+	e.wantPending(domain.OperationKindConsolidate, 0)
+}
+
+// wrapErr wraps a non-nil error from the Invalidator or the fake store for the test's transaction.
+func wrapErr(err error) error {
+	if err != nil {
+		return fmt.Errorf("in test tx: %w", err)
+	}
+	return nil
 }
 
 // obsIDs returns sorted observation ids.

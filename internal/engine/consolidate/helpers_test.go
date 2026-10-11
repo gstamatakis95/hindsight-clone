@@ -1,7 +1,6 @@
 package consolidate
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -91,7 +90,6 @@ func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 		LLM:      e.llm,
 		Embedder: e.emb,
 		Clock:    clock,
-		Counter:  storeCounter{e.store},
 		NewID: func() port.UnitID {
 			e.nextID++
 			return port.UnitID(fmt.Sprintf("obs-%02d", e.nextID))
@@ -304,20 +302,6 @@ func (e *env) run(j port.Job) ConsolidationResult {
 		e.t.Fatal(err)
 	}
 	return res
-}
-
-// storeCounter is the test ObservationCounter: it counts a scope's observations through the fake's search
-// (a zero-vector query with no floor returns every observation that has an embedding).
-type storeCounter struct{ s port.Store }
-
-// CountObservations counts the observations of scope s.
-func (c storeCounter) CountObservations(ctx context.Context, s port.ScopeKey) (int, error) {
-	q := port.VectorQuery{
-		Bank: s.BankRef, Embedding: make([]float32, domain.EmbeddingDim),
-		Types: []domain.FactType{domain.FactTypeObservation}, Tags: scopePredicate(s),
-	}
-	hits, err := c.s.Read().SearchVector(ctx, q)
-	return len(hits), err
 }
 
 // autoJob is the automatic consolidate job of the test bank.

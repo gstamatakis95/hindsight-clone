@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// env is one test's world: the fake store, clock and LLM, the stub reads the ports lack (CCR WP-12-1),
+// env is one test's world: the fake store, clock and LLM, its reads (stubReads),
 // and stub recall / reflect engines that return the in-scope units of their window.
 type env struct {
 	t      *testing.T
@@ -54,7 +54,7 @@ func newEnv(t *testing.T) *env {
 		store: store, llm: fake.NewLLM(), emb: fake.NewEmbedder(fake.EmbedSimilar),
 		config: config.NewResolver(store, nil, server),
 	}
-	e.reads = &stubReads{store: store}
+	e.reads = &stubReads{Reader: store.Read(), store: store}
 	e.rc = &stubRecaller{reads: e.reads}
 	e.rf = &stubReflector{reads: e.reads}
 	md := ModelDeps{LLM: e.llm, Router: routing.NewRouter(), Clock: clock}
@@ -149,9 +149,11 @@ func (e *env) scriptSynthesize(content string) {
 		port.ChatResponse{Message: port.ChatMessage{Content: content}})
 }
 
-// stubReads implements ScopeReader, ModelLister, CronSource and FailureSource over the fake store for the
-// units and models a test created (the ports have no such reads yet).
+// stubReads is the fake store's port.Reader (so NewestSeqInScope, TagCounts and ListMentalModels are the
+// fake's real reads) with test-only CronModels and FailedRefreshes lists, and it tracks the units a test
+// created for the stub recall and reflect engines.
 type stubReads struct {
+	port.Reader
 	store  *fake.Store
 	mu     sync.Mutex
 	units  []port.UnitID
@@ -188,65 +190,6 @@ func (s *stubReads) liveUnits(ctx context.Context, b port.BankRef) []domain.Unit
 		panic(err)
 	}
 	return us
-}
-
-// matching filters units by types, tags and seq.
-func matching(us []domain.Unit, types []domain.FactType, tags *port.SQLPredicate, r port.SeqRange) []domain.Unit {
-	var out []domain.Unit
-	for _, u := range us {
-		if (len(types) == 0 || slices.Contains(types, u.Type)) && tags.Eval(u.Tags) && r.Contains(u.Seq) {
-			out = append(out, u)
-		}
-	}
-	return out
-}
-
-// NewestSeq implements ScopeReader.
-func (s *stubReads) NewestSeq(ctx context.Context, q ScopeQuery) (int64, error) {
-	var newest int64
-	for _, u := range matching(s.liveUnits(ctx, q.Bank), q.Types, q.Tags, q.Seq) {
-		newest = max(newest, u.Seq)
-	}
-	return newest, nil
-}
-
-// ListModels implements ModelLister (one page, ordered by id).
-func (s *stubReads) ListModels(ctx context.Context, q ModelQuery) ([]domain.MentalModel, string, error) {
-	s.mu.Lock()
-	refs := slices.Clone(s.models)
-	s.mu.Unlock()
-	var out []domain.MentalModel
-	err := s.store.InTx(ctx, func(tx port.Tx) error {
-		for _, r := range refs {
-			if r.b != q.Bank {
-				continue
-			}
-			m, err := tx.MentalModels().Get(ctx, r.b, r.id)
-			if err != nil {
-				continue
-			}
-			if keepModel(m, q) {
-				out = append(out, m)
-			}
-		}
-		return nil
-	})
-	slices.SortFunc(out, func(a, b domain.MentalModel) int {
-		return strings.Compare(string(a.Spec.ID), string(b.Spec.ID))
-	})
-	return out, "", err //nolint:wrapcheck // test stub over the fake store
-}
-
-// keepModel applies a ModelQuery's filters.
-func keepModel(m domain.MentalModel, q ModelQuery) bool {
-	f := m.Spec.FolderPath
-	if q.FolderPrefix != "" && f != q.FolderPrefix && !strings.HasPrefix(f, q.FolderPrefix+"/") {
-		return false
-	}
-	if q.RefreshAfterConsolidation && !m.Spec.Trigger.RefreshAfterConsolidation {
-		return false
-	}
-	return len(q.Tags) == 0 || domain.MatchTags(m.Spec.Tags, q.Tags, q.TagsMatch)
 }
 
 // CronModels implements CronSource.

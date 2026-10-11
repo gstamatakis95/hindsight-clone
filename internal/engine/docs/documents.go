@@ -22,8 +22,7 @@ type DocumentAdmin interface {
 	) (domain.Operation, error)
 }
 
-// DocumentSource lists documents. It is the port.Reader method proposed in CCR WP-13-1 (DocumentQuery and
-// DocumentCursor move to port with it); port.Reader satisfies it once the CCR lands.
+// DocumentSource lists documents. It is the port.Reader method; port.Reader satisfies it.
 type DocumentSource interface {
 	// ListDocuments returns up to q.Limit documents matching q, newest first (created_at, then id, both
 	// descending), starting strictly after q.After, with UnitCount and UnitsByFactType filled. An unknown
@@ -42,35 +41,11 @@ type Reprocessor interface {
 	) (port.OperationID, error)
 }
 
-// DocumentQuery filters DocumentSource.ListDocuments. Zero fields do not filter.
-type DocumentQuery struct {
-	// Bank is the bank listed.
-	Bank port.BankRef
-	// Q is a case-insensitive substring filter on the document id.
-	Q string
-	// Tags filters by normalized document tags with domain.MatchTags semantics; empty = none.
-	Tags []string
-	// TagsMatch is how Tags compare.
-	TagsMatch domain.TagsMatch
-	// Start is the inclusive lower bound on TimeField; nil = unbounded.
-	Start *time.Time
-	// End is the exclusive upper bound on TimeField; nil = unbounded.
-	End *time.Time
-	// TimeField is the timestamp Start and End filter on; unspecified = created_at.
-	TimeField domain.DocTimeField
-	// After continues a listing: only documents strictly after this cursor; nil = first page.
-	After *DocumentCursor
-	// Limit caps the result (> 0).
-	Limit int
-}
+// DocumentQuery filters DocumentSource.ListDocuments (port.DocumentQuery). Zero fields do not filter.
+type DocumentQuery = port.DocumentQuery
 
-// DocumentCursor is a keyset position in a document listing.
-type DocumentCursor struct {
-	// CreatedAt is the last listed document's created_at.
-	CreatedAt time.Time `json:"c"`
-	// ID is the last listed document's id.
-	ID port.DocumentID `json:"i"`
-}
+// DocumentCursor is a keyset position in a document listing (port.DocumentCursor).
+type DocumentCursor = port.DocumentCursor
 
 // ListDocumentsRequest mirrors memory.v1.ListDocumentsRequest; server.ListDocumentsRequest becomes an alias
 // of it (decision 1302).

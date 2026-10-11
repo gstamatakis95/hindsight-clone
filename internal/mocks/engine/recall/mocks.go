@@ -306,8 +306,8 @@ var _ recall.TagVocabulary = &TagVocabulary{}
 //
 //		// make and configure a mocked recall.TagVocabulary
 //		mockedTagVocabulary := &TagVocabulary{
-//			BankTagsFunc: func(ctx context.Context, b port.BankRef) ([]string, error) {
-//				panic("mock out the BankTags method")
+//			TagCountsFunc: func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+//				panic("mock out the TagCounts method")
 //			},
 //		}
 //
@@ -316,395 +316,79 @@ var _ recall.TagVocabulary = &TagVocabulary{}
 //
 //	}
 type TagVocabulary struct {
-	// BankTagsFunc mocks the BankTags method.
-	BankTagsFunc func(ctx context.Context, b port.BankRef) ([]string, error)
+	// TagCountsFunc mocks the TagCounts method.
+	TagCountsFunc func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
-		// BankTags holds details about calls to the BankTags method.
-		BankTags []struct {
+		// TagCounts holds details about calls to the TagCounts method.
+		TagCounts []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
 			B port.BankRef
+			// Source is the source argument value.
+			Source domain.TagSource
+			// Prefix is the prefix argument value.
+			Prefix string
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
 		}
 	}
-	lockBankTags sync.RWMutex
+	lockTagCounts sync.RWMutex
 }
 
-// BankTags calls BankTagsFunc.
-func (mock *TagVocabulary) BankTags(ctx context.Context, b port.BankRef) ([]string, error) {
-	if mock.BankTagsFunc == nil {
-		panic("TagVocabulary.BankTagsFunc: method is nil but TagVocabulary.BankTags was just called")
+// TagCounts calls TagCountsFunc.
+func (mock *TagVocabulary) TagCounts(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+	if mock.TagCountsFunc == nil {
+		panic("TagVocabulary.TagCountsFunc: method is nil but TagVocabulary.TagCounts was just called")
 	}
 	callInfo := struct {
-		Ctx context.Context
-		B   port.BankRef
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
 	}{
-		Ctx: ctx,
-		B:   b,
+		Ctx:    ctx,
+		B:      b,
+		Source: source,
+		Prefix: prefix,
+		After:  after,
+		Limit:  limit,
 	}
-	mock.lockBankTags.Lock()
-	mock.calls.BankTags = append(mock.calls.BankTags, callInfo)
-	mock.lockBankTags.Unlock()
-	return mock.BankTagsFunc(ctx, b)
+	mock.lockTagCounts.Lock()
+	mock.calls.TagCounts = append(mock.calls.TagCounts, callInfo)
+	mock.lockTagCounts.Unlock()
+	return mock.TagCountsFunc(ctx, b, source, prefix, after, limit)
 }
 
-// BankTagsCalls gets all the calls that were made to BankTags.
+// TagCountsCalls gets all the calls that were made to TagCounts.
 // Check the length with:
 //
-//	len(mockedTagVocabulary.BankTagsCalls())
-func (mock *TagVocabulary) BankTagsCalls() []struct {
-	Ctx context.Context
-	B   port.BankRef
+//	len(mockedTagVocabulary.TagCountsCalls())
+func (mock *TagVocabulary) TagCountsCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Source domain.TagSource
+	Prefix string
+	After  string
+	Limit  int
 } {
 	var calls []struct {
-		Ctx context.Context
-		B   port.BankRef
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
 	}
-	mock.lockBankTags.RLock()
-	calls = mock.calls.BankTags
-	mock.lockBankTags.RUnlock()
-	return calls
-}
-
-// Ensure that ChunkReader does implement recall.ChunkReader.
-// If this is not the case, regenerate this file with mockery.
-var _ recall.ChunkReader = &ChunkReader{}
-
-// ChunkReader is a mock implementation of recall.ChunkReader.
-//
-//	func TestSomethingThatUsesChunkReader(t *testing.T) {
-//
-//		// make and configure a mocked recall.ChunkReader
-//		mockedChunkReader := &ChunkReader{
-//			GetChunksFunc: func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
-//				panic("mock out the GetChunks method")
-//			},
-//		}
-//
-//		// use mockedChunkReader in code that requires recall.ChunkReader
-//		// and then make assertions.
-//
-//	}
-type ChunkReader struct {
-	// GetChunksFunc mocks the GetChunks method.
-	GetChunksFunc func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// GetChunks holds details about calls to the GetChunks method.
-		GetChunks []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// B is the b argument value.
-			B port.BankRef
-			// Ids is the ids argument value.
-			Ids []port.ChunkID
-		}
-	}
-	lockGetChunks sync.RWMutex
-}
-
-// GetChunks calls GetChunksFunc.
-func (mock *ChunkReader) GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
-	if mock.GetChunksFunc == nil {
-		panic("ChunkReader.GetChunksFunc: method is nil but ChunkReader.GetChunks was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		B   port.BankRef
-		Ids []port.ChunkID
-	}{
-		Ctx: ctx,
-		B:   b,
-		Ids: ids,
-	}
-	mock.lockGetChunks.Lock()
-	mock.calls.GetChunks = append(mock.calls.GetChunks, callInfo)
-	mock.lockGetChunks.Unlock()
-	return mock.GetChunksFunc(ctx, b, ids)
-}
-
-// GetChunksCalls gets all the calls that were made to GetChunks.
-// Check the length with:
-//
-//	len(mockedChunkReader.GetChunksCalls())
-func (mock *ChunkReader) GetChunksCalls() []struct {
-	Ctx context.Context
-	B   port.BankRef
-	Ids []port.ChunkID
-} {
-	var calls []struct {
-		Ctx context.Context
-		B   port.BankRef
-		Ids []port.ChunkID
-	}
-	mock.lockGetChunks.RLock()
-	calls = mock.calls.GetChunks
-	mock.lockGetChunks.RUnlock()
-	return calls
-}
-
-// Ensure that EntityStateReader does implement recall.EntityStateReader.
-// If this is not the case, regenerate this file with mockery.
-var _ recall.EntityStateReader = &EntityStateReader{}
-
-// EntityStateReader is a mock implementation of recall.EntityStateReader.
-//
-//	func TestSomethingThatUsesEntityStateReader(t *testing.T) {
-//
-//		// make and configure a mocked recall.EntityStateReader
-//		mockedEntityStateReader := &EntityStateReader{
-//			EntityStatesFunc: func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
-//				panic("mock out the EntityStates method")
-//			},
-//		}
-//
-//		// use mockedEntityStateReader in code that requires recall.EntityStateReader
-//		// and then make assertions.
-//
-//	}
-type EntityStateReader struct {
-	// EntityStatesFunc mocks the EntityStates method.
-	EntityStatesFunc func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// EntityStates holds details about calls to the EntityStates method.
-		EntityStates []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// B is the b argument value.
-			B port.BankRef
-			// Units is the units argument value.
-			Units []port.UnitID
-		}
-	}
-	lockEntityStates sync.RWMutex
-}
-
-// EntityStates calls EntityStatesFunc.
-func (mock *EntityStateReader) EntityStates(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
-	if mock.EntityStatesFunc == nil {
-		panic("EntityStateReader.EntityStatesFunc: method is nil but EntityStateReader.EntityStates was just called")
-	}
-	callInfo := struct {
-		Ctx   context.Context
-		B     port.BankRef
-		Units []port.UnitID
-	}{
-		Ctx:   ctx,
-		B:     b,
-		Units: units,
-	}
-	mock.lockEntityStates.Lock()
-	mock.calls.EntityStates = append(mock.calls.EntityStates, callInfo)
-	mock.lockEntityStates.Unlock()
-	return mock.EntityStatesFunc(ctx, b, units)
-}
-
-// EntityStatesCalls gets all the calls that were made to EntityStates.
-// Check the length with:
-//
-//	len(mockedEntityStateReader.EntityStatesCalls())
-func (mock *EntityStateReader) EntityStatesCalls() []struct {
-	Ctx   context.Context
-	B     port.BankRef
-	Units []port.UnitID
-} {
-	var calls []struct {
-		Ctx   context.Context
-		B     port.BankRef
-		Units []port.UnitID
-	}
-	mock.lockEntityStates.RLock()
-	calls = mock.calls.EntityStates
-	mock.lockEntityStates.RUnlock()
-	return calls
-}
-
-// Ensure that Lookups does implement recall.Lookups.
-// If this is not the case, regenerate this file with mockery.
-var _ recall.Lookups = &Lookups{}
-
-// Lookups is a mock implementation of recall.Lookups.
-//
-//	func TestSomethingThatUsesLookups(t *testing.T) {
-//
-//		// make and configure a mocked recall.Lookups
-//		mockedLookups := &Lookups{
-//			BankTagsFunc: func(ctx context.Context, b port.BankRef) ([]string, error) {
-//				panic("mock out the BankTags method")
-//			},
-//			EntityStatesFunc: func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
-//				panic("mock out the EntityStates method")
-//			},
-//			GetChunksFunc: func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
-//				panic("mock out the GetChunks method")
-//			},
-//		}
-//
-//		// use mockedLookups in code that requires recall.Lookups
-//		// and then make assertions.
-//
-//	}
-type Lookups struct {
-	// BankTagsFunc mocks the BankTags method.
-	BankTagsFunc func(ctx context.Context, b port.BankRef) ([]string, error)
-
-	// EntityStatesFunc mocks the EntityStates method.
-	EntityStatesFunc func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error)
-
-	// GetChunksFunc mocks the GetChunks method.
-	GetChunksFunc func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// BankTags holds details about calls to the BankTags method.
-		BankTags []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// B is the b argument value.
-			B port.BankRef
-		}
-		// EntityStates holds details about calls to the EntityStates method.
-		EntityStates []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// B is the b argument value.
-			B port.BankRef
-			// Units is the units argument value.
-			Units []port.UnitID
-		}
-		// GetChunks holds details about calls to the GetChunks method.
-		GetChunks []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// B is the b argument value.
-			B port.BankRef
-			// Ids is the ids argument value.
-			Ids []port.ChunkID
-		}
-	}
-	lockBankTags     sync.RWMutex
-	lockEntityStates sync.RWMutex
-	lockGetChunks    sync.RWMutex
-}
-
-// BankTags calls BankTagsFunc.
-func (mock *Lookups) BankTags(ctx context.Context, b port.BankRef) ([]string, error) {
-	if mock.BankTagsFunc == nil {
-		panic("Lookups.BankTagsFunc: method is nil but Lookups.BankTags was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		B   port.BankRef
-	}{
-		Ctx: ctx,
-		B:   b,
-	}
-	mock.lockBankTags.Lock()
-	mock.calls.BankTags = append(mock.calls.BankTags, callInfo)
-	mock.lockBankTags.Unlock()
-	return mock.BankTagsFunc(ctx, b)
-}
-
-// BankTagsCalls gets all the calls that were made to BankTags.
-// Check the length with:
-//
-//	len(mockedLookups.BankTagsCalls())
-func (mock *Lookups) BankTagsCalls() []struct {
-	Ctx context.Context
-	B   port.BankRef
-} {
-	var calls []struct {
-		Ctx context.Context
-		B   port.BankRef
-	}
-	mock.lockBankTags.RLock()
-	calls = mock.calls.BankTags
-	mock.lockBankTags.RUnlock()
-	return calls
-}
-
-// EntityStates calls EntityStatesFunc.
-func (mock *Lookups) EntityStates(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
-	if mock.EntityStatesFunc == nil {
-		panic("Lookups.EntityStatesFunc: method is nil but Lookups.EntityStates was just called")
-	}
-	callInfo := struct {
-		Ctx   context.Context
-		B     port.BankRef
-		Units []port.UnitID
-	}{
-		Ctx:   ctx,
-		B:     b,
-		Units: units,
-	}
-	mock.lockEntityStates.Lock()
-	mock.calls.EntityStates = append(mock.calls.EntityStates, callInfo)
-	mock.lockEntityStates.Unlock()
-	return mock.EntityStatesFunc(ctx, b, units)
-}
-
-// EntityStatesCalls gets all the calls that were made to EntityStates.
-// Check the length with:
-//
-//	len(mockedLookups.EntityStatesCalls())
-func (mock *Lookups) EntityStatesCalls() []struct {
-	Ctx   context.Context
-	B     port.BankRef
-	Units []port.UnitID
-} {
-	var calls []struct {
-		Ctx   context.Context
-		B     port.BankRef
-		Units []port.UnitID
-	}
-	mock.lockEntityStates.RLock()
-	calls = mock.calls.EntityStates
-	mock.lockEntityStates.RUnlock()
-	return calls
-}
-
-// GetChunks calls GetChunksFunc.
-func (mock *Lookups) GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
-	if mock.GetChunksFunc == nil {
-		panic("Lookups.GetChunksFunc: method is nil but Lookups.GetChunks was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		B   port.BankRef
-		Ids []port.ChunkID
-	}{
-		Ctx: ctx,
-		B:   b,
-		Ids: ids,
-	}
-	mock.lockGetChunks.Lock()
-	mock.calls.GetChunks = append(mock.calls.GetChunks, callInfo)
-	mock.lockGetChunks.Unlock()
-	return mock.GetChunksFunc(ctx, b, ids)
-}
-
-// GetChunksCalls gets all the calls that were made to GetChunks.
-// Check the length with:
-//
-//	len(mockedLookups.GetChunksCalls())
-func (mock *Lookups) GetChunksCalls() []struct {
-	Ctx context.Context
-	B   port.BankRef
-	Ids []port.ChunkID
-} {
-	var calls []struct {
-		Ctx context.Context
-		B   port.BankRef
-		Ids []port.ChunkID
-	}
-	mock.lockGetChunks.RLock()
-	calls = mock.calls.GetChunks
-	mock.lockGetChunks.RUnlock()
+	mock.lockTagCounts.RLock()
+	calls = mock.calls.TagCounts
+	mock.lockTagCounts.RUnlock()
 	return calls
 }
 

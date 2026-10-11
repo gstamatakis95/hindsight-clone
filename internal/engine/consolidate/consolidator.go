@@ -60,13 +60,6 @@ type ConsolidatorDeps struct {
 	Scopes ScopeExpander
 	// Deduper checks new observations for near-duplicates; nil = NewDeduper(LLM, Router, Store.Read()).
 	Deduper Deduper
-	// Counter counts a scope's observations; required only when a scope has max_observations_per_scope.
-	Counter ObservationCounter
-	// Models lists mental models for the refresh triggers; nil = no triggers.
-	Models ModelLister
-	// DocScopes reads a document's item-level observation_scopes (WP-15's Document.ObservationScopes);
-	// nil = fall back to the document's overrides, then the run's default (decision 1003).
-	DocScopes DocumentScopeReader
 	// Tokens counts tokens for the source-fact budgets; nil = about four characters per token.
 	Tokens recall.TokenCounter
 	// Checkpoint returns the run's checkpoint (progress + cancel check) between scopes and batches;

@@ -108,18 +108,6 @@ type IngestorDeps struct {
 	Clock port.Clock
 	// NewID generates document ids; nil = uuid.NewString.
 	NewID func() string
-	// ScopesWriter stores an item's observation scopes on its document; nil = not stored. It stands in until
-	// WP-15 adds domain.Document.ObservationScopes to DocumentRepo.Upsert (decision 808).
-	ScopesWriter DocumentScopesWriter
-}
-
-// DocumentScopesWriter stores a retain item's observation_scopes on its document, in the caller's transaction.
-// Once WP-15 lands it becomes setting domain.Document.ObservationScopes on DocumentRepo.Upsert.
-type DocumentScopesWriter interface {
-	// SetObservationScopes stores s (nil = none) on document doc of b.
-	SetObservationScopes(
-		ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes,
-	) error
 }
 
 // ingestor is the Ingestor.
@@ -366,14 +354,9 @@ func (i *ingestor) write(ctx context.Context, req IngestRequest, plans []*itemPl
 			}
 			if err := tx.Documents().Upsert(ctx, domain.Document{
 				ID: p.doc, Bank: req.Bank, Overrides: p.overrides, Tags: p.payload.Tags, BlobKey: p.payload.BlobKey,
+				ObservationScopes: p.payload.ObservationScopes,
 			}); err != nil {
 				return err
-			}
-			if i.d.ScopesWriter != nil {
-				err := i.d.ScopesWriter.SetObservationScopes(ctx, tx, req.Bank, p.doc, p.payload.ObservationScopes)
-				if err != nil {
-					return fmt.Errorf("retain: store observation scopes: %w", err)
-				}
 			}
 		}
 		if !req.RunAsync {

@@ -3,6 +3,7 @@ package consolidate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/port"
@@ -49,25 +50,35 @@ func TestStrategyMatch(t *testing.T) {
 	}
 }
 
-// fixedScopes is a ScopeLister over a fixed list.
-type fixedScopes struct {
-	scopes   []port.ScopeKey
-	complete bool
-}
+// manyScopes is a test-only ScopeLister reporting more scopes than Preview examines.
+type manyScopes struct{}
 
-// Scopes returns the list.
-func (f fixedScopes) Scopes(_ context.Context, _ port.BankRef, limit int) ([]port.ScopeKey, bool, error) {
-	if limit != previewScopeLimit {
-		return nil, false, errors.New("unexpected limit")
+// ListScopes returns limit scopes when asked for previewScopeLimit+1 of them.
+func (manyScopes) ListScopes(_ context.Context, _ port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
+	if after != "" || limit != previewScopeLimit+1 {
+		return nil, errors.New("unexpected paging")
 	}
-	return f.scopes, f.complete, nil
+	return make([]domain.ScopeInfo, limit), nil
 }
 
-// TestStrategyPreview: each draft strategy lists the scopes it wins and those an earlier one shadows.
+// TestStrategyPreviewIncomplete: more scopes than the preview limit make Complete false.
+func TestStrategyPreviewIncomplete(t *testing.T) {
+	p, err := NewStrategyMatcher(manyScopes{}).Preview(t.Context(), bank, nil)
+	if err != nil || p.Complete {
+		t.Fatalf("preview = %+v, %v; want incomplete", p.Complete, err)
+	}
+}
+
+// TestStrategyPreview: each draft strategy lists the scopes it wins and those an earlier one shadows, over
+// the scopes the fake's Reader.ListScopes returns (every scope that holds an observation).
 func TestStrategyPreview(t *testing.T) {
-	m := NewStrategyMatcher(fixedScopes{scopes: []port.ScopeKey{
-		scopeOf("team", "x"), scopeOf("team"), scopeOf("other"), scopeOf(),
-	}})
+	e := newEnv(t, domain.BankConfig{})
+	for i, tags := range [][]string{{"team", "x"}, {"team"}, {"other"}, {}} {
+		id := fmt.Sprintf("f%d", i)
+		e.fact(id, "fact "+id, tags...)
+		e.observation("obs-"+id, "obs "+id, tags, id)
+	}
+	m := NewStrategyMatcher(e.store.Read())
 	draft := []domain.ConsolidationStrategy{
 		{Name: "exact-team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}, TagsMatch: domain.TagsMatchExact}}},
 		{Name: "team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}}}},
@@ -76,7 +87,7 @@ func TestStrategyPreview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Complete || len(p.Matches) != 2 {
+	if !p.Complete || len(p.Matches) != 2 {
 		t.Fatalf("preview = %+v", p)
 	}
 	keys := func(ss []port.ScopeKey) []string {

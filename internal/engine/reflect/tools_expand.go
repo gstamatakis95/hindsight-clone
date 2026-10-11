@@ -11,8 +11,7 @@ import (
 
 // expandTool is expand: the source facts behind observations and the source chunks behind facts.
 type expandTool struct {
-	r      port.Reader
-	chunks ChunkReader
+	r port.Reader
 }
 
 var _ Tool = (*expandTool)(nil)
@@ -100,7 +99,7 @@ func (t *expandTool) visibleUnits(
 	return out, nil
 }
 
-// context reads the observations' source facts and the facts' chunks (when a ChunkReader is wired).
+// context reads the observations' source facts and the facts' chunks (Reader.GetChunks).
 func (t *expandTool) context(
 	ctx context.Context, st *AgentState, units map[port.UnitID]domain.Unit,
 ) (map[port.UnitID]domain.Unit, map[port.ChunkID]domain.Chunk, error) {
@@ -120,8 +119,8 @@ func (t *expandTool) context(
 		}
 	}
 	chunks := map[port.ChunkID]domain.Chunk{}
-	if t.chunks != nil && len(chunkIDs) > 0 {
-		cs, err := t.chunks.GetChunks(ctx, st.Request.Bank, chunkIDs)
+	if len(chunkIDs) > 0 {
+		cs, err := t.r.GetChunks(ctx, st.Request.Bank, chunkIDs)
 		if err != nil {
 			return nil, nil, fmt.Errorf("get chunks: %w", err)
 		}

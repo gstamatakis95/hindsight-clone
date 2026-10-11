@@ -6,6 +6,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/port"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,9 @@ func TestContextOverflowClassified(t *testing.T) {
 		{"413 input", http.StatusRequestEntityTooLarge, map[string]any{"error": "input is too long"}, true},
 		{"other 400", http.StatusBadRequest, map[string]any{"error": "bad request"}, false},
 		{"marker on 404", http.StatusNotFound, map[string]any{"error": "prompt is too long"}, false},
+		{"marker past the 512-byte snippet", http.StatusBadRequest, map[string]any{
+			"detail": strings.Repeat("x", 600), "error": map[string]any{"code": "context_length_exceeded"},
+		}, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

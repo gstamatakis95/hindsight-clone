@@ -40,7 +40,7 @@ func (e *env) rederiveNext() {
 // TestClearMemoryResetsOwnConsolidation (review item 2): clearing a memory's observations also makes the
 // memory itself consolidate again, with its embedding intact.
 func TestClearMemoryResetsOwnConsolidation(t *testing.T) {
-	e, a, _ := adminEnv(t)
+	e, a := adminEnv(t)
 	e.inTx(func(tx port.Tx) error {
 		return tx.Units().MarkConsolidated(e.ctx, []port.UnitID{"f1"}, e.clock.Now())
 	})
@@ -115,7 +115,7 @@ func TestRederiveBackoffRetryKeepsNewerEntities(t *testing.T) {
 // TestRemovalPathsQueueGraphMaintenance (review item 4): edit, both clears and rederive queue
 // graph_maintenance.
 func TestRemovalPathsQueueGraphMaintenance(t *testing.T) {
-	e, a, _ := adminEnv(t)
+	e, a := adminEnv(t)
 	queued := func(step string) {
 		t.Helper()
 		if n := len(e.claim(domain.OperationKindGraphMaintenance)); n != 1 {

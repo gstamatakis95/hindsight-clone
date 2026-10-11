@@ -3,7 +3,6 @@ package consolidate
 import (
 	"context"
 	"fmt"
-	"memd/internal/domain"
 	"memd/internal/port"
 )
 
@@ -14,29 +13,28 @@ type Invalidator interface {
 	// ClearForMemory deletes the observations citing unit, resets consolidated_at on their other sources
 	// and returns the affected scopes.
 	ClearForMemory(ctx context.Context, tx port.Tx, b port.BankRef, unit port.UnitID) ([]port.ScopeKey, error)
-	// ClearScopes deletes every observation in scopes (all scopes when empty) and resets their sources. It
-	// enqueues nothing.
-	ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) error
+	// ClearScopes deletes every observation in scopes (every scope of b when scopes is empty: the RPC's
+	// "empty = all", mapped to EvidenceRepo.DeleteAllObservations), resets their sources and returns the
+	// deleted observations. It enqueues nothing. Callers must pass only scopes the client named, never a
+	// list derived from data, which could be empty.
+	ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, error)
 	// ClearDocumentUnits clears the observations citing any unit of doc, resets their co-sources and
 	// returns the affected scopes.
 	ClearDocumentUnits(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.ScopeKey, error)
 }
 
-// invalidator implements Invalidator.
-type invalidator struct {
-	obs ObservationClearer
-}
+// invalidator implements Invalidator over the transaction's repositories.
+type invalidator struct{}
 
 var _ Invalidator = (*invalidator)(nil)
 
-// NewInvalidator returns the Invalidator. obs supplies the observation reads and deletes the frozen
-// ports lack (CCR WP-10-1); with a nil obs every method fails with FAILED_PRECONDITION. Each method takes
-// tx.Seq (a clear changes memory content) before it deletes or enqueues. ClearForMemory and
-// ClearDocumentUnits enqueue the bank's automatic consolidate job (DedupePending) when they reset or
-// deleted anything. Refreshes of models whose source_ids include a removed unit are the curator's (it
-// knows what it removed); stale models in the affected scopes refresh through the next consolidation.
-func NewInvalidator(obs ObservationClearer) Invalidator {
-	return &invalidator{obs: obs}
+// NewInvalidator returns the Invalidator. Each method takes tx.Seq (a clear changes memory content) before
+// it reads, deletes or enqueues. ClearForMemory and ClearDocumentUnits enqueue the bank's automatic
+// consolidate job (DedupePending) when they reset or deleted anything. Refreshes of models whose source_ids
+// include a removed unit are the curator's (it knows what it removed); stale models in the affected scopes
+// refresh through the next consolidation.
+func NewInvalidator() Invalidator {
+	return &invalidator{}
 }
 
 // ClearForMemory reads the scopes of the observations citing unit, deletes them and resets their other
@@ -44,20 +42,20 @@ func NewInvalidator(obs ObservationClearer) Invalidator {
 func (v *invalidator) ClearForMemory(
 	ctx context.Context, tx port.Tx, b port.BankRef, unit port.UnitID,
 ) ([]port.ScopeKey, error) {
-	if err := v.ready(); err != nil {
-		return nil, err
+	if _, err := tx.Seq(ctx, b); err != nil {
+		return nil, fmt.Errorf("consolidate: clear observations: %w", err)
 	}
 	return v.clearCiting(ctx, tx, b, []port.UnitID{unit})
 }
 
-// ClearDocumentUnits clears the observations citing any live unit of doc.
+// ClearDocumentUnits clears the observations citing any live unit of doc (UnitRepo.IDsByDocument).
 func (v *invalidator) ClearDocumentUnits(
 	ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID,
 ) ([]port.ScopeKey, error) {
-	if err := v.ready(); err != nil {
-		return nil, err
+	if _, err := tx.Seq(ctx, b); err != nil {
+		return nil, fmt.Errorf("consolidate: clear observations: %w", err)
 	}
-	ids, err := v.obs.DocumentUnits(ctx, tx, b, doc)
+	ids, err := tx.Units().IDsByDocument(ctx, b, doc)
 	if err != nil {
 		return nil, fmt.Errorf("consolidate: units of document %s: %w", doc, err)
 	}
@@ -68,36 +66,32 @@ func (v *invalidator) ClearDocumentUnits(
 }
 
 // ClearScopes deletes the scopes' observations and resets their sources. The caller (ClearObservations,
-// with or without reconsolidate) owns the consolidate job.
-func (v *invalidator) ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) error {
-	if err := v.ready(); err != nil {
-		return err
-	}
+// with or without reconsolidate) owns the consolidate job. An empty scopes list is the RPC's "every scope"
+// and maps explicitly to DeleteAllObservations; DeleteScopes itself deletes nothing for an empty list.
+func (v *invalidator) ClearScopes(
+	ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey,
+) ([]port.UnitID, error) {
 	if _, err := tx.Seq(ctx, b); err != nil {
-		return fmt.Errorf("consolidate: clear scopes: %w", err)
+		return nil, fmt.Errorf("consolidate: clear scopes: %w", err)
 	}
-	if _, _, err := v.obs.DeleteScopes(ctx, tx, b, scopes); err != nil {
-		return fmt.Errorf("consolidate: clear scopes: %w", err)
+	var deleted []port.UnitID
+	var err error
+	if len(scopes) == 0 {
+		deleted, _, err = tx.Evidence().DeleteAllObservations(ctx, b)
+	} else {
+		deleted, _, err = tx.Evidence().DeleteScopes(ctx, b, scopes)
 	}
-	return nil
+	if err != nil {
+		return nil, fmt.Errorf("consolidate: clear scopes: %w", err)
+	}
+	return deleted, nil
 }
 
-// ready reports a missing ObservationClearer as FAILED_PRECONDITION instead of panicking.
-func (v *invalidator) ready() error {
-	if v.obs == nil {
-		return fmt.Errorf("%w: consolidate: no ObservationClearer wired", domain.ErrFailedPrecondition)
-	}
-	return nil
-}
-
-// clearCiting deletes the observations citing ids and returns their scopes.
+// clearCiting deletes the observations citing ids and returns their scopes. The caller has taken tx.Seq.
 func (v *invalidator) clearCiting(
 	ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID,
 ) ([]port.ScopeKey, error) {
-	if _, err := tx.Seq(ctx, b); err != nil {
-		return nil, fmt.Errorf("consolidate: clear observations: %w", err)
-	}
-	scopes, err := v.obs.CitingScopes(ctx, tx, b, ids)
+	scopes, err := tx.Evidence().CitingScopes(ctx, b, ids)
 	if err != nil {
 		return nil, fmt.Errorf("consolidate: scopes citing %v: %w", ids, err)
 	}

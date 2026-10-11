@@ -77,7 +77,7 @@ func (h *harness) build() {
 	}
 	h.r = rf.NewReflector(rf.ReflectorDeps{
 		Store: h.store, Config: config.NewResolver(h.store, nil, server), Router: routing.NewRouter(), LLM: h.llm,
-		Clock: h.clock, Tools: rf.DefaultTools(h.rc, h.pages, h.reader, nil),
+		Clock: h.clock, Tools: rf.DefaultTools(h.rc, h.pages, h.reader),
 	})
 }
 

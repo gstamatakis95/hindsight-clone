@@ -49,13 +49,13 @@ type DeleterConfig struct {
 	// DefaultDeleteMaxBatches.
 	MaxBatches int
 	// Blobs lists the bank's blob keys so they are deleted page by page with a fence check between pages;
-	// nil = one Blob.DeletePrefix after the checks (CCR WP-13-2 adds the listing to port.Blob).
+	// nil = one Blob.DeletePrefix after the checks. port.Blob satisfies it.
 	Blobs BlobLister
 	// BlobPageSize is the keys per listed page; 0 = DefaultDeleteBlobPageSize.
 	BlobPageSize int
 }
 
-// BlobLister lists blob keys. It is the port.Blob method proposed in CCR WP-13-2.
+// BlobLister lists blob keys. It is the port.Blob method (CCR WP-13-2); port.Blob satisfies it.
 type BlobLister interface {
 	// List returns up to limit keys starting with prefix and sorting strictly after after ("" = from the
 	// start), in key order.

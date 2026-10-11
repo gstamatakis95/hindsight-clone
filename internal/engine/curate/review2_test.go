@@ -8,7 +8,7 @@ import (
 // with no embedding and stays stamped consolidated; clearing its observations must not make it
 // consolidatable before the rederive writes the embedding.
 func TestClearMemoryLeavesPendingRederiveAlone(t *testing.T) {
-	e, a, _ := adminEnv(t)
+	e, a := adminEnv(t)
 	text := "Alice likes oolong tea"
 	req := UpdateMemoryRequest{Bank: testBank, ID: "f1", Text: &text}
 	if _, _, err := e.curator().Update(e.ctx, req); err != nil {

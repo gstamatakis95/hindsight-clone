@@ -1,6 +1,6 @@
 # 802 — Replacement lists the document's units with SetDocumentTags
 
-Status: accepted (WP-08); a cleaner port method is proposed in CCR WP-08-1
+Status: superseded (WP-16): `replace` now lists the units with `UnitRepo.IDsByDocument` (CCR batch #20), which writes nothing. The rest of the order below is unchanged.
 
 ## Context
 When retain replaces a document, it must delete the observations citing the old units and reset their other

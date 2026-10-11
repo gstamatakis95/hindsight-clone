@@ -43,9 +43,8 @@ type strategyMatcher struct {
 
 var _ StrategyMatcher = (*strategyMatcher)(nil)
 
-// NewStrategyMatcher returns the StrategyMatcher. scopes lists a bank's existing observation scopes for
-// Preview (a read port.Reader lacks, CCR WP-10-1); nil makes Preview fail with FAILED_PRECONDITION, while
-// Match works without it.
+// NewStrategyMatcher returns the StrategyMatcher. scopes (port.Reader) lists a bank's existing observation
+// scopes for Preview; nil makes Preview fail with FAILED_PRECONDITION, while Match works without it.
 func NewStrategyMatcher(scopes ScopeLister) StrategyMatcher {
 	return &strategyMatcher{scopes: scopes}
 }
@@ -99,9 +98,15 @@ func (m *strategyMatcher) Preview(
 	if m.scopes == nil {
 		return StrategyPreview{}, fmt.Errorf("%w: consolidate: no scope lister wired", domain.ErrFailedPrecondition)
 	}
-	scopes, complete, err := m.scopes.Scopes(ctx, b, previewScopeLimit)
+	infos, err := m.scopes.ListScopes(ctx, b, "", previewScopeLimit+1)
 	if err != nil {
 		return StrategyPreview{}, fmt.Errorf("consolidate: list scopes: %w", err)
+	}
+	complete := len(infos) <= previewScopeLimit
+	infos = infos[:min(len(infos), previewScopeLimit)]
+	scopes := make([]port.ScopeKey, len(infos))
+	for i, in := range infos {
+		scopes[i] = domain.NewScopeKey(b, in.Scope.Tags)
 	}
 	out := StrategyPreview{Matches: make([]StrategyMatch, len(draft)), Complete: complete}
 	for i := range draft {

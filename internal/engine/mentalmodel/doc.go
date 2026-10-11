@@ -18,7 +18,8 @@
 // (worker.RefreshFailureReconciler). Admin serves the CRUD, refresh, clear, history and folder RPCs and
 // PageSearcher ranks whole pages for SearchPages.
 //
-// Reads the ports lack (in-scope newest seq, model listing, cron models, failed refreshes) are declared
-// in reads.go and requested in CCR WP-12-1. mentalmodel imports recall and reflect for their request
-// types and declares the small Reflector, Recaller and Projector it consumes; neither imports mentalmodel.
+// The port.Reader subsets it consumes (in-scope newest seq and bank tags, model listing, cron models, failed
+// refreshes) are declared in reads.go; port.Reader satisfies each. mentalmodel imports recall and reflect
+// for their request types and declares the small Reflector, Recaller and Projector it consumes; neither
+// imports mentalmodel.
 package mentalmodel

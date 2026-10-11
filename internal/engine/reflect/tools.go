@@ -84,10 +84,3 @@ type PageReader interface {
 	// ReadPages returns the pages with the given ids, in order; unknown ids are skipped.
 	ReadPages(ctx context.Context, b port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error)
 }
-
-// ChunkReader reads source chunks by id for the expand tool. port.Reader has no chunk read yet (CCR WP-11-2);
-// until one is wired, expand returns units and source facts without chunks.
-type ChunkReader interface {
-	// GetChunks returns the chunks with the given ids, in order; unknown ids are skipped.
-	GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
-}

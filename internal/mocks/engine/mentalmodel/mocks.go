@@ -930,8 +930,11 @@ var _ mentalmodel.ScopeReader = &ScopeReader{}
 //
 //		// make and configure a mocked mentalmodel.ScopeReader
 //		mockedScopeReader := &ScopeReader{
-//			NewestSeqFunc: func(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error) {
-//				panic("mock out the NewestSeq method")
+//			NewestSeqInScopeFunc: func(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error) {
+//				panic("mock out the NewestSeqInScope method")
+//			},
+//			TagCountsFunc: func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+//				panic("mock out the TagCounts method")
 //			},
 //		}
 //
@@ -940,26 +943,45 @@ var _ mentalmodel.ScopeReader = &ScopeReader{}
 //
 //	}
 type ScopeReader struct {
-	// NewestSeqFunc mocks the NewestSeq method.
-	NewestSeqFunc func(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error)
+	// NewestSeqInScopeFunc mocks the NewestSeqInScope method.
+	NewestSeqInScopeFunc func(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error)
+
+	// TagCountsFunc mocks the TagCounts method.
+	TagCountsFunc func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
-		// NewestSeq holds details about calls to the NewestSeq method.
-		NewestSeq []struct {
+		// NewestSeqInScope holds details about calls to the NewestSeqInScope method.
+		NewestSeqInScope []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Q is the q argument value.
 			Q mentalmodel.ScopeQuery
 		}
+		// TagCounts holds details about calls to the TagCounts method.
+		TagCounts []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Source is the source argument value.
+			Source domain.TagSource
+			// Prefix is the prefix argument value.
+			Prefix string
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
 	}
-	lockNewestSeq sync.RWMutex
+	lockNewestSeqInScope sync.RWMutex
+	lockTagCounts        sync.RWMutex
 }
 
-// NewestSeq calls NewestSeqFunc.
-func (mock *ScopeReader) NewestSeq(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error) {
-	if mock.NewestSeqFunc == nil {
-		panic("ScopeReader.NewestSeqFunc: method is nil but ScopeReader.NewestSeq was just called")
+// NewestSeqInScope calls NewestSeqInScopeFunc.
+func (mock *ScopeReader) NewestSeqInScope(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error) {
+	if mock.NewestSeqInScopeFunc == nil {
+		panic("ScopeReader.NewestSeqInScopeFunc: method is nil but ScopeReader.NewestSeqInScope was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
@@ -968,17 +990,17 @@ func (mock *ScopeReader) NewestSeq(ctx context.Context, q mentalmodel.ScopeQuery
 		Ctx: ctx,
 		Q:   q,
 	}
-	mock.lockNewestSeq.Lock()
-	mock.calls.NewestSeq = append(mock.calls.NewestSeq, callInfo)
-	mock.lockNewestSeq.Unlock()
-	return mock.NewestSeqFunc(ctx, q)
+	mock.lockNewestSeqInScope.Lock()
+	mock.calls.NewestSeqInScope = append(mock.calls.NewestSeqInScope, callInfo)
+	mock.lockNewestSeqInScope.Unlock()
+	return mock.NewestSeqInScopeFunc(ctx, q)
 }
 
-// NewestSeqCalls gets all the calls that were made to NewestSeq.
+// NewestSeqInScopeCalls gets all the calls that were made to NewestSeqInScope.
 // Check the length with:
 //
-//	len(mockedScopeReader.NewestSeqCalls())
-func (mock *ScopeReader) NewestSeqCalls() []struct {
+//	len(mockedScopeReader.NewestSeqInScopeCalls())
+func (mock *ScopeReader) NewestSeqInScopeCalls() []struct {
 	Ctx context.Context
 	Q   mentalmodel.ScopeQuery
 } {
@@ -986,9 +1008,61 @@ func (mock *ScopeReader) NewestSeqCalls() []struct {
 		Ctx context.Context
 		Q   mentalmodel.ScopeQuery
 	}
-	mock.lockNewestSeq.RLock()
-	calls = mock.calls.NewestSeq
-	mock.lockNewestSeq.RUnlock()
+	mock.lockNewestSeqInScope.RLock()
+	calls = mock.calls.NewestSeqInScope
+	mock.lockNewestSeqInScope.RUnlock()
+	return calls
+}
+
+// TagCounts calls TagCountsFunc.
+func (mock *ScopeReader) TagCounts(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+	if mock.TagCountsFunc == nil {
+		panic("ScopeReader.TagCountsFunc: method is nil but ScopeReader.TagCounts was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}{
+		Ctx:    ctx,
+		B:      b,
+		Source: source,
+		Prefix: prefix,
+		After:  after,
+		Limit:  limit,
+	}
+	mock.lockTagCounts.Lock()
+	mock.calls.TagCounts = append(mock.calls.TagCounts, callInfo)
+	mock.lockTagCounts.Unlock()
+	return mock.TagCountsFunc(ctx, b, source, prefix, after, limit)
+}
+
+// TagCountsCalls gets all the calls that were made to TagCounts.
+// Check the length with:
+//
+//	len(mockedScopeReader.TagCountsCalls())
+func (mock *ScopeReader) TagCountsCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Source domain.TagSource
+	Prefix string
+	After  string
+	Limit  int
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}
+	mock.lockTagCounts.RLock()
+	calls = mock.calls.TagCounts
+	mock.lockTagCounts.RUnlock()
 	return calls
 }
 
@@ -1002,8 +1076,8 @@ var _ mentalmodel.ModelLister = &ModelLister{}
 //
 //		// make and configure a mocked mentalmodel.ModelLister
 //		mockedModelLister := &ModelLister{
-//			ListModelsFunc: func(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error) {
-//				panic("mock out the ListModels method")
+//			ListMentalModelsFunc: func(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error) {
+//				panic("mock out the ListMentalModels method")
 //			},
 //		}
 //
@@ -1012,26 +1086,26 @@ var _ mentalmodel.ModelLister = &ModelLister{}
 //
 //	}
 type ModelLister struct {
-	// ListModelsFunc mocks the ListModels method.
-	ListModelsFunc func(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error)
+	// ListMentalModelsFunc mocks the ListMentalModels method.
+	ListMentalModelsFunc func(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
-		// ListModels holds details about calls to the ListModels method.
-		ListModels []struct {
+		// ListMentalModels holds details about calls to the ListMentalModels method.
+		ListMentalModels []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Q is the q argument value.
 			Q mentalmodel.ModelQuery
 		}
 	}
-	lockListModels sync.RWMutex
+	lockListMentalModels sync.RWMutex
 }
 
-// ListModels calls ListModelsFunc.
-func (mock *ModelLister) ListModels(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error) {
-	if mock.ListModelsFunc == nil {
-		panic("ModelLister.ListModelsFunc: method is nil but ModelLister.ListModels was just called")
+// ListMentalModels calls ListMentalModelsFunc.
+func (mock *ModelLister) ListMentalModels(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error) {
+	if mock.ListMentalModelsFunc == nil {
+		panic("ModelLister.ListMentalModelsFunc: method is nil but ModelLister.ListMentalModels was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
@@ -1040,17 +1114,17 @@ func (mock *ModelLister) ListModels(ctx context.Context, q mentalmodel.ModelQuer
 		Ctx: ctx,
 		Q:   q,
 	}
-	mock.lockListModels.Lock()
-	mock.calls.ListModels = append(mock.calls.ListModels, callInfo)
-	mock.lockListModels.Unlock()
-	return mock.ListModelsFunc(ctx, q)
+	mock.lockListMentalModels.Lock()
+	mock.calls.ListMentalModels = append(mock.calls.ListMentalModels, callInfo)
+	mock.lockListMentalModels.Unlock()
+	return mock.ListMentalModelsFunc(ctx, q)
 }
 
-// ListModelsCalls gets all the calls that were made to ListModels.
+// ListMentalModelsCalls gets all the calls that were made to ListMentalModels.
 // Check the length with:
 //
-//	len(mockedModelLister.ListModelsCalls())
-func (mock *ModelLister) ListModelsCalls() []struct {
+//	len(mockedModelLister.ListMentalModelsCalls())
+func (mock *ModelLister) ListMentalModelsCalls() []struct {
 	Ctx context.Context
 	Q   mentalmodel.ModelQuery
 } {
@@ -1058,9 +1132,9 @@ func (mock *ModelLister) ListModelsCalls() []struct {
 		Ctx context.Context
 		Q   mentalmodel.ModelQuery
 	}
-	mock.lockListModels.RLock()
-	calls = mock.calls.ListModels
-	mock.lockListModels.RUnlock()
+	mock.lockListMentalModels.RLock()
+	calls = mock.calls.ListMentalModels
+	mock.lockListMentalModels.RUnlock()
 	return calls
 }
 

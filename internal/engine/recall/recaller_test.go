@@ -224,7 +224,9 @@ func TestRecallNoCueNoTimeParse(t *testing.T) {
 
 func TestRecallExplicitWindowNoTimeParse(t *testing.T) {
 	e := newEnv(t, envOpts{})
-	u := fact("u1", "trip to the mountains")
+	// The unit shares "what happened" with both queries: the temporal arm keeps only in-window units with a
+	// cosine of at least 0.1 to the query.
+	u := fact("u1", "what happened on the trip to the mountains")
 	u.OccurredStart = at(-10)
 	e.add(t, u)
 	w := &domain.TimeWindow{Start: testNow.AddDate(0, 0, -30), End: testNow}
@@ -324,21 +326,38 @@ func TestRecallArmsAndTrace(t *testing.T) {
 }
 
 func TestRecallIncludes(t *testing.T) {
-	e := newEnv(t, envOpts{arms: []Retriever{arm(ArmSemantic, "o1")}})
-	e.add(t, fact("f1", "source fact"))
+	e := newEnv(t, envOpts{arms: []Retriever{arm(ArmSemantic, "o1", "f2")}})
+	e.addChunks(t, "d1", domain.Chunk{ID: "c2", Index: 0, Text: "chunk of f2"})
+	f2 := fact("f2", "other fact")
+	f2.DocumentID, f2.ChunkID = "d1", "c2"
+	e.add(t, fact("f1", "source fact"), f2)
 	e.add(t, domain.Unit{ID: "o1", Bank: testBank, Type: domain.FactTypeObservation, Text: "obs"})
 	e.cite(t, "o1", "f1")
-	e.lookups.entities = []domain.EntityState{{
-		EntityID: "e1", CanonicalName: "Alice", ObservationIDs: []port.UnitID{"o1"},
-	}}
+	var alice port.EntityID
+	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
+		var err error
+		if alice, err = tx.Entities().Upsert(ctx, domain.Entity{Bank: testBank, CanonicalName: "Alice"}); err != nil {
+			return err
+		}
+		for _, u := range []port.UnitID{"f1", "f2"} {
+			if err := tx.Entities().Attach(ctx, u, []port.EntityID{alice}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	res := e.recall(t, RecallRequest{Query: "obs", Include: domain.RecallInclude{
 		SourceFacts: ptr(true), Entities: ptr(true), Chunks: ptr(true),
 	}})
 	if _, ok := res.SourceFacts["f1"]; !ok || res.SourceFactsTruncated {
 		t.Fatalf("source facts = %v", res.SourceFacts)
 	}
-	if res.Entities["e1"].CanonicalName != "Alice" || len(res.Chunks) != 0 {
-		t.Fatalf("entities = %v chunks = %v", res.Entities, res.Chunks)
+	got := res.Entities[alice]
+	if got.CanonicalName != "Alice" || !slices.Equal(got.ObservationIDs, []port.UnitID{"o1"}) {
+		t.Fatalf("entities = %+v, want Alice (from f2) with observation o1 (citing f1)", res.Entities)
+	}
+	if c := res.Chunks["c2"]; c.Text != "chunk of f2" || len(res.Chunks) != 1 {
+		t.Fatalf("chunks = %+v, want f2's chunk", res.Chunks)
 	}
 }
 

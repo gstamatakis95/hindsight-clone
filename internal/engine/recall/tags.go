@@ -98,7 +98,7 @@ func (c *tagCompiler) resolveFuzzy(
 	if c.vocab == nil {
 		return nil, fmt.Errorf("%w: recall: fuzzy tag resolution needs a tag vocabulary", domain.ErrFailedPrecondition)
 	}
-	raw, err := c.vocab.BankTags(ctx, b)
+	raw, err := bankTags(ctx, c.vocab, b)
 	if err != nil {
 		return nil, fmt.Errorf("recall: read bank tags: %w", err)
 	}

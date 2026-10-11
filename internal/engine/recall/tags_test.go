@@ -8,13 +8,24 @@ import (
 	"memd/internal/port"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
-// stubVocab is a TagVocabulary returning a fixed list.
+// stubVocab is a TagVocabulary over a fixed list, most used first: it reports descending counts in byte
+// order of the tags (as TagCounts does), so the compiler's count sort must restore the list's order.
 type stubVocab []string
 
-func (v stubVocab) BankTags(context.Context, port.BankRef) ([]string, error) { return v, nil }
+func (v stubVocab) TagCounts(
+	context.Context, port.BankRef, domain.TagSource, string, string, int,
+) ([]domain.TagCount, error) {
+	out := make([]domain.TagCount, len(v))
+	for i, t := range v {
+		out[i] = domain.TagCount{Tag: t, Count: int64(len(v) - i)}
+	}
+	slices.SortFunc(out, func(a, b domain.TagCount) int { return strings.Compare(a.Tag, b.Tag) })
+	return out, nil
+}
 
 // countingVocab is a TagVocabulary that counts its reads and can fail.
 type countingVocab struct {
@@ -23,9 +34,14 @@ type countingVocab struct {
 	calls int
 }
 
-func (v *countingVocab) BankTags(context.Context, port.BankRef) ([]string, error) {
+func (v *countingVocab) TagCounts(
+	ctx context.Context, b port.BankRef, s domain.TagSource, prefix, after string, limit int,
+) ([]domain.TagCount, error) {
 	v.calls++
-	return v.tags, v.err
+	if v.err != nil {
+		return nil, v.err
+	}
+	return stubVocab(v.tags).TagCounts(ctx, b, s, prefix, after, limit)
 }
 
 var tagsBank = port.BankRef{Tenant: "t", Bank: "b"}

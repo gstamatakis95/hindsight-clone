@@ -39,7 +39,11 @@ func (*agentic) Strategy() domain.RefreshStrategy { return domain.RefreshStrateg
 
 // Full runs the reflect loop over everything in scope with seq <= upTo.
 func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (Draft, error) {
-	res, err := a.rf.Reflect(ctx, a.request(m, cfg, port.SeqUpTo(0, upTo)))
+	req, err := a.request(m, cfg, port.SeqUpTo(0, upTo))
+	if err != nil {
+		return Draft{}, err
+	}
+	res, err := a.rf.Reflect(ctx, req)
 	if err != nil {
 		return Draft{}, fmt.Errorf("mentalmodel: reflect: %w", err)
 	}
@@ -63,7 +67,11 @@ func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.Ban
 func (a *agentic) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (DeltaDraft, error) {
-	res, err := a.rf.Reflect(ctx, a.request(m, cfg, port.SeqUpTo(m.LastSeqSeen, upTo)))
+	req, err := a.request(m, cfg, port.SeqUpTo(m.LastSeqSeen, upTo))
+	if err != nil {
+		return DeltaDraft{ContentMD: m.ContentMD}, err
+	}
+	res, err := a.rf.Reflect(ctx, req)
 	if err != nil {
 		return DeltaDraft{ContentMD: m.ContentMD}, fmt.Errorf("mentalmodel: reflect: %w", err)
 	}
@@ -77,8 +85,11 @@ func (a *agentic) Delta(
 }
 
 // request is the reflect request of a refresh over window: the model's scope, budget and exclusions,
-// answering as a document. The model itself is always excluded from the page tools.
-func (a *agentic) request(m domain.MentalModel, cfg domain.BankConfig, window port.SeqRange) reflect.ReflectRequest {
+// answering as a document, with the rendered mm_refresh_context as its context. The model itself is always
+// excluded from the page tools.
+func (a *agentic) request(
+	m domain.MentalModel, cfg domain.BankConfig, window port.SeqRange,
+) (reflect.ReflectRequest, error) {
 	scope := resolveScope(m)
 	t := m.Spec.Trigger
 	facts, outputs := true, false
@@ -94,9 +105,9 @@ func (a *agentic) request(m domain.MentalModel, cfg domain.BankConfig, window po
 	if n := maxContentTokens(m, cfg); n > 0 {
 		req.MaxTokens = &n
 	}
-	// TODO(WP-11): once ReflectRequest.Context merges, set req.Context from refreshContext(m, window):
-	// prompts.MentalModelRefreshContext with RefreshContextData{Name: m.Spec.Name, Delta: window.After > 0}.
-	return req
+	var err error
+	req.Context, err = refreshContext(m, window)
+	return req, err
 }
 
 // refreshContext renders the reflect context of an agentic refresh over window: the document's name and

@@ -1,7 +1,6 @@
 package consolidate
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -128,11 +127,6 @@ func TestRunObservationCap(t *testing.T) {
 	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("over-cap create: err = %v", err)
 	}
-	// The cap needs a counter.
-	e.deps.Counter = nil
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrFailedPrecondition) {
-		t.Fatalf("no counter: err = %v", err)
-	}
 }
 
 // TestRunDropsInvalidActions: updates of unshown observations and actions citing no batch fact are
@@ -224,12 +218,17 @@ func TestRunDocumentScopeMode(t *testing.T) {
 	}
 }
 
-// fixedModels is a ModelLister over a fixed list.
-type fixedModels []domain.MentalModel
-
-// MentalModels returns the list.
-func (f fixedModels) MentalModels(context.Context, port.BankRef) ([]domain.MentalModel, error) {
-	return f, nil
+// addModels stores mental models in the fake store; the run lists them with Reader.ListMentalModels.
+func (e *env) addModels(ms ...domain.MentalModel) {
+	e.t.Helper()
+	e.tx(func(tx port.Tx) error {
+		for _, m := range ms {
+			if err := tx.MentalModels().Create(e.t.Context(), m); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // TestRunTriggersRefreshes: models with refresh_after_consolidation whose scope a changed scope reaches
@@ -250,14 +249,14 @@ func TestRunTriggersRefreshes(t *testing.T) {
 	}
 	paused := model("paused", []string{"x"}, after)
 	paused.AutoRefreshPaused = true
-	e.deps.Models = fixedModels{
+	e.addModels(
 		model("tagged", []string{"x"}, after),
 		model("untagged", nil, after),
 		model("floor", []string{"x"}, floor),
 		model("other", []string{"y"}, after),
 		model("cron", []string{"x"}, domain.RefreshTrigger{RefreshCron: "0 * * * *"}),
 		paused,
-	}
+	)
 	e.fact("f1", "Jack climbs", "x")
 	e.script(e.createEach("f1"))
 	e.run(autoJob())

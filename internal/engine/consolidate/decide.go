@@ -156,11 +156,7 @@ func (c *consolidator) capacity(ctx context.Context, s port.ScopeKey, cfg domain
 	if limit == 0 {
 		return &limit, nil
 	}
-	if c.d.Counter == nil {
-		return nil, fmt.Errorf("%w: consolidate: max_observations_per_scope needs an ObservationCounter",
-			domain.ErrFailedPrecondition)
-	}
-	n, err := c.d.Counter.CountObservations(ctx, s)
+	n, err := c.d.Store.Read().CountObservations(ctx, s)
 	if err != nil {
 		return nil, fmt.Errorf("consolidate: count observations: %w", err)
 	}

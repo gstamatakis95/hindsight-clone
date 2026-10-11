@@ -1,7 +1,10 @@
 package mentalmodel
 
 import (
+	"context"
+	"fmt"
 	"memd/internal/domain"
+	"memd/internal/engine/recall"
 	"memd/internal/port"
 	"slices"
 )
@@ -35,13 +38,10 @@ func (s ResolvedScope) tagFilter() domain.TagFilter {
 	return domain.TagFilter{Tags: slices.Clone(s.Tags), Match: s.TagsMatch}
 }
 
-// predicate compiles the scope's tag filter (nil = no filter). With stalenessOnly, a tagged scope also
-// excludes untagged units: untagged writes never make a tagged model stale, even when its refresh reads
-// untagged memories (tags_match any / all). A scope with a fuzzy leaf anywhere drops the tag filter (only
-// the untagged rule stays for staleness): fuzzy names resolve in recall, so over-matching costs at most
-// one retrieval, while compiling them as exact names would miss real matches (decision 1203).
-func (s ResolvedScope) predicate(stalenessOnly bool) *port.SQLPredicate {
-	p := s.tagPredicate()
+// predicate adds the staleness rule to p, the scope's compiled tag filter (nil = no filter). With
+// stalenessOnly, a tagged scope also excludes untagged units: untagged writes never make a tagged model
+// stale, even when its refresh reads untagged memories (tags_match any / all).
+func (s ResolvedScope) predicate(p *port.SQLPredicate, stalenessOnly bool) *port.SQLPredicate {
 	if !stalenessOnly || (len(s.TagGroups) == 0 && len(s.Tags) == 0) {
 		return p
 	}
@@ -53,13 +53,11 @@ func (s ResolvedScope) predicate(stalenessOnly bool) *port.SQLPredicate {
 	return &port.SQLPredicate{Op: port.PredicateAnd, Args: []port.SQLPredicate{*p, tagged}}
 }
 
-// tagPredicate compiles the tags or tag groups alone; nil = no tag filter (none set, or a fuzzy leaf).
+// tagPredicate compiles the tags or tag groups alone; nil = no tag filter. A scope with a fuzzy leaf needs
+// the bank's tags and compiles in scopeQuery instead.
 func (s ResolvedScope) tagPredicate() *port.SQLPredicate {
 	switch {
 	case len(s.TagGroups) > 0:
-		if hasFuzzyLeaf(s.TagGroups) {
-			return nil
-		}
 		args := make([]port.SQLPredicate, len(s.TagGroups))
 		for i, g := range s.TagGroups {
 			args[i] = compileGroup(g)
@@ -115,8 +113,20 @@ func compileGroup(g domain.TagGroup) port.SQLPredicate {
 	return port.SQLPredicate{Op: port.PredicateOr}
 }
 
-// scopeQuery is the ScopeReader query for m's scope over seq range r.
-func scopeQuery(m domain.MentalModel, r port.SeqRange, stalenessOnly bool) ScopeQuery {
+// scopeQuery is the ScopeReader query for m's scope over seq range r. A scope with a fuzzy leaf first
+// resolves its names to the bank's exact tags (sr.TagCounts) with recall's TagFilterCompiler at minSim, so
+// staleness and the pre-check see exactly the units recall would retrieve (decision 1203).
+func scopeQuery(
+	ctx context.Context, sr ScopeReader, m domain.MentalModel, r port.SeqRange, stalenessOnly bool, minSim float64,
+) (ScopeQuery, error) {
 	s := resolveScope(m)
-	return ScopeQuery{Bank: m.Bank, Types: s.FactTypes, Tags: s.predicate(stalenessOnly), Seq: r}
+	tags := s.tagPredicate()
+	if hasFuzzyLeaf(s.TagGroups) {
+		p, err := recall.NewTagFilterCompiler(sr).Compile(ctx, m.Bank, s.tagFilter(), minSim)
+		if err != nil {
+			return ScopeQuery{}, fmt.Errorf("mentalmodel: resolve fuzzy scope: %w", err)
+		}
+		tags = &p
+	}
+	return ScopeQuery{Bank: m.Bank, Types: s.FactTypes, Tags: s.predicate(tags, stalenessOnly), Seq: r}, nil
 }

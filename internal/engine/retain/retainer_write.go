@@ -134,7 +134,7 @@ func (r *retainer) commitBatch(ctx context.Context, rn *run, pb *preparedBatch) 
 			return err
 		}
 		if replace {
-			if err := r.replace(ctx, tx, rn, seq); err != nil {
+			if err := r.replace(ctx, tx, rn); err != nil {
 				return err
 			}
 		}
@@ -220,10 +220,10 @@ func factTime(f ExtractedFact, mentioned *time.Time) time.Time {
 // replace removes the document's old units in the first batch's transaction: observations citing them are
 // deleted and their other sources reset (EvidenceRepo.DeleteCiting, before the units go, since evidence rows
 // cascade), then the units are deleted and graph maintenance is queued for their neighbours. The units are
-// listed with SetDocumentTags (decision 802).
-func (r *retainer) replace(ctx context.Context, tx port.Tx, rn *run, seq int64) error {
+// listed with UnitRepo.IDsByDocument, which writes nothing (decision 802, superseded by the CCR batch).
+func (r *retainer) replace(ctx context.Context, tx port.Tx, rn *run) error {
 	b, doc := rn.j.Bank, rn.p.DocumentID
-	ids, err := tx.Units().SetDocumentTags(ctx, b, doc, rn.tags, seq)
+	ids, err := tx.Units().IDsByDocument(ctx, b, doc)
 	if err != nil || len(ids) == 0 {
 		return err
 	}
@@ -254,7 +254,7 @@ func (r *retainer) complete(ctx context.Context, rn *run) error {
 			return err
 		}
 		if replace {
-			if err := r.replace(ctx, tx, rn, seq); err != nil {
+			if err := r.replace(ctx, tx, rn); err != nil {
 				return err
 			}
 		}

@@ -24,14 +24,6 @@ type TemplateCodec interface {
 	) (domain.Bank, []domain.Operation, error)
 }
 
-// ModelSpecReader reads the specs of a bank's mental models. It is the port.Reader method proposed in CCR
-// WP-13-1; port.Reader satisfies it once the CCR lands.
-type ModelSpecReader interface {
-	// MentalModelSpecs returns the spec of every mental model of b, ordered by id; an unknown or
-	// tombstoned bank is domain.ErrNotFound.
-	MentalModelSpecs(ctx context.Context, b port.BankRef) ([]domain.MentalModelSpec, error)
-}
-
 // RefreshQueuer enqueues mental-model refreshes; the mental-model engine (WP-12) owns the refresh payload
 // and its scheduling rules, so WP-13 never builds a refresh job itself (decision 1303).
 type RefreshQueuer interface {
@@ -43,16 +35,15 @@ type RefreshQueuer interface {
 // templateCodec implements TemplateCodec over port.Store.
 type templateCodec struct {
 	s       port.Store
-	specs   ModelSpecReader
 	refresh RefreshQueuer
 }
 
 var _ TemplateCodec = (*templateCodec)(nil)
 
-// NewTemplateCodec returns the TemplateCodec over s; specs lists model specs for Export (port.Reader once
-// CCR WP-13-1 lands) and refresh enqueues the first build of each created model.
-func NewTemplateCodec(s port.Store, specs ModelSpecReader, refresh RefreshQueuer) TemplateCodec {
-	return &templateCodec{s: s, specs: specs, refresh: refresh}
+// NewTemplateCodec returns the TemplateCodec over s (Export lists the model specs with
+// Reader.ListMentalModels); refresh enqueues the first build of each created model.
+func NewTemplateCodec(s port.Store, refresh RefreshQueuer) TemplateCodec {
+	return &templateCodec{s: s, refresh: refresh}
 }
 
 // Export reads the bank's own config and directives in one short transaction, then its model specs.
@@ -78,11 +69,13 @@ func (c *templateCodec) Export(ctx context.Context, b port.BankRef) (domain.Bank
 	if err != nil {
 		return domain.BankTemplate{}, err
 	}
-	specs, err := c.specs.MentalModelSpecs(ctx, b)
+	models, _, err := c.s.Read().ListMentalModels(ctx, port.ModelQuery{Bank: b})
 	if err != nil {
 		return domain.BankTemplate{}, fmt.Errorf("export mental-model specs: %w", err)
 	}
-	t.MentalModels = specs
+	for _, m := range models {
+		t.MentalModels = append(t.MentalModels, m.Spec)
+	}
 	return t, nil
 }
 

@@ -19,6 +19,7 @@ func RunReadsSuite(t *testing.T, newStore StoreFactory) {
 	runStoreCases(t, newStore, []storeCase{
 		{"get_chunks", testRdGetChunks},
 		{"entity_states", testRdEntityStates},
+		{"entity_states_id_order", testRdEntityStatesIDOrder},
 		{"stale_scopes", testRdStaleScopes},
 		{"tag_counts", testRdTagCounts},
 		{"count_observations", testRdCountObservations},
@@ -264,6 +265,28 @@ func testRdEntityStates(t *testing.T, s port.Store) {
 	rdWantEntityStates(t, "Tx.EntityStates(bank A)", inTxStates, want)
 }
 
+// testRdEntityStatesIDOrder: five entities with explicit ids, created out of order and named so that name
+// order is the reverse of id order, come back in id order (neither by name nor by insertion).
+func testRdEntityStatesIDOrder(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	f := rdFact(bankA, "f", 1)
+	insertUnits(t, s, f)
+	names := map[int]string{1: "Eve", 2: "Dan", 3: "Cy", 4: "Bob", 5: "Ann"}
+	var want []domain.EntityState
+	for _, n := range []int{3, 1, 5, 2, 4} {
+		id := port.EntityID(fmt.Sprintf("00000000-0000-4000-8000-%012d", n))
+		got := upsertEntity(t, s, domain.Entity{ID: id, Bank: bankA, CanonicalName: names[n], Kind: "person"})
+		if got != id {
+			t.Fatalf("Upsert(%s) = %s, want the given id", id, got)
+		}
+		rdAttach(t, s, f.ID, id)
+	}
+	for n := 1; n <= 5; n++ {
+		want = append(want, rdState(port.EntityID(fmt.Sprintf("00000000-0000-4000-8000-%012d", n)), names[n]))
+	}
+	rdWantEntityStates(t, "EntityStates(id order)", rdEntityStates(t, s, bankA, f.ID), want)
+}
+
 // ---------- StaleScopes ----------
 
 // rdScopeStrings renders scopes as "tenant/bank|key" so they compare in order (ScopeKey holds a slice).
@@ -321,8 +344,11 @@ func testRdStaleScopes(t *testing.T, s port.Store) {
 
 	rdMark(t, s, false, f1.ID)
 	rdWantStale(t, s, "StaleScopes after MarkConsolidated(f1)", bankA, in, []port.ScopeKey{shared})
+	z := rdScope(bankA, "z")
+	rdWantStale(t, s, "StaleScopes(z) while f2 is pending", bankA, []port.ScopeKey{z, x}, []port.ScopeKey{z})
 	rdMark(t, s, true, f2.ID)
 	rdWantStale(t, s, "StaleScopes after MarkConsolidationFailed(f2)", bankA, in, nil)
+	rdWantStale(t, s, "StaleScopes(z) after MarkConsolidationFailed(f2)", bankA, []port.ScopeKey{z}, nil)
 	rdWantStale(t, s, "StaleScopes(bank A, other tenant's scope key)", bankA,
 		[]port.ScopeKey{rdScope(bankOtherTenant, "x")}, nil)
 
@@ -763,6 +789,22 @@ func rdWantIDKeyedEmpty(t *testing.T, s port.Store, what string, b port.BankRef)
 	rdWantEmpty(t, what+": ModelsCiting", len(ms), err)
 }
 
+// rdWantRepoLookupsEmpty checks the id-keyed repository lookups on bank b in a transaction that takes no
+// Seq: UnitRepo.IDsByDocument and EvidenceRepo.CitingScopes return empty with no error.
+func rdWantRepoLookupsEmpty(t *testing.T, s port.Store, what string, b port.BankRef) {
+	t.Helper()
+	var ids []port.UnitID
+	var scopes []port.ScopeKey
+	var idsErr, scopesErr error
+	inTx(t, s, func(tx port.Tx) error {
+		ids, idsErr = tx.Units().IDsByDocument(t.Context(), b, "doc-1")
+		scopes, scopesErr = tx.Evidence().CitingScopes(t.Context(), b, []port.UnitID{newID[port.UnitID](), rdBadID})
+		return nil
+	})
+	rdWantEmpty(t, what+": IDsByDocument", len(ids), idsErr)
+	rdWantEmpty(t, what+": CitingScopes", len(scopes), scopesErr)
+}
+
 // rdWantEmpty fails the test unless err is nil and n (a length or count) is 0.
 func rdWantEmpty(t *testing.T, what string, n int, err error) {
 	t.Helper()
@@ -801,7 +843,8 @@ func rdSeededLookups(t *testing.T, s port.Store, b port.BankRef, ids []port.Unit
 }
 
 // testRdErrorRegimes: on an unknown bank and on a tombstoned bank, the id-keyed lookups (GetChunks,
-// EntityStates, StaleScopes, CountObservations, NewestSeqInScope, ModelsCiting) return empty with no error
+// EntityStates, StaleScopes, CountObservations, NewestSeqInScope, ModelsCiting, and the repositories'
+// IDsByDocument and CitingScopes) return empty with no error
 // and TagCounts is ErrNotFound; a tombstoned bank that still holds rows gives no lookup error either.
 func testRdErrorRegimes(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA, bankOtherTenant)
@@ -813,6 +856,8 @@ func testRdErrorRegimes(t *testing.T, s port.Store) {
 
 	rdWantIDKeyedEmpty(t, s, "unknown bank", bankB)
 	rdWantIDKeyedEmpty(t, s, "tombstoned empty bank", bankA)
+	rdWantRepoLookupsEmpty(t, s, "unknown bank", bankB)
+	rdWantRepoLookupsEmpty(t, s, "tombstoned empty bank", bankA)
 	rdSeededLookups(t, s, bankOtherTenant, []port.UnitID{f.ID, o.ID})
 	rdWantTagCountsNotFound(t, s, "unknown bank", bankB)
 	rdWantTagCountsNotFound(t, s, "tombstoned empty bank", bankA)

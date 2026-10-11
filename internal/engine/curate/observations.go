@@ -29,12 +29,12 @@ type ObservationAdmin interface {
 	) (ClearResult, error)
 }
 
-// ScopeSource reads observation scopes. It is the port.Reader method proposed in CCR WP-13-1; port.Reader
-// satisfies it once the CCR lands.
+// ScopeSource reads observation scopes. It is the port.Reader method; port.Reader satisfies it.
 type ScopeSource interface {
-	// ListScopes returns up to limit of b's observation scopes (every scope holding an observation or an
-	// unconsolidated unit) with their counts, ordered by ScopeKey.String() and starting strictly after
-	// after ("" = from the start). An unknown or tombstoned bank is domain.ErrNotFound.
+	// ListScopes returns up to limit of b's observation scopes (its observation_scopes rows: every scope that
+	// has held an observation) with their counts, ordered by ScopeKey.String() and starting strictly after
+	// after ("" = from the start, shared scope included; "0" continues after the shared scope, decision
+	// 1560). An unknown or tombstoned bank is domain.ErrNotFound.
 	ListScopes(ctx context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error)
 }
 
@@ -42,9 +42,9 @@ type ScopeSource interface {
 // consolidate.Invalidator satisfies it.
 type ObservationClearer interface {
 	// ClearScopes deletes every observation in scopes (all scopes when empty) and resets their sources,
-	// in the caller's transaction. It enqueues nothing: ObservationAdmin owns the consolidate enqueue
-	// (exactly one, only when reconsolidate is set).
-	ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) error
+	// in the caller's transaction, and returns the deleted observations. It enqueues nothing:
+	// ObservationAdmin owns the consolidate enqueue (exactly one, only when reconsolidate is set).
+	ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, error)
 }
 
 // ConsolidatePayload is the payload of a manual consolidate job (decision 1301); an automatic one is {}.
@@ -74,7 +74,7 @@ type ClearResult struct {
 type ObservationAdminDeps struct {
 	// Store opens the transactions.
 	Store port.Store
-	// Scopes lists scopes (and counts the observations a clear removes).
+	// Scopes lists scopes (port.Reader).
 	Scopes ScopeSource
 	// Clearer deletes the observations of scopes.
 	Clearer ObservationClearer

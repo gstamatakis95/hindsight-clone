@@ -15,8 +15,8 @@ type StatsReader interface {
 	Tags(ctx context.Context, req ListTagsRequest) (TagPage, error)
 }
 
-// StatsSource is the counting side of StatsReader. Its methods are the port.Reader methods proposed in CCR
-// WP-13-1; port.Reader satisfies it once the CCR lands.
+// StatsSource is the counting side of StatsReader. Its methods are port.Reader methods; port.Reader
+// satisfies it.
 type StatsSource interface {
 	// BankStats returns bank b's counts from indexed COUNT queries; an unknown or tombstoned bank is
 	// domain.ErrNotFound.
@@ -56,7 +56,7 @@ type statsReader struct{ src StatsSource }
 
 var _ StatsReader = (*statsReader)(nil)
 
-// NewStatsReader returns the StatsReader over src (port.Reader once CCR WP-13-1 lands).
+// NewStatsReader returns the StatsReader over src (port.Reader).
 func NewStatsReader(src StatsSource) StatsReader { return &statsReader{src: src} }
 
 // Stats returns the source's counts.

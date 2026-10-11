@@ -44,7 +44,7 @@ type reconciler struct {
 
 var _ RefreshFailureReconciler = (*reconciler)(nil)
 
-// NewRefreshFailureReconciler returns the reconciler over the failed-refresh read (CCR WP-12-1).
+// NewRefreshFailureReconciler returns the reconciler over the failed-refresh read (port.Reader.FailedRefreshes).
 func NewRefreshFailureReconciler(
 	src FailureSource, s port.Store, c port.ConfigResolver, clock port.Clock,
 ) RefreshFailureReconciler {

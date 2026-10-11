@@ -18,8 +18,8 @@ type MemoryLister interface {
 	ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
 }
 
-// UnitSource is the read side of MemoryLister. Its methods are the port.Reader methods proposed in CCR
-// WP-13-1 (UnitQuery and UnitCursor move to port with it); port.Reader satisfies it once the CCR lands.
+// UnitSource is the read side of MemoryLister. Its methods are port.Reader methods; port.Reader satisfies
+// it.
 type UnitSource interface {
 	// GetUnit returns one unit of b, live (State valid) or archived (State invalidated), with Entities,
 	// SourceIDs and, for observations, Stale filled; unknown = domain.ErrNotFound. An unknown or
@@ -34,44 +34,11 @@ type UnitSource interface {
 	ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
 }
 
-// UnitQuery filters ListUnits. Zero fields do not filter.
-type UnitQuery struct {
-	// Bank is the bank listed.
-	Bank port.BankRef
-	// Types limits fact types; empty = all.
-	Types []domain.FactType
-	// Q is a case-insensitive substring filter on the text; empty = none.
-	Q string
-	// DocumentID limits units to one document.
-	DocumentID port.DocumentID
-	// EntityID limits units to live units attached to the entity (archived units never match).
-	EntityID port.EntityID
-	// State selects live (valid), archived (invalidated) or both (unspecified) tables.
-	State domain.MemoryState
-	// Start is the inclusive lower bound on TimeField; nil = unbounded.
-	Start *time.Time
-	// End is the exclusive upper bound on TimeField; nil = unbounded.
-	End *time.Time
-	// TimeField is the timestamp Start and End filter on; unspecified = created_at. A unit whose field is
-	// null never matches a bound on it.
-	TimeField domain.TimeField
-	// Tags filters by normalized tags with domain.MatchTags semantics; empty = none.
-	Tags []string
-	// TagsMatch is how Tags compare.
-	TagsMatch domain.TagsMatch
-	// After continues a listing: only units strictly after this cursor in the listing order; nil = first.
-	After *UnitCursor
-	// Limit caps the result (> 0).
-	Limit int
-}
+// UnitQuery filters UnitSource.ListUnits (port.UnitQuery). Zero fields do not filter.
+type UnitQuery = port.UnitQuery
 
-// UnitCursor is a keyset position in a unit listing.
-type UnitCursor struct {
-	// CreatedAt is the last listed unit's created_at.
-	CreatedAt time.Time `json:"c"`
-	// ID is the last listed unit's id.
-	ID port.UnitID `json:"i"`
-}
+// UnitCursor is a keyset position in a unit listing (port.UnitCursor).
+type UnitCursor = port.UnitCursor
 
 // ListMemoriesRequest mirrors memory.v1.ListMemoriesRequest with domain types.
 type ListMemoriesRequest struct {
