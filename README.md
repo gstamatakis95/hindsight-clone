@@ -72,6 +72,18 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","query":"Summarize
 grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.BankService/GetBankStats
 ```
 
+### Sync vs async retain
+
+`Retain` is synchronous by default. It returns once the units are committed, and the extraction LLM calls
+run inside the RPC. A call with no deadline of its own gets `MEMD_RPC_DEADLINE` (120s by default).
+
+A sync retain that fails part-way, for example on a deadline or an LLM outage, can leave the document
+partly replaced. Retrying it starts from scratch: an inline run never resumes (decision 801). So a document
+whose extraction takes longer than the deadline can never complete synchronously.
+
+For long documents, set `run_async: true`. The `retain_document` job resumes from its committed chunks
+across retries and worker crashes. You can also give the call a longer client deadline.
+
 ## Tests
 
 ```sh

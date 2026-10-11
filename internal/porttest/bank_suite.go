@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"sync"
 	"testing"
+	"time"
 )
 
 // ---------- BankRepo ----------
@@ -206,6 +208,59 @@ func testTenantConfig(t *testing.T, s port.Store) {
 	small := domain.BankConfig{RetainMission: "tenant default"}
 	inTx(t, s, func(tx port.Tx) error { return tx.Banks().SetTenantConfig(t.Context(), "tenant-1", small) })
 	wantJSON(t, "TenantConfig after replace", tenantConfig(t, s, "tenant-1"), small)
+}
+
+// tenantRMW runs LockTenantConfig, TenantConfig, then SetTenantConfig with mission appended to the
+// RetainMission it read, in one transaction. It reports on locked once it holds the lock and waits for
+// release before writing.
+func tenantRMW(
+	t *testing.T, s port.Store, tenant, mission string, locked chan<- struct{}, release <-chan struct{},
+) error {
+	var once sync.Once
+	return s.InTx(t.Context(), func(tx port.Tx) error {
+		if err := tx.Banks().LockTenantConfig(t.Context(), tenant); err != nil {
+			return err
+		}
+		cur, err := tx.Banks().TenantConfig(t.Context(), tenant)
+		if err != nil {
+			return err
+		}
+		once.Do(func() { close(locked) })
+		<-release
+		cur.RetainMission += mission
+		return tx.Banks().SetTenantConfig(t.Context(), tenant, cur)
+	})
+}
+
+// testTenantConfigLock: while tx A holds a tenant's config lock (no config stored yet), tx B's
+// LockTenantConfig blocks; once A commits, B reads A's write, so neither read-modify-write is lost.
+func testTenantConfigLock(t *testing.T, s port.Store) {
+	const tenant = "tenant-lock"
+	lockedA, lockedB := make(chan struct{}), make(chan struct{})
+	releaseA, releaseB := make(chan struct{}), make(chan struct{})
+	close(releaseB)
+	var once sync.Once
+	freeA := func() { once.Do(func() { close(releaseA) }) }
+	defer freeA()
+	doneA, doneB := make(chan error, 1), make(chan error, 1)
+	go func() { doneA <- tenantRMW(t, s, tenant, "A", lockedA, releaseA) }()
+	waitFor(t, "tx A's lock", lockedA)
+	go func() { doneB <- tenantRMW(t, s, tenant, "B", lockedB, releaseB) }()
+	select {
+	case <-lockedB:
+		t.Errorf("tx B took the tenant config lock while tx A held it; want it blocked")
+	case <-time.After(blockedFor):
+	}
+	freeA()
+	if err := waitFor(t, "tx A's commit", doneA); err != nil {
+		t.Fatalf("tx A: %v", err)
+	}
+	if err := waitFor(t, "tx B's commit", doneB); err != nil {
+		t.Fatalf("tx B: %v", err)
+	}
+	if got := tenantConfig(t, s, tenant).RetainMission; got != "AB" {
+		t.Errorf("RetainMission after two locked read-modify-writes = %q, want %q", got, "AB")
+	}
 }
 
 // ---------- MentalModelRepo ----------

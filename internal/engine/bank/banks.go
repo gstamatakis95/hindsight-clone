@@ -56,13 +56,17 @@ func (a *tenantAdmin) TenantConfig(ctx context.Context, tenant string) (domain.B
 	return cfg, nil
 }
 
-// UpdateTenantConfig reads, patches and stores the tenant config in one transaction.
+// UpdateTenantConfig reads, patches and stores the tenant config in one transaction. It locks the tenant
+// config first, so concurrent patches serialize instead of one overwriting the other (decision 2500).
 func (a *tenantAdmin) UpdateTenantConfig(
 	ctx context.Context, tenant string, patch ConfigPatch,
 ) (domain.BankConfig, error) {
 	var out domain.BankConfig
 	err := a.s.InTx(ctx, func(tx port.Tx) error {
 		out = domain.BankConfig{}
+		if err := tx.Banks().LockTenantConfig(ctx, tenant); err != nil {
+			return err
+		}
 		cur, err := tx.Banks().TenantConfig(ctx, tenant)
 		if err != nil {
 			return err
@@ -138,12 +142,20 @@ func (a *bankAdmin) GetBank(ctx context.Context, b port.BankRef) (domain.Bank, e
 	return out, nil
 }
 
-// UpdateBankConfig ensures the bank, patches its own overrides and returns it, in one transaction.
+// UpdateBankConfig ensures the bank, patches its own overrides and returns it, in one transaction. It takes
+// the bank's change seq (which locks the bank row) before reading the overrides, so concurrent patches of
+// different fields serialize instead of one overwriting the other (decision 2500).
 func (a *bankAdmin) UpdateBankConfig(ctx context.Context, b port.BankRef, patch ConfigPatch) (domain.Bank, error) {
 	var out domain.Bank
 	err := a.s.InTx(ctx, func(tx port.Tx) error {
 		out = domain.Bank{}
-		cur, err := tx.Banks().Ensure(ctx, b)
+		if _, err := tx.Banks().Ensure(ctx, b); err != nil {
+			return err
+		}
+		if _, err := tx.Seq(ctx, b); err != nil {
+			return err
+		}
+		cur, err := tx.Banks().Get(ctx, b) // re-read under the lock: Ensure's read may predate it
 		if err != nil {
 			return err
 		}

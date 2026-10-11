@@ -3,6 +3,7 @@ package fake
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -98,8 +99,8 @@ func (r entityRepo) Attach(_ context.Context, unit port.UnitID, ents []port.Enti
 		return notFound("unit %s", unit)
 	}
 	for _, e := range ents {
-		if !st.entityInBank(e, u.u.Bank) {
-			return notFound("entity %s", e)
+		if !st.entityInBank(e, u.u.Bank) { // as Postgres: pruned after it was resolved (decision 2501)
+			return fmt.Errorf("%w: entity %s no longer exists", domain.ErrConflict, e)
 		}
 	}
 	r.attach(unit, ents)

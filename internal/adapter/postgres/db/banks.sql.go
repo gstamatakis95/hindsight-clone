@@ -144,6 +144,17 @@ func (q *Queries) MarkBankDeleting(ctx context.Context, arg MarkBankDeletingPara
 	return result.RowsAffected(), nil
 }
 
+const tenantConfigLock = `-- name: TenantConfigLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended('tenant_config/' || $1::text, 0))
+`
+
+// TenantConfigLock serializes read-modify-writes of one tenant's config until the tx ends; it needs no
+// tenants row, so a first-ever write is covered too.
+func (q *Queries) TenantConfigLock(ctx context.Context, tenantID string) error {
+	_, err := q.db.Exec(ctx, tenantConfigLock, tenantID)
+	return err
+}
+
 const upsertBankConfig = `-- name: UpsertBankConfig :execrows
 INSERT INTO banks AS b (tenant_id, id, config) VALUES ($1, $2, $3)
 ON CONFLICT (tenant_id, id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()

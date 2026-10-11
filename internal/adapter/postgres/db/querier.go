@@ -309,6 +309,9 @@ type Querier interface {
 	// is pending or processing and none ended within retry_after_seconds. It walks the operations table (pruned
 	// after the retention period), not memory_units, so the maintenance tick never scans every unit.
 	StrandedFacts(ctx context.Context, arg StrandedFactsParams) ([]StrandedFactsRow, error)
+	// TenantConfigLock serializes read-modify-writes of one tenant's config until the tx ends; it needs no
+	// tenants row, so a first-ever write is covered too.
+	TenantConfigLock(ctx context.Context, tenantID string) error
 	// UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
 	// with an embedding created before @before (WP-20, decision 2000). It is BanksToConsolidate plus the grace
 	// cut-off, over the same partial index (tenant_id, bank_id, created_at).
