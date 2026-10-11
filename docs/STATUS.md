@@ -316,3 +316,10 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
     Reprocess op id on audit/archive rows: ACCEPTED GAP (rows are kept; no data loss).
   - LOW bundle (blob Put after the bank check, tick graph_maintenance for dirty banks, manual consolidate retry,
     progress checkpoints) → WP-20.
+- 2026-10-11 FINAL REVIEW A (platform/API): 1 HIGH, 3 MEDIUM, 12 LOW; no cross-tenant leak (a probe of all 48
+  RPCs); buf breaking vs contracts-v1 clean; README quick start verified literally. Rulings:
+  - HIGH: an implicit-mask config patch replaces `models` wholesale (SPEC says per-slot merge) → WP-21, with the
+    MEDIUM that whole-config writes skip ValidateOverrides.
+  - MEDIUM: duplicate MEMD_WORKER_ID defeats heartbeat fencing → append a per-process uuid; S3 keys unchecked →
+    validate. Plus LOWs (CreateBank on a deleting bank, cancel of delete_bank, "."/".." ids, unbound-slot
+    startup check, per-slot concurrency env, worker health, e2e blob-prefix assertion) → folded into WP-20.
