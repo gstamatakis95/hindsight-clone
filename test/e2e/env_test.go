@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"memd/internal/adapter/s3"
 	"memd/test/e2e/gatewayemu"
 	"memd/test/e2e/harness"
 	"slices"
@@ -45,7 +46,7 @@ func startEnv(t *testing.T) *env {
 	api := s.StartMemd(t, bin, opts)
 	opts.Mode = harness.ModeWorker
 	w := s.StartMemd(t, bin, opts)
-	return &env{stack: s, emu: emu, api: api, worker: w, c: harness.Dial(t, api.Addr, "e2e")}
+	return &env{stack: s, emu: emu, api: api, worker: w, c: harness.Dial(t, api.Addr, e2eTenant)}
 }
 
 // ctx is a per-step context.
@@ -150,6 +151,26 @@ func anyContains(texts map[string]string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// e2eTenant is the tenant every scenario's client sends.
+const e2eTenant = "e2e"
+
+// blobKeys lists the MinIO keys under prefix (up to 1000), straight from the bucket memd writes to.
+func (e *env) blobKeys(t *testing.T, prefix string) []string {
+	t.Helper()
+	blob, err := s3.NewBlob(e.ctx(t), s3.Config{
+		Endpoint: e.stack.S3Endpoint, Region: harness.S3Region, Bucket: harness.S3Bucket,
+		AccessKeyID: harness.S3AccessKey, SecretAccessKey: harness.S3SecretKey, UsePathStyle: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := blob.List(e.ctx(t), prefix, "", 1000)
+	if err != nil {
+		t.Fatalf("list %q: %v", prefix, err)
+	}
+	return keys
 }
 
 // codeOf is err's gRPC code (OK for nil).

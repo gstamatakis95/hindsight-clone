@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"memd/internal/config"
+	"memd/internal/domain"
 	"strconv"
 	"strings"
 	"time"
@@ -84,21 +86,27 @@ type Config struct {
 	EmbedModel string
 	// GatewayMaxConcurrent caps in-flight gateway calls in this process.
 	GatewayMaxConcurrent int
+	// SlotConcurrency caps in-flight gateway calls per slot (MEMD_GATEWAY_MAX_CONCURRENT_<SLOT>, e.g.
+	// MEMD_GATEWAY_MAX_CONCURRENT_EXTRACT); slots without an entry are limited only by GatewayMaxConcurrent.
+	SlotConcurrency map[domain.ModelSlot]int
 	// GatewayTimeout bounds one gateway HTTP attempt when the binding sets none.
 	GatewayTimeout time.Duration
 	// S3Endpoint is the object store's S3 API URL; empty = AWS for S3Region.
 	S3Endpoint string
 	// S3Bucket holds the original document texts.
 	S3Bucket string
-	// S3AccessKey is the static access key; empty = the AWS default chain is not used, so it is required.
+	// S3AccessKey is the static access key. The S3 adapter signs with static credentials only (no AWS
+	// default credential chain), so it is required, together with S3SecretKey (decision 2004).
 	S3AccessKey string
-	// S3SecretKey is the static secret key.
+	// S3SecretKey is the static secret key; required.
 	S3SecretKey string
 	// S3Region is the signing region.
 	S3Region string
 	// S3PathStyle addresses objects path-style (MinIO).
 	S3PathStyle bool
-	// WorkerID names this worker on claimed rows; empty = generated.
+	// WorkerID is the prefix of this worker's id on claimed rows; empty = the hostname. Every process appends
+	// its own uuid (effectiveWorkerID), so two workers given the same MEMD_WORKER_ID never share an id and
+	// heartbeat fencing keeps working (decision 2004).
 	WorkerID string
 	// WorkerSlots is how many jobs the worker runs at once.
 	WorkerSlots int
@@ -159,15 +167,15 @@ var settings = []setting{
 	},
 	{envS3Endpoint, "S3 API URL (empty = AWS)", "", str(func(c *Config) *string { return &c.S3Endpoint })},
 	{envS3Bucket, "bucket for original texts (required)", "", str(func(c *Config) *string { return &c.S3Bucket })},
-	{envS3AccessKey, "S3 access key", "", str(func(c *Config) *string { return &c.S3AccessKey })},
-	{envS3SecretKey, "S3 secret key", "", str(func(c *Config) *string { return &c.S3SecretKey })},
+	{envS3AccessKey, "S3 access key (required)", "", str(func(c *Config) *string { return &c.S3AccessKey })},
+	{envS3SecretKey, "S3 secret key (required)", "", str(func(c *Config) *string { return &c.S3SecretKey })},
 	{envS3Region, "S3 signing region", defaultS3Region, str(func(c *Config) *string { return &c.S3Region })},
 	{
 		envS3PathStyle, "path-style S3 addressing (MinIO)", "false",
 		boolean(func(c *Config) *bool { return &c.S3PathStyle }),
 	},
 	{
-		envWorkerID, "worker id on claimed rows (empty = generated)", "",
+		envWorkerID, "worker id prefix on claimed rows (empty = hostname; a per-process uuid is appended)", "",
 		str(func(c *Config) *string { return &c.WorkerID }),
 	},
 	{
@@ -273,7 +281,10 @@ func usage(w io.Writer) {
 	for _, s := range settings {
 		_, _ = fmt.Fprintf(w, "  -%s, %s (default %q)\n      %s\n", flagName(s.env), s.env, s.def, s.help)
 	}
-	_, _ = fmt.Fprintf(w, "  MEMD_MODEL, MEMD_MODEL_<SLOT>\n      gateway model of every LLM slot / of one slot\n")
+	_, _ = fmt.Fprintf(w, "  MEMD_MODEL, MEMD_MODEL_<SLOT>\n      gateway model of every LLM slot / of one slot "+
+		"(EXTRACT and REFLECT must be bound)\n")
+	_, _ = fmt.Fprintf(w, "  %s_<SLOT>\n      max in-flight gateway calls of one slot (EXTRACT, ..., RERANK, EMBED)\n",
+		envGatewayConcurrency)
 }
 
 // LoadConfig reads the mode from args[0], then every setting from env and the flags after the mode (a flag
@@ -307,6 +318,11 @@ func LoadConfig(args []string, env func(string) string) (Config, error) {
 		}
 	}
 	c.DSN = normalizeDSN(c.DSN)
+	slots, err := slotConcurrency(env)
+	if err != nil {
+		return Config{}, err
+	}
+	c.SlotConcurrency = slots
 	return c, nil
 }
 
@@ -348,6 +364,11 @@ func (c Config) Validate() error {
 	if c.S3Bucket == "" {
 		errs = append(errs, fmt.Errorf("%s is required", envS3Bucket))
 	}
+	if c.S3AccessKey == "" || c.S3SecretKey == "" {
+		errs = append(errs, fmt.Errorf("%s and %s are both required (static S3 credentials)", envS3AccessKey,
+			envS3SecretKey))
+	}
+	errs = append(errs, c.validateSlots()...)
 	if c.EmbedModel == "" {
 		errs = append(errs, fmt.Errorf("%s must not be empty", envEmbedModel))
 	}
@@ -363,6 +384,60 @@ func (c Config) Validate() error {
 		return fmt.Errorf("memd: invalid config: %w", err)
 	}
 	return nil
+}
+
+// gatewaySlots are the slots MEMD_GATEWAY_MAX_CONCURRENT_<SLOT> can cap.
+var gatewaySlots = []domain.ModelSlot{
+	domain.ModelSlotExtract, domain.ModelSlotTimeParse, domain.ModelSlotConsolidate, domain.ModelSlotDedupCheck,
+	domain.ModelSlotReflect, domain.ModelSlotStructuredOutput, domain.ModelSlotMentalModelDelta,
+	domain.ModelSlotSynthesize, domain.ModelSlotRerank, domain.ModelSlotEmbed,
+}
+
+// slotConcurrency reads MEMD_GATEWAY_MAX_CONCURRENT_<SLOT> for every gateway slot; unset slots get no entry.
+func slotConcurrency(env func(string) string) (map[domain.ModelSlot]int, error) {
+	out := map[domain.ModelSlot]int{}
+	for _, slot := range gatewaySlots {
+		key := envGatewayConcurrency + "_" + strings.ToUpper(string(slot))
+		v, ok := lookup(env, key)
+		if !ok {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return nil, fmt.Errorf("memd: %s: not an integer: %q", key, v)
+		}
+		out[slot] = n
+	}
+	return out, nil
+}
+
+// requiredSlots must have a model at the server level: retain (EXTRACT) and reflect (REFLECT) can't run
+// without one, so memd refuses to start rather than fail the first call.
+var requiredSlots = []domain.ModelSlot{domain.ModelSlotExtract, domain.ModelSlotReflect}
+
+// validateSlots checks the per-slot gateway caps are positive and that the required slots are bound in the
+// environment (config.ServerDefaults reads MEMD_MODEL and MEMD_MODEL_<SLOT>).
+func (c Config) validateSlots() []error {
+	var errs []error
+	for slot, n := range c.SlotConcurrency {
+		if n <= 0 {
+			errs = append(errs, fmt.Errorf("%s_%s must be positive", envGatewayConcurrency, strings.ToUpper(string(slot))))
+		}
+	}
+	if c.Env == nil {
+		return errs
+	}
+	server, err := config.ServerDefaults(c.Env)
+	if err != nil {
+		return append(errs, err)
+	}
+	for _, slot := range requiredSlots {
+		if _, ok := server.Binding(slot); !ok {
+			errs = append(errs, fmt.Errorf("no model bound to slot %s: set MEMD_MODEL or %s%s", slot,
+				config.EnvModelPrefix, strings.ToUpper(string(slot))))
+		}
+	}
+	return errs
 }
 
 // validateWorker checks the worker timings: positive, and a heartbeat well inside the reclaim threshold
