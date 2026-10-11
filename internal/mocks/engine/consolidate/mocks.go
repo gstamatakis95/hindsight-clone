@@ -8,7 +8,6 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/engine/recall"
 	"memd/internal/port"
 	"sync"
 )
@@ -95,8 +94,8 @@ var _ consolidate.Deduper = &Deduper{}
 //
 //		// make and configure a mocked consolidate.Deduper
 //		mockedDeduper := &Deduper{
-//			ReconcileFunc: func(ctx context.Context, tx port.Tx, s port.ScopeKey, changed []port.UnitID) ([]port.UnitID, error) {
-//				panic("mock out the Reconcile method")
+//			CheckFunc: func(ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, text string, emb []float32) (consolidate.DedupVerdict, error) {
+//				panic("mock out the Check method")
 //			},
 //		}
 //
@@ -105,139 +104,659 @@ var _ consolidate.Deduper = &Deduper{}
 //
 //	}
 type Deduper struct {
-	// ReconcileFunc mocks the Reconcile method.
-	ReconcileFunc func(ctx context.Context, tx port.Tx, s port.ScopeKey, changed []port.UnitID) ([]port.UnitID, error)
+	// CheckFunc mocks the Check method.
+	CheckFunc func(ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, text string, emb []float32) (consolidate.DedupVerdict, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
-		// Reconcile holds details about calls to the Reconcile method.
-		Reconcile []struct {
+		// Check holds details about calls to the Check method.
+		Check []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// S is the s argument value.
+			S port.ScopeKey
+			// Cfg is the cfg argument value.
+			Cfg domain.BankConfig
+			// Text is the text argument value.
+			Text string
+			// Emb is the emb argument value.
+			Emb []float32
+		}
+	}
+	lockCheck sync.RWMutex
+}
+
+// Check calls CheckFunc.
+func (mock *Deduper) Check(ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, text string, emb []float32) (consolidate.DedupVerdict, error) {
+	if mock.CheckFunc == nil {
+		panic("Deduper.CheckFunc: method is nil but Deduper.Check was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		S    port.ScopeKey
+		Cfg  domain.BankConfig
+		Text string
+		Emb  []float32
+	}{
+		Ctx:  ctx,
+		S:    s,
+		Cfg:  cfg,
+		Text: text,
+		Emb:  emb,
+	}
+	mock.lockCheck.Lock()
+	mock.calls.Check = append(mock.calls.Check, callInfo)
+	mock.lockCheck.Unlock()
+	return mock.CheckFunc(ctx, s, cfg, text, emb)
+}
+
+// CheckCalls gets all the calls that were made to Check.
+// Check the length with:
+//
+//	len(mockedDeduper.CheckCalls())
+func (mock *Deduper) CheckCalls() []struct {
+	Ctx  context.Context
+	S    port.ScopeKey
+	Cfg  domain.BankConfig
+	Text string
+	Emb  []float32
+} {
+	var calls []struct {
+		Ctx  context.Context
+		S    port.ScopeKey
+		Cfg  domain.BankConfig
+		Text string
+		Emb  []float32
+	}
+	mock.lockCheck.RLock()
+	calls = mock.calls.Check
+	mock.lockCheck.RUnlock()
+	return calls
+}
+
+// Ensure that ObservationCounter does implement consolidate.ObservationCounter.
+// If this is not the case, regenerate this file with mockery.
+var _ consolidate.ObservationCounter = &ObservationCounter{}
+
+// ObservationCounter is a mock implementation of consolidate.ObservationCounter.
+//
+//	func TestSomethingThatUsesObservationCounter(t *testing.T) {
+//
+//		// make and configure a mocked consolidate.ObservationCounter
+//		mockedObservationCounter := &ObservationCounter{
+//			CountObservationsFunc: func(ctx context.Context, s port.ScopeKey) (int, error) {
+//				panic("mock out the CountObservations method")
+//			},
+//		}
+//
+//		// use mockedObservationCounter in code that requires consolidate.ObservationCounter
+//		// and then make assertions.
+//
+//	}
+type ObservationCounter struct {
+	// CountObservationsFunc mocks the CountObservations method.
+	CountObservationsFunc func(ctx context.Context, s port.ScopeKey) (int, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// CountObservations holds details about calls to the CountObservations method.
+		CountObservations []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// S is the s argument value.
+			S port.ScopeKey
+		}
+	}
+	lockCountObservations sync.RWMutex
+}
+
+// CountObservations calls CountObservationsFunc.
+func (mock *ObservationCounter) CountObservations(ctx context.Context, s port.ScopeKey) (int, error) {
+	if mock.CountObservationsFunc == nil {
+		panic("ObservationCounter.CountObservationsFunc: method is nil but ObservationCounter.CountObservations was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		S   port.ScopeKey
+	}{
+		Ctx: ctx,
+		S:   s,
+	}
+	mock.lockCountObservations.Lock()
+	mock.calls.CountObservations = append(mock.calls.CountObservations, callInfo)
+	mock.lockCountObservations.Unlock()
+	return mock.CountObservationsFunc(ctx, s)
+}
+
+// CountObservationsCalls gets all the calls that were made to CountObservations.
+// Check the length with:
+//
+//	len(mockedObservationCounter.CountObservationsCalls())
+func (mock *ObservationCounter) CountObservationsCalls() []struct {
+	Ctx context.Context
+	S   port.ScopeKey
+} {
+	var calls []struct {
+		Ctx context.Context
+		S   port.ScopeKey
+	}
+	mock.lockCountObservations.RLock()
+	calls = mock.calls.CountObservations
+	mock.lockCountObservations.RUnlock()
+	return calls
+}
+
+// Ensure that ScopeLister does implement consolidate.ScopeLister.
+// If this is not the case, regenerate this file with mockery.
+var _ consolidate.ScopeLister = &ScopeLister{}
+
+// ScopeLister is a mock implementation of consolidate.ScopeLister.
+//
+//	func TestSomethingThatUsesScopeLister(t *testing.T) {
+//
+//		// make and configure a mocked consolidate.ScopeLister
+//		mockedScopeLister := &ScopeLister{
+//			ScopesFunc: func(ctx context.Context, b port.BankRef, limit int) ([]port.ScopeKey, bool, error) {
+//				panic("mock out the Scopes method")
+//			},
+//		}
+//
+//		// use mockedScopeLister in code that requires consolidate.ScopeLister
+//		// and then make assertions.
+//
+//	}
+type ScopeLister struct {
+	// ScopesFunc mocks the Scopes method.
+	ScopesFunc func(ctx context.Context, b port.BankRef, limit int) ([]port.ScopeKey, bool, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Scopes holds details about calls to the Scopes method.
+		Scopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Limit is the limit argument value.
+			Limit int
+		}
+	}
+	lockScopes sync.RWMutex
+}
+
+// Scopes calls ScopesFunc.
+func (mock *ScopeLister) Scopes(ctx context.Context, b port.BankRef, limit int) ([]port.ScopeKey, bool, error) {
+	if mock.ScopesFunc == nil {
+		panic("ScopeLister.ScopesFunc: method is nil but ScopeLister.Scopes was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Limit: limit,
+	}
+	mock.lockScopes.Lock()
+	mock.calls.Scopes = append(mock.calls.Scopes, callInfo)
+	mock.lockScopes.Unlock()
+	return mock.ScopesFunc(ctx, b, limit)
+}
+
+// ScopesCalls gets all the calls that were made to Scopes.
+// Check the length with:
+//
+//	len(mockedScopeLister.ScopesCalls())
+func (mock *ScopeLister) ScopesCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Limit int
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Limit int
+	}
+	mock.lockScopes.RLock()
+	calls = mock.calls.Scopes
+	mock.lockScopes.RUnlock()
+	return calls
+}
+
+// Ensure that ModelLister does implement consolidate.ModelLister.
+// If this is not the case, regenerate this file with mockery.
+var _ consolidate.ModelLister = &ModelLister{}
+
+// ModelLister is a mock implementation of consolidate.ModelLister.
+//
+//	func TestSomethingThatUsesModelLister(t *testing.T) {
+//
+//		// make and configure a mocked consolidate.ModelLister
+//		mockedModelLister := &ModelLister{
+//			MentalModelsFunc: func(ctx context.Context, b port.BankRef) ([]domain.MentalModel, error) {
+//				panic("mock out the MentalModels method")
+//			},
+//		}
+//
+//		// use mockedModelLister in code that requires consolidate.ModelLister
+//		// and then make assertions.
+//
+//	}
+type ModelLister struct {
+	// MentalModelsFunc mocks the MentalModels method.
+	MentalModelsFunc func(ctx context.Context, b port.BankRef) ([]domain.MentalModel, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// MentalModels holds details about calls to the MentalModels method.
+		MentalModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+	}
+	lockMentalModels sync.RWMutex
+}
+
+// MentalModels calls MentalModelsFunc.
+func (mock *ModelLister) MentalModels(ctx context.Context, b port.BankRef) ([]domain.MentalModel, error) {
+	if mock.MentalModelsFunc == nil {
+		panic("ModelLister.MentalModelsFunc: method is nil but ModelLister.MentalModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockMentalModels.Lock()
+	mock.calls.MentalModels = append(mock.calls.MentalModels, callInfo)
+	mock.lockMentalModels.Unlock()
+	return mock.MentalModelsFunc(ctx, b)
+}
+
+// MentalModelsCalls gets all the calls that were made to MentalModels.
+// Check the length with:
+//
+//	len(mockedModelLister.MentalModelsCalls())
+func (mock *ModelLister) MentalModelsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockMentalModels.RLock()
+	calls = mock.calls.MentalModels
+	mock.lockMentalModels.RUnlock()
+	return calls
+}
+
+// Ensure that ObservationClearer does implement consolidate.ObservationClearer.
+// If this is not the case, regenerate this file with mockery.
+var _ consolidate.ObservationClearer = &ObservationClearer{}
+
+// ObservationClearer is a mock implementation of consolidate.ObservationClearer.
+//
+//	func TestSomethingThatUsesObservationClearer(t *testing.T) {
+//
+//		// make and configure a mocked consolidate.ObservationClearer
+//		mockedObservationClearer := &ObservationClearer{
+//			CitingScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error) {
+//				panic("mock out the CitingScopes method")
+//			},
+//			DeleteScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, []port.UnitID, error) {
+//				panic("mock out the DeleteScopes method")
+//			},
+//			DocumentUnitsFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
+//				panic("mock out the DocumentUnits method")
+//			},
+//		}
+//
+//		// use mockedObservationClearer in code that requires consolidate.ObservationClearer
+//		// and then make assertions.
+//
+//	}
+type ObservationClearer struct {
+	// CitingScopesFunc mocks the CitingScopes method.
+	CitingScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error)
+
+	// DeleteScopesFunc mocks the DeleteScopes method.
+	DeleteScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, []port.UnitID, error)
+
+	// DocumentUnitsFunc mocks the DocumentUnits method.
+	DocumentUnitsFunc func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// CitingScopes holds details about calls to the CitingScopes method.
+		CitingScopes []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Tx is the tx argument value.
 			Tx port.Tx
-			// S is the s argument value.
-			S port.ScopeKey
-			// Changed is the changed argument value.
-			Changed []port.UnitID
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.UnitID
+		}
+		// DeleteScopes holds details about calls to the DeleteScopes method.
+		DeleteScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// Scopes is the scopes argument value.
+			Scopes []port.ScopeKey
+		}
+		// DocumentUnits holds details about calls to the DocumentUnits method.
+		DocumentUnits []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// Doc is the doc argument value.
+			Doc port.DocumentID
 		}
 	}
-	lockReconcile sync.RWMutex
+	lockCitingScopes  sync.RWMutex
+	lockDeleteScopes  sync.RWMutex
+	lockDocumentUnits sync.RWMutex
 }
 
-// Reconcile calls ReconcileFunc.
-func (mock *Deduper) Reconcile(ctx context.Context, tx port.Tx, s port.ScopeKey, changed []port.UnitID) ([]port.UnitID, error) {
-	if mock.ReconcileFunc == nil {
-		panic("Deduper.ReconcileFunc: method is nil but Deduper.Reconcile was just called")
+// CitingScopes calls CitingScopesFunc.
+func (mock *ObservationClearer) CitingScopes(ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error) {
+	if mock.CitingScopesFunc == nil {
+		panic("ObservationClearer.CitingScopesFunc: method is nil but ObservationClearer.CitingScopes was just called")
 	}
 	callInfo := struct {
-		Ctx     context.Context
-		Tx      port.Tx
-		S       port.ScopeKey
-		Changed []port.UnitID
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Ids []port.UnitID
 	}{
-		Ctx:     ctx,
-		Tx:      tx,
-		S:       s,
-		Changed: changed,
+		Ctx: ctx,
+		Tx:  tx,
+		B:   b,
+		Ids: ids,
 	}
-	mock.lockReconcile.Lock()
-	mock.calls.Reconcile = append(mock.calls.Reconcile, callInfo)
-	mock.lockReconcile.Unlock()
-	return mock.ReconcileFunc(ctx, tx, s, changed)
+	mock.lockCitingScopes.Lock()
+	mock.calls.CitingScopes = append(mock.calls.CitingScopes, callInfo)
+	mock.lockCitingScopes.Unlock()
+	return mock.CitingScopesFunc(ctx, tx, b, ids)
 }
 
-// ReconcileCalls gets all the calls that were made to Reconcile.
+// CitingScopesCalls gets all the calls that were made to CitingScopes.
 // Check the length with:
 //
-//	len(mockedDeduper.ReconcileCalls())
-func (mock *Deduper) ReconcileCalls() []struct {
-	Ctx     context.Context
-	Tx      port.Tx
-	S       port.ScopeKey
-	Changed []port.UnitID
+//	len(mockedObservationClearer.CitingScopesCalls())
+func (mock *ObservationClearer) CitingScopesCalls() []struct {
+	Ctx context.Context
+	Tx  port.Tx
+	B   port.BankRef
+	Ids []port.UnitID
 } {
 	var calls []struct {
-		Ctx     context.Context
-		Tx      port.Tx
-		S       port.ScopeKey
-		Changed []port.UnitID
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Ids []port.UnitID
 	}
-	mock.lockReconcile.RLock()
-	calls = mock.calls.Reconcile
-	mock.lockReconcile.RUnlock()
+	mock.lockCitingScopes.RLock()
+	calls = mock.calls.CitingScopes
+	mock.lockCitingScopes.RUnlock()
 	return calls
 }
 
-// Ensure that Recaller does implement consolidate.Recaller.
-// If this is not the case, regenerate this file with mockery.
-var _ consolidate.Recaller = &Recaller{}
-
-// Recaller is a mock implementation of consolidate.Recaller.
-//
-//	func TestSomethingThatUsesRecaller(t *testing.T) {
-//
-//		// make and configure a mocked consolidate.Recaller
-//		mockedRecaller := &Recaller{
-//			RecallFunc: func(ctx context.Context, req recall.RecallRequest) (recall.RecallResult, error) {
-//				panic("mock out the Recall method")
-//			},
-//		}
-//
-//		// use mockedRecaller in code that requires consolidate.Recaller
-//		// and then make assertions.
-//
-//	}
-type Recaller struct {
-	// RecallFunc mocks the Recall method.
-	RecallFunc func(ctx context.Context, req recall.RecallRequest) (recall.RecallResult, error)
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// Recall holds details about calls to the Recall method.
-		Recall []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Req is the req argument value.
-			Req recall.RecallRequest
-		}
+// DeleteScopes calls DeleteScopesFunc.
+func (mock *ObservationClearer) DeleteScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, []port.UnitID, error) {
+	if mock.DeleteScopesFunc == nil {
+		panic("ObservationClearer.DeleteScopesFunc: method is nil but ObservationClearer.DeleteScopes was just called")
 	}
-	lockRecall sync.RWMutex
+	callInfo := struct {
+		Ctx    context.Context
+		Tx     port.Tx
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}{
+		Ctx:    ctx,
+		Tx:     tx,
+		B:      b,
+		Scopes: scopes,
+	}
+	mock.lockDeleteScopes.Lock()
+	mock.calls.DeleteScopes = append(mock.calls.DeleteScopes, callInfo)
+	mock.lockDeleteScopes.Unlock()
+	return mock.DeleteScopesFunc(ctx, tx, b, scopes)
 }
 
-// Recall calls RecallFunc.
-func (mock *Recaller) Recall(ctx context.Context, req recall.RecallRequest) (recall.RecallResult, error) {
-	if mock.RecallFunc == nil {
-		panic("Recaller.RecallFunc: method is nil but Recaller.Recall was just called")
+// DeleteScopesCalls gets all the calls that were made to DeleteScopes.
+// Check the length with:
+//
+//	len(mockedObservationClearer.DeleteScopesCalls())
+func (mock *ObservationClearer) DeleteScopesCalls() []struct {
+	Ctx    context.Context
+	Tx     port.Tx
+	B      port.BankRef
+	Scopes []port.ScopeKey
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Tx     port.Tx
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}
+	mock.lockDeleteScopes.RLock()
+	calls = mock.calls.DeleteScopes
+	mock.lockDeleteScopes.RUnlock()
+	return calls
+}
+
+// DocumentUnits calls DocumentUnitsFunc.
+func (mock *ObservationClearer) DocumentUnits(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
+	if mock.DocumentUnitsFunc == nil {
+		panic("ObservationClearer.DocumentUnitsFunc: method is nil but ObservationClearer.DocumentUnits was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		Req recall.RecallRequest
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
 	}{
 		Ctx: ctx,
-		Req: req,
+		Tx:  tx,
+		B:   b,
+		Doc: doc,
 	}
-	mock.lockRecall.Lock()
-	mock.calls.Recall = append(mock.calls.Recall, callInfo)
-	mock.lockRecall.Unlock()
-	return mock.RecallFunc(ctx, req)
+	mock.lockDocumentUnits.Lock()
+	mock.calls.DocumentUnits = append(mock.calls.DocumentUnits, callInfo)
+	mock.lockDocumentUnits.Unlock()
+	return mock.DocumentUnitsFunc(ctx, tx, b, doc)
 }
 
-// RecallCalls gets all the calls that were made to Recall.
+// DocumentUnitsCalls gets all the calls that were made to DocumentUnits.
 // Check the length with:
 //
-//	len(mockedRecaller.RecallCalls())
-func (mock *Recaller) RecallCalls() []struct {
+//	len(mockedObservationClearer.DocumentUnitsCalls())
+func (mock *ObservationClearer) DocumentUnitsCalls() []struct {
 	Ctx context.Context
-	Req recall.RecallRequest
+	Tx  port.Tx
+	B   port.BankRef
+	Doc port.DocumentID
 } {
 	var calls []struct {
 		Ctx context.Context
-		Req recall.RecallRequest
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
 	}
-	mock.lockRecall.RLock()
-	calls = mock.calls.Recall
-	mock.lockRecall.RUnlock()
+	mock.lockDocumentUnits.RLock()
+	calls = mock.calls.DocumentUnits
+	mock.lockDocumentUnits.RUnlock()
+	return calls
+}
+
+// Ensure that DocumentScopeReader does implement consolidate.DocumentScopeReader.
+// If this is not the case, regenerate this file with mockery.
+var _ consolidate.DocumentScopeReader = &DocumentScopeReader{}
+
+// DocumentScopeReader is a mock implementation of consolidate.DocumentScopeReader.
+//
+//	func TestSomethingThatUsesDocumentScopeReader(t *testing.T) {
+//
+//		// make and configure a mocked consolidate.DocumentScopeReader
+//		mockedDocumentScopeReader := &DocumentScopeReader{
+//			ItemScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (*domain.ObservationScopes, error) {
+//				panic("mock out the ItemScopes method")
+//			},
+//		}
+//
+//		// use mockedDocumentScopeReader in code that requires consolidate.DocumentScopeReader
+//		// and then make assertions.
+//
+//	}
+type DocumentScopeReader struct {
+	// ItemScopesFunc mocks the ItemScopes method.
+	ItemScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (*domain.ObservationScopes, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// ItemScopes holds details about calls to the ItemScopes method.
+		ItemScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// Doc is the doc argument value.
+			Doc port.DocumentID
+		}
+	}
+	lockItemScopes sync.RWMutex
+}
+
+// ItemScopes calls ItemScopesFunc.
+func (mock *DocumentScopeReader) ItemScopes(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (*domain.ObservationScopes, error) {
+	if mock.ItemScopesFunc == nil {
+		panic("DocumentScopeReader.ItemScopesFunc: method is nil but DocumentScopeReader.ItemScopes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		B:   b,
+		Doc: doc,
+	}
+	mock.lockItemScopes.Lock()
+	mock.calls.ItemScopes = append(mock.calls.ItemScopes, callInfo)
+	mock.lockItemScopes.Unlock()
+	return mock.ItemScopesFunc(ctx, tx, b, doc)
+}
+
+// ItemScopesCalls gets all the calls that were made to ItemScopes.
+// Check the length with:
+//
+//	len(mockedDocumentScopeReader.ItemScopesCalls())
+func (mock *DocumentScopeReader) ItemScopesCalls() []struct {
+	Ctx context.Context
+	Tx  port.Tx
+	B   port.BankRef
+	Doc port.DocumentID
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		Doc port.DocumentID
+	}
+	mock.lockItemScopes.RLock()
+	calls = mock.calls.ItemScopes
+	mock.lockItemScopes.RUnlock()
+	return calls
+}
+
+// Ensure that Checkpointer does implement consolidate.Checkpointer.
+// If this is not the case, regenerate this file with mockery.
+var _ consolidate.Checkpointer = &Checkpointer{}
+
+// Checkpointer is a mock implementation of consolidate.Checkpointer.
+//
+//	func TestSomethingThatUsesCheckpointer(t *testing.T) {
+//
+//		// make and configure a mocked consolidate.Checkpointer
+//		mockedCheckpointer := &Checkpointer{
+//			ReportFunc: func(ctx context.Context, p domain.Progress) error {
+//				panic("mock out the Report method")
+//			},
+//		}
+//
+//		// use mockedCheckpointer in code that requires consolidate.Checkpointer
+//		// and then make assertions.
+//
+//	}
+type Checkpointer struct {
+	// ReportFunc mocks the Report method.
+	ReportFunc func(ctx context.Context, p domain.Progress) error
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Report holds details about calls to the Report method.
+		Report []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// P is the p argument value.
+			P domain.Progress
+		}
+	}
+	lockReport sync.RWMutex
+}
+
+// Report calls ReportFunc.
+func (mock *Checkpointer) Report(ctx context.Context, p domain.Progress) error {
+	if mock.ReportFunc == nil {
+		panic("Checkpointer.ReportFunc: method is nil but Checkpointer.Report was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		P   domain.Progress
+	}{
+		Ctx: ctx,
+		P:   p,
+	}
+	mock.lockReport.Lock()
+	mock.calls.Report = append(mock.calls.Report, callInfo)
+	mock.lockReport.Unlock()
+	return mock.ReportFunc(ctx, p)
+}
+
+// ReportCalls gets all the calls that were made to Report.
+// Check the length with:
+//
+//	len(mockedCheckpointer.ReportCalls())
+func (mock *Checkpointer) ReportCalls() []struct {
+	Ctx context.Context
+	P   domain.Progress
+} {
+	var calls []struct {
+		Ctx context.Context
+		P   domain.Progress
+	}
+	mock.lockReport.RLock()
+	calls = mock.calls.Report
+	mock.lockReport.RUnlock()
 	return calls
 }
 

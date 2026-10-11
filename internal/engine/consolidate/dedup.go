@@ -2,21 +2,155 @@ package consolidate
 
 import (
 	"context"
-	"memd/internal/engine/recall"
+	"fmt"
+	"memd/internal/domain"
 	"memd/internal/port"
+	"memd/internal/prompts"
+	"strings"
 )
 
-// Deduper merges near-duplicate observations within a scope.
+// Dedup defaults.
+const (
+	// defaultDedupThreshold is dedup_threshold when unset (the spec's 0.97).
+	defaultDedupThreshold = 0.97
+	// dedupTopK is how many nearest observations the probe reads; only the best one is checked.
+	dedupTopK = 5
+)
+
+// Deduper reconciles a new observation with a near-duplicate already in its scope.
 type Deduper interface {
-	// Reconcile finds observations with cosine >= dedup_threshold within scope s of each changed one,
-	// then makes an LLM merge-or-keep check (DEDUP_CHECK). It returns the observations it removed by
-	// merging.
-	Reconcile(ctx context.Context, tx port.Tx, s port.ScopeKey, changed []port.UnitID) ([]port.UnitID, error)
+	// Check finds the observation of scope s nearest to emb with cosine >= cfg's dedup_threshold (>= 1
+	// disables dedup) and asks DEDUP_CHECK whether text repeats it. It runs outside any transaction; the
+	// caller folds a merge into its apply transaction (the twin is updated with the merged text and gains
+	// the new observation's evidence, and the new observation is not created).
+	Check(ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, text string, emb []float32) (DedupVerdict, error)
 }
 
-// Recaller is the part of recall.Recaller consolidation consumes (near-duplicate and related-observation
-// lookups); recall.Recaller satisfies it.
-type Recaller interface {
-	// Recall runs one recall request.
-	Recall(ctx context.Context, req recall.RecallRequest) (recall.RecallResult, error)
+// DedupVerdict is the outcome of one dedup check.
+type DedupVerdict struct {
+	// TwinID is the near-duplicate observation; empty when none is at or above the threshold.
+	TwinID port.UnitID
+	// Merge reports that DEDUP_CHECK judged both to state the same fact.
+	Merge bool
+	// Text is the merged observation text (Merge only).
+	Text string
+	// Usage is the DEDUP_CHECK call's usage; nil when no call was made.
+	Usage *port.Usage
+}
+
+// deduper implements Deduper over the semantic arm of port.Reader.
+type deduper struct {
+	llm    port.LLM
+	router port.ModelRouter
+	read   port.Reader
+}
+
+var _ Deduper = (*deduper)(nil)
+
+// NewDeduper returns the Deduper. It probes with port.Reader.SearchVector (exact cosine over the scope's
+// observations) instead of the Recaller: the threshold is a cosine similarity, which fused recall scores
+// are not (decision 1001).
+func NewDeduper(llm port.LLM, router port.ModelRouter, r port.Reader) Deduper {
+	return &deduper{llm: llm, router: router, read: r}
+}
+
+// dedupResponse is the DEDUP_CHECK response (prompts dedup_system.schema.json).
+type dedupResponse struct {
+	Action string `json:"action"`
+	Text   string `json:"text"`
+	Reason string `json:"reason"`
+}
+
+// Check probes the scope and, when a twin is close enough, asks DEDUP_CHECK merge-or-keep.
+func (d *deduper) Check(
+	ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, text string, emb []float32,
+) (DedupVerdict, error) {
+	threshold := defaultDedupThreshold
+	if cfg.DedupThreshold != nil {
+		threshold = *cfg.DedupThreshold
+	}
+	if threshold >= 1 || len(emb) == 0 {
+		return DedupVerdict{}, nil
+	}
+	twin, ok, err := d.nearest(ctx, s, emb, threshold)
+	if err != nil || !ok {
+		return DedupVerdict{}, err
+	}
+	binding, err := d.router.Resolve(cfg, domain.ModelSlotDedupCheck)
+	if err != nil {
+		return DedupVerdict{}, fmt.Errorf("consolidate: dedup binding: %w", err)
+	}
+	req, err := dedupRequest(binding, text, twin.Text)
+	if err != nil {
+		return DedupVerdict{}, err
+	}
+	var out dedupResponse
+	usage, err := d.llm.Structured(ctx, req, &out)
+	v := DedupVerdict{TwinID: twin.ID, Usage: &usage}
+	if err != nil {
+		return v, fmt.Errorf("consolidate: dedup check: %w", err)
+	}
+	if out.Action == "merge" {
+		v.Merge = true
+		v.Text = strings.TrimSpace(out.Text)
+		if v.Text == "" {
+			v.Text = twin.Text
+		}
+	}
+	return v, nil
+}
+
+// nearest returns the scope's observation most similar to emb at or above threshold.
+func (d *deduper) nearest(
+	ctx context.Context, s port.ScopeKey, emb []float32, threshold float64,
+) (domain.Unit, bool, error) {
+	hits, err := d.read.SearchVector(ctx, port.VectorQuery{
+		Bank:          s.BankRef,
+		Embedding:     emb,
+		Types:         []domain.FactType{domain.FactTypeObservation},
+		Tags:          scopePredicate(s),
+		MinSimilarity: threshold,
+		Limit:         dedupTopK,
+	})
+	if err != nil {
+		return domain.Unit{}, false, fmt.Errorf("consolidate: dedup probe: %w", err)
+	}
+	if len(hits) == 0 || hits[0].Score < threshold {
+		return domain.Unit{}, false, nil
+	}
+	us, err := d.read.GetUnits(ctx, s.BankRef, []port.UnitID{hits[0].ID})
+	if err != nil {
+		return domain.Unit{}, false, fmt.Errorf("consolidate: dedup twin: %w", err)
+	}
+	if len(us) == 0 {
+		return domain.Unit{}, false, nil
+	}
+	return us[0], true, nil
+}
+
+// dedupRequest renders the DEDUP_CHECK call.
+func dedupRequest(binding port.ModelBinding, text, existing string) (port.StructuredRequest, error) {
+	data := prompts.DedupData{New: text, Existing: existing}
+	system, err := prompts.Render(prompts.DedupSystem, data)
+	if err != nil {
+		return port.StructuredRequest{}, fmt.Errorf("consolidate: render dedup system: %w", err)
+	}
+	user, err := prompts.Render(prompts.DedupUser, data)
+	if err != nil {
+		return port.StructuredRequest{}, fmt.Errorf("consolidate: render dedup user: %w", err)
+	}
+	schema, err := prompts.Schema(prompts.DedupSystem)
+	if err != nil {
+		return port.StructuredRequest{}, fmt.Errorf("consolidate: dedup schema: %w", err)
+	}
+	return port.StructuredRequest{
+		Slot: domain.ModelSlotDedupCheck, Binding: binding, Name: prompts.DedupSystem,
+		System: system, User: user, Schema: schema,
+	}, nil
+}
+
+// scopePredicate selects exactly the observations of scope s (its exact tag set; the shared scope is
+// the untagged one).
+func scopePredicate(s port.ScopeKey) *port.SQLPredicate {
+	return &port.SQLPredicate{Op: port.PredicateTags, Tags: s.Tags, Match: domain.TagsMatchExact}
 }
