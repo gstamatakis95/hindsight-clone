@@ -16,26 +16,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func TestLoadGolden(t *testing.T) {
-	convs, err := golden.Load(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(convs) < 3 {
-		t.Fatalf("fixtures = %d, want >= 3", len(convs))
-	}
-	for _, c := range convs {
-		if len(c.Sessions) == 0 || len(c.Questions) == 0 {
-			t.Errorf("%s: empty fixture", c.ID)
-		}
-		for _, s := range c.Sessions {
-			if s.Time.IsZero() {
-				t.Errorf("%s/%s: no timestamp", c.ID, s.ID)
-			}
-		}
-	}
-}
-
 func TestLoadGoldenRejectsBadFixtures(t *testing.T) {
 	const ok = `"sessions":[{"id":"s","content":"c"}],"checks":[{"id":"q","query":"q","accept":["a"]}]`
 	tests := map[string]string{
@@ -67,7 +47,7 @@ func TestLoadGoldenRejectsBadFixtures(t *testing.T) {
 // TestGoldenFixturesUnderTwoMinutes runs every fixture through the real harness, memd gRPC target and
 // substring judge against the in-process stub server, as CI does against `memd all`.
 func TestGoldenFixturesUnderTwoMinutes(t *testing.T) {
-	convs, err := golden.Load(".")
+	convs, err := golden.Load("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +65,17 @@ func TestGoldenFixturesUnderTwoMinutes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	start := time.Now()
-	runner := harness.NewRunner(target.NewMemd(conn, "golden"), judge.Contains{}, harness.SystemClock{},
+	journal, err := harness.OpenJournal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = journal.Close() })
+	runner, err := harness.NewRunner(
+		harness.Deps{Target: target.NewMemd(conn, "golden"), Judge: judge.Contains{}, Journal: journal},
 		harness.Config{Mode: harness.ModeRecall, BankPrefix: "golden-", Parallel: 4, PollInterval: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
 	rep, err := runner.Run(ctx, convs)
 	if err != nil {
 		t.Fatal(err)

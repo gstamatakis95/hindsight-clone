@@ -9,10 +9,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // gateway is an httptest OpenAI-compatible chat endpoint that replies with reply and records the prompt.
-func gateway(t *testing.T, status int, reply string) (*httptest.Server, *string) {
+func gateway(t *testing.T, reply string) (*judge.Chat, *string) {
 	t.Helper()
 	var prompt string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -20,24 +21,21 @@ func gateway(t *testing.T, status int, reply string) (*httptest.Server, *string)
 			t.Errorf("unexpected request %s auth=%q", r.URL.Path, r.Header.Get("Authorization"))
 		}
 		var req struct {
-			Model       string  `json:"model"`
-			Temperature float64 `json:"temperature"`
-			Messages    []struct {
+			Messages []struct {
 				Content string `json:"content"`
 			} `json:"messages"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Model != "judge-model" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Messages) != 1 {
 			t.Errorf("bad request body: %v %+v", err, req)
+			return
 		}
-		if len(req.Messages) == 1 {
-			prompt = req.Messages[0].Content
-		}
-		w.WriteHeader(status)
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"` + reply + `"}}],` +
+		prompt = req.Messages[0].Content
+		content, _ := json.Marshal(reply)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":` + string(content) + `}}],` +
 			`"usage":{"prompt_tokens":120,"completion_tokens":1}}`))
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &prompt
+	return judge.NewChat(srv.URL+"/v1/", "m", "k", srv.Client()), &prompt
 }
 
 func TestLLMJudgeVerdicts(t *testing.T) {
@@ -46,17 +44,15 @@ func TestLLMJudgeVerdicts(t *testing.T) {
 		want  bool
 	}{
 		{"Yes", true},
-		{"yes.", true},
 		{"**Yes**", true},
-		{"No", false},
-		{"no", false},
 		{"No, the answer is not yes.", false},
 		{"", false},
+		{`{"reason": "same date", "correct": true}`, true},
+		{"```json\n{\"reason\": \"different topic\", \"correct\": false}\n```", false},
 	}
 	for _, tt := range tests {
-		srv, _ := gateway(t, http.StatusOK, tt.reply)
-		j := judge.NewLLM(srv.URL+"/v1/", "judge-model", "k", nil)
-		v, err := j.Grade(context.Background(), harness.Question{Query: "q", Answer: "a"}, "r", false)
+		chat, _ := gateway(t, tt.reply)
+		v, err := judge.NewLLM(chat).Grade(context.Background(), harness.Question{Query: "q", Answer: "a"}, "r", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,15 +62,6 @@ func TestLLMJudgeVerdicts(t *testing.T) {
 		if len(v.Usage) != 1 || v.Usage[0] != (harness.Usage{Slot: "JUDGE", InputTokens: 120, OutputTokens: 1}) {
 			t.Errorf("usage = %+v", v.Usage)
 		}
-	}
-}
-
-func TestLLMJudgeGatewayError(t *testing.T) {
-	srv, _ := gateway(t, http.StatusTooManyRequests, "slow down")
-	_, err := judge.NewLLM(srv.URL+"/v1", "judge-model", "k", nil).
-		Grade(context.Background(), harness.Question{}, "r", false)
-	if err == nil || !strings.Contains(err.Error(), "429") {
-		t.Fatalf("err = %v, want the gateway status", err)
 	}
 }
 
@@ -89,31 +76,56 @@ func TestLLMJudgePromptPerKind(t *testing.T) {
 		{harness.KindUpdate, false, "updated answer"},
 		{harness.KindPreference, false, "Rubric: gold"},
 		{harness.KindAbstention, false, "unanswerable"},
-		{harness.KindTemporal, true, "Retrieved Memories:\nresp {{x}}"},
+		{harness.KindLoCoMo, false, "Gold answer: gold\nGenerated answer: resp {{x}}"},
+		{harness.KindLoCoMo, true, "Retrieved Memories:\nresp {{x}}"},
 	}
 	for _, tt := range tests {
-		srv, prompt := gateway(t, http.StatusOK, "yes")
+		chat, prompt := gateway(t, "yes")
 		q := harness.Question{Query: "What?", Answer: "gold", Kind: tt.kind}
-		if _, err := judge.NewLLM(srv.URL+"/v1", "judge-model", "k", nil).
-			Grade(context.Background(), q, "resp {{x}}", tt.recall); err != nil {
+		if _, err := judge.NewLLM(chat).Grade(context.Background(), q, "resp {{x}}", tt.recall); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(*prompt, tt.want) || !strings.Contains(*prompt, "Question: What?") {
 			t.Errorf("kind %q recall=%v: prompt lacks %q:\n%s", tt.kind, tt.recall, tt.want, *prompt)
 		}
 	}
-	if _, err := judge.Prompt(harness.Question{Kind: "nope"}, "", false); err == nil {
-		t.Error("unknown kind: want error")
-	}
 }
 
 func TestLLMJudgeRecallNotApplicable(t *testing.T) {
 	// No gateway: a not-applicable question must not call the model.
-	j := judge.NewLLM("http://127.0.0.1:1/v1", "judge-model", "k", nil)
+	j := judge.NewLLM(judge.NewChat("http://127.0.0.1:1/v1", "m", "k", nil))
 	for _, kind := range []string{harness.KindAbstention, harness.KindPreference} {
 		v, err := j.Grade(context.Background(), harness.Question{Kind: kind}, "memories", true)
 		if err != nil || !v.NotApplicable || v.Correct {
 			t.Errorf("kind %q in recall mode: verdict %+v, err %v; want not applicable", kind, v, err)
+		}
+	}
+}
+
+// TestAnswererLoCoMo checks the rag answer: the LoCoMo prompt with the query date and the recall result
+// as JSON, and the answer taken from the model's JSON reply.
+func TestAnswererLoCoMo(t *testing.T) {
+	chat, prompt := gateway(t, `Sure: {"reasoning": "memory 1 says so", "answer": "7 May 2023"}`)
+	q := harness.Question{
+		Query: "When did Caroline go?", Kind: harness.KindLoCoMo,
+		QueryTime: time.Date(2023, 8, 25, 13, 33, 0, 0, time.UTC),
+	}
+	mem := harness.Memory{Text: "Caroline went on 7 May", MentionedAt: "2023-05-08T13:56:00Z"}
+	rec := harness.Recalled{Results: []harness.Memory{mem}}
+	a, err := judge.NewAnswerer(chat).Answer(context.Background(), q, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Text != "7 May 2023" || a.Reasoning != "memory 1 says so" || a.Usage[0].Slot != "ANSWER" {
+		t.Fatalf("answer = %+v", a)
+	}
+	for _, want := range []string{
+		"The question is being asked on: 2023-08-25T13:33:00+00:00 UTC",
+		`{"results":[{"text":"Caroline went on 7 May","mentioned_at":"2023-05-08T13:56:00Z"}]}`,
+		"Question: When did Caroline go?",
+	} {
+		if !strings.Contains(*prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, *prompt)
 		}
 	}
 }

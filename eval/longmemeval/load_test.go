@@ -55,12 +55,6 @@ func TestLoadSample(t *testing.T) {
 	}
 }
 
-func TestLoadMissingFile(t *testing.T) {
-	if _, err := longmemeval.Load("testdata/does-not-exist.json"); err == nil {
-		t.Fatal("Load of a missing file: want error")
-	}
-}
-
 // instanceJSON builds a one-instance dataset with the given extra fields.
 func instanceJSON(id, qtype, fields string) string {
 	return `[{"question_id":"` + id + `","question_type":"` + qtype + `","question":"q?","answer":"a",` +

@@ -69,15 +69,28 @@ type hsUsageResponse struct {
 
 // hsRecallRequest is Hindsight's RecallRequest.
 type hsRecallRequest struct {
-	Query          string `json:"query"`
-	QueryTimestamp string `json:"query_timestamp,omitempty"`
+	Query          string     `json:"query"`
+	QueryTimestamp string     `json:"query_timestamp,omitempty"`
+	Budget         string     `json:"budget,omitempty"`
+	MaxTokens      int        `json:"max_tokens,omitempty"`
+	Include        *hsInclude `json:"include,omitempty"`
 }
 
-// hsRecallResponse is Hindsight's RecallResponse.
+// hsInclude is Hindsight's IncludeOptions; a nil Entities pointer is sent as null (entities off).
+type hsInclude struct {
+	Entities *struct{}       `json:"entities"`
+	Chunks   *hsChunkInclude `json:"chunks,omitempty"`
+}
+
+// hsChunkInclude is Hindsight's ChunkIncludeOptions.
+type hsChunkInclude struct {
+	MaxTokens int `json:"max_tokens"`
+}
+
+// hsRecallResponse is Hindsight's RecallResponse; its field names match harness.Recalled.
 type hsRecallResponse struct {
-	Results []struct {
-		Text string `json:"text"`
-	} `json:"results"`
+	Results []harness.Memory         `json:"results"`
+	Chunks  map[string]harness.Chunk `json:"chunks"`
 }
 
 // hsReflectRequest is Hindsight's ReflectRequest.
@@ -125,18 +138,23 @@ func (h *Hindsight) PendingOperations(ctx context.Context, bank string) (map[str
 	return pending, nil
 }
 
-// Recall returns the texts of the recalled facts in result order.
-func (h *Hindsight) Recall(ctx context.Context, bank, query string, at time.Time) ([]string, error) {
+// Recall returns the recalled facts in result order, with their chunks when opts asks for them. Entity
+// observations are always off, as in Hindsight's own benchmark runs.
+func (h *Hindsight) Recall(
+	ctx context.Context, bank, query string, at time.Time, opts harness.RecallOptions,
+) (harness.Recalled, error) {
+	req := hsRecallRequest{
+		Query: query, QueryTimestamp: rfc3339(at), Budget: strings.ToLower(opts.Budget), MaxTokens: opts.MaxTokens,
+		Include: &hsInclude{},
+	}
+	if opts.ChunkTokens > 0 {
+		req.Include.Chunks = &hsChunkInclude{MaxTokens: opts.ChunkTokens}
+	}
 	var resp hsRecallResponse
-	req := hsRecallRequest{Query: query, QueryTimestamp: rfc3339(at)}
 	if err := h.do(ctx, http.MethodPost, bank, "/memories/recall", req, &resp); err != nil {
-		return nil, err
+		return harness.Recalled{}, err
 	}
-	texts := make([]string, 0, len(resp.Results))
-	for _, r := range resp.Results {
-		texts = append(texts, r.Text)
-	}
-	return texts, nil
+	return harness.Recalled(resp), nil
 }
 
 // Reflect returns Hindsight's answer and its usage under the REFLECT slot. Hindsight's reflect takes no

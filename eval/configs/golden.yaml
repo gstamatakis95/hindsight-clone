@@ -1,0 +1,11 @@
+# The golden fixtures against a local `memd all` (real or emulated gateway): recall mode, substring judge,
+# no model calls on the eval side. The run exits 1 unless every check passes.
+#
+#   make bench CONFIG=eval/configs/golden.yaml
+#   make bench CONFIG=eval/configs/golden.yaml ARGS=-stub   # no server: the in-process stub
+benchmark: golden
+memd:
+  addr: localhost:50051
+  tenant: eval
+parallel: 4
+out_dir: eval-results

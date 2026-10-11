@@ -10,7 +10,6 @@ import (
 	"memd/eval/target"
 	"memd/test/e2e/gatewayemu"
 	e2eharness "memd/test/e2e/harness"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,11 +18,11 @@ import (
 )
 
 // TestGoldenAgainstMemdAll runs every eval/golden fixture through the eval harness (sync retain, the
-// BankStats barrier, recall mode, substring judge) against `memd all` with the emulated gateway, as the
-// card's golden-fixture item asks. Every check must pass.
+// BankStats barrier, recall mode, substring judge) against `memd all` with the emulated gateway. Every
+// check must pass.
 func TestGoldenAgainstMemdAll(t *testing.T) {
 	bin := e2eharness.BuildMemd(t)
-	convs, err := golden.Load(filepath.Join(e2eharness.RepoRoot(t), "eval", "golden"))
+	convs, err := golden.Load("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +38,20 @@ func TestGoldenAgainstMemdAll(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
-	runner := harness.NewRunner(target.NewMemd(conn, "golden"), judge.Contains{}, harness.SystemClock{},
+	journal, err := harness.OpenJournal(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = journal.Close() })
+	runner, err := harness.NewRunner(
+		harness.Deps{Target: target.NewMemd(conn, "golden"), Judge: judge.Contains{}, Journal: journal},
 		harness.Config{
 			Mode: harness.ModeRecall, BankPrefix: "golden-", Parallel: 4, PollInterval: 200 * time.Millisecond,
 			QuietPolls: 2, SettleTimeout: 90 * time.Second,
 		})
+	if err != nil {
+		t.Fatal(err)
+	}
 	rep, err := runner.Run(ctx, convs)
 	if err != nil {
 		t.Fatal(err)

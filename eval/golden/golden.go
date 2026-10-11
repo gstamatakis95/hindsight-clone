@@ -1,11 +1,12 @@
 package golden
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"memd/eval/harness"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 )
@@ -31,11 +32,20 @@ type check struct {
 	Accept   []string `json:"accept"`
 }
 
-// Load reads every *.yaml fixture in dir, in file-name order, one conversation per fixture. Fixtures are
-// written in YAML's JSON-compatible flow style (decision 700) and decoded strictly: unknown fields are
-// errors.
+// fixtures are the golden fixtures of this directory, built into the binary.
+//
+//go:embed *.yaml
+var fixtures embed.FS
+
+// Load reads every *.yaml fixture in dir, in file-name order, one conversation per fixture; dir "" means
+// the fixtures built into the binary (this directory's). Fixtures are written in YAML's JSON-compatible
+// flow style and decoded strictly: unknown fields are errors.
 func Load(dir string) ([]harness.Conversation, error) {
-	paths, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
+	fsys := fs.FS(fixtures)
+	if dir != "" {
+		fsys = os.DirFS(dir)
+	}
+	paths, err := fs.Glob(fsys, "*.yaml")
 	if err != nil {
 		return nil, fmt.Errorf("golden: list fixtures: %w", err)
 	}
@@ -46,7 +56,7 @@ func Load(dir string) ([]harness.Conversation, error) {
 	names := map[string]string{}
 	convs := make([]harness.Conversation, 0, len(paths))
 	for _, p := range paths {
-		c, err := loadFile(p)
+		c, err := loadFile(fsys, p)
 		if err != nil {
 			return nil, err
 		}
@@ -60,8 +70,8 @@ func Load(dir string) ([]harness.Conversation, error) {
 }
 
 // loadFile decodes and validates one fixture.
-func loadFile(path string) (harness.Conversation, error) {
-	f, err := os.Open(filepath.Clean(path))
+func loadFile(fsys fs.FS, path string) (harness.Conversation, error) {
+	f, err := fsys.Open(path)
 	if err != nil {
 		return harness.Conversation{}, fmt.Errorf("golden: %w", err)
 	}
