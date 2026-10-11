@@ -39,17 +39,17 @@ type deltaPlanner struct{ d ModelDeps }
 // deltaResponse is the MENTAL_MODEL_DELTA response schema's shape.
 type deltaResponse struct {
 	// Operations are the proposed ops.
-	Operations []EditOp `json:"operations"`
+	Operations []domain.DeltaOp `json:"operations"`
 }
 
 // plan asks for ops integrating facts (observations listed first) into m's document and applies them.
 // facts must be non-empty; the caller returns ErrNoNewFacts before calling it otherwise.
 func (p deltaPlanner) plan(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, facts []domain.Unit,
-) (DeltaDraft, error) {
+) (deltaDraft, error) {
 	binding, err := p.d.Router.Resolve(cfg, domain.ModelSlotMentalModelDelta)
 	if err != nil {
-		return DeltaDraft{}, fmt.Errorf("mentalmodel: delta model: %w", err)
+		return deltaDraft{}, fmt.Errorf("mentalmodel: delta model: %w", err)
 	}
 	doc := splitMarkdown(m.ContentMD)
 	obs, raw := promptFacts(facts)
@@ -58,7 +58,7 @@ func (p deltaPlanner) plan(
 		Observations: obs, Facts: raw, DocumentTokens: approxTokens(m.ContentMD),
 		DocumentBudget: maxContentTokens(m, cfg), MaxOutputTokens: derefInt(binding.MaxOutputTokens),
 	}
-	draft := DeltaDraft{ContentMD: m.ContentMD, SourceIDs: unitIDs(facts), FactsRetrieved: len(facts)}
+	draft := deltaDraft{ContentMD: m.ContentMD, SourceIDs: unitIDs(facts), FactsRetrieved: len(facts)}
 	ops, usage, err := p.call(ctx, binding, data)
 	draft.Usage = append(draft.Usage, usage)
 	if err != nil {
@@ -92,9 +92,9 @@ func (p deltaPlanner) plan(
 // retryOps returns the skipped ops that earn the one retry: every op when none applied, else only the ops
 // skipped for an id the document does not have (Hindsight's _is_bad_reference). The retry's reply replaces
 // the first one wholesale.
-func retryOps(ops []EditOp) []EditOp {
+func retryOps(ops []domain.DeltaOp) []domain.DeltaOp {
 	all := appliedCount(ops) == 0
-	var out []EditOp
+	var out []domain.DeltaOp
 	for _, op := range ops {
 		if !op.Applied && (all || isBadReference(op.SkipReason)) {
 			out = append(out, op)
@@ -112,7 +112,7 @@ func isBadReference(reason string) bool {
 // call renders the delta prompts with data and makes one structured MENTAL_MODEL_DELTA call.
 func (p deltaPlanner) call(
 	ctx context.Context, binding domain.ModelBinding, data prompts.DeltaData,
-) ([]EditOp, domain.Usage, error) {
+) ([]domain.DeltaOp, domain.Usage, error) {
 	system, err := prompts.Render(prompts.MentalModelStructuredDeltaSystem, data)
 	if err != nil {
 		return nil, domain.Usage{}, fmt.Errorf("mentalmodel: render delta system: %w", err)
@@ -140,7 +140,7 @@ func (p deltaPlanner) call(
 }
 
 // appliedCount counts the ops that were applied.
-func appliedCount(ops []EditOp) int {
+func appliedCount(ops []domain.DeltaOp) int {
 	n := 0
 	for _, op := range ops {
 		if op.Applied {
@@ -151,7 +151,7 @@ func appliedCount(ops []EditOp) int {
 }
 
 // rejectedOps lists the skipped ops as the retry prompt shows them: the op as sent, and why.
-func rejectedOps(ops []EditOp) []prompts.RejectedOp {
+func rejectedOps(ops []domain.DeltaOp) []prompts.RejectedOp {
 	var out []prompts.RejectedOp
 	for _, op := range ops {
 		if op.Applied {

@@ -8,7 +8,7 @@ import (
 
 // validCitations keeps the cited ids some tool actually retrieved (a unit or a mental model), in citation
 // order without duplicates; anything the agent never saw is dropped.
-func validCitations(st *AgentState, cited []string) []string {
+func validCitations(st *agentState, cited []string) []string {
 	out := make([]string, 0, len(cited))
 	for _, id := range cited {
 		if slices.Contains(out, id) {
@@ -24,7 +24,7 @@ func validCitations(st *AgentState, cited []string) []string {
 }
 
 // citedBasedOn builds BasedOn from the done call's valid citations: units and mental models.
-func citedBasedOn(st *AgentState, cited []string) BasedOn {
+func citedBasedOn(st *agentState, cited []string) BasedOn {
 	var b BasedOn
 	for _, id := range validCitations(st, cited) {
 		if u, ok := st.RetrievedUnits[port.UnitID(id)]; ok {
@@ -38,7 +38,7 @@ func citedBasedOn(st *AgentState, cited []string) BasedOn {
 
 // allBasedOn builds BasedOn from everything retrieved, for answers synthesised without a done call (the
 // answer drew on every tool result; decision 1102). Ids are sorted so the result is deterministic.
-func allBasedOn(st *AgentState) BasedOn {
+func allBasedOn(st *agentState) BasedOn {
 	var b BasedOn
 	ids := make([]port.UnitID, 0, len(st.RetrievedUnits))
 	for id := range st.RetrievedUnits {

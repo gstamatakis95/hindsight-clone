@@ -38,16 +38,16 @@ func NewAgenticSynthesizer(rf Reflector, d ModelDeps) Synthesizer {
 func (*agentic) Strategy() domain.RefreshStrategy { return domain.RefreshStrategyAgentic }
 
 // Full runs the reflect loop over everything in scope with seq <= upTo.
-func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (Draft, error) {
+func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (draft, error) {
 	req, err := a.request(m, cfg, port.SeqUpTo(0, upTo))
 	if err != nil {
-		return Draft{}, err
+		return draft{}, err
 	}
 	res, err := a.rf.Reflect(ctx, req)
 	if err != nil {
-		return Draft{}, fmt.Errorf("mentalmodel: reflect: %w", err)
+		return draft{}, fmt.Errorf("mentalmodel: reflect: %w", err)
 	}
-	d := Draft{
+	d := draft{
 		ContentMD: strings.TrimSpace(res.Text), SourceIDs: unitIDs(res.BasedOn.Memories), Usage: res.Usage,
 		ToolCalls: toolCalls(res), FactsRetrieved: len(res.BasedOn.Memories),
 	}
@@ -66,17 +66,17 @@ func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.Ban
 // Delta runs the reflect loop over (LastSeqSeen, upTo] and integrates the memories it cites.
 func (a *agentic) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
-) (DeltaDraft, error) {
+) (deltaDraft, error) {
 	req, err := a.request(m, cfg, port.SeqUpTo(m.LastSeqSeen, upTo))
 	if err != nil {
-		return DeltaDraft{ContentMD: m.ContentMD}, err
+		return deltaDraft{ContentMD: m.ContentMD}, err
 	}
 	res, err := a.rf.Reflect(ctx, req)
 	if err != nil {
-		return DeltaDraft{ContentMD: m.ContentMD}, fmt.Errorf("mentalmodel: reflect: %w", err)
+		return deltaDraft{ContentMD: m.ContentMD}, fmt.Errorf("mentalmodel: reflect: %w", err)
 	}
 	if len(res.BasedOn.Memories) == 0 {
-		return DeltaDraft{ContentMD: m.ContentMD, Usage: res.Usage, ToolCalls: toolCalls(res)}, ErrNoNewFacts
+		return deltaDraft{ContentMD: m.ContentMD, Usage: res.Usage, ToolCalls: toolCalls(res)}, ErrNoNewFacts
 	}
 	d, err := a.planner.plan(ctx, m, cfg, observationsFirst(res.BasedOn.Memories))
 	d.Usage = append(slices.Clone(res.Usage), d.Usage...)

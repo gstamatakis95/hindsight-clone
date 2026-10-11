@@ -30,7 +30,7 @@ type run struct {
 	llm         port.LLM
 	clock       port.Clock
 	binding     port.ModelBinding
-	st          *AgentState
+	st          *agentState
 	tools       map[string]Tool
 	specs       []port.ToolSpec
 	data        prompts.ReflectData
@@ -223,7 +223,7 @@ func parseDone(raw json.RawMessage, asDocument bool) (text string, cited []strin
 func (r *run) callTool(ctx context.Context, c port.ToolCall) error {
 	start := r.clock.Now()
 	tool, ok := r.tools[c.Name]
-	var res ToolResult
+	var res toolResult
 	if !ok {
 		res = malformed("Tool '%s' is not available. %s", c.Name, r.instructions.unknown)
 	} else {

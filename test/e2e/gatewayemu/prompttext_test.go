@@ -50,11 +50,11 @@ func TestPromptTextRoundTrip(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		prompts.SynthesizeUser, prompts.MentalModelDeltaUser, prompts.MentalModelStructuredDeltaUser,
+		prompts.SynthesizeUser, prompts.MentalModelStructuredDeltaUser,
 	} {
 		var data any = prompts.SynthesizeData{SourceQuery: "Topic?", Facts: facts}
 		if name != prompts.SynthesizeUser {
-			data = prompts.DeltaData{SourceQuery: "Topic?", CurrentMarkdown: "## A\n\nB", Facts: facts}
+			data = prompts.DeltaData{SourceQuery: "Topic?", Facts: facts}
 		}
 		if got := sourceLines(render(name, data)); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: sourceLines = %v, want %v", name, got, want)

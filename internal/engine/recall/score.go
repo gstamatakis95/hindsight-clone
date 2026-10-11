@@ -17,12 +17,12 @@ type Scorer interface {
 	// them with the cross-encoder (RERANK slot) when recall.rerank is on, else seeds the base score from the
 	// unboosted RRF rank (1.0 down to 0.1, as Hindsight does for a passthrough reranker), multiplies in the
 	// boosts, sets Candidate.Final and returns the kept candidates ordered by it, best first.
-	Score(ctx context.Context, q *ParsedQuery, cs []Candidate) ([]Candidate, error)
+	Score(ctx context.Context, q *parsedQuery, cs []Candidate) ([]Candidate, error)
 }
 
-// Boosts are the multipliers the Scorer applied to a candidate's base score; 1 is neutral. Each is
+// boosts are the multipliers the Scorer applied to a candidate's base score; 1 is neutral. Each is
 // 1 + alpha * (signal - 0.5) with the signal in [0, 1], so a boost moves the score by at most alpha / 2.
-type Boosts struct {
+type boosts struct {
 	// Recency favours recent units (recency_alpha, linear decay over recency_horizon_days).
 	Recency float64
 	// Temporal favours units close to the middle of the query's time window (temporal_alpha, Hindsight's
@@ -41,13 +41,13 @@ type scorer struct {
 
 var _ Scorer = (*scorer)(nil)
 
-// NewScorer returns the Scorer. rr may be nil, which behaves as recall.rerank = false.
-func NewScorer(rr port.Reranker, router port.ModelRouter, clock port.Clock) Scorer {
+// newScorer returns the Scorer. rr may be nil, which behaves as recall.rerank = false.
+func newScorer(rr port.Reranker, router port.ModelRouter, clock port.Clock) Scorer {
 	return &scorer{rr: rr, router: router, clock: clock}
 }
 
 // Score implements Scorer.
-func (s *scorer) Score(ctx context.Context, q *ParsedQuery, cs []Candidate) ([]Candidate, error) {
+func (s *scorer) Score(ctx context.Context, q *parsedQuery, cs []Candidate) ([]Candidate, error) {
 	set := settingsOf(q.Config)
 	if set.rerankMax > 0 && len(cs) > set.rerankMax {
 		cs = cs[:set.rerankMax]
@@ -74,7 +74,7 @@ func (s *scorer) Score(ctx context.Context, q *ParsedQuery, cs []Candidate) ([]C
 }
 
 // rerank sets Candidate.Reranker and the base score (Final) of every candidate from the cross-encoder.
-func (s *scorer) rerank(ctx context.Context, q *ParsedQuery, cs []Candidate) error {
+func (s *scorer) rerank(ctx context.Context, q *parsedQuery, cs []Candidate) error {
 	binding, err := s.router.Resolve(q.Config, domain.ModelSlotRerank)
 	if err != nil {
 		return fmt.Errorf("recall: rerank binding: %w", err)
@@ -131,7 +131,7 @@ func passthroughBase(cs []Candidate) {
 }
 
 // boost returns the recency, temporal and proof multipliers of c under the settings s.
-func boost(c Candidate, q *ParsedQuery, s settings) Boosts {
+func boost(c Candidate, q *parsedQuery, s settings) boosts {
 	temporal := 0.5
 	if _, ok := c.Arms[ArmTemporal]; ok && c.Unit != nil && q.Window != nil {
 		temporal = temporalProximity(*c.Unit, *q.Window, s.recencyHorizonDays)
@@ -141,7 +141,7 @@ func boost(c Candidate, q *ParsedQuery, s settings) Boosts {
 		recency = recencySignal(*c.Unit, q.At, s.recencyHorizonDays)
 		proof = proofSignal(*c.Unit)
 	}
-	return Boosts{
+	return boosts{
 		Recency:  1 + s.recencyAlpha*(recency-0.5),
 		Temporal: 1 + s.temporalAlpha*(temporal-0.5),
 		Proof:    1 + s.proofAlpha*(proof-0.5),

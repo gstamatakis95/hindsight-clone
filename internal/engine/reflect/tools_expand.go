@@ -33,7 +33,7 @@ type expandItem struct {
 
 // Call implements Tool. Expand only reads ids; it registers nothing as retrieved (as in Hindsight), so its
 // output can't be cited unless an earlier search returned the unit.
-func (t *expandTool) Call(ctx context.Context, st *AgentState, args json.RawMessage) (ToolResult, error) {
+func (t *expandTool) Call(ctx context.Context, st *agentState, args json.RawMessage) (toolResult, error) {
 	var a struct {
 		IDs json.RawMessage `json:"memory_ids"`
 	}
@@ -81,7 +81,7 @@ func (t *expandTool) Call(ctx context.Context, st *AgentState, args json.RawMess
 
 // visibleUnits reads units and keeps those inside the request's fact types, tag filter and seq range, by id.
 func (t *expandTool) visibleUnits(
-	ctx context.Context, st *AgentState, ids []port.UnitID,
+	ctx context.Context, st *agentState, ids []port.UnitID,
 ) (map[port.UnitID]domain.Unit, error) {
 	us, err := t.r.GetUnits(ctx, st.Request.Bank, ids)
 	if err != nil {
@@ -101,7 +101,7 @@ func (t *expandTool) visibleUnits(
 
 // context reads the observations' source facts and the facts' chunks (Reader.GetChunks).
 func (t *expandTool) context(
-	ctx context.Context, st *AgentState, units map[port.UnitID]domain.Unit,
+	ctx context.Context, st *agentState, units map[port.UnitID]domain.Unit,
 ) (map[port.UnitID]domain.Unit, map[port.ChunkID]domain.Chunk, error) {
 	var sourceIDs []port.UnitID
 	var chunkIDs []port.ChunkID

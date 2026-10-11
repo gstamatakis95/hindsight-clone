@@ -198,9 +198,10 @@ func TestPruneOperations(t *testing.T) {
 		}
 	}
 	ops.exec(`UPDATE operations SET finished_at = now() - interval '48 hours' WHERE id = $1`, string(done))
-	n, err := PruneOperations(context.Background(), ops, clock, 24*time.Hour)
+	d := MaintenanceDeps{Store: ops, Clock: clock, OperationRetention: 24 * time.Hour}
+	n, err := pruneOperations(context.Background(), d)
 	if err != nil || n != 1 {
-		t.Fatalf("PruneOperations = %d, %v; want 1", n, err)
+		t.Fatalf("pruneOperations = %d, %v; want 1", n, err)
 	}
 	if ops.count(`id = ANY($1::uuid[])`, []string{string(pending), string(recent)}) != 2 {
 		t.Error("pruned a pending or recent operation")

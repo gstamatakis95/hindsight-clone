@@ -32,19 +32,6 @@ func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, reader: &reader{conn: pool, pool: pool}}
 }
 
-// Open connects a new pool to dsn and returns a Store over it with the pool's Close.
-func Open(ctx context.Context, dsn string) (*Store, func(), error) {
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, nil, mapErr("connect", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, nil, mapErr("ping", err)
-	}
-	return New(pool), pool.Close, nil
-}
-
 // Read returns the long-lived read-only view over the pool; each call is its own statement.
 func (s *Store) Read() port.Reader { return s.reader }
 

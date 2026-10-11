@@ -56,7 +56,7 @@ func (r *retainer) prepare(
 	for _, c := range pending {
 		c.ID = port.ChunkID(r.d.NewID())
 		pb.chunks = append(pb.chunks, c)
-		facts, u, err := r.d.Extractor.Extract(ctx, ExtractInput{
+		facts, u, err := r.d.Extractor.Extract(ctx, extractInput{
 			Bank: rn.j.Bank, DocumentID: rn.p.DocumentID, ChunkIndex: c.Index, Text: c.Text, Context: rn.p.Context,
 			MentionedAt: rn.mentioned, Metadata: rn.p.Metadata, Hints: rn.p.hints(), Config: rn.cfg,
 		})

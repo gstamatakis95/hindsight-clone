@@ -7,7 +7,6 @@ import (
 	"memd/internal/engine/reflect"
 	"memd/internal/port"
 	"testing"
-	"time"
 )
 
 // stubProjector returns a fixed projection and records the document it saw.
@@ -67,33 +66,5 @@ func TestMaxDeltaRatioFallsBackToFull(t *testing.T) {
 	if out.Trace.ModeFallbackReason != FallbackMaxDeltaRatio || out.Trace.EffectiveMode != domain.RefreshModeFull ||
 		e.model("status").ContentMD != "## Status\n\nAlice leads; Bob joined." {
 		t.Fatalf("trace %+v content %q", out.Trace, e.model("status").ContentMD)
-	}
-}
-
-// TestRetractedSourceTriggersRefresh checks that invalidating a cited unit queues a refresh of the citing
-// model only: "other" is stale (an in-scope write since it was built) but cites nothing, so it is not queued.
-func TestRetractedSourceTriggersRefresh(t *testing.T) {
-	e := newEnv(t)
-	tr, _ := newTriggers(e)
-	_, u := builtModel(e, domain.RefreshStrategySingleShot)
-	e.addModel(domain.MentalModelSpec{ID: "other", Tags: []string{"proj"}})
-	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	e.archive(u.ID)
-	if stale, _, _ := NewChangeDetector(e.store.Read(), e.reads).NeedsRefresh(e.ctx, e.model("other")); !stale {
-		t.Fatal("other must be stale for this test to mean anything")
-	}
-	n, err := tr.Retracted(e.ctx, e.bank, []port.UnitID{u.ID})
-	if err != nil || n != 1 {
-		t.Fatalf("queued %d: %v", n, err)
-	}
-	e.clock.Advance(time.Minute) // past the debounce
-	jobs := e.claimDue(domain.OperationKindRefreshMentalModel)
-	if len(jobs) != 1 {
-		t.Fatalf("claimed %d refreshes", len(jobs))
-	}
-	var p RefreshPayload
-	if err := json.Unmarshal(jobs[0].Payload, &p); err != nil || p.MentalModelID != "status" ||
-		jobs[0].SerialKey != SerialKey("status") {
-		t.Fatalf("queued the wrong model: %+v serial %q (%v)", p, jobs[0].SerialKey, err)
 	}
 }

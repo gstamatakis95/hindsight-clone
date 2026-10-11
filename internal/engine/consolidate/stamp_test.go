@@ -137,7 +137,10 @@ func TestRunCoSourceInvalidatedIsNotStamped(t *testing.T) {
 	e.script(e.cite("Alice and Dan like tea", "f1", "f3"), e.cite("Alice likes tea", "f1"))
 	e.beforeScope(func() {
 		e.tx(func(tx port.Tx) error {
-			if _, err := NewInvalidator().ClearForMemory(t.Context(), tx, bank, uid("f3")); err != nil {
+			if _, err := tx.Seq(t.Context(), bank); err != nil {
+				return err
+			}
+			if _, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, []port.UnitID{uid("f3")}); err != nil {
 				return fmt.Errorf("clear for f3: %w", err)
 			}
 			return tx.Units().Archive(t.Context(), bank, uid("f3"), "wrong")
@@ -173,7 +176,11 @@ func TestRunCoSourceRetaggedIsNotStamped(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if _, err := NewInvalidator().ClearDocumentUnits(t.Context(), tx, bank, "d2"); err != nil {
+			ids, err := tx.Units().IDsByDocument(t.Context(), bank, "d2")
+			if err != nil {
+				return err
+			}
+			if _, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, ids); err != nil {
 				return fmt.Errorf("clear d2: %w", err)
 			}
 			_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d2", []string{"a"}, []string{"c"}, seq)

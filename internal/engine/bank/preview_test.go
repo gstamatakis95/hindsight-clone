@@ -99,6 +99,31 @@ func TestPreview(t *testing.T) {
 	}
 }
 
+// TestPreviewRetainCausalLinksDefault checks that the retain preview treats an unset
+// retain.extract_causal_links as retain does (on) and omits the causal section only when it is false.
+func TestPreviewRetainCausalLinksDefault(t *testing.T) {
+	p := NewPromptPreviewer(cfgStub{}, dirStub{})
+	b := port.BankRef{Tenant: "t", Bank: "b"}
+	off := false
+	for _, tc := range []struct {
+		name string
+		cfg  domain.BankConfig
+		want bool
+	}{
+		{"no retain tuning", domain.BankConfig{}, true},
+		{"retain tuning without the flag", domain.BankConfig{Retain: &domain.RetainTuning{}}, true},
+		{"explicitly off", domain.BankConfig{Retain: &domain.RetainTuning{ExtractCausalLinks: &off}}, false},
+	} {
+		got, err := p.Preview(t.Context(), b, domain.PromptOperationRetain, tc.cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if has := strings.Contains(previewText(got), "CAUSAL RELATIONSHIPS"); has != tc.want {
+			t.Errorf("%s: causal section shown = %v, want %v", tc.name, has, tc.want)
+		}
+	}
+}
+
 func TestPreviewChunksSkipsAndUnknownOp(t *testing.T) {
 	p := NewPromptPreviewer(cfgStub{}, dirStub{})
 	b := port.BankRef{Tenant: "t", Bank: "b"}

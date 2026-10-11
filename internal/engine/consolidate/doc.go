@@ -87,9 +87,8 @@
 //     pattern with no tags matches only under exact. [StrategyMatcher.Preview] evaluates draft strategies
 //     against the bank's existing scopes (the first 1000) without saving.
 //   - [Invalidator] clears derived observations in the caller's transaction, taking tx.Seq first.
-//     ClearScopes (every scope when the list is empty) is what ObservationService.ClearObservations uses;
-//     ClearForMemory and ClearDocumentUnits are implemented and tested but not wired: curation and docs
-//     clear citing observations with EvidenceRepo.DeleteCiting themselves.
+//     ClearScopes (every scope when the list is empty) is what ObservationService.ClearObservations uses.
+//     Curation and docs clear citing observations with EvidenceRepo.DeleteCiting themselves.
 //   - [NewJob] builds a consolidate job: the automatic one ({}, no overrides) uses DedupePending and joins a
 //     pending consolidate of the bank; one with scopes or overrides is never deduplicated. The serial key is
 //     [SerialKey] ("consolidate"): one consolidation at a time per bank.

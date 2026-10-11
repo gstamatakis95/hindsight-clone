@@ -97,8 +97,6 @@ func (r *chatRequest) op() string {
 		return OpReflectFinal
 	case "synthesize":
 		return OpSynthesize
-	case "mental_model_delta":
-		return OpMarkdownDelta
 	default:
 		return OpChat
 	}
@@ -201,8 +199,6 @@ func answer(req *chatRequest, op string) (reply, error) {
 		return reply{content: quoteAnswer(fencedOrLines(req.lastUser()))}, nil
 	case OpSynthesize:
 		return reply{content: synthesizePage(req.lastUser())}, nil
-	case OpMarkdownDelta:
-		return reply{content: markdownDelta(req.lastUser())}, nil
 	default:
 		content, err := structured(req)
 		return reply{content: content}, err
@@ -258,17 +254,4 @@ func synthesizePage(user string) string {
 		topic = "Summary"
 	}
 	return "## " + topic + "\n\n" + quoteAnswer(sourceLines(user))
-}
-
-// markdownDelta is a markdown MENTAL_MODEL_DELTA answer: the current document with the new facts appended.
-func markdownDelta(user string) string {
-	current := between(user, "----- BEGIN CURRENT DOCUMENT -----", "----- END CURRENT DOCUMENT -----")
-	items := sourceLines(user)
-	if len(items) == 0 {
-		return current
-	}
-	if current == "" {
-		return quoteAnswer(items)
-	}
-	return current + "\n\n" + quoteAnswer(items)
 }

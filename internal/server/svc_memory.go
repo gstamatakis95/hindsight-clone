@@ -2,10 +2,6 @@ package server
 
 import (
 	"context"
-	"memd/internal/engine/recall"
-	"memd/internal/engine/retain"
-
-	reflecteng "memd/internal/engine/reflect"
 
 	pb "memd/gen/memory/v1"
 )
@@ -21,13 +17,6 @@ var _ pb.MemoryServiceServer = (*memoryServer)(nil)
 
 // newMemoryServer returns the MemoryService server over d.
 func newMemoryServer(d Deps) *memoryServer { return &memoryServer{d: d} }
-
-// NewMemoryServer returns the MemoryService server over the retain, recall and reflect engines.
-//
-//nolint:ireturn // signature fixed by docs/SPEC.md (internal/server).
-func NewMemoryServer(in retain.Ingestor, rc recall.Recaller, rf reflecteng.Reflector) pb.MemoryServiceServer {
-	return newMemoryServer(Deps{Ingestor: in, Recaller: rc, Reflector: rf})
-}
 
 // Retain stores content and extracts memory units from it.
 func (s *memoryServer) Retain(ctx context.Context, req *pb.RetainRequest) (*pb.RetainResponse, error) {

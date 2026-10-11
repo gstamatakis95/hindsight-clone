@@ -12,43 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const banksToConsolidate = `-- name: BanksToConsolidate :many
-SELECT b.tenant_id, b.id FROM banks b
-WHERE b.deleting_at IS NULL AND EXISTS (
-    SELECT 1 FROM memory_units u
-    WHERE u.tenant_id = b.tenant_id AND u.bank_id = b.id
-      AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
-      AND u.embedding IS NOT NULL
-)
-ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C"
-`
-
-type BanksToConsolidateRow struct {
-	TenantID string
-	ID       string
-}
-
-// BanksToConsolidate returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact with an embedding (the §0 predicate as in ScopeUnconsolidated, over the same partial index, plus embedding IS NOT NULL per decision 1500).
-func (q *Queries) BanksToConsolidate(ctx context.Context) ([]BanksToConsolidateRow, error) {
-	rows, err := q.db.Query(ctx, banksToConsolidate)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []BanksToConsolidateRow{}
-	for rows.Next() {
-		var i BanksToConsolidateRow
-		if err := rows.Scan(&i.TenantID, &i.ID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const chunkGetMany = `-- name: ChunkGetMany :many
 SELECT id, tenant_id, bank_id, document_id, chunk_index, text, content_hash, token_count, truncated, created_at FROM chunks
 WHERE tenant_id = $1 AND bank_id = $2 AND id = ANY($3::uuid[])

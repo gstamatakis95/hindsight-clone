@@ -59,8 +59,6 @@ type Querier interface {
 	BankDeleteUnitEntities(ctx context.Context, arg BankDeleteUnitEntitiesParams) (int64, error)
 	// BankDeleteUnits deletes up to lim memory_units rows of the bank.
 	BankDeleteUnits(ctx context.Context, arg BankDeleteUnitsParams) (int64, error)
-	// BanksToConsolidate returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact with an embedding (the §0 predicate as in ScopeUnconsolidated, over the same partial index, plus embedding IS NOT NULL per decision 1500).
-	BanksToConsolidate(ctx context.Context) ([]BanksToConsolidateRow, error)
 	// BanksWithGraphWork returns, in byte order, the banks that are not tombstoned and have graph_dirty or
 	// entity_maintenance rows queued (WP-20, decision 2002).
 	BanksWithGraphWork(ctx context.Context) ([]BanksWithGraphWorkRow, error)
@@ -313,8 +311,8 @@ type Querier interface {
 	// tenants row, so a first-ever write is covered too.
 	TenantConfigLock(ctx context.Context, tenantID string) error
 	// UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
-	// with an embedding created before @before (WP-20, decision 2000). It is BanksToConsolidate plus the grace
-	// cut-off, over the same partial index (tenant_id, bank_id, created_at).
+	// with an embedding created before @before (decision 2000): the §0 predicate as in ScopeUnconsolidated plus the
+	// grace cut-off, over the partial index (tenant_id, bank_id, created_at).
 	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBanksRow, error)
 	// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
 	UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error

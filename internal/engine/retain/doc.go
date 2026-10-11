@@ -81,9 +81,9 @@
 // # Extraction, entities and links
 //
 // [Extractor] makes one EXTRACT call per chunk through port.ModelRouter and port.LLM.Structured, with the
-// prompt of the mode's [ExtractionStrategy]: [Concise] (default), [Verbose], [Verbatim] (the chunk text is
-// the fact; the call adds dates, entities and labels), [Custom] (custom_extraction_prompt as guidelines;
-// a blank prompt falls back to concise) and [Chunks] (each chunk is one fact, no call). A fact's text is
+// prompt of the mode's [ExtractionStrategy]: concise (default), verbose, verbatim (the chunk text is
+// the fact; the call adds dates, entities and labels), custom (custom_extraction_prompt as guidelines;
+// a blank prompt falls back to concise) and chunks (each chunk is one fact, no call). A fact's text is
 // Hindsight's "what | When: ... | Involving: ... | why"; a fact without "what" is dropped; fact_type
 // "assistant" becomes experience, "world" world, and anything else falls back to fact_kind, then world.
 // Causal parents (at most 2, only earlier facts of the same chunk) are kept when extract_causal_links is on
@@ -106,11 +106,11 @@
 // semantic links are symmetric and written both ways; only the linked unit's side is capped.
 // [Linker.LinkWith] takes the caller's effective config; [Linker.Link] reads the stored tenant < bank tuning.
 //
-// [ChunkWith] splits text into indexed chunks with their SHA-256 and token count: a JSON array of objects is
+// chunkWith splits text into indexed chunks with their SHA-256 and token count: a JSON array of objects is
 // cut between turns and JSONL between lines (a turn or line stays whole up to structured_chunk_max_tokens),
 // anything else at the most preferred separator present (paragraph, line, sentence, clause, word, character)
 // and packed greedily, with chunk_overlap_tokens of overlap. Tokens are counted with the injected
-// [TokenCounter] (cmd/memd wires tiktoken cl100k_base); [ApproxTokens], ceil(runes / 4), is the default.
+// [TokenCounter] (cmd/memd wires tiktoken cl100k_base); approxTokens, ceil(runes / 4), is the default.
 //
 // # Reprocess
 //

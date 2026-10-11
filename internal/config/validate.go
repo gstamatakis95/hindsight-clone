@@ -114,7 +114,7 @@ func ValidateOverrides(rpc string, o domain.BankConfig) error {
 	if al.all {
 		return nil
 	}
-	for _, p := range SetPaths(o) {
+	for _, p := range setPaths(o) {
 		if p != "models" && !al.allowsPath(p) {
 			return fmt.Errorf("%w: %s can't use override %q", domain.ErrInvalidArgument, rpc, p)
 		}

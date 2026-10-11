@@ -7,31 +7,31 @@ import (
 )
 
 // approx is the default token counter.
-var approx ApproxTokens
+var approx approxTokens
 
-// chunkStrings returns the texts of ChunkWith's chunks.
-func chunkStrings(text string, o ChunkOptions) []string {
+// chunkStrings returns the texts of chunkWith's chunks.
+func chunkStrings(text string, o chunkOptions) []string {
 	var out []string
-	for _, c := range ChunkWith(text, o, ApproxTokens{}) {
+	for _, c := range chunkWith(text, o, approxTokens{}) {
 		out = append(out, c.Text)
 	}
 	return out
 }
 
 func TestChunkSmallTextIsOneChunk(t *testing.T) {
-	got := ChunkWith("Alice likes tea.", ChunkOptions{MaxTokens: 100}, nil)
+	got := chunkWith("Alice likes tea.", chunkOptions{MaxTokens: 100}, nil)
 	if len(got) != 1 || got[0].Text != "Alice likes tea." || got[0].Index != 0 ||
 		got[0].ContentHash != hashText("Alice likes tea.") ||
 		got[0].TokenCount != 4 {
 		t.Fatalf("chunks = %+v", got)
 	}
-	if got := ChunkWith("  \n ", ChunkOptions{}, nil); len(got) != 0 {
+	if got := chunkWith("  \n ", chunkOptions{}, nil); len(got) != 0 {
 		t.Fatalf("blank text gave %d chunks", len(got))
 	}
 }
 
 func TestChunkPlainTextSplitsAtParagraphsWithinBudget(t *testing.T) {
-	got := chunkStrings(paragraphs(6, "one"), ChunkOptions{MaxTokens: 12})
+	got := chunkStrings(paragraphs(6, "one"), chunkOptions{MaxTokens: 12})
 	if len(got) != 6 {
 		t.Fatalf("%d chunks, want 6: %q", len(got), got)
 	}
@@ -42,7 +42,7 @@ func TestChunkPlainTextSplitsAtParagraphsWithinBudget(t *testing.T) {
 	}
 	// A long sentence with no paragraph breaks falls back to word boundaries, every chunk within budget.
 	long := strings.Repeat("word ", 200)
-	for _, c := range chunkStrings(long, ChunkOptions{MaxTokens: 10}) {
+	for _, c := range chunkStrings(long, chunkOptions{MaxTokens: 10}) {
 		if approx.Count(c) > 10 || strings.HasPrefix(c, " ") {
 			t.Fatalf("chunk %q over budget or untrimmed", c)
 		}
@@ -55,7 +55,7 @@ func TestChunkKeepsChatTurnsWhole(t *testing.T) {
 		turns = append(turns, map[string]string{"role": "user", "content": strings.Repeat("hello there. ", 4)})
 	}
 	raw, _ := json.Marshal(turns)
-	got := chunkStrings(string(raw), ChunkOptions{MaxTokens: 40})
+	got := chunkStrings(string(raw), chunkOptions{MaxTokens: 40})
 	if len(got) < 2 {
 		t.Fatalf("%d chunks, want several", len(got))
 	}
@@ -77,7 +77,7 @@ func TestChunkKeepsJSONLLinesWhole(t *testing.T) {
 	for i := 0; i < 8; i++ {
 		lines = append(lines, `{"event":"login","user":"alice","note":"a fairly long note"}`)
 	}
-	got := chunkStrings(strings.Join(lines, "\n"), ChunkOptions{MaxTokens: 40})
+	got := chunkStrings(strings.Join(lines, "\n"), chunkOptions{MaxTokens: 40})
 	if len(got) < 2 {
 		t.Fatalf("%d chunks, want several", len(got))
 	}
@@ -100,7 +100,7 @@ func TestChunkStructuredLimit(t *testing.T) {
 	small := `{"role":"user","content":"hi"}`
 	text := "[" + small + "," + big + "," + small + "]"
 	// Up to the structured limit an oversized turn stays whole as its own chunk.
-	got := chunkStrings(text, ChunkOptions{MaxTokens: 20, StructuredMaxTokens: 100})
+	got := chunkStrings(text, chunkOptions{MaxTokens: 20, StructuredMaxTokens: 100})
 	found := false
 	for _, c := range got {
 		if strings.Contains(c, big) {
@@ -111,7 +111,7 @@ func TestChunkStructuredLimit(t *testing.T) {
 		t.Errorf("turn within the structured limit was split: %q", got)
 	}
 	// Past it, the turn is split as text within the budget.
-	for _, c := range chunkStrings(text, ChunkOptions{MaxTokens: 20, StructuredMaxTokens: 20}) {
+	for _, c := range chunkStrings(text, chunkOptions{MaxTokens: 20, StructuredMaxTokens: 20}) {
 		if approx.Count(c) > 20 {
 			t.Errorf("chunk over budget: %q", c)
 		}
@@ -119,12 +119,12 @@ func TestChunkStructuredLimit(t *testing.T) {
 }
 
 func TestChunkOverlap(t *testing.T) {
-	got := chunkStrings(paragraphs(3, "one"), ChunkOptions{MaxTokens: 16, OverlapTokens: 3})
+	got := chunkStrings(paragraphs(3, "one"), chunkOptions{MaxTokens: 16, OverlapTokens: 3})
 	if len(got) != 3 || !strings.HasPrefix(got[1], "in depth. Paragraph B") {
 		t.Fatalf("chunks = %q", got)
 	}
 	// With overlap every chunk, prefixed tail included, stays within MaxTokens.
-	for _, o := range []ChunkOptions{{MaxTokens: 12, OverlapTokens: 3}, {MaxTokens: 10, OverlapTokens: 4}} {
+	for _, o := range []chunkOptions{{MaxTokens: 12, OverlapTokens: 3}, {MaxTokens: 10, OverlapTokens: 4}} {
 		for _, text := range []string{paragraphs(8, "overlap"), strings.Repeat("alpha beta gamma. ", 80)} {
 			for _, c := range chunkStrings(text, o) {
 				if approx.Count(c) > o.MaxTokens {
@@ -156,7 +156,7 @@ func chatText(t *testing.T, n int) string {
 
 func TestChunkDeterministicCompleteAndWithinBudget(t *testing.T) {
 	const max = 24
-	o := ChunkOptions{MaxTokens: max}
+	o := chunkOptions{MaxTokens: max}
 	plain := paragraphs(10, "determinism") + "\n\n" + strings.Repeat("lorem ipsum dolor sit amet, ", 40) +
 		strings.Repeat("x", 300)
 	var lines []string
@@ -166,7 +166,7 @@ func TestChunkDeterministicCompleteAndWithinBudget(t *testing.T) {
 	jsonl := strings.Join(lines, "\n")
 	chat := chatText(t, 20)
 	for name, text := range map[string]string{"plain": plain, "jsonl": jsonl, "chat": chat} {
-		first, second := ChunkWith(text, o, nil), ChunkWith(text, o, nil)
+		first, second := chunkWith(text, o, nil), chunkWith(text, o, nil)
 		if len(first) != len(second) {
 			t.Fatalf("%s: %d then %d chunks", name, len(first), len(second))
 		}

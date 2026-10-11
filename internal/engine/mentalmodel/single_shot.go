@@ -38,21 +38,21 @@ func (*singleShot) Strategy() domain.RefreshStrategy { return domain.RefreshStra
 // Full recalls everything in scope with seq <= upTo and writes the page in one SYNTHESIZE call.
 func (s *singleShot) Full(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
-) (Draft, error) {
+) (draft, error) {
 	units, err := s.recall(ctx, m, cfg, port.SeqUpTo(0, upTo))
 	if err != nil {
-		return Draft{}, err
+		return draft{}, err
 	}
 	if len(units) == 0 {
-		return Draft{}, ErrNoNewFacts
+		return draft{}, ErrNoNewFacts
 	}
 	binding, err := s.d.Router.Resolve(cfg, domain.ModelSlotSynthesize)
 	if err != nil {
-		return Draft{}, fmt.Errorf("mentalmodel: synthesize model: %w", err)
+		return draft{}, fmt.Errorf("mentalmodel: synthesize model: %w", err)
 	}
 	system, user, err := s.render(ctx, m, cfg, units)
 	if err != nil {
-		return Draft{}, err
+		return draft{}, err
 	}
 	resp, err := s.d.LLM.Chat(ctx, port.ChatRequest{
 		Slot: domain.ModelSlotSynthesize, Binding: binding, Name: prompts.SynthesizeSystem,
@@ -61,9 +61,9 @@ func (s *singleShot) Full(
 		},
 	})
 	if err != nil {
-		return Draft{}, fmt.Errorf("mentalmodel: synthesize call: %w", err)
+		return draft{}, fmt.Errorf("mentalmodel: synthesize call: %w", err)
 	}
-	return Draft{
+	return draft{
 		ContentMD: strings.TrimSpace(resp.Message.Content), SourceIDs: unitIDs(units),
 		Usage: []domain.Usage{resp.Usage}, FactsRetrieved: len(units),
 	}, nil
@@ -72,13 +72,13 @@ func (s *singleShot) Full(
 // Delta recalls what changed in scope since LastSeqSeen and integrates it with MENTAL_MODEL_DELTA.
 func (s *singleShot) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
-) (DeltaDraft, error) {
+) (deltaDraft, error) {
 	units, err := s.recall(ctx, m, cfg, port.SeqUpTo(m.LastSeqSeen, upTo))
 	if err != nil {
-		return DeltaDraft{}, err
+		return deltaDraft{}, err
 	}
 	if len(units) == 0 {
-		return DeltaDraft{ContentMD: m.ContentMD}, ErrNoNewFacts
+		return deltaDraft{ContentMD: m.ContentMD}, ErrNoNewFacts
 	}
 	return s.planner.plan(ctx, m, cfg, units)
 }

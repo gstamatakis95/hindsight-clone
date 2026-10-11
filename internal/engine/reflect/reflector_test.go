@@ -491,7 +491,7 @@ func TestReflectStructuredOutputError(t *testing.T) {
 	}
 }
 
-func TestPromptBuilderUsesEffectiveConfig(t *testing.T) {
+func TestReflectPromptUsesEffectiveConfig(t *testing.T) {
 	bankCfg := domain.BankConfig{ReflectMission: "Bank mission.", Disposition: &domain.Disposition{Skepticism: 1}}
 	h := newHarness(t, bankCfg, unit("u1", "Alice likes tea"))
 	h.turns(recallCall(), doneCall("tea", "u1"))
@@ -508,17 +508,6 @@ func TestPromptBuilderUsesEffectiveConfig(t *testing.T) {
 	if !containsAll(sys, "Request mission.", "highly skeptical", "Memory Bank: Bank One", "2020-05-01 12:30 UTC") ||
 		strings.Contains(sys, "Bank mission.") {
 		t.Errorf("system prompt does not reflect the effective config:\n%s", sys)
-	}
-
-	pb := rf.NewPromptBuilder(h.clock)
-	out := pb.System(domain.BankConfig{ReflectMission: "Be brief.", Disposition: &domain.Disposition{Empathy: 5}},
-		[]domain.Directive{{Name: "D", Rules: []string{"Cite dates."}}})
-	if !containsAll(out, "Be brief.", "strongly consider the emotional state", "Cite dates.") {
-		t.Errorf("PromptBuilder.System:\n%s", out)
-	}
-	off := pb.System(domain.BankConfig{Reflect: &domain.ReflectConfig{EnabledTools: []string{rf.ToolRecall}}}, nil)
-	if strings.Contains(off, "search_mental_models") || !strings.Contains(off, "recall()") {
-		t.Errorf("disabled tools must not be described:\n%s", off)
 	}
 }
 

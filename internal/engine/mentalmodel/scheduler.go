@@ -18,22 +18,20 @@ import (
 // mental-model tables.
 type RefreshScheduler interface {
 	// Decide applies auto_refresh_paused, staleness, debounce and the interval floor to m at now.
-	Decide(ctx context.Context, m domain.MentalModel, now time.Time) (RefreshDecision, error)
+	Decide(ctx context.Context, m domain.MentalModel, now time.Time) (refreshDecision, error)
 }
 
-// DecisionKind is what a RefreshScheduler decided.
-type DecisionKind string
+// decisionKind is what a RefreshScheduler decided.
+type decisionKind string
 
 // Decision kinds.
 const (
-	// DecisionUnspecified is the zero value.
-	DecisionUnspecified DecisionKind = ""
-	// DecisionRunNow enqueues the refresh due now.
-	DecisionRunNow DecisionKind = "run_now"
-	// DecisionPark enqueues the refresh with run_at = RefreshDecision.Until (debounce or interval floor).
-	DecisionPark DecisionKind = "park"
-	// DecisionSkip enqueues nothing (paused, not stale, or the trigger doesn't apply).
-	DecisionSkip DecisionKind = "skip"
+	// decisionRunNow enqueues the refresh due now.
+	decisionRunNow decisionKind = "run_now"
+	// decisionPark enqueues the refresh with run_at = refreshDecision.Until (debounce or interval floor).
+	decisionPark decisionKind = "park"
+	// decisionSkip enqueues nothing (paused, not stale, or the trigger doesn't apply).
+	decisionSkip decisionKind = "skip"
 )
 
 // Skip and park reasons.
@@ -48,11 +46,11 @@ const (
 	ReasonIntervalFloor = "min_refresh_interval"
 )
 
-// RefreshDecision is a RefreshScheduler's verdict for one model.
-type RefreshDecision struct {
+// refreshDecision is a RefreshScheduler's verdict for one model.
+type refreshDecision struct {
 	// Kind is run now, park or skip.
-	Kind DecisionKind
-	// Until is when a parked refresh becomes due (DecisionPark only).
+	Kind decisionKind
+	// Until is when a parked refresh becomes due (decisionPark only).
 	Until time.Time
 	// Reason explains a park or skip, for logs and traces.
 	Reason string
@@ -74,26 +72,26 @@ func NewRefreshScheduler(d ChangeDetector, c port.ConfigResolver) RefreshSchedul
 
 // Decide skips a paused or fresh model; otherwise the refresh is due at the later of now + debounce and
 // last_refreshed_at + the interval floor.
-func (s *scheduler) Decide(ctx context.Context, m domain.MentalModel, now time.Time) (RefreshDecision, error) {
+func (s *scheduler) Decide(ctx context.Context, m domain.MentalModel, now time.Time) (refreshDecision, error) {
 	if m.AutoRefreshPaused {
-		return RefreshDecision{Kind: DecisionSkip, Reason: ReasonPaused}, nil
+		return refreshDecision{Kind: decisionSkip, Reason: ReasonPaused}, nil
 	}
 	stale, _, err := s.detect.NeedsRefresh(ctx, m)
 	if err != nil {
-		return RefreshDecision{}, fmt.Errorf("mentalmodel: staleness of %s: %w", m.Spec.ID, err)
+		return refreshDecision{}, fmt.Errorf("mentalmodel: staleness of %s: %w", m.Spec.ID, err)
 	}
 	if !stale {
-		return RefreshDecision{Kind: DecisionSkip, Reason: ReasonNotStale}, nil
+		return refreshDecision{Kind: decisionSkip, Reason: ReasonNotStale}, nil
 	}
 	cfg, err := s.config.Effective(ctx, m.Bank, configLevels(m, nil)...)
 	if err != nil {
-		return RefreshDecision{}, fmt.Errorf("mentalmodel: config: %w", err)
+		return refreshDecision{}, fmt.Errorf("mentalmodel: config: %w", err)
 	}
 	until, reason := dueAt(m, cfg, now)
 	if !until.After(now) {
-		return RefreshDecision{Kind: DecisionRunNow}, nil
+		return refreshDecision{Kind: decisionRunNow}, nil
 	}
-	return RefreshDecision{Kind: DecisionPark, Until: until, Reason: reason}, nil
+	return refreshDecision{Kind: decisionPark, Until: until, Reason: reason}, nil
 }
 
 // dueAt is when an automatic refresh of m may run: now + refresh_debounce_seconds, or the end of the

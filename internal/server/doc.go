@@ -19,8 +19,7 @@
 //
 // [New] registers MemoryService, MemoryUnitService, TenantService, BankService, DocumentService,
 // ObservationService, MentalModelService and OperationService, plus grpc.health.v1. A nil dependency in
-// [Deps] makes its RPCs return UNIMPLEMENTED ("not wired") instead of panicking. [NewMemoryServer] and
-// [NewMemoryUnitServer] build single services for tests and embedding.
+// [Deps] makes its RPCs return UNIMPLEMENTED ("not wired") instead of panicking.
 //
 // # Interceptors
 //

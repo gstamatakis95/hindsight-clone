@@ -40,8 +40,8 @@ type RecallerDeps struct {
 	Clock port.Clock
 	// Count counts tokens for packing, include budgets and the query limit.
 	Count TokenCounter
-	// Retrievers replaces the four standard arms over Reader; nil = NewSemantic, NewKeyword, NewGraph and
-	// NewTemporal.
+	// Retrievers replaces the four standard arms over Reader; nil = newSemantic, newKeyword, newGraph and
+	// newTemporal.
 	Retrievers []Retriever
 }
 
@@ -64,12 +64,12 @@ var _ Recaller = (*recaller)(nil)
 func NewRecaller(d RecallerDeps) Recaller {
 	arms := d.Retrievers
 	if arms == nil {
-		arms = []Retriever{NewSemantic(d.Reader), NewKeyword(d.Reader), NewGraph(d.Reader), NewTemporal(d.Reader)}
+		arms = []Retriever{newSemantic(d.Reader), newKeyword(d.Reader), newGraph(d.Reader), newTemporal(d.Reader)}
 	}
 	return &recaller{
-		d: d, arms: arms, tags: NewTagFilterCompiler(d.Reader), fuser: NewRRF(),
-		scorer: NewScorer(d.Reranker, d.Router, d.Clock), gate: NewScoreGate(), packer: NewPacker(d.Count),
-		prefer: NewObservationPreference(), includer: NewIncluder(d.Reader, d.Count),
+		d: d, arms: arms, tags: NewTagFilterCompiler(d.Reader), fuser: newRRF(),
+		scorer: newScorer(d.Reranker, d.Router, d.Clock), gate: newScoreGate(), packer: newPacker(d.Count),
+		prefer: newObservationPreference(), includer: newIncluder(d.Reader, d.Count),
 	}
 }
 
@@ -134,7 +134,7 @@ func (r *recaller) Recall(ctx context.Context, req RecallRequest) (RecallResult,
 
 // retrieve runs the enabled arms concurrently. The temporal arm runs only when the query has a window. It
 // returns each arm's list by name and one trace entry per arm that ran, in arm order.
-func (r *recaller) retrieve(ctx context.Context, q *ParsedQuery, set settings) (
+func (r *recaller) retrieve(ctx context.Context, q *parsedQuery, set settings) (
 	map[string][]Candidate, []ArmTrace, error,
 ) {
 	var run []Retriever
@@ -174,7 +174,7 @@ func (r *recaller) retrieve(ctx context.Context, q *ParsedQuery, set settings) (
 // rank keeps the top reranker_max_candidates of fused (strategy boosts decide that cut), hydrates them
 // (units archived since retrieval are dropped), scores them and applies the result floors. It also returns
 // how many the cross-encoder scored.
-func (r *recaller) rank(ctx context.Context, q *ParsedQuery, fused []Candidate, set settings) (
+func (r *recaller) rank(ctx context.Context, q *parsedQuery, fused []Candidate, set settings) (
 	[]Candidate, int, error,
 ) {
 	top := trimBoosted(fused, set.rerankMax, set.rrfK, set.boosts)
@@ -260,7 +260,7 @@ func (r *recaller) staleScopes(ctx context.Context, b port.BankRef, packed []Can
 }
 
 // result builds the RecallResult from the packed candidates, the enrichment and the stale scope keys.
-func result(packed []Candidate, e Enrichment, stale map[string]bool) RecallResult {
+func result(packed []Candidate, e enrichment, stale map[string]bool) RecallResult {
 	out := RecallResult{
 		Results: make([]Memory, 0, len(packed)), SourceFacts: e.SourceFacts,
 		SourceFactsTruncated: e.SourceFactsTruncated, Chunks: e.Chunks, Entities: e.Entities,

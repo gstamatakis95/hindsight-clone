@@ -25,7 +25,7 @@ type pageOut struct {
 
 // visiblePages reads pages by id and keeps those the request may see: not excluded and inside its tag filter.
 func visiblePages(
-	ctx context.Context, pages PageReader, st *AgentState, ids []port.MentalModelID,
+	ctx context.Context, pages PageReader, st *agentState, ids []port.MentalModelID,
 ) ([]domain.MentalModel, error) {
 	req := st.Request
 	if req.ExcludeMentalModels {
@@ -47,7 +47,7 @@ func visiblePages(
 }
 
 // rememberPages records retrieved pages in the agent state.
-func rememberPages(st *AgentState, ms []domain.MentalModel) {
+func rememberPages(st *agentState, ms []domain.MentalModel) {
 	if st.RetrievedModels == nil {
 		st.RetrievedModels = map[port.MentalModelID]struct{}{}
 	}
@@ -78,7 +78,7 @@ func (*searchPagesTool) Name() string { return ToolSearchMentalModels }
 func (*searchPagesTool) Schema() json.RawMessage { return schemaOf(ToolSearchMentalModels) }
 
 // Call implements Tool.
-func (t *searchPagesTool) Call(ctx context.Context, st *AgentState, args json.RawMessage) (ToolResult, error) {
+func (t *searchPagesTool) Call(ctx context.Context, st *agentState, args json.RawMessage) (toolResult, error) {
 	var a queryArgs
 	if res, ok := decodeArgs(ToolSearchMentalModels, args, &a); !ok {
 		return res, nil
@@ -169,7 +169,7 @@ func (*readPagesTool) Name() string { return ToolReadMentalModels }
 func (*readPagesTool) Schema() json.RawMessage { return schemaOf(ToolReadMentalModels) }
 
 // Call implements Tool.
-func (t *readPagesTool) Call(ctx context.Context, st *AgentState, args json.RawMessage) (ToolResult, error) {
+func (t *readPagesTool) Call(ctx context.Context, st *agentState, args json.RawMessage) (toolResult, error) {
 	var a struct {
 		IDs       json.RawMessage `json:"mental_model_ids"`
 		MaxTokens *float64        `json:"max_tokens"`

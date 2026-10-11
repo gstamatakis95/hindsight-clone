@@ -28,8 +28,8 @@
 //  1. Validate (an empty query is domain.ErrInvalidArgument) and resolve the effective config with the
 //     request overrides. The resolver reads config in its own short transaction; an unknown or tombstoned
 //     bank is domain.ErrNotFound.
-//  2. Parse into a [ParsedQuery]: the query cut to [MaxQueryTokens] (500) tokens; the reference time
-//     (query_time, else port.Clock); the per-arm limit from [BudgetLimit]; the tag filter compiled once into
+//  2. Parse into a parsedQuery: the query cut to [MaxQueryTokens] (500) tokens; the reference time
+//     (query_time, else port.Clock); the per-arm limit from budgetLimit; the tag filter compiled once into
 //     a port.SQLPredicate shared by every arm (fuzzy leaves are expanded against the bank's tags, read with
 //     Reader.TagCounts, by trigram similarity >= recall.fuzzy_tag_min_similarity); the time window (an
 //     explicit window is used as given with no time analysis, else timex derives one, calling TIME_PARSE

@@ -165,7 +165,7 @@ func TestRecallMinScoresResult(t *testing.T) {
 }
 
 func TestScoreGate(t *testing.T) {
-	g := NewScoreGate()
+	g := newScoreGate()
 	m := domain.MinScores{Semantic: ptr(0.4), Reranker: ptr(0.5), Final: ptr(0.2)}
 	if f, ok := g.ArmFloor(ArmSemantic, m); !ok || f != 0.4 {
 		t.Fatalf("semantic floor = %v %v", f, ok)
@@ -432,7 +432,7 @@ func TestRecallSemanticDefaultFloor(t *testing.T) {
 	spy := &spyReader{Reader: e.store.Read()}
 	e.rc = NewRecaller(RecallerDeps{
 		Reader: spy, Config: e.rc.(*recaller).d.Config, Embedder: e.emb, Router: e.rc.(*recaller).d.Router,
-		Clock: e.clock, Count: wordCounter{}, Retrievers: []Retriever{NewSemantic(spy)},
+		Clock: e.clock, Count: wordCounter{}, Retrievers: []Retriever{newSemantic(spy)},
 	})
 	for _, tt := range []struct {
 		name string
@@ -456,7 +456,7 @@ type failingArm struct{}
 
 func (failingArm) Name() string { return ArmKeyword }
 
-func (failingArm) Retrieve(context.Context, *ParsedQuery) ([]Candidate, error) {
+func (failingArm) Retrieve(context.Context, *parsedQuery) ([]Candidate, error) {
 	return nil, domain.ErrUnavailable
 }
 

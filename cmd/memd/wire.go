@@ -287,8 +287,8 @@ func wireMentalModels(c core, gw modelGateway) mentalModels {
 		}),
 		pages: mentalmodel.NewPageSearcher(c.read, gw),
 		triggers: mentalmodel.NewTriggers(mentalmodel.TriggerDeps{
-			Store: c.store, Scheduler: mentalmodel.NewRefreshScheduler(detector, c.resolver), Models: c.read,
-			Cron: c.read, Clock: c.clock,
+			Store: c.store, Scheduler: mentalmodel.NewRefreshScheduler(detector, c.resolver), Cron: c.read,
+			Clock: c.clock,
 		}),
 	}
 }

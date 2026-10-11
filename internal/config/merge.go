@@ -5,7 +5,7 @@ import (
 	"reflect"
 )
 
-// One reflection walker serves Merge, ApplyMask, ResetPaths and SetPaths, so "is set" means the same
+// One reflection walker serves Merge and the override path checks, so "is set" means the same
 // thing everywhere (decision 010): a pointer, slice or map is set when non-nil (a non-nil empty list is
 // an explicit clear), a plain string or number when non-zero. A pointer to a struct is a nested message
 // that merges field by field; BankConfig.Models merges per slot; every other field is a leaf.

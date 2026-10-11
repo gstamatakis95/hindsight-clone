@@ -108,14 +108,10 @@
 // # FieldMask helpers
 //
 // Paths are proto field names, which are also the json tags of domain.BankConfig, dotted into nested
-// messages ("recall.rrf_k"); lists and maps are leaves and "models" is one path. [SetPaths] lists the leaf
-// paths a config sets (ValidateOverrides uses it), [LeafPaths] every leaf path. [ApplyMask] patches a level
-// (a masked unset scalar or message becomes unset, a masked empty list or map becomes an explicit clear, an
-// empty mask merges the patch over the base, nested messages left empty are pruned) and [ResetPaths] unsets
-// paths (no paths = the zero config); unknown paths are domain.ErrInvalidArgument. The Update*Config and
-// ResetBankConfig RPCs do not call these two: the server applies FieldMasks with its own patch builders
-// (internal/server), which treat an absent mask as the request's populated leaves and merge models per slot
-// under it.
+// messages ("recall.rrf_k"); lists and maps are leaves and "models" is one path. ValidateOverrides checks
+// the leaf paths a config sets against the RPC's allowlist. The Update*Config and ResetBankConfig RPCs apply
+// FieldMasks with the server's patch builders (internal/server), which treat an absent mask as the request's
+// populated leaves and merge models per slot under it.
 //
 // # Tests
 //

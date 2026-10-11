@@ -321,9 +321,6 @@ func TestSmokePlainChat(t *testing.T) {
 		{domain.ModelSlotSynthesize, render(t, prompts.SynthesizeUser, prompts.SynthesizeData{
 			Name: "People", SourceQuery: "Who lives where?", Facts: facts,
 		}), []string{"## Who lives where?", facts[0].Text, facts[1].Text, facts[2].Text}},
-		{domain.ModelSlotMentalModelDelta, render(t, prompts.MentalModelDeltaUser, prompts.DeltaData{
-			SourceQuery: "Who lives where?", CurrentMarkdown: "## People\n\nCarol lives in Rome.", Facts: facts[:1],
-		}), []string{"## People\n\nCarol lives in Rome.", facts[0].Text}},
 		{domain.ModelSlotReflect, render(t, prompts.ReflectFinalUser, prompts.ReflectData{
 			Query: "Where does Alice live?",
 			Retrieved: []prompts.ToolOutput{{

@@ -77,43 +77,43 @@ func schemaOf(name string) json.RawMessage {
 }
 
 // malformed returns the tool result that sends a malformed-call error back to the model.
-func malformed(format string, args ...any) ToolResult {
+func malformed(format string, args ...any) toolResult {
 	msg := fmt.Sprintf(format, args...)
 	out, _ := json.Marshal(map[string]string{"error": msg})
-	return ToolResult{Output: out, Error: msg}
+	return toolResult{Output: out, Error: msg}
 }
 
 // output marshals a tool's JSON output.
-func output(v any) (ToolResult, error) {
+func output(v any) (toolResult, error) {
 	out, err := json.Marshal(v)
 	if err != nil {
-		return ToolResult{}, fmt.Errorf("reflect: tool output: %w", err)
+		return toolResult{}, fmt.Errorf("reflect: tool output: %w", err)
 	}
-	return ToolResult{Output: out}, nil
+	return toolResult{Output: out}, nil
 }
 
 // decodeArgs decodes a tool call's raw arguments; a failure is reported to the model.
-func decodeArgs(name string, raw json.RawMessage, v any) (ToolResult, bool) {
+func decodeArgs(name string, raw json.RawMessage, v any) (toolResult, bool) {
 	if len(raw) == 0 {
 		raw = json.RawMessage(`{}`)
 	}
 	if err := json.Unmarshal(raw, v); err != nil {
 		return malformed("%s: arguments are not valid JSON for this tool: %v", name, err), false
 	}
-	return ToolResult{}, true
+	return toolResult{}, true
 }
 
 // retrievalError classifies a dependency error; it always fails reflect (strict: it never answers from
 // evidence it could not gather). A caller's ctx error and an already classified error (invalid argument,
 // failed precondition, not found, unavailable) keep their class; anything else is UNAVAILABLE. The one
 // argument error the model controls, an over-long query, is caught before the call (checkQuery).
-func retrievalError(ctx context.Context, name string, err error) (ToolResult, error) {
+func retrievalError(ctx context.Context, name string, err error) (toolResult, error) {
 	switch {
 	case ctx.Err() != nil, errors.Is(err, domain.ErrInvalidArgument), errors.Is(err, domain.ErrFailedPrecondition),
 		errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrUnavailable):
-		return ToolResult{}, fmt.Errorf("reflect: %s: %w", name, err)
+		return toolResult{}, fmt.Errorf("reflect: %s: %w", name, err)
 	default:
-		return ToolResult{}, fmt.Errorf("%w: reflect: %s: %w", domain.ErrUnavailable, name, err)
+		return toolResult{}, fmt.Errorf("%w: reflect: %s: %w", domain.ErrUnavailable, name, err)
 	}
 }
 
@@ -129,7 +129,7 @@ func tokenArg(v *float64, def int) int {
 const maxQueryTokens = 500
 
 // checkQuery returns the malformed-call result for a missing or over-long query; ok when the query is usable.
-func checkQuery(tool, query string) (ToolResult, bool) {
+func checkQuery(tool, query string) (toolResult, bool) {
 	switch {
 	case strings.TrimSpace(query) == "":
 		return malformed("%s requires a query parameter", tool), false
@@ -137,7 +137,7 @@ func checkQuery(tool, query string) (ToolResult, bool) {
 		return malformed("%s: the query is too long (max %d tokens); search with a shorter query", tool,
 			maxQueryTokens), false
 	}
-	return ToolResult{}, true
+	return toolResult{}, true
 }
 
 // estimateTokens approximates a text's token count as one token per four bytes (decision 1104).
@@ -169,7 +169,7 @@ func toMemoryOut(u domain.Unit) memoryOut {
 }
 
 // remember records retrieved units in the agent state.
-func remember(st *AgentState, units ...domain.Unit) {
+func remember(st *agentState, units ...domain.Unit) {
 	if st.RetrievedUnits == nil {
 		st.RetrievedUnits = map[port.UnitID]domain.Unit{}
 	}
@@ -179,7 +179,7 @@ func remember(st *AgentState, units ...domain.Unit) {
 }
 
 // recallRequest builds the recall request a recall-backed tool sends.
-func recallRequest(st *AgentState, query string, types []domain.FactType, maxTokens int) recall.RecallRequest {
+func recallRequest(st *agentState, query string, types []domain.FactType, maxTokens int) recall.RecallRequest {
 	budget := domain.BudgetMid
 	if st.Config.Reflect != nil && st.Config.Reflect.RecallBudget != domain.BudgetUnspecified {
 		budget = st.Config.Reflect.RecallBudget
@@ -211,7 +211,7 @@ func (*recallTool) Name() string { return ToolRecall }
 func (*recallTool) Schema() json.RawMessage { return schemaOf(ToolRecall) }
 
 // Call implements Tool.
-func (t *recallTool) Call(ctx context.Context, st *AgentState, args json.RawMessage) (ToolResult, error) {
+func (t *recallTool) Call(ctx context.Context, st *agentState, args json.RawMessage) (toolResult, error) {
 	var a queryArgs
 	if res, ok := decodeArgs(ToolRecall, args, &a); !ok {
 		return res, nil
@@ -272,7 +272,7 @@ func (*observationsTool) Name() string { return ToolSearchObservations }
 func (*observationsTool) Schema() json.RawMessage { return schemaOf(ToolSearchObservations) }
 
 // Call implements Tool.
-func (t *observationsTool) Call(ctx context.Context, st *AgentState, args json.RawMessage) (ToolResult, error) {
+func (t *observationsTool) Call(ctx context.Context, st *agentState, args json.RawMessage) (toolResult, error) {
 	var a queryArgs
 	if res, ok := decodeArgs(ToolSearchObservations, args, &a); !ok {
 		return res, nil
@@ -300,7 +300,7 @@ func (t *observationsTool) Call(ctx context.Context, st *AgentState, args json.R
 }
 
 // observationsOutput renders search_observations' result and records the observations.
-func observationsOutput(st *AgentState, query string, res recall.RecallResult) (ToolResult, error) {
+func observationsOutput(st *agentState, query string, res recall.RecallResult) (toolResult, error) {
 	obs := make([]memoryOut, 0, len(res.Results))
 	anyStale := false
 	for _, m := range res.Results {

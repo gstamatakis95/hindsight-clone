@@ -25,7 +25,7 @@ func TestIncludeChunksTruncated(t *testing.T) {
 	}
 	results := []Candidate{unit("u1", "c1"), unit("u2", "c2"), unit("u3", "c1"), unit("u4", "c3"), unit("u5", "")}
 	inc := domain.RecallInclude{Chunks: ptr(true), ChunksMaxTokens: ptr(5)}
-	in := NewIncluder(env.store.Read(), wordCounter{})
+	in := newIncluder(env.store.Read(), wordCounter{})
 	e, err := in.Enrich(context.Background(), testBank, port.SeqRange{}, results, inc)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestIncludeSourceFactsTruncated(t *testing.T) {
 	}
 	results := []Candidate{{ID: "o1", Unit: &units[0]}, {ID: "o2", Unit: &units[1]}}
 	inc := domain.RecallInclude{SourceFacts: ptr(true), SourceFactsMaxTokens: ptr(4)}
-	enr, err := NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
+	enr, err := newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqRange{}, results, inc)
 	if err != nil {
 		t.Fatal(err)
@@ -73,13 +73,13 @@ func TestIncludeSourceFactsTruncated(t *testing.T) {
 	// Citation order: f1 (o1's first source) is first in line, so with room for exactly 6 words it is kept
 	// and the later f2 and f3 skipped.
 	inc.SourceFactsMaxTokens = ptr(6)
-	enr, _ = NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
+	enr, _ = newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqRange{}, results, inc)
 	if _, ok := enr.SourceFacts[uid("f1")]; !ok || len(enr.SourceFacts) != 1 || !enr.SourceFactsTruncated {
 		t.Fatalf("citation order: %v", enr.SourceFacts)
 	}
 	inc.SourceFactsMaxTokens = nil // default 4096
-	enr, _ = NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
+	enr, _ = newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqRange{}, results, inc)
 	if enr.SourceFactsTruncated || len(enr.SourceFacts) != 3 {
 		t.Fatalf("default budget: %v truncated=%v", enr.SourceFacts, enr.SourceFactsTruncated)
@@ -99,7 +99,7 @@ func TestIncludeSourceFactsBoundedBySeq(t *testing.T) {
 	units, _ := e.store.Read().GetUnits(context.Background(), testBank, uids("o1"))
 	results := []Candidate{{ID: "o1", Unit: &units[0]}}
 	inc := domain.RecallInclude{SourceFacts: ptr(true)}
-	enr, err := NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
+	enr, err := newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqUpTo(0, snapshot), results, inc)
 	if err != nil {
 		t.Fatal(err)

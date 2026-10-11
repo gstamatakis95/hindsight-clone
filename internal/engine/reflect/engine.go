@@ -188,7 +188,7 @@ func (r *reflector) newRun(
 	rn := &run{
 		llm: r.d.LLM, clock: r.d.Clock, binding: binding, tools: tools, specs: specs, data: data,
 		maxIter: maxIterations(cfg, req.Budget), callIDs: map[string]bool{}, requireEv: true, instructions: instructions,
-		st: &AgentState{Request: req, Config: cfg, QueryTime: queryTime},
+		st: &agentState{Request: req, Config: cfg, QueryTime: queryTime},
 		messages: []port.ChatMessage{
 			{Role: port.ChatRoleSystem, Content: system}, {Role: port.ChatRoleUser, Content: req.Query},
 		},

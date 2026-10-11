@@ -159,20 +159,6 @@ func (e *env) tx(fn func(tx port.Tx) error) {
 	}
 }
 
-// scopesTx runs fn in a write transaction and returns its scopes, failing the test on error.
-func (e *env) scopesTx(fn func(tx port.Tx) ([]port.ScopeKey, error)) []port.ScopeKey {
-	e.t.Helper()
-	var out []port.ScopeKey
-	e.tx(func(tx port.Tx) error {
-		var err error
-		if out, err = fn(tx); err != nil {
-			return fmt.Errorf("in tx: %w", err)
-		}
-		return nil
-	})
-	return out
-}
-
 // script queues CONSOLIDATE replies, one per call in order (the last one repeats).
 func (e *env) script(replies ...fake.Reply) {
 	e.llm.Script(domain.ModelSlotConsolidate, prompts.ConsolidateSystem, replies...)

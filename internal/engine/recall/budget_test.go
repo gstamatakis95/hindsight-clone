@@ -38,8 +38,8 @@ func TestBudgetLimit(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := BudgetLimit(tt.cfg, tt.budget, tt.maxTokens); got != tt.want {
-				t.Fatalf("BudgetLimit = %d, want %d", got, tt.want)
+			if got := budgetLimit(tt.cfg, tt.budget, tt.maxTokens); got != tt.want {
+				t.Fatalf("budgetLimit = %d, want %d", got, tt.want)
 			}
 		})
 	}

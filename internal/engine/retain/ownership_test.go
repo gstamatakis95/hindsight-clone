@@ -86,7 +86,7 @@ type hookExtractor struct {
 }
 
 // Extract implements Extractor.
-func (h *hookExtractor) Extract(ctx context.Context, in ExtractInput) ([]ExtractedFact, []domain.Usage, error) {
+func (h *hookExtractor) Extract(ctx context.Context, in extractInput) ([]ExtractedFact, []domain.Usage, error) {
 	h.calls++
 	if h.calls == h.at {
 		h.hook()
@@ -132,7 +132,7 @@ func TestRetainOverlappingRetainsOfOneDocument(t *testing.T) {
 			if err != nil || !res.Superseded {
 				t.Fatalf("overtaken run = %+v, %v; want superseded", res, err)
 			}
-			want := len(ChunkWith(other, ChunkOptions{MaxTokens: 12}, nil))
+			want := len(chunkWith(other, chunkOptions{MaxTokens: 12}, nil))
 			d := e.document("d1")
 			if d.UnitCount != int64(want) || d.ContentHash != ContentHash(other) || d.ExtractedAt == nil {
 				t.Errorf("document %+v, want the newer retain's %d units", d, want)

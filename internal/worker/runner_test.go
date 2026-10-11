@@ -146,9 +146,6 @@ func TestRunnerRetrySchedule(t *testing.T) {
 		{"permanent fails at once", retainJob("x"), func(int, time.Time) error {
 			return fmt.Errorf("%w: schema violation", ErrPermanent)
 		}, []retryStep{{terminal: true}}, domain.OperationStatusFailed},
-		{"ErrRetryAt sets the time, the cap still applies", retainJob("x"), func(_ int, now time.Time) error {
-			return RetryAt(now.Add(5*m), boom)
-		}, []retryStep{{after: 5 * m}, {after: 5 * m}, {terminal: true}}, domain.OperationStatusFailed},
 		{"consolidate: capped exponential, unbounded", consolidateJob(bankA), func(run int, _ time.Time) error {
 			if run <= 7 {
 				return boom
@@ -236,8 +233,6 @@ func TestRetryPolicy(t *testing.T) {
 		{"consolidate attempt 0", domain.OperationKindConsolidate, 0, boom, time.Minute, true},
 		{"consolidate attempt 3", domain.OperationKindConsolidate, 3, boom, 8 * time.Minute, true},
 		{"consolidate capped", domain.OperationKindConsolidate, 50, boom, ConsolidateBackoffCap, true},
-		{"retry-at wins", domain.OperationKindRetainDocument, 0, RetryAt(now.Add(time.Hour), boom), time.Hour, true},
-		{"zero retry-at uses backoff", domain.OperationKindRetainDocument, 1, &ErrRetryAt{}, 2 * time.Minute, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

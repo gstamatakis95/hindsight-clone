@@ -53,7 +53,7 @@ type drafted struct {
 	structured json.RawMessage
 	usage      []domain.Usage
 	toolCalls  []domain.ToolCallTrace
-	ops        []EditOp
+	ops        []domain.DeltaOp
 	retrieved  int
 	used       int
 	noNewFacts bool

@@ -25,7 +25,7 @@ type Retriever interface {
 	// Name is the arm name: semantic | keyword | graph | temporal.
 	Name() string
 	// Retrieve returns the arm's candidates for q, best first, at most q.Limit.
-	Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, error)
+	Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, error)
 }
 
 // Candidate is one unit moving through the recall pipeline with every score it has collected.
@@ -35,21 +35,21 @@ type Candidate struct {
 	// Unit is the hydrated unit; nil until hydrated (port.Reader.GetUnits).
 	Unit *domain.Unit
 	// Arms holds the candidate's rank and raw score per arm name; an absent arm did not return it.
-	Arms map[string]ArmScore
+	Arms map[string]armScore
 	// RRF is the reciprocal-rank-fusion score.
 	RRF float64
 	// Reranker is the cross-encoder score in [0,1]; nil = not reranked.
 	Reranker *float64
 	// Boosts are the recency, temporal and proof boosts the Scorer applied.
-	Boosts Boosts
+	Boosts boosts
 	// Final is the final score after reranking and boosts.
 	Final float64
 	// Tokens is the unit text's token count, set when packing.
 	Tokens int
 }
 
-// ArmScore is a candidate's position and raw score in one arm's list.
-type ArmScore struct {
+// armScore is a candidate's position and raw score in one arm's list.
+type armScore struct {
 	// Rank is the 1-based rank in the arm's list.
 	Rank int
 	// Score is the arm's raw score (cosine similarity, BM25, proximity or path weight).
