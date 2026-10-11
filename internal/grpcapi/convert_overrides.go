@@ -1,11 +1,12 @@
 package grpcapi
 
 import (
-	pb "memd/gen/memory/v1"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/mentalmodel"
 	"strings"
+
+	pb "memd/gen/memory/v1"
 )
 
 // The per-RPC override messages. Each holds only what its RPC can change and converts to the BankConfig level

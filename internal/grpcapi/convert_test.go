@@ -1,19 +1,21 @@
 package grpcapi
 
 import (
+	"encoding/json"
 	"errors"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/memory"
 	"memd/internal/recall"
+	reflecteng "memd/internal/reflect"
 	"reflect"
 	"slices"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
-
-	reflecteng "memd/internal/reflect"
 
 	pb "memd/gen/memory/v1"
 )
@@ -261,5 +263,116 @@ func TestUpdateMemoryMask(t *testing.T) {
 	})
 	if v := domain.FieldViolations(err); len(v) != 1 || v[0].Field != "update_mask" {
 		t.Errorf("nested path: err = %v, want a violation on update_mask", err)
+	}
+}
+
+// TestUnknownEnumRejected checks an undefined enum number is INVALID_ARGUMENT.
+func TestUnknownEnumRejected(t *testing.T) {
+	var d decoder
+	d.config(&pb.BankConfig{Retain: &pb.RetainConfig{ExtractionMode: pb.RetainConfig_ExtractionMode(99)}})
+	if err := d.err; err == nil || !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+	if got := toEnum[pb.FactType](domain.FactType("bogus")); got != pb.FactType_FACT_TYPE_UNSPECIFIED {
+		t.Fatalf("unknown domain value = %v, want UNSPECIFIED", got)
+	}
+}
+
+// anyListSet reports whether any of o's clearable lists or maps is non-nil (an explicit value or clear).
+func anyListSet(o domain.BankConfig) bool {
+	return o.Recall.Arms != nil || o.Recall.ArmBoosts != nil || o.Retain != nil ||
+		o.Observations != nil || o.Models != nil
+}
+
+// TestEmptyRepeatedOverrideIsNotAClear sends a Recall override that sets only recall.rrf_k over the wire
+// and merges it over a tenant level with list and map fields: proto3 can't tell an absent repeated field from
+// an empty one, so the converter must leave them nil and the tenant's lists must survive the merge.
+func TestEmptyRepeatedOverrideIsNotAClear(t *testing.T) {
+	rrf := int32(7)
+	wire, err := proto.Marshal(&pb.RecallRequest{
+		BankId: "b", Query: "q", Overrides: &pb.RecallOverrides{Recall: &pb.RecallConfig{RrfK: &rrf}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req pb.RecallRequest
+	if err := proto.Unmarshal(wire, &req); err != nil {
+		t.Fatal(err)
+	}
+	in, err := recallRequestFromProto(&req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := in.Overrides
+	if o == nil || o.Recall == nil {
+		t.Fatalf("overrides lost: %+v", o)
+	}
+	if anyListSet(*o) {
+		t.Fatalf("absent lists decoded as explicit clears: %+v", o)
+	}
+	tenant := domain.BankConfig{
+		Recall: &domain.RecallConfig{
+			Arms: []string{"vector"}, ArmBoosts: map[string]float64{"vector": 2},
+		},
+		Retain: &domain.RetainConfig{EntityLabels: []domain.EntityLabel{{Key: "k"}}},
+	}
+	got := config.Merge(tenant, *o)
+	if len(got.Recall.Arms) != 1 || len(got.Recall.ArmBoosts) != 1 || len(got.Retain.EntityLabels) != 1 {
+		t.Fatalf("tenant lists cleared by the override: %+v", got)
+	}
+	if got.Recall.RRFK == nil || *got.Recall.RRFK != 7 {
+		t.Fatalf("rrf_k not applied: %+v", got.Recall)
+	}
+}
+
+// viewModel is a model with every view-dependent field set.
+func viewModel() domain.MentalModel {
+	return domain.MentalModel{
+		Spec:                 domain.MentalModelSpec{ID: "m1", Name: "page"},
+		Bank:                 domain.BankRef{Tenant: "t", Bank: "b"},
+		ContentMD:            "# page",
+		StructuredOutputJSON: json.RawMessage(`{"a":1}`),
+		Version:              3,
+		SourceIDs:            []domain.UnitID{"u1"},
+		LastTrace:            &domain.RefreshTrace{Outcome: domain.RefreshOutcomeContentWritten, DurationMS: 5},
+		CreatedAt:            time.Unix(100, 0),
+	}
+}
+
+// presence reports which view-dependent fields of m are set.
+type presence struct {
+	// content is content_md, structured is structured_output_json, sources is source_memory_ids, trace is
+	// last_trace.
+	content, structured, sources, trace bool
+}
+
+// presenceOf reads the view-dependent fields of m; it also checks the always-present ones.
+func presenceOf(t *testing.T, m *pb.MentalModel) presence {
+	t.Helper()
+	if m.GetSpec().GetId() != "m1" || m.GetVersion() != 3 {
+		t.Fatalf("basic fields missing: %v", m)
+	}
+	return presence{
+		content: m.GetContentMd() != "", structured: m.GetStructuredOutputJson() != "",
+		sources: len(m.GetSourceMemoryIds()) > 0, trace: m.GetLastTrace() != nil,
+	}
+}
+
+// TestMentalModelView checks the view trimming of mentalModelToProto: BASIC is the spec plus status, CONTENT
+// adds content and structured output, FULL adds source ids and the last trace.
+func TestMentalModelView(t *testing.T) {
+	m := viewModel()
+	trims := []struct {
+		view domain.MentalModelView
+		want presence
+	}{
+		{domain.MentalModelViewBasic, presence{}},
+		{domain.MentalModelViewContent, presence{content: true, structured: true}},
+		{domain.MentalModelViewFull, presence{content: true, structured: true, sources: true, trace: true}},
+	}
+	for _, tc := range trims {
+		if got := presenceOf(t, mentalModelToProto(m, tc.view)); got != tc.want {
+			t.Errorf("view %q: got %+v, want %+v", tc.view, got, tc.want)
+		}
 	}
 }
