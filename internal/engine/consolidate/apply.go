@@ -26,6 +26,7 @@ type applyInput struct {
 // applyOutput is what one apply transaction committed.
 type applyOutput struct {
 	wrote     bool          // an observation was written
+	cited     []port.UnitID // facts the written observations cite in this scope
 	stamped   []port.UnitID // facts stamped consolidated
 	unsettled []port.UnitID // facts whose decision did not fully land: not stamped this run
 }
@@ -54,9 +55,10 @@ func (c *consolidator) apply(ctx context.Context, in applyInput) (applyOutput, e
 			return err
 		}
 		var complete bool
-		if out.wrote, complete, err = c.writeActions(ctx, tx, in, live, seq, now); err != nil {
+		if out.cited, complete, err = c.writeActions(ctx, tx, in, live, seq, now); err != nil {
 			return err
 		}
+		out.wrote = len(out.cited) > 0
 		complete = complete && !in.incomplete
 		if out.wrote {
 			if err := enqueueRefreshes(ctx, tx, in.scope.BankRef, in.mm, in.refresh, now); err != nil {
@@ -85,27 +87,31 @@ func (c *consolidator) apply(ctx context.Context, in applyInput) (applyOutput, e
 	return out, nil
 }
 
-// writeActions writes every action that can land, stamped with seq, and reports whether one was written
-// and whether every action landed.
+// writeActions writes every action that can land, stamped with seq, and returns the facts the written
+// actions cite (empty when nothing was written) and whether every action landed.
 func (c *consolidator) writeActions(
 	ctx context.Context, tx port.Tx, in applyInput, live map[port.UnitID]domain.Unit, seq int64, now time.Time,
-) (wrote, complete bool, err error) {
+) (cited []port.UnitID, complete bool, err error) {
 	complete = true
 	for _, a := range in.actions {
 		obs, ok, err := c.target(ctx, tx, in.scope, a, live)
 		if err != nil {
-			return false, false, err
+			return nil, false, err
 		}
 		if !ok {
 			complete = false
 			continue
 		}
 		if err := writeObservation(ctx, tx, obs, a, seq, now); err != nil {
-			return false, false, err
+			return nil, false, err
 		}
-		wrote = true
+		for _, e := range a.Evidence {
+			if !slices.Contains(cited, e.Unit) {
+				cited = append(cited, e.Unit)
+			}
+		}
 	}
-	return wrote, complete, nil
+	return cited, complete, nil
 }
 
 // liveFacts re-reads ids and keeps those unchanged since they were planned: same seq and same tags. An
@@ -126,8 +132,10 @@ func liveFacts(
 	return live, nil
 }
 
-// stampable returns those of ids that are live and still cited in every scope the plan skipped because
-// it already cited them (a concurrent clear may have removed that observation since).
+// stampable returns those of ids that are live and still cited in every scope of cited: the scopes the
+// plan skipped because they already cited the unit, and the scopes this run wrote an observation citing it
+// in. A concurrent clear, retag or invalidate may have deleted that observation since, resetting the unit
+// without changing its seq (decision 1801). The caller holds tx.Seq, so no clear can commit in between.
 func stampable(
 	ctx context.Context, tx port.Tx, ids []port.UnitID, live map[port.UnitID]domain.Unit,
 	cited map[port.UnitID][]port.ScopeKey,

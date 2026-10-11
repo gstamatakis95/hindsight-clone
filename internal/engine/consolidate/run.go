@@ -21,7 +21,7 @@ type run struct {
 	models  []domain.MentalModel // refresh_after_consolidation models, listed once per run
 
 	units  map[port.UnitID]domain.Unit     // planned units (their seq and tags are re-checked before stamping)
-	cited  map[port.UnitID][]port.ScopeKey // scopes skipped because they already cited the unit
+	cited  map[port.UnitID][]port.ScopeKey // scopes that cite the unit: skipped at plan, or written this run
 	scopes []scopeWork
 	last   map[port.UnitID]int // index into scopes of the unit's last pending scope
 	done   []port.UnitID       // planned units with no pending scope: stamped in finish
