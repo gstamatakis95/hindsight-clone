@@ -561,21 +561,29 @@ func (q *Queries) UnitScopeUpsert(ctx context.Context, arg UnitScopeUpsertParams
 }
 
 const unitSetArchivedDocumentTags = `-- name: UnitSetArchivedDocumentTags :exec
-UPDATE memory_units_archive SET tags = $1
-WHERE tenant_id = $2 AND bank_id = $3 AND document_id = $4
+UPDATE memory_units_archive SET
+    tags = ARRAY(
+        SELECT t FROM unnest(tags || $1::text[]) AS t
+        WHERE t <> ALL($2::text[]) OR t = ANY($1::text[])
+        GROUP BY t ORDER BY t COLLATE "C"
+    )
+WHERE tenant_id = $3 AND bank_id = $4 AND document_id = $5
 `
 
 type UnitSetArchivedDocumentTagsParams struct {
-	Tags       []string
+	NewTags    []string
+	OldTags    []string
 	TenantID   string
 	BankID     string
 	DocumentID *string
 }
 
-// UnitSetArchivedDocumentTags rewrites the tags of a document's archived units.
+// UnitSetArchivedDocumentTags replaces the document-derived tags of a document's archived units, like
+// UnitSetDocumentTags.
 func (q *Queries) UnitSetArchivedDocumentTags(ctx context.Context, arg UnitSetArchivedDocumentTagsParams) error {
 	_, err := q.db.Exec(ctx, unitSetArchivedDocumentTags,
-		arg.Tags,
+		arg.NewTags,
+		arg.OldTags,
 		arg.TenantID,
 		arg.BankID,
 		arg.DocumentID,
@@ -585,23 +593,32 @@ func (q *Queries) UnitSetArchivedDocumentTags(ctx context.Context, arg UnitSetAr
 
 const unitSetDocumentTags = `-- name: UnitSetDocumentTags :many
 UPDATE memory_units SET
-    tags = $1, seq = $2, consolidated_at = NULL, consolidation_failed_at = NULL, updated_at = now()
-WHERE tenant_id = $3 AND bank_id = $4 AND document_id = $5::text
+    tags = ARRAY(
+        SELECT t FROM unnest(tags || $1::text[]) AS t
+        WHERE t <> ALL($2::text[]) OR t = ANY($1::text[])
+        GROUP BY t ORDER BY t COLLATE "C"
+    ),
+    seq = $3, consolidated_at = NULL, consolidation_failed_at = NULL, updated_at = now()
+WHERE tenant_id = $4 AND bank_id = $5 AND document_id = $6::text
 RETURNING id
 `
 
 type UnitSetDocumentTagsParams struct {
-	Tags       []string
+	NewTags    []string
+	OldTags    []string
 	Seq        int64
 	TenantID   string
 	BankID     string
 	DocumentID string
 }
 
-// UnitSetDocumentTags rewrites the tags and seq of a document's live units, clears their consolidation stamps and returns their ids.
+// UnitSetDocumentTags replaces the document-derived tags of a document's live units with
+// (tags - old_tags) + new_tags (deduplicated, byte-sorted like domain.NormalizeTags), sets seq, clears their
+// consolidation stamps and returns their ids.
 func (q *Queries) UnitSetDocumentTags(ctx context.Context, arg UnitSetDocumentTagsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, unitSetDocumentTags,
-		arg.Tags,
+		arg.NewTags,
+		arg.OldTags,
 		arg.Seq,
 		arg.TenantID,
 		arg.BankID,

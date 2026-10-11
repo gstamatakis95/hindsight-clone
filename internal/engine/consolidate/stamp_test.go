@@ -176,7 +176,7 @@ func TestRunCoSourceRetaggedIsNotStamped(t *testing.T) {
 			if _, err := NewInvalidator().ClearDocumentUnits(t.Context(), tx, bank, "d2"); err != nil {
 				return fmt.Errorf("clear d2: %w", err)
 			}
-			_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d2", []string{"c"}, seq)
+			_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d2", []string{"a"}, []string{"c"}, seq)
 			return err
 		})
 	}, "b")

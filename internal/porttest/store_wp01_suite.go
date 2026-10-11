@@ -47,7 +47,7 @@ func testGapSetDocumentTags(t *testing.T, s port.Store) {
 		if err != nil {
 			return err
 		}
-		ids, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", tags, seq)
+		ids, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", []string{"old"}, tags, seq)
 		return err
 	})
 	wantSet(t, "SetDocumentTags(bank A) ids", ids, []port.UnitID{units[bankA].ID})

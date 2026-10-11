@@ -48,16 +48,29 @@ UPDATE memory_units SET
     consolidated_at = NULL, consolidation_failed_at = NULL, updated_at = now()
 WHERE id = @id AND tenant_id = @tenant_id AND bank_id = @bank_id AND fact_type <> 'observation';
 
--- UnitSetDocumentTags rewrites the tags and seq of a document's live units, clears their consolidation stamps and returns their ids.
+-- UnitSetDocumentTags replaces the document-derived tags of a document's live units with
+-- (tags - old_tags) + new_tags (deduplicated, byte-sorted like domain.NormalizeTags), sets seq, clears their
+-- consolidation stamps and returns their ids.
 -- name: UnitSetDocumentTags :many
 UPDATE memory_units SET
-    tags = @tags, seq = @seq, consolidated_at = NULL, consolidation_failed_at = NULL, updated_at = now()
+    tags = ARRAY(
+        SELECT t FROM unnest(tags || @new_tags::text[]) AS t
+        WHERE t <> ALL(@old_tags::text[]) OR t = ANY(@new_tags::text[])
+        GROUP BY t ORDER BY t COLLATE "C"
+    ),
+    seq = @seq, consolidated_at = NULL, consolidation_failed_at = NULL, updated_at = now()
 WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND document_id = @document_id::text
 RETURNING id;
 
--- UnitSetArchivedDocumentTags rewrites the tags of a document's archived units.
+-- UnitSetArchivedDocumentTags replaces the document-derived tags of a document's archived units, like
+-- UnitSetDocumentTags.
 -- name: UnitSetArchivedDocumentTags :exec
-UPDATE memory_units_archive SET tags = @tags
+UPDATE memory_units_archive SET
+    tags = ARRAY(
+        SELECT t FROM unnest(tags || @new_tags::text[]) AS t
+        WHERE t <> ALL(@old_tags::text[]) OR t = ANY(@new_tags::text[])
+        GROUP BY t ORDER BY t COLLATE "C"
+    )
 WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND document_id = @document_id;
 
 -- UnitAppendAudit writes one memory_audit row; a NULL at takes now().

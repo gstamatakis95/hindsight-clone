@@ -147,23 +147,29 @@ func (r *unitRepo) Update(ctx context.Context, u domain.Unit) error {
 	return nil
 }
 
-// SetDocumentTags rewrites the tags and seq of the document's live units, clears both consolidation stamps
-// and returns their ids. The document's archived units get the new tags too, so a later Restore brings
-// them back under the document's current tags.
+// SetDocumentTags replaces the document-derived tags of the document's units, live and archived, with
+// (tags − oldTags) ∪ newTags, so a unit's extra (label) tags survive; on the live units it also sets seq and
+// clears both consolidation stamps, and it returns their ids. Archived units are retagged too, so a later
+// Restore brings them back under the document's current tags.
 func (r *unitRepo) SetDocumentTags(
-	ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64,
+	ctx context.Context, b port.BankRef, doc port.DocumentID, oldTags, newTags []string, seq int64,
 ) ([]port.UnitID, error) {
-	if err := checkTags(tags); err != nil {
+	if err := checkTags(oldTags); err != nil {
+		return nil, err
+	}
+	if err := checkTags(newTags); err != nil {
 		return nil, err
 	}
 	err := r.q.UnitSetArchivedDocumentTags(ctx, db.UnitSetArchivedDocumentTagsParams{
-		Tags: tagsOrEmpty(tags), TenantID: b.Tenant, BankID: b.Bank, DocumentID: textPtr(doc),
+		OldTags: tagsOrEmpty(oldTags), NewTags: tagsOrEmpty(newTags),
+		TenantID: b.Tenant, BankID: b.Bank, DocumentID: textPtr(doc),
 	})
 	if err != nil {
 		return nil, mapErr("set archived document tags", err)
 	}
 	ids, err := r.q.UnitSetDocumentTags(ctx, db.UnitSetDocumentTagsParams{
-		Tags: tagsOrEmpty(tags), Seq: seq, TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
+		OldTags: tagsOrEmpty(oldTags), NewTags: tagsOrEmpty(newTags), Seq: seq,
+		TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
 	})
 	if err != nil {
 		return nil, mapErr("set document tags", err)

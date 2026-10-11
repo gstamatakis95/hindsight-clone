@@ -23,10 +23,16 @@ type UnitRepo interface {
 	// consolidated again (its old observations are removed separately with EvidenceRepo.DeleteCiting).
 	// Unknown or archived ids return domain.ErrNotFound.
 	Update(ctx context.Context, u domain.Unit) error
-	// SetDocumentTags rewrites the tags (and seq) of every live unit of a document, clears their
-	// consolidated_at and consolidation_failed_at (callers delete the old observations with
-	// EvidenceRepo.DeleteCiting), and returns their ids.
-	SetDocumentTags(ctx context.Context, b BankRef, doc DocumentID, tags []string, seq int64) ([]UnitID, error)
+	// SetDocumentTags replaces the document-derived tags of every unit of a document, live and archived:
+	// each unit's tags become normalize((tags − oldTags) ∪ newTags), so a unit's own extra tags (the
+	// write_to_tags label tags) survive. On the live units it also sets seq and clears consolidated_at
+	// and consolidation_failed_at (callers delete the old observations with EvidenceRepo.DeleteCiting).
+	// It returns the live units' ids. Both tag lists must be normalized (domain.NormalizeTags), else
+	// domain.ErrInvalidArgument. Passing the same list twice leaves the tags as they are, apart from
+	// adding any of them a unit lacks, and only resets the stamps.
+	SetDocumentTags(
+		ctx context.Context, b BankRef, doc DocumentID, oldTags, newTags []string, seq int64,
+	) ([]UnitID, error)
 	// IDsByDocument returns the ids of doc's live units, sorted; an unknown document has none. It writes
 	// nothing, so callers can run EvidenceRepo.DeleteCiting before DeleteByDocument.
 	IDsByDocument(ctx context.Context, b BankRef, doc DocumentID) ([]UnitID, error)

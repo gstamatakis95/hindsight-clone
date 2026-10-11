@@ -34,9 +34,11 @@ func NewRetagger(s port.Store) Retagger {
 
 // Retag commits doc's new tag set and enqueues retag_document, or does nothing when the set is unchanged.
 // An unchanged set is a no-op only while the document's newest retag_document operation (if any) did not
-// end FAILED or CANCELLED; otherwise the committed tags never reached the units, so the job is enqueued
-// again. The common no-op path reads only: it bumps no change seq. A real change takes the bank's change seq
-// (which serializes concurrent retags of the bank), re-reads the tags under that lock and only then writes.
+// end FAILED or CANCELLED; otherwise the observations derived under the old tags were never cleared, so
+// the job is enqueued again. The common no-op path reads only: it bumps no change seq. A real change takes
+// the bank's change seq (which serializes concurrent retags of the bank), re-reads the tags under that lock
+// and only then writes: the document's tags and, in the same transaction, its units' document-derived tags
+// (old to new; their label tags stay, decision 1900).
 func (r *retagger) Retag(
 	ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string,
 ) (port.OperationID, error) {
@@ -59,7 +61,8 @@ func (r *retagger) Retag(
 			id, err = retryFailedRetag(ctx, tx, b, doc)
 			return err
 		}
-		if _, err := tx.Seq(ctx, b); err != nil {
+		seq, err := tx.Seq(ctx, b)
+		if err != nil {
 			return err
 		}
 		if d, err = tx.Documents().Get(ctx, b, doc); err != nil {
@@ -68,7 +71,7 @@ func (r *retagger) Retag(
 		if domain.SameTagSet(d.Tags, want) {
 			return nil // a concurrent retag set the same tags first
 		}
-		id, err = enqueueRetag(ctx, tx, b, doc, want)
+		id, err = enqueueRetag(ctx, tx, b, doc, domain.NormalizeTags(d.Tags), want, seq)
 		return err
 	})
 	if err != nil {
@@ -112,11 +115,15 @@ func lastRetagFailed(ctx context.Context, tx port.Tx, b port.BankRef, doc port.D
 	}
 }
 
-// enqueueRetag stores the document's new tags and enqueues (or joins) its retag_document job.
+// enqueueRetag stores the document's new tags, replaces the document-derived tags of its units (oldTags,
+// read under tx.Seq, become newTags; label tags stay) and enqueues (or joins) its retag_document job.
 func enqueueRetag(
-	ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, tags []string,
+	ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, oldTags, newTags []string, seq int64,
 ) (port.OperationID, error) {
-	if err := tx.Documents().SetTags(ctx, b, doc, tags); err != nil {
+	if err := tx.Documents().SetTags(ctx, b, doc, newTags); err != nil {
+		return "", err
+	}
+	if _, err := tx.Units().SetDocumentTags(ctx, b, doc, oldTags, newTags, seq); err != nil {
 		return "", err
 	}
 	return enqueueRetagJob(ctx, tx, b, doc)
@@ -135,9 +142,10 @@ func enqueueRetagJob(ctx context.Context, tx port.Tx, b port.BankRef, doc port.D
 	return id, err
 }
 
-// Apply runs retag_document: it rewrites the tags of the document's live units to the document's current
-// tags, deletes the observations citing them (resetting their co-sources) and enqueues consolidation, in
-// one transaction, plus graph_maintenance when observations were deleted. A document that is gone is a
+// Apply runs retag_document: it re-asserts the document's current tags on its units (Retag already replaced
+// them, keeping their label tags) and resets their consolidation stamps, deletes the observations citing
+// them (resetting their co-sources) and enqueues consolidation, in one transaction, plus graph_maintenance
+// when observations were deleted. A document that is gone is a
 // no-op; a gone bank (domain.ErrNotFound) or a tombstoned one (domain.ErrBankDeleting) fails from Tx.Seq,
 // and an error after ctx ended is domain.ErrCancelled. It never creates a bank.
 func (r *retagger) Apply(ctx context.Context, j port.Job) error {
@@ -177,7 +185,8 @@ func applyRetag(ctx context.Context, tx port.Tx, b port.BankRef, doc port.Docume
 	if err != nil {
 		return err
 	}
-	ids, err := tx.Units().SetDocumentTags(ctx, b, doc, domain.NormalizeTags(d.Tags), seq)
+	cur := domain.NormalizeTags(d.Tags)
+	ids, err := tx.Units().SetDocumentTags(ctx, b, doc, cur, cur, seq)
 	if err != nil {
 		return err
 	}

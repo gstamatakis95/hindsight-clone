@@ -94,7 +94,7 @@ func TestUnnormalizedTagsRejected(t *testing.T) {
 			return tx.Units().Insert(ctx, []domain.Unit{{ID: "v", Bank: mine, Type: domain.FactTypeWorld, Tags: bad}})
 		},
 		"Units.SetDocumentTags": func(tx port.Tx) error {
-			_, err := tx.Units().SetDocumentTags(ctx, mine, "doc-1", bad, 1)
+			_, err := tx.Units().SetDocumentTags(ctx, mine, "doc-1", nil, bad, 1)
 			return err
 		},
 		"Documents.Upsert": func(tx port.Tx) error {
