@@ -7,19 +7,23 @@ import (
 	"testing"
 )
 
+// TestIncludeChunksTruncated: chunks are read through the fake's Reader.GetChunks in result order, the chunk
+// crossing the budget is cut and the walk stops there; nothing is attached when chunks are not asked for.
 func TestIncludeChunksTruncated(t *testing.T) {
-	l := &stubLookups{chunks: map[port.ChunkID]domain.Chunk{
-		"c1": {ID: "c1", Index: 0, Text: "one two three"},
-		"c2": {ID: "c2", Index: 1, Text: "four five six seven"},
-		"c3": {ID: "c3", Index: 2, Text: "eight"},
-	}}
+	env := newEnv(t, envOpts{})
+	env.addChunks(t, "d1",
+		domain.Chunk{ID: "c1", Index: 0, Text: "one two three"},
+		domain.Chunk{ID: "c2", Index: 1, Text: "four five six seven"},
+		domain.Chunk{ID: "c3", Index: 2, Text: "eight"},
+	)
 	unit := func(id, chunk string) Candidate {
 		u := domain.Unit{ID: port.UnitID(id), Type: domain.FactTypeWorld, Text: id, ChunkID: port.ChunkID(chunk)}
 		return Candidate{ID: u.ID, Unit: &u}
 	}
 	results := []Candidate{unit("u1", "c1"), unit("u2", "c2"), unit("u3", "c1"), unit("u4", "c3"), unit("u5", "")}
 	inc := domain.RecallInclude{Chunks: ptr(true), ChunksMaxTokens: ptr(5)}
-	e, err := NewIncluder(nil, l, wordCounter{}).Enrich(context.Background(), testBank, port.SeqRange{}, results, inc)
+	in := NewIncluder(env.store.Read(), wordCounter{})
+	e, err := in.Enrich(context.Background(), testBank, port.SeqRange{}, results, inc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,10 +36,10 @@ func TestIncludeChunksTruncated(t *testing.T) {
 	if _, ok := e.Chunks["c3"]; ok || len(e.Chunks) != 2 {
 		t.Fatalf("chunks = %+v, want the walk to stop at the budget", e.Chunks)
 	}
-	// Not asked, or no lookups: nothing attached.
-	e, _ = NewIncluder(nil, nil, wordCounter{}).Enrich(context.Background(), testBank, port.SeqRange{}, results, inc)
+	// Not asked: nothing attached.
+	e, _ = in.Enrich(context.Background(), testBank, port.SeqRange{}, results, domain.RecallInclude{})
 	if e.Chunks != nil {
-		t.Fatalf("chunks without lookups = %+v", e.Chunks)
+		t.Fatalf("chunks not asked for = %+v", e.Chunks)
 	}
 }
 
@@ -52,7 +56,7 @@ func TestIncludeSourceFactsTruncated(t *testing.T) {
 	}
 	results := []Candidate{{ID: "o1", Unit: &units[0]}, {ID: "o2", Unit: &units[1]}}
 	inc := domain.RecallInclude{SourceFacts: ptr(true), SourceFactsMaxTokens: ptr(4)}
-	enr, err := NewIncluder(e.store.Read(), nil, wordCounter{}).Enrich(context.Background(), testBank,
+	enr, err := NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqRange{}, results, inc)
 	if err != nil {
 		t.Fatal(err)
@@ -66,13 +70,13 @@ func TestIncludeSourceFactsTruncated(t *testing.T) {
 	// Citation order: f1 (o1's first source) is first in line, so with room for exactly 6 words it is kept
 	// and the later f2 and f3 skipped.
 	inc.SourceFactsMaxTokens = ptr(6)
-	enr, _ = NewIncluder(e.store.Read(), nil, wordCounter{}).Enrich(context.Background(), testBank,
+	enr, _ = NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqRange{}, results, inc)
 	if _, ok := enr.SourceFacts["f1"]; !ok || len(enr.SourceFacts) != 1 || !enr.SourceFactsTruncated {
 		t.Fatalf("citation order: %v", enr.SourceFacts)
 	}
 	inc.SourceFactsMaxTokens = nil // default 4096
-	enr, _ = NewIncluder(e.store.Read(), nil, wordCounter{}).Enrich(context.Background(), testBank,
+	enr, _ = NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqRange{}, results, inc)
 	if enr.SourceFactsTruncated || len(enr.SourceFacts) != 3 {
 		t.Fatalf("default budget: %v truncated=%v", enr.SourceFacts, enr.SourceFactsTruncated)
@@ -92,7 +96,7 @@ func TestIncludeSourceFactsBoundedBySeq(t *testing.T) {
 	units, _ := e.store.Read().GetUnits(context.Background(), testBank, []port.UnitID{"o1"})
 	results := []Candidate{{ID: "o1", Unit: &units[0]}}
 	inc := domain.RecallInclude{SourceFacts: ptr(true)}
-	enr, err := NewIncluder(e.store.Read(), nil, wordCounter{}).Enrich(context.Background(), testBank,
+	enr, err := NewIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
 		port.SeqUpTo(0, snapshot), results, inc)
 	if err != nil {
 		t.Fatal(err)

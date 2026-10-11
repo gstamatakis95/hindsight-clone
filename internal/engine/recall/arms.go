@@ -105,7 +105,8 @@ func (a *temporal) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, e
 	}
 	hs, err := a.r.SearchTemporal(ctx, port.TemporalQuery{
 		Bank: q.Bank, Window: *q.Window, Buckets: settingsOf(q.Config).temporalBuckets, Types: q.Types,
-		Tags: q.Predicate, Seq: q.Seq, Limit: q.Limit,
+		Tags: q.Predicate, Seq: q.Seq, Limit: q.Limit, Embedding: q.Embedding,
+		MinSimilarity: temporalMinSimilarity,
 	})
 	return candidates(ArmTemporal, hs, q.Limit), err
 }

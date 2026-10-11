@@ -35,6 +35,9 @@ const (
 	graphSeedMinSimilarity = 0.3
 	// semanticMinSimilarity is the semantic arm's floor when min_scores.semantic is unset (Hindsight's 0.3).
 	semanticMinSimilarity = 0.3
+	// temporalMinSimilarity is the temporal arm's relevance floor: in-window units less similar to the query
+	// are dropped (Hindsight pg/recall.py's in-window pool, CCR WP-09-2).
+	temporalMinSimilarity = 0.1
 	// traceTopIDs is how many ids ArmTrace.TopIDs keeps.
 	traceTopIDs = 5
 )

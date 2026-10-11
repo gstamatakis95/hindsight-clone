@@ -25,29 +25,6 @@ type wordCounter struct{}
 
 func (wordCounter) Count(s string) int { return len(strings.Fields(s)) }
 
-// stubLookups serves fixed tags, chunks and entity states.
-type stubLookups struct {
-	tags     []string
-	chunks   map[port.ChunkID]domain.Chunk
-	entities []domain.EntityState
-}
-
-func (s *stubLookups) BankTags(context.Context, port.BankRef) ([]string, error) { return s.tags, nil }
-
-func (s *stubLookups) GetChunks(_ context.Context, _ port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
-	var out []domain.Chunk
-	for _, id := range ids {
-		if c, ok := s.chunks[id]; ok {
-			out = append(out, c)
-		}
-	}
-	return out, nil
-}
-
-func (s *stubLookups) EntityStates(context.Context, port.BankRef, []port.UnitID) ([]domain.EntityState, error) {
-	return s.entities, nil
-}
-
 // stubArm is a Retriever returning fixed hits and recording the query it saw.
 type stubArm struct {
 	name   string
@@ -79,7 +56,6 @@ type env struct {
 	emb     *fake.Embedder
 	rr      *fake.Reranker
 	llm     *fake.LLM
-	lookups *stubLookups
 	rc      Recaller
 }
 
@@ -94,7 +70,7 @@ func newEnv(t *testing.T, o envOpts) *env {
 	t.Helper()
 	e := &env{
 		clock: fake.NewClock(testNow), emb: fake.NewEmbedder(fake.EmbedSimilar), rr: fake.NewReranker(),
-		llm: fake.NewLLM(), lookups: &stubLookups{},
+		llm: fake.NewLLM(),
 	}
 	e.store = fake.NewStore(e.clock)
 	vars := map[string]string{config.EnvModel: "llm-1"}
@@ -107,7 +83,7 @@ func newEnv(t *testing.T, o envOpts) *env {
 	}
 	router := routing.NewRouter()
 	e.rc = NewRecaller(RecallerDeps{
-		Reader: e.store.Read(), Lookups: e.lookups, Config: config.NewResolver(e.store, nil, server),
+		Reader: e.store.Read(), Config: config.NewResolver(e.store, nil, server),
 		Embedder: e.emb, Reranker: e.rr, Router: router, Times: timex.NewNormalizer(e.llm, router, e.clock),
 		Clock: e.clock, Count: wordCounter{}, Retrievers: o.arms,
 	})

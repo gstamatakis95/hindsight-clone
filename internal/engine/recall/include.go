@@ -49,16 +49,14 @@ type Chunk struct {
 // includer is the Includer.
 type includer struct {
 	r     port.Reader
-	l     Lookups
 	count TokenCounter
 }
 
 var _ Includer = (*includer)(nil)
 
-// NewIncluder returns the Includer. l may be nil: chunks and entities then attach nothing (they need the
-// reads of CCR WP-09-1); source facts only need r.
-func NewIncluder(r port.Reader, l Lookups, count TokenCounter) Includer {
-	return &includer{r: r, l: l, count: count}
+// NewIncluder returns the Includer over r (GetChunks, GetUnits and EntityStates).
+func NewIncluder(r port.Reader, count TokenCounter) Includer {
+	return &includer{r: r, count: count}
 }
 
 // Enrich implements Includer.
@@ -67,7 +65,7 @@ func (in *includer) Enrich(
 ) (Enrichment, error) {
 	var e Enrichment
 	var err error
-	if isSet(inc.Chunks) && in.l != nil {
+	if isSet(inc.Chunks) {
 		if e.Chunks, err = in.chunks(ctx, b, results, intOr(inc.ChunksMaxTokens, DefaultChunksMaxTokens)); err != nil {
 			return Enrichment{}, err
 		}
@@ -78,7 +76,7 @@ func (in *includer) Enrich(
 			return Enrichment{}, err
 		}
 	}
-	if isSet(inc.Entities) && in.l != nil {
+	if isSet(inc.Entities) {
 		if e.Entities, err = in.entities(ctx, b, results); err != nil {
 			return Enrichment{}, err
 		}
@@ -102,7 +100,7 @@ func (in *includer) chunks(
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := in.l.GetChunks(ctx, b, ids)
+	rows, err := in.r.GetChunks(ctx, b, ids)
 	if err != nil {
 		return nil, fmt.Errorf("recall: read chunks: %w", err)
 	}
@@ -182,7 +180,7 @@ func (in *includer) entities(
 	if len(ids) == 0 {
 		return out, nil
 	}
-	states, err := in.l.EntityStates(ctx, b, ids)
+	states, err := in.r.EntityStates(ctx, b, ids)
 	if err != nil {
 		return nil, fmt.Errorf("recall: read entity state: %w", err)
 	}

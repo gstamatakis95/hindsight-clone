@@ -16,6 +16,6 @@
 // fit; and the Includer attaches chunks, source facts and entity state within their own budgets. Recall is
 // read-only: it never writes, and it reads config in a short transaction of its own.
 //
-// Reads port.Reader doesn't have yet (bank tags, chunks, entity state) are consumed through the optional
-// Lookups interface (CCR WP-09-1).
+// Fuzzy tag leaves read the bank's tags with Reader.TagCounts, include.chunks and include.entities use
+// Reader.GetChunks and Reader.EntityStates, and Memory.Stale comes from Reader.StaleScopes.
 package recall

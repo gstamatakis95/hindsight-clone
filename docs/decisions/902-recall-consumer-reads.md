@@ -7,7 +7,14 @@ Four recall features need reads that `port.Reader` doesn't have, and the port is
 - include.entities needs entity state with observation ids;
 - `Memory.stale` needs per-scope unconsolidated facts.
 
-## Decision
+**Update (WP-16):** the CCR batch landed, so the consumer interfaces are gone. `RecallerDeps.Lookups` is
+removed and `RecallerDeps.Reader` serves everything. `TagVocabulary` is now the `TagCounts` method, read with
+`TagCounts(b, memories, "", "", 0)` and sorted by count descending, then tag. include.chunks and
+include.entities read `GetChunks` and `EntityStates`. `Memory.Stale` is set for returned observations from one
+`StaleScopes` call over their distinct scopes. The temporal arm sends the query embedding with
+`MinSimilarity = 0.1` (CCR WP-09-2). Decision 1601 has the details.
+
+## Decision (original)
 - **Consumer interfaces.** Recall declares `TagVocabulary`, `ChunkReader` and `EntityStateReader` (together
   `Lookups`). Their signatures are exactly what CCR WP-09-1 proposes for `port.Reader`, so the Postgres reader
   satisfies them once the CCR lands.
