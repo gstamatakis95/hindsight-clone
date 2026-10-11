@@ -313,8 +313,9 @@ the metrics layer can read.
 With Datadog enabled, memd writes JSON logs to stdout, one object per line. Each line uses Datadog's reserved
 attributes: `timestamp`, `status` (`debug`, `info`, `warn` or `error`), `message`, and `logger.name` for the
 tracer's own messages. The agent parses these without a pipeline. Every line also carries `dd.service`, plus
-`dd.env` and `dd.version` when set. Lines logged during a request, job or tick add `dd.trace_id` and `dd.span_id`, which link the
-line to its trace. `MEMD_LOG_FORMAT=json` gives the same JSON with Datadog off, but without the `dd.*` attributes.
+`dd.env` and `dd.version` when set. Lines logged during a request, job or tick add `dd.trace_id` and
+`dd.span_id`, which link the line to its trace. `MEMD_LOG_FORMAT=json` gives the same JSON with Datadog off, but
+on stderr (where memd always logs without Datadog) and without the `dd.*` attributes.
 
 The agent collects logs from the container's output; memd doesn't ship them over HTTP itself. To collect them:
 
@@ -328,10 +329,6 @@ The agent collects logs from the container's output; memd doesn't ship them over
    Alternatively, set `DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true` on the agent to collect every container.
 
 This only applies when memd runs in a container. Under `go run`, the logs go to your terminal.
-
-Prompts, model output, memory content, request bodies, metadata and SQL parameters are never recorded in spans,
-metrics or Datadog tags. Span errors carry only the error class. See
-[decision 2400](docs/decisions/2400-datadog-optional.md).
 
 ### Running an agent locally
 
@@ -378,6 +375,10 @@ repository ships no image, so use your own build:
 
 In Kubernetes, set `DD_AGENT_HOST` from the node IP (`status.hostIP`) to reach the agent DaemonSet. That
 variable covers both traces and DogStatsD.
+
+Prompts, model output, memory content, request bodies, metadata and SQL parameters are never recorded in spans,
+metrics or Datadog tags. Span errors carry only the error class. See
+[decision 2400](docs/decisions/2400-datadog-optional.md).
 
 ## Contributing
 

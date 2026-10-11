@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"memd/internal/domain"
-	"memd/internal/jobs"
 	"net"
 	"time"
 
@@ -117,13 +116,15 @@ func (t *Telemetry) millis(name string, d time.Duration, tags ...string) {
 // tag formats one name:value tag.
 func tag(name, value string) string { return name + ":" + value }
 
-// jobOutcomeMetrics maps a job outcome (jobs.Outcome*) to its counter.
+// jobOutcomeMetrics maps a job outcome to its counter. The keys are the values of jobs.OutcomeCompleted,
+// OutcomeRetry, OutcomeFailed, OutcomeReleased and OutcomeLost, written out so this package doesn't depend on
+// the job runner; keep them in sync (cmd/memd's TestDatadogMetrics checks completed end to end).
 var jobOutcomeMetrics = map[string]string{
-	jobs.OutcomeCompleted: MetricJobCompleted,
-	jobs.OutcomeRetry:     MetricJobRetried,
-	jobs.OutcomeFailed:    MetricJobFailed,
-	jobs.OutcomeReleased:  MetricJobReleased,
-	jobs.OutcomeLost:      MetricJobLost,
+	"completed": MetricJobCompleted,
+	"retry":     MetricJobRetried,
+	"failed":    MetricJobFailed,
+	"released":  MetricJobReleased,
+	"lost":      MetricJobLost,
 }
 
 // jobMetrics counts a job run's start and returns the func that records its end.

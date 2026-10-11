@@ -10,8 +10,7 @@
 // wire.go) imports this package. The job runner, the maintenance tick and the gateway and S3 adapters expose
 // vendor-free hooks, each nil by default (jobs.Config.TraceJob, maintenance.Deps.TraceTick, gateway.Config.TraceCall
 // and OnUsage, s3.Config.APIOptions), and cmd/memd's wiring fills them from a [Telemetry]. The package imports
-// internal/domain, internal/store and internal/jobs only for the hook signatures, the queue read, the job outcomes
-// and the error classes.
+// internal/domain and internal/store only for the hook signatures, the queue read and the error classes.
 //
 //	tel, stop := observability.Start(observability.Config{Enabled: on, Profiler: prof, Metrics: met, Logger: base})
 //	defer stop()
