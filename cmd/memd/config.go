@@ -42,8 +42,19 @@ const (
 	envWorkerHealthAddr = "MEMD_WORKER_HEALTH_ADDR"
 	envDBMaxConns       = "MEMD_DB_MAX_CONNS"
 	envLogLevel         = "MEMD_LOG_LEVEL"
+	envLogFormat        = "MEMD_LOG_FORMAT"
 	envDatadogEnabled   = "MEMD_DATADOG_ENABLED"
 	envDatadogProfiler  = "MEMD_DATADOG_PROFILER"
+	envDatadogMetrics   = "MEMD_DATADOG_METRICS"
+)
+
+// Log formats (MEMD_LOG_FORMAT). Unset, the format is json with Datadog enabled and text otherwise.
+const (
+	// logFormatText is slog's key=value text, one record per line.
+	logFormatText = "text"
+	// logFormatJSON is one JSON object per line with Datadog's reserved attribute names
+	// (observability.NewJSONHandler).
+	logFormatJSON = "json"
 )
 
 // Defaults of the deployment settings.
@@ -98,11 +109,29 @@ type Config struct {
 	DBMaxConns int
 	// LogLevel is debug, info, warn or error.
 	LogLevel slog.Level
-	// DatadogEnabled turns on Datadog tracing, log correlation and runtime metrics (internal/observability);
-	// the agent address and the rest come from the standard DD_* variables. Off by default.
+	// LogFormat is text or json; empty = json when DatadogEnabled, else text (see Config.logFormat).
+	LogFormat string
+	// DatadogEnabled turns on Datadog tracing, log correlation, runtime metrics and memd's own metrics
+	// (internal/observability); the agent address and the rest come from the standard DD_* variables. Off by
+	// default.
 	DatadogEnabled bool
 	// DatadogProfiler also starts the Datadog profiler; ignored unless DatadogEnabled.
 	DatadogProfiler bool
+	// DatadogMetrics sends memd's own metrics to DogStatsD (default true); ignored unless DatadogEnabled.
+	DatadogMetrics bool
+}
+
+// logFormat is the effective log format: LogFormat when set, else json with Datadog enabled (the agent then
+// parses each line without a pipeline) and text otherwise.
+func (c Config) logFormat() string {
+	switch {
+	case c.LogFormat != "":
+		return c.LogFormat
+	case c.DatadogEnabled:
+		return logFormatJSON
+	default:
+		return logFormatText
+	}
 }
 
 // setting is one configuration knob with its environment variable and flag.
@@ -159,13 +188,18 @@ var settings = []setting{
 		integer(func(c *Config) *int { return &c.DBMaxConns }),
 	},
 	{envLogLevel, "log level: debug, info, warn, error", "info", logLevel},
+	{envLogFormat, "log format: text or json (empty = json with Datadog enabled, else text)", "", logFormat},
 	{
-		envDatadogEnabled, "Datadog tracing, log correlation and runtime metrics (agent from DD_* variables)",
+		envDatadogEnabled, "Datadog tracing, metrics and log correlation (agent from DD_* variables)",
 		"false", boolean(func(c *Config) *bool { return &c.DatadogEnabled }),
 	},
 	{
 		envDatadogProfiler, "Datadog continuous profiler (only with Datadog enabled)", "false",
 		boolean(func(c *Config) *bool { return &c.DatadogProfiler }),
+	},
+	{
+		envDatadogMetrics, "memd's own metrics over DogStatsD (only with Datadog enabled)", "true",
+		boolean(func(c *Config) *bool { return &c.DatadogMetrics }),
 	},
 }
 
@@ -204,6 +238,17 @@ func logLevel(c *Config, v string) error {
 		return fmt.Errorf("not a log level: %q", v)
 	}
 	return nil
+}
+
+// logFormat parses the log format; empty leaves the choice to Config.logFormat.
+func logFormat(c *Config, v string) error {
+	switch v = strings.ToLower(strings.TrimSpace(v)); v {
+	case "", logFormatText, logFormatJSON:
+		c.LogFormat = v
+		return nil
+	default:
+		return fmt.Errorf("not a log format (text, json): %q", v)
+	}
 }
 
 // flagName is the flag of an environment variable: MEMD_GRPC_ADDR -> grpc-addr.

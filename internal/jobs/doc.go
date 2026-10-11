@@ -89,9 +89,9 @@
 // # Tracing
 //
 // Config.TraceJob is an optional hook ([TraceFunc]); cmd/memd sets it from internal/observability when
-// MEMD_DATADOG_ENABLED is on. The job span covers the handler and its terminal Complete/Fail and is finished
-// with one of the Outcome* values (completed, retry, failed, released, lost). With the hook nil there is no
-// tracing and no extra work.
+// MEMD_DATADOG_ENABLED is on, for the job's trace span and its metrics (started, outcome counts, duration). The
+// span covers the handler and its terminal Complete/Fail and is finished with one of the Outcome* values
+// (completed, retry, failed, released, lost). With the hook nil there is no tracing and no extra work.
 //
 // # Tests
 //

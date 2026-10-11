@@ -15,14 +15,33 @@ import (
 	"github.com/aws/smithy-go/middleware"
 )
 
-// JobHook returns the worker's job tracing hook (assign it to jobs.Config.TraceJob): one SpanJob
-// span per run, resource = the job kind, tagged with the operation id, tenant, bank, attempt and outcome,
-// and marked as an error when the run did not complete. Disabled, it returns nil.
+// JobHook returns the worker's job hook (assign it to jobs.Config.TraceJob). While tracing: one SpanJob span
+// per run, resource = the job kind, tagged with the operation id, tenant, bank, attempt and outcome, and
+// marked as an error when the run did not complete. With metrics: MetricJobStarted, one outcome counter
+// (MetricJobCompleted, ...) and MetricJobDuration, tagged with the kind (and the outcome) only. Disabled, it
+// returns nil.
 func (t *Telemetry) JobHook() func(context.Context, store.Job) (context.Context, func(string, error)) {
-	if t == nil {
+	if !t.traces() && !t.metered() {
 		return nil
 	}
-	return traceJob
+	return func(ctx context.Context, j store.Job) (context.Context, func(string, error)) {
+		var span func(string, error)
+		if t.tracing {
+			ctx, span = traceJob(ctx, j)
+		}
+		var metrics func(string)
+		if t.stats != nil {
+			metrics = t.jobMetrics(j.Kind)
+		}
+		return ctx, func(outcome string, err error) {
+			if span != nil {
+				span(outcome, err)
+			}
+			if metrics != nil {
+				metrics(outcome)
+			}
+		}
+	}
 }
 
 // traceJob starts the span of one run of j.
@@ -42,9 +61,9 @@ func traceJob(ctx context.Context, j store.Job) (context.Context, func(string, e
 }
 
 // TickHook returns the maintenance tick tracing hook (assign it to maintenance.Deps.TraceTick): one
-// SpanTick span per tick, marked as an error when a step failed. Disabled, it returns nil.
+// SpanTick span per tick, marked as an error when a step failed. Without tracing, it returns nil.
 func (t *Telemetry) TickHook() func(context.Context) (context.Context, func(error)) {
-	if t == nil {
+	if !t.traces() {
 		return nil
 	}
 	return traceTick
@@ -57,16 +76,33 @@ func traceTick(ctx context.Context) (context.Context, func(error)) {
 	return ctx, func(err error) { finish(span, err) }
 }
 
-// GatewayHook returns the AI gateway tracing hook (assign it to gateway.Config.TraceCall): one
-// SpanGatewayCall span per model call, resource = the route, tagged with the model slot and model name
-// only (never the prompt, messages, tools or response). Disabled, it returns nil.
+// GatewayHook returns the AI gateway call hook (assign it to gateway.Config.TraceCall). While tracing: one
+// SpanGatewayCall span per model call, resource = the route, tagged with the model slot and model name only
+// (never the prompt, messages, tools or response). With metrics: MetricGatewayCalls, MetricGatewayLatency
+// and, on failure, MetricGatewayErrors with the error class. Disabled, it returns nil.
 func (t *Telemetry) GatewayHook() func(
 	ctx context.Context, slot domain.ModelSlot, model, path string,
 ) (context.Context, func(error)) {
-	if t == nil {
+	if !t.traces() && !t.metered() {
 		return nil
 	}
-	return traceGatewayCall
+	return func(ctx context.Context, slot domain.ModelSlot, model, path string) (context.Context, func(error)) {
+		var span, metrics func(error)
+		if t.tracing {
+			ctx, span = traceGatewayCall(ctx, slot, model, path)
+		}
+		if t.stats != nil {
+			metrics = t.gatewayMetrics(slot, model, path)
+		}
+		return ctx, func(err error) {
+			if span != nil {
+				span(err)
+			}
+			if metrics != nil {
+				metrics(err)
+			}
+		}
+	}
 }
 
 // traceGatewayCall starts the span of one gateway call.
@@ -84,9 +120,9 @@ func traceGatewayCall(ctx context.Context, slot domain.ModelSlot, model, path st
 
 // HTTPClient returns c (nil = a new client) with a transport that adds one "http.request" span per HTTP
 // attempt (method, URL without query, status) and propagates the trace to the gateway. Bodies and
-// headers are never tagged. Disabled, it returns c unchanged, nil included.
+// headers are never tagged. Without tracing, it returns c unchanged, nil included.
 func (t *Telemetry) HTTPClient(c *http.Client) *http.Client {
-	if t == nil {
+	if !t.traces() {
 		return c
 	}
 	if c == nil {
@@ -96,10 +132,10 @@ func (t *Telemetry) HTTPClient(c *http.Client) *http.Client {
 }
 
 // S3APIOptions returns the AWS SDK middleware that adds one span per S3 call (resource = "S3.<Operation>",
-// tagged with the bucket; object bodies are never read). Assign it to s3.Config.APIOptions. Disabled, it
-// returns nil.
+// tagged with the bucket; object bodies are never read). Assign it to s3.Config.APIOptions. Without
+// tracing, it returns nil.
 func (t *Telemetry) S3APIOptions() []func(*middleware.Stack) error {
-	if t == nil {
+	if !t.traces() {
 		return nil
 	}
 	var cfg aws.Config
@@ -117,22 +153,47 @@ func finish(span *tracer.Span, err error) {
 	span.Finish(tracer.WithError(safeError(err)), tracer.NoDebugStack())
 }
 
-// errorClasses are the error classes a span may name, most specific first.
-var errorClasses = []error{
-	context.Canceled, context.DeadlineExceeded, domain.ErrCancelled, domain.ErrNotFound,
-	domain.ErrAlreadyExists, domain.ErrInvalidArgument, domain.ErrFailedPrecondition, domain.ErrConflict,
-	domain.ErrResourceExhausted, domain.ErrUnavailable,
+// errorClass is one error class a span or metric may name.
+type errorClass struct {
+	// err is the sentinel.
+	err error
+	// name is the metric tag value.
+	name string
+}
+
+// errorClasses are the error classes a span or metric may name, most specific first.
+var errorClasses = []errorClass{
+	{context.Canceled, "canceled"},
+	{context.DeadlineExceeded, "deadline_exceeded"},
+	{domain.ErrCancelled, "cancelled"},
+	{domain.ErrNotFound, "not_found"},
+	{domain.ErrAlreadyExists, "already_exists"},
+	{domain.ErrInvalidArgument, "invalid_argument"},
+	{domain.ErrFailedPrecondition, "failed_precondition"},
+	{domain.ErrConflict, "conflict"},
+	{domain.ErrResourceExhausted, "resource_exhausted"},
+	{domain.ErrUnavailable, "unavailable"},
 }
 
 // safeError reduces err to its class: the first of errorClasses it wraps, else a generic error. The
 // original message never reaches the span.
 func safeError(err error) error {
 	for _, c := range errorClasses {
-		if errors.Is(err, c) {
-			return c
+		if errors.Is(err, c.err) {
+			return c.err
 		}
 	}
 	return errUnclassified
+}
+
+// errorClassOf names err's class for a metric tag: the first of errorClasses it wraps, else "other".
+func errorClassOf(err error) string {
+	for _, c := range errorClasses {
+		if errors.Is(err, c.err) {
+			return c.name
+		}
+	}
+	return "other"
 }
 
 // errUnclassified names an error that wraps none of the known classes.

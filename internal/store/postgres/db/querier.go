@@ -239,6 +239,11 @@ type Querier interface {
 	QueueRetry(ctx context.Context, arg QueueRetryParams) (Operation, error)
 	// QueueSetPayload replaces a pending job's payload and overrides.
 	QueueSetPayload(ctx context.Context, arg QueueSetPayloadParams) error
+	// QueueStats returns the job queue's depth by kind and status (pending and processing only), with the age in
+	// seconds of the oldest due pending job of each kind (run_at <= now(); 0 when none is due; parked retries and
+	// debounced jobs are not waiting yet). retain_batch parents are left out: they are never claimed and stay pending
+	// until their children settle. Both statuses are covered by the partial index operations_active_serial_key_idx.
+	QueueStats(ctx context.Context) ([]QueueStatsRow, error)
 	// QueueStatus returns an operation's status.
 	QueueStatus(ctx context.Context, id uuid.UUID) (string, error)
 	// ReadsBankStats returns a bank row with its counts in one statement (one snapshot). The per-type maps are JSON

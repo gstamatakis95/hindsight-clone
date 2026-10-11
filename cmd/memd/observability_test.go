@@ -1,14 +1,20 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"memd/internal/jobs"
 	"memd/internal/observability"
 	"net"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/DataDog/datadog-go/v5/statsd"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/ext"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/mocktracer"
 
@@ -134,7 +140,7 @@ func checkJobSpans(t *testing.T, spans []*mocktracer.Span) {
 func TestDatadogSettings(t *testing.T) {
 	env := baseEnv(t, baseFile)
 	cfg, err := loadValidate([]string{"all"}, env)
-	if err != nil || cfg.DatadogEnabled || cfg.DatadogProfiler {
+	if err != nil || cfg.DatadogEnabled || cfg.DatadogProfiler || !cfg.DatadogMetrics {
 		t.Fatalf("defaults: %+v %v", cfg, err)
 	}
 	env[envDatadogEnabled], env[envDatadogProfiler] = "true", "true"
@@ -147,6 +153,142 @@ func TestDatadogSettings(t *testing.T) {
 	env[envDatadogEnabled] = "maybe"
 	if _, err = loadValidate([]string{"all"}, env); err == nil {
 		t.Fatal("MEMD_DATADOG_ENABLED=maybe was accepted")
+	}
+	env[envDatadogEnabled], env[envDatadogMetrics] = "true", "false"
+	if cfg, err = loadValidate([]string{"all"}, env); err != nil || cfg.DatadogMetrics {
+		t.Fatalf("metrics off: %+v %v", cfg, err)
+	}
+}
+
+// TestLogFormat checks the log format and stream: text on stderr by default, JSON on stdout with Datadog
+// enabled, an explicit format winning either way, and an unknown format rejected.
+func TestLogFormat(t *testing.T) {
+	cases := []struct {
+		datadog, format string
+		json, stdout    bool
+	}{
+		{"false", "", false, false},
+		{"true", "", true, true},
+		{"true", "text", false, true},
+		{"false", "JSON", true, false},
+	}
+	for _, c := range cases {
+		env := baseEnv(t, baseFile)
+		env[envDatadogEnabled], env[envLogFormat] = c.datadog, c.format
+		cfg, err := loadValidate([]string{"all"}, env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		slog.New(logHandler(cfg, &stdout, &stderr)).Info("hello")
+		out := &stderr
+		if c.stdout {
+			out = &stdout
+		}
+		line := out.String()
+		if stdout.Len()+stderr.Len() != len(line) || !strings.Contains(line, "hello") {
+			t.Fatalf("%+v: stdout %q, stderr %q", c, stdout.String(), stderr.String())
+		}
+		var rec map[string]any
+		if isJSON := json.Unmarshal([]byte(line), &rec) == nil; isJSON != c.json || (c.json && rec["message"] != "hello") {
+			t.Fatalf("%+v: line %q", c, line)
+		}
+	}
+	env := baseEnv(t, baseFile)
+	env[envLogFormat] = "xml"
+	if _, err := loadValidate([]string{"all"}, env); err == nil {
+		t.Fatal("MEMD_LOG_FORMAT=xml was accepted")
+	}
+}
+
+// statsPoint is one metric sample a fakeStats received.
+type statsPoint struct {
+	name string
+	tags []string
+}
+
+// fakeStats records the metrics sent to it; calling a method it does not override panics (the embedded
+// interface is nil).
+type fakeStats struct {
+	statsd.ClientInterface
+	mu     sync.Mutex
+	points []statsPoint
+}
+
+// add records one sample.
+func (f *fakeStats) add(name string, tags []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.points = append(f.points, statsPoint{name: name, tags: slices.Clone(tags)})
+	return nil
+}
+
+// Count records a count.
+func (f *fakeStats) Count(name string, _ int64, tags []string, _ float64) error {
+	return f.add(name, tags)
+}
+
+// Gauge records a gauge.
+func (f *fakeStats) Gauge(name string, _ float64, tags []string, _ float64) error {
+	return f.add(name, tags)
+}
+
+// Distribution records a distribution sample.
+func (f *fakeStats) Distribution(name string, _ float64, tags []string, _ float64) error {
+	return f.add(name, tags)
+}
+
+// has reports whether a sample of name carried every one of tags.
+func (f *fakeStats) has(name string, tags ...string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, p := range f.points {
+		if p.name == name && !slices.ContainsFunc(tags, func(tag string) bool { return !slices.Contains(p.tags, tag) }) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestDatadogMetrics runs a retain through the stack wired with metrics only (no tracer) and checks that the
+// RPC, its gateway calls and token usage, and the consolidate job each emit their metrics with bounded tags.
+func TestDatadogMetrics(t *testing.T) {
+	stats := &fakeStats{}
+	w := startWiredWith(t, observability.NewMetrics(slog.New(slog.NewTextHandler(io.Discard, nil)), stats))
+	retainOne(t, w, "b")
+	kind := "kind:consolidate"
+	deadline := time.Now().Add(10 * time.Second) // the job's metrics follow its settle by a moment
+	for !stats.has(observability.MetricJobDuration, kind, "outcome:completed") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	retain := []string{"method:" + pb.MemoryService_Retain_FullMethodName, "code:OK"}
+	extract := []string{"slot:extract", "route:/chat/completions"}
+	for _, want := range []struct {
+		name string
+		tags []string
+	}{
+		{observability.MetricGRPCRequests, retain},
+		{observability.MetricGRPCLatency, retain},
+		{observability.MetricGatewayCalls, extract},
+		{observability.MetricGatewayLatency, extract},
+		{observability.MetricGatewayTokensIn, []string{"slot:extract"}},
+		{observability.MetricJobStarted, []string{kind}},
+		{observability.MetricJobCompleted, []string{kind}},
+		{observability.MetricJobDuration, []string{kind, "outcome:completed"}},
+	} {
+		if !stats.has(want.name, want.tags...) {
+			t.Errorf("no %s with %v", want.name, want.tags)
+		}
+	}
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	for _, p := range stats.points {
+		for _, tag := range p.tags {
+			if name, _, _ := strings.Cut(tag, ":"); !slices.Contains(
+				[]string{"method", "code", "kind", "outcome", "slot", "model", "route", "error"}, name) {
+				t.Errorf("%s carries tag %q", p.name, tag)
+			}
+		}
 	}
 }
 
@@ -174,7 +316,7 @@ func TestDatadogUnreachableAgentStillServes(t *testing.T) {
 	t.Setenv("DD_INSTRUMENTATION_TELEMETRY_ENABLED", "false")
 	t.Setenv("DD_REMOTE_CONFIGURATION_ENABLED", "false")
 	tel, stop := observability.Start(observability.Config{
-		Enabled: true, Profiler: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Enabled: true, Profiler: true, Metrics: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	t.Cleanup(stop)
 	if !tel.Enabled() {

@@ -107,3 +107,7 @@ retention:
 
 api:
   rpc_deadline: 120s                    # calls that carry no deadline; 0s = none
+
+# Datadog metrics, used only when MEMD_DATADOG_ENABLED is set (and MEMD_DATADOG_METRICS is not false).
+observability:
+  metrics_interval: 15s                 # how often the Postgres pool and job queue gauges are sampled

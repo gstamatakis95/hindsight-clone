@@ -39,6 +39,7 @@ const (
 	defaultRPCDeadline       = 120 * time.Second
 	defaultOperationKeep     = 7 * 24 * time.Hour
 	defaultEventKeep         = 30 * 24 * time.Hour
+	defaultMetricsInterval   = 15 * time.Second
 )
 
 // ServerFile is the server config file.
@@ -55,6 +56,14 @@ type ServerFile struct {
 	Retention RetentionFile `json:"retention"`
 	// API sets the gRPC server's behaviour.
 	API APIFile `json:"api"`
+	// Observability tunes the optional Datadog metrics (MEMD_DATADOG_ENABLED switches them on).
+	Observability ObservabilityFile `json:"observability"`
+}
+
+// ObservabilityFile is the observability section of the server config file.
+type ObservabilityFile struct {
+	// MetricsInterval is how often the Postgres pool and job queue gauges are sampled (default 15s).
+	MetricsInterval Duration `json:"metrics_interval"`
 }
 
 // GatewayFile is the gateway section of the server config file.
@@ -186,6 +195,7 @@ func (f *ServerFile) withDefaults() {
 	fill(&f.Worker.MaintenanceInterval, defaultMaintenance)
 	fill(&f.Retention.Operations, defaultOperationKeep)
 	fill(&f.Retention.Events, defaultEventKeep)
+	fill(&f.Observability.MetricsInterval, defaultMetricsInterval)
 	if f.API.RPCDeadline == nil {
 		d := Duration(defaultRPCDeadline)
 		f.API.RPCDeadline = &d
@@ -233,10 +243,11 @@ func (f ServerFile) validateOperator() []error {
 	w := f.Worker
 	for _, d := range []Duration{
 		f.Gateway.Timeout, w.PollInterval, w.HeartbeatInterval, w.StaleAfter, w.MaintenanceInterval,
-		f.Retention.Operations, f.Retention.Events,
+		f.Retention.Operations, f.Retention.Events, f.Observability.MetricsInterval,
 	} {
 		if d <= 0 {
-			errs = append(errs, errors.New("gateway.timeout, the worker timings and the retentions must be positive"))
+			errs = append(errs, errors.New("gateway.timeout, the worker timings, the retentions and "+
+				"observability.metrics_interval must be positive"))
 			break
 		}
 	}

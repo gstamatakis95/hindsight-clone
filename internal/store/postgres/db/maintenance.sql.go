@@ -46,6 +46,52 @@ func (q *Queries) BanksWithGraphWork(ctx context.Context) ([]BanksWithGraphWorkR
 	return items, nil
 }
 
+const queueStats = `-- name: QueueStats :many
+SELECT kind, status, count(*)::bigint AS jobs,
+    COALESCE(EXTRACT(EPOCH FROM now() - min(run_at) FILTER (WHERE status = 'pending' AND run_at <= now())), 0)::float8
+        AS oldest_due_seconds
+FROM operations
+WHERE status IN ('pending', 'processing') AND kind <> 'retain_batch'
+GROUP BY kind, status
+ORDER BY kind, status
+`
+
+type QueueStatsRow struct {
+	Kind             string
+	Status           string
+	Jobs             int64
+	OldestDueSeconds float64
+}
+
+// QueueStats returns the job queue's depth by kind and status (pending and processing only), with the age in
+// seconds of the oldest due pending job of each kind (run_at <= now(); 0 when none is due; parked retries and
+// debounced jobs are not waiting yet). retain_batch parents are left out: they are never claimed and stay pending
+// until their children settle. Both statuses are covered by the partial index operations_active_serial_key_idx.
+func (q *Queries) QueueStats(ctx context.Context) ([]QueueStatsRow, error) {
+	rows, err := q.db.Query(ctx, queueStats)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueueStatsRow{}
+	for rows.Next() {
+		var i QueueStatsRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Status,
+			&i.Jobs,
+			&i.OldestDueSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const stalledBankDeletes = `-- name: StalledBankDeletes :many
 SELECT b.tenant_id, b.id FROM banks b
 WHERE b.deleting_at IS NOT NULL AND NOT EXISTS (

@@ -8,6 +8,7 @@ tool (
 )
 
 require (
+	github.com/DataDog/datadog-go/v5 v5.9.1
 	github.com/DataDog/dd-trace-go/contrib/aws/aws-sdk-go-v2/v2 v2.10.1
 	github.com/DataDog/dd-trace-go/contrib/google.golang.org/grpc/v2 v2.10.1
 	github.com/DataDog/dd-trace-go/contrib/log/slog/v2 v2.10.1
@@ -19,6 +20,7 @@ require (
 	github.com/aws/smithy-go v1.28.5
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/moby/moby/api v1.55.0
 	github.com/pgvector/pgvector-go v0.4.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/testcontainers/testcontainers-go v0.44.0
@@ -42,7 +44,6 @@ require (
 	github.com/DataDog/datadog-agent/pkg/trace/log v0.82.0 // indirect
 	github.com/DataDog/datadog-agent/pkg/trace/stats v0.82.0 // indirect
 	github.com/DataDog/datadog-agent/pkg/trace/traceutil v0.82.0 // indirect
-	github.com/DataDog/datadog-go/v5 v5.9.0 // indirect
 	github.com/DataDog/go-libddwaf/v5 v5.0.0 // indirect
 	github.com/DataDog/go-runtime-metrics-internal v0.0.4-0.20260217080614-b0f4edc38a6d // indirect
 	github.com/DataDog/go-sqllexer v0.2.3 // indirect
@@ -98,7 +99,6 @@ require (
 	github.com/minio/simdjson-go v0.4.5 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/go-archive v0.2.0 // indirect
-	github.com/moby/moby/api v1.55.0 // indirect
 	github.com/moby/moby/client v0.5.0 // indirect
 	github.com/moby/patternmatcher v0.6.1 // indirect
 	github.com/moby/sys/sequential v0.7.0 // indirect

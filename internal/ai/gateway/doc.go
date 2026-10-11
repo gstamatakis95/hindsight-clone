@@ -73,10 +73,10 @@
 //
 // Structured and Chat return their token usage summed over every attempt, failed ones included; its model is the one
 // the gateway reported, else the binding's. Config.OnUsage, when set, is called once per successful HTTP call of any
-// kind; cmd/memd does not set it. Config.TraceCall ([CallTraceFunc]) wraps every call, with all its retries, in a trace
-// span that sees only the slot, the requested model and the route, never prompts or responses. cmd/memd/wire.go passes
-// the Datadog hook and an instrumented *http.Client from internal/observability when MEMD_DATADOG_ENABLED is set; this
-// package imports nothing from Datadog.
+// kind; cmd/memd sets it to the Datadog token counters when Datadog metrics are on. Config.TraceCall ([CallTraceFunc])
+// wraps every call, with all its retries, in a trace span (and the call metrics) that sees only the slot, the requested
+// model and the route, never prompts or responses. cmd/memd/wire.go passes the Datadog hooks and an instrumented
+// *http.Client from internal/observability when MEMD_DATADOG_ENABLED is set; this package imports nothing from Datadog.
 //
 // # Testing
 //

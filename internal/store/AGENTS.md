@@ -8,8 +8,8 @@ These rules add to the root AGENTS.md.
 ## Contract
 - The interface doc comments are the specification: ordering, dedup, unknown-id behaviour, idempotency. A change
   starts in that comment and the adapter's tests.
-- Reader is split by consumer (Search, Catalog, Freshness); the tick's cross-bank scans are Maintenance. Depend on
-  the narrowest one.
+- Reader is split by consumer (Search, Catalog, Freshness); the tick's cross-bank scans (and the metrics
+  sampler's QueueStats) are Maintenance. Depend on the narrowest one.
 - Every adapter is tested against the real backend: Postgres through `postgres/pgtest` (one cloned database per
   test, so tests run in parallel), S3 on MinIO through the shared `blob/blobtest` suite. There is no in-memory store.
 
