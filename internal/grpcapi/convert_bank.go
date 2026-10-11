@@ -3,7 +3,7 @@ package grpcapi
 import (
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/bank"
+	"memd/internal/bank"
 
 	pb "memd/gen/memory/v1"
 )

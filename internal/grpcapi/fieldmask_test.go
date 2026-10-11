@@ -115,8 +115,8 @@ func TestFieldMaskConfigPatch(t *testing.T) {
 	}
 }
 
-// TestFieldMaskInvalid checks invalid paths, paths inside a model binding, an embed binding below the server
-// level and an empty or unknown reset are INVALID_ARGUMENT.
+// TestFieldMaskInvalid checks invalid paths, paths inside a model binding and an embed binding below the server
+// level are INVALID_ARGUMENT.
 func TestFieldMaskInvalid(t *testing.T) {
 	for _, m := range []*fieldmaskpb.FieldMask{
 		mask("nope"), mask("recall.nope"), mask("models.slot"), mask("retain.mission.x"),
@@ -143,37 +143,6 @@ func TestFieldMaskInvalid(t *testing.T) {
 	}
 	if _, err := specPatch(&pb.MentalModelSpec{Id: "x"}, mask("id")); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("id path: err = %v, want ErrInvalidArgument", err)
-	}
-	for _, paths := range [][]string{{"bogus"}, nil} {
-		if _, err := resetPatch(paths); !errors.Is(err, domain.ErrInvalidArgument) {
-			t.Errorf("reset %v: err = %v, want ErrInvalidArgument", paths, err)
-		}
-	}
-}
-
-// TestFieldMaskReset checks ResetBankConfig paths go back to unset and "*" resets everything.
-func TestFieldMaskReset(t *testing.T) {
-	patch, err := resetPatch([]string{"recall.rrf_k", "retain.entity_labels", "retain.mission", "models.extract"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := patch(baseConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := baseConfig()
-	want.Recall = &domain.RecallConfig{RecencyAlpha: ptr(0.2)}
-	want.Retain = &domain.RetainConfig{}
-	want.Models = &domain.ModelBindings{}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("got  %+v\nwant %+v", got, want)
-	}
-	all, err := resetPatch([]string{"*"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := all(baseConfig()); !reflect.DeepEqual(got, domain.BankConfig{}) {
-		t.Fatalf("reset all = %+v", got)
 	}
 }
 

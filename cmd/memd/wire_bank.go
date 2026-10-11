@@ -1,18 +1,17 @@
 package main
 
 import (
-	"memd/internal/engine/bank"
+	"memd/internal/bank"
+	"memd/internal/domain"
 	"memd/internal/grpcapi"
 )
 
-// wireBanks builds the bank area: BankService (bank admin, the effective config, stats and tag listings, the prompt
-// preview, directives, templates) and the two-step bank delete (the DeleteBank RPC and the delete_bank job).
+// wireBanks builds bank.Service: it serves BankService's bank lifecycle RPCs (create, get, delete, stats, tags,
+// templates), runs the delete_bank job and the tick's resume_bank_deletes sweep. wireConfig adds the config,
+// directive and preview RPCs to the same handler.
 func wireBanks(c core, in infra, d *deps) {
-	deleter := bank.NewBankDeleter(c.db, in.blob, c.clock, bank.DeleterConfig{})
-	d.api.Bank = &grpcapi.BankHandler{
-		Banks: bank.NewBankAdmin(c.db), Config: c.resolver, Stats: bank.NewStatsReader(c.read),
-		Previewer: bank.NewPromptPreviewer(c.resolver, c.db), Deleter: deleter,
-		Templates: bank.NewTemplateCodec(c.db, c.clock), Directives: bank.NewDirectiveAdmin(c.db),
-	}
-	d.handlers.deleter = deleter
+	svc := bank.New(bank.Deps{DB: c.db, Maintenance: in.maint, Blob: in.blob, Clock: c.clock})
+	d.api.Bank = &grpcapi.BankHandler{Banks: svc}
+	d.handlers.add(domain.OperationKindDeleteBank, svc.RunDeleteJob)
+	d.maintenance.Banks = svc
 }

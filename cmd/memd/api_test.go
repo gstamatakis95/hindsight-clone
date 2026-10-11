@@ -16,7 +16,7 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// API behaviour through the real engines, on the shared test stack (stack_test.go).
+// API behaviour through the real services, on the shared test stack (stack_test.go).
 
 // fillRequest sets every id-like string field to "x" and every singular message field to an empty message, so
 // required-field checks pass with otherwise zero requests.
@@ -38,7 +38,7 @@ func fillRequest(m protoreflect.Message) {
 }
 
 // TestEveryRPCWired calls every memory.v1 RPC (enumerated from the service descriptors) with a minimal request and
-// checks each reaches a wired handler: no UNIMPLEMENTED, and no INTERNAL or UNKNOWN from the engines.
+// checks each reaches a wired handler: no UNIMPLEMENTED, and no INTERNAL or UNKNOWN from the services.
 func TestEveryRPCWired(t *testing.T) {
 	w := startWired(t)
 	n := 0

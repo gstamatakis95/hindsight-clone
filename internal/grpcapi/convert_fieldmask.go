@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/bank"
+	"memd/internal/configsvc"
 	"memd/internal/mentalmodel"
 	"strings"
 
@@ -85,7 +85,7 @@ func dropImmutable(paths, immutable []string) []string {
 
 // configPatch builds the ConfigPatch of an Update*Config request: the masked paths applied to the stored
 // level, which must then pass config.Validate.
-func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask) (bank.ConfigPatch, error) {
+func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask) (configsvc.Patch, error) {
 	if patch == nil {
 		patch = &pb.BankConfig{}
 	}
@@ -107,18 +107,6 @@ func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask) (bank.Config
 			return domain.BankConfig{}, err //nolint:wrapcheck // config errors are already domain error classes
 		}
 		return out, nil
-	}, nil
-}
-
-// resetPatch builds the ConfigPatch of ResetBankConfig: the paths go back to unset (inherit); "*" resets
-// everything and no paths at all is domain.ErrInvalidArgument (config.ResetPaths). The paths are checked
-// before the patch runs.
-func resetPatch(paths []string) (bank.ConfigPatch, error) {
-	if _, err := config.ResetPaths(domain.BankConfig{}, paths); err != nil {
-		return nil, err //nolint:wrapcheck // config errors are already domain error classes
-	}
-	return func(cur domain.BankConfig) (domain.BankConfig, error) {
-		return config.ResetPaths(cur, paths) //nolint:wrapcheck // config errors are already domain error classes
 	}, nil
 }
 

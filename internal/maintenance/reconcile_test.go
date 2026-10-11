@@ -2,6 +2,7 @@ package maintenance
 
 import (
 	"context"
+	"memd/internal/bank"
 	"memd/internal/domain"
 	"memd/internal/jobs"
 	"memd/internal/store"
@@ -38,8 +39,9 @@ func TestMaintenanceResumesStalledBankDelete(t *testing.T) {
 	}
 	ops.markDeleting(bankC)
 	ops.ageHeartbeats(jobs.DefaultStaleAfter + time.Second)
+	banks := bank.New(bank.Deps{DB: ops, Maintenance: ops, Clock: clock})
 	deps := New(Deps{
-		Claimer: ops, Store: ops, Clock: clock, Logger: quiet, Deletes: ops,
+		Claimer: ops, Store: ops, Clock: clock, Logger: quiet, Banks: banks,
 	})
 	for range 3 {
 		if err := deps.tick(context.Background()); err != nil {

@@ -3,8 +3,7 @@ package grpcapi
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/jobs"
-	"memd/internal/store"
+	"memd/internal/operation"
 
 	pb "memd/gen/memory/v1"
 )
@@ -12,27 +11,11 @@ import (
 // OperationHandler serves memory.v1.OperationService.
 type OperationHandler struct {
 	pb.UnimplementedOperationServiceServer
-	// Operations serves GetOperation, ListOperations and ListEvents.
-	Operations OperationReader
-	// Control serves CancelOperation and RetryOperation.
-	Control jobs.OperationControl
+	// Operations serves every OperationService RPC.
+	Operations *operation.Service
 }
 
 var _ pb.OperationServiceServer = (*OperationHandler)(nil)
-
-// OperationReader reads a bank's operations and lifecycle events; an unknown or deleting bank is
-// domain.ErrNotFound.
-type OperationReader interface {
-	// GetOperation returns one operation of b; unknown = domain.ErrNotFound.
-	GetOperation(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
-	// ListOperations pages the bank's operations, newest first, and returns the next page token.
-	ListOperations(ctx context.Context, b domain.BankRef, f store.OperationFilter) ([]domain.Operation, string, error)
-	// ListEvents returns events with seq > afterSeq (types empty = all) and the last seq scanned. A limit of 0 or
-	// less is 100 and any limit is capped at 1000.
-	ListEvents(
-		ctx context.Context, b domain.BankRef, afterSeq int64, limit int, types []domain.EventType,
-	) ([]domain.LifecycleEvent, int64, error)
-}
 
 // GetOperation returns one operation of the bank.
 func (h *OperationHandler) GetOperation(
@@ -76,7 +59,7 @@ func (h *OperationHandler) CancelOperation(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	op, err := h.Control.Cancel(ctx, b, id)
+	op, err := h.Operations.CancelOperation(ctx, b, id)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -91,7 +74,7 @@ func (h *OperationHandler) RetryOperation(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	op, err := h.Control.Retry(ctx, b, id)
+	op, err := h.Operations.RetryOperation(ctx, b, id)
 	if err != nil {
 		return nil, toStatus(err)
 	}

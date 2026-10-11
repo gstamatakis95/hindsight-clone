@@ -2,13 +2,10 @@ package main
 
 import (
 	"memd/internal/grpcapi"
-	"memd/internal/jobs"
+	"memd/internal/operation"
 )
 
-// wireOperations builds the operation area: OperationService (operation reads and events through operationReader in
-// glue.go, and operation control: cancel, retry).
+// wireOperations builds operation.Service: it serves OperationService (operation and event reads, cancel, retry).
 func wireOperations(c core, d *deps) {
-	d.api.Operation = &grpcapi.OperationHandler{
-		Operations: &operationReader{s: c.db}, Control: jobs.NewOperationControl(c.db),
-	}
+	d.api.Operation = &grpcapi.OperationHandler{Operations: operation.New(operation.Deps{DB: c.db})}
 }

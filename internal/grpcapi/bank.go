@@ -3,9 +3,9 @@ package grpcapi
 import (
 	"context"
 	"fmt"
-	"memd/internal/config"
+	"memd/internal/bank"
+	"memd/internal/configsvc"
 	"memd/internal/domain"
-	"memd/internal/engine/bank"
 
 	pb "memd/gen/memory/v1"
 )
@@ -13,20 +13,11 @@ import (
 // BankHandler serves memory.v1.BankService.
 type BankHandler struct {
 	pb.UnimplementedBankServiceServer
-	// Banks serves CreateBank, GetBank, GetBankConfig (overrides), UpdateBankConfig and ResetBankConfig.
-	Banks bank.BankAdmin
-	// Config resolves GetBankConfig's effective view.
-	Config *config.Resolver
-	// Stats serves GetBankStats and ListTags.
-	Stats bank.StatsReader
-	// Previewer serves PreviewPrompt.
-	Previewer bank.PromptPreviewer
-	// Deleter serves DeleteBank (the tombstone).
-	Deleter bank.BankDeleter
-	// Templates serves ExportBankTemplate and CreateBankFromTemplate.
-	Templates bank.TemplateCodec
-	// Directives serves UpsertDirective, ListDirectives and DeleteDirective.
-	Directives bank.DirectiveAdmin
+	// Banks serves CreateBank, CreateBankFromTemplate, GetBank, DeleteBank, GetBankStats, ListTags and
+	// ExportBankTemplate.
+	Banks *bank.Service
+	// Config serves GetBankConfig, UpdateBankConfig, ResetBankConfig, PreviewPrompt and the directive RPCs.
+	Config *configsvc.Service
 }
 
 var _ pb.BankServiceServer = (*BankHandler)(nil)
@@ -45,7 +36,7 @@ func (h *BankHandler) CreateBank(ctx context.Context, req *pb.CreateBankRequest)
 		return nil, toStatus(err)
 	}
 	in.Ref = b
-	out, err := h.Banks.CreateBank(ctx, in)
+	out, _, err := h.Banks.CreateBank(ctx, bank.CreateRequest{Bank: in})
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -73,16 +64,12 @@ func (h *BankHandler) GetBankConfig(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	bk, err := h.Banks.GetBank(ctx, b)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	resolved, err := h.Config.Effective(ctx, b)
+	view, err := h.Config.GetBankConfig(ctx, b)
 	if err != nil {
 		return nil, toStatus(err)
 	}
 	return &pb.GetBankConfigResponse{
-		Resolved: configValueToProto(resolved), Overrides: configValueToProto(bk.Config),
+		Resolved: configValueToProto(view.Effective), Overrides: configValueToProto(view.Own),
 	}, nil
 }
 
@@ -99,7 +86,7 @@ func (h *BankHandler) UpdateBankConfig(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Banks.UpdateBankConfig(ctx, b, patch)
+	out, err := h.Config.UpdateBankConfig(ctx, b, patch)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -114,11 +101,7 @@ func (h *BankHandler) ResetBankConfig(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	patch, err := resetPatch(req.GetPaths())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	out, err := h.Banks.UpdateBankConfig(ctx, b, patch)
+	out, err := h.Config.ResetBankConfig(ctx, b, req.GetPaths())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -131,7 +114,7 @@ func (h *BankHandler) GetBankStats(ctx context.Context, req *pb.GetBankStatsRequ
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Stats.Stats(ctx, b)
+	out, err := h.Banks.GetBankStats(ctx, b)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -149,7 +132,7 @@ func (h *BankHandler) ListTags(ctx context.Context, req *pb.ListTagsRequest) (*p
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	out, err := h.Stats.Tags(ctx, in)
+	out, err := h.Banks.ListTags(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -175,7 +158,7 @@ func (h *BankHandler) PreviewPrompt(
 	if overrides != nil {
 		o = *overrides
 	}
-	out, err := h.Previewer.Preview(ctx, b, op, o)
+	out, err := h.Config.PreviewPrompt(ctx, b, op, o)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -188,7 +171,7 @@ func (h *BankHandler) DeleteBank(ctx context.Context, req *pb.DeleteBankRequest)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	op, err := h.Deleter.Tombstone(ctx, b)
+	op, err := h.Banks.DeleteBank(ctx, b)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -203,7 +186,7 @@ func (h *BankHandler) ExportBankTemplate(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Templates.Export(ctx, b)
+	out, err := h.Banks.ExportBankTemplate(ctx, b)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -230,7 +213,9 @@ func (h *BankHandler) CreateBankFromTemplate(
 			return nil, toStatus(err)
 		}
 	}
-	out, builds, err := h.Templates.CreateNamed(ctx, b, req.GetName(), t)
+	out, builds, err := h.Banks.CreateBank(ctx, bank.CreateRequest{
+		Bank: domain.Bank{Ref: b, Name: req.GetName()}, Template: &t,
+	})
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -254,7 +239,7 @@ func (h *BankHandler) UpsertDirective(
 	}
 	in := upsertDirectiveFromProto(req)
 	in.Bank = b
-	out, err := h.Directives.UpsertDirective(ctx, in)
+	out, err := h.Config.UpsertDirective(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -269,7 +254,7 @@ func (h *BankHandler) ListDirectives(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Directives.ListDirectives(ctx, b, req.GetTags(), req.GetActiveOnly())
+	out, err := h.Config.ListDirectives(ctx, b, req.GetTags(), req.GetActiveOnly())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -287,7 +272,7 @@ func (h *BankHandler) DeleteDirective(
 	if err := requireID("directive_id", req.GetDirectiveId()); err != nil {
 		return nil, toStatus(err)
 	}
-	if err := h.Directives.DeleteDirective(ctx, b, domain.DirectiveID(req.GetDirectiveId())); err != nil {
+	if err := h.Config.DeleteDirective(ctx, b, domain.DirectiveID(req.GetDirectiveId())); err != nil {
 		return nil, toStatus(err)
 	}
 	return &pb.DeleteDirectiveResponse{}, nil

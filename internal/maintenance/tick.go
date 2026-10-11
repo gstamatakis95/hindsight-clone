@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"memd/internal/bank"
 	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/jobs"
@@ -80,8 +81,8 @@ type Deps struct {
 	Store store.DB
 	// Clock dates the cut-offs and the graph budget; nil = the system clock.
 	Clock clock.Clock
-	// Deletes lists tombstoned banks whose delete_bank stopped (StalledBankDeletes).
-	Deletes store.Maintenance
+	// Banks re-enqueues the stopped deletes of tombstoned banks (bank.Service.ResumeStalledDeletes).
+	Banks *bank.Service
 	// Graph lists banks with graph maintenance queued (BanksWithGraphWork).
 	Graph store.Maintenance
 	// Memory re-queues the rederives of stranded facts and settles finished retain_batch parents.
@@ -251,19 +252,18 @@ func (s *Service) reconcileConsolidation(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// resumeBankDeletes re-enqueues delete_bank for every tombstoned bank whose delete stopped (decision 2001):
-// ReclaimStale and the shutdown release charge attempts and fail delete_bank at its cap with no
-// continuation, which would leave the bank tombstoned forever. jobs.EnqueueDeleteBank joins a delete_bank
-// another tick inserted meanwhile; a bank whose delete just finished is skipped.
+// resumeBankDeletes re-enqueues delete_bank for every tombstoned bank whose delete stopped
+// (bank.Service.ResumeStalledDeletes): ReclaimStale and the shutdown release fail delete_bank at its cap with
+// no continuation, which would leave the bank tombstoned forever.
 func (s *Service) resumeBankDeletes(ctx context.Context) (int, error) {
-	if s.d.Deletes == nil {
+	if s.d.Banks == nil {
 		return 0, nil
 	}
-	banks, err := s.d.Deletes.StalledBankDeletes(ctx)
+	n, err := s.d.Banks.ResumeStalledDeletes(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("list stalled bank deletes: %w", err)
+		return n, fmt.Errorf("resume bank deletes: %w", err)
 	}
-	return s.enqueueEach(ctx, banks, jobs.EnqueueDeleteBank)
+	return n, nil
 }
 
 // reconcileGraph enqueues graph_maintenance for every bank with graph_dirty or entity_maintenance rows
@@ -289,9 +289,8 @@ func gone(err error) bool {
 type enqueueFunc func(ctx context.Context, tx store.Tx, b domain.BankRef) (domain.OperationID, bool, error)
 
 // enqueueEach enqueues (or joins) a bank's automatic job with enqueue for every bank, one short transaction
-// each, and returns how many it inserted. It takes no change seq: nothing here is memory content, and Seq
-// refuses a tombstoned bank, which the delete resume must still reach. A bank being deleted (or gone) is
-// skipped; other errors don't stop the rest.
+// each, and returns how many it inserted. It takes no change seq: nothing here is memory content. A bank being
+// deleted (or gone) is skipped; other errors don't stop the rest.
 func (s *Service) enqueueEach(ctx context.Context, banks []domain.BankRef, enqueue enqueueFunc) (int, error) {
 	inserted := 0
 	var errs []error

@@ -1,11 +1,14 @@
 package main
 
 import (
-	"memd/internal/engine/bank"
+	"memd/internal/configsvc"
 	"memd/internal/grpcapi"
 )
 
-// wireConfig builds the config area: TenantService (the tenant-level config).
+// wireConfig builds configsvc.Service: it serves TenantService and BankService's config, directive and prompt
+// preview RPCs. It runs after wireBanks, which builds the BankHandler.
 func wireConfig(c core, d *deps) {
-	d.api.Tenant = &grpcapi.TenantHandler{Tenants: bank.NewTenantAdmin(c.db)}
+	svc := configsvc.New(configsvc.Deps{DB: c.db, Config: c.resolver})
+	d.api.Tenant = &grpcapi.TenantHandler{Config: svc}
+	d.api.Bank.Config = svc
 }
