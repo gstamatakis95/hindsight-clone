@@ -20,8 +20,8 @@ type rrf struct{}
 
 var _ Fuser = rrf{}
 
-// NewRRF returns the reciprocal-rank-fusion Fuser.
-func NewRRF() Fuser { return rrf{} }
+// newRRF returns the reciprocal-rank-fusion Fuser.
+func newRRF() Fuser { return rrf{} }
 
 // armOrder is the fixed order arms are summed in, so float sums and ties are deterministic.
 var armOrder = []string{ArmSemantic, ArmKeyword, ArmGraph, ArmTemporal}
@@ -35,13 +35,13 @@ func (rrf) Fuse(lists map[string][]Candidate, k int) []Candidate {
 	var order []*Candidate
 	for _, arm := range orderedArms(lists) {
 		for i, c := range lists[arm] {
-			s := ArmScore{Rank: i + 1}
+			s := armScore{Rank: i + 1}
 			if a, ok := c.Arms[arm]; ok {
 				s = a
 			}
 			m, ok := byID[string(c.ID)]
 			if !ok {
-				m = &Candidate{ID: c.ID, Unit: c.Unit, Arms: map[string]ArmScore{}}
+				m = &Candidate{ID: c.ID, Unit: c.Unit, Arms: map[string]armScore{}}
 				byID[string(c.ID)] = m
 				order = append(order, m)
 			}

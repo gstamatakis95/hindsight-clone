@@ -15,18 +15,18 @@
 // Constructors return the concrete *Store; cmd/memd/wire.go, the only composition root, narrows it to port.Store and
 // port.Claimer, and to the worker's own consumer interfaces for the non-port methods listed below.
 //
-//	store, closePool, err := postgres.Open(ctx, dsn) // or postgres.New(pool) over a caller-owned pool
-//	err = store.InTx(ctx, func(tx port.Tx) error {
+//	store := postgres.New(pool) // over a caller-owned pool
+//	err := store.InTx(ctx, func(tx port.Tx) error {
 //		seq, err := tx.Seq(ctx, bank) // locks the bank row until commit
 //		...                           // writes stamped with seq
 //	})
 //	hits, err := store.Read().SearchVector(ctx, q) // each Read() call is its own statement
 //
-// [New] wraps a pool the caller owns and closes; [Open] connects a pool to a DSN, pings it and returns its Close. The
-// pool needs at least two connections: Store.Read never waits on an open transaction. In production cmd/memd sizes the
-// pool (MEMD_DB_MAX_CONNS, default max(2*MEMD_WORKER_SLOTS+16, 32)) and, when Datadog is enabled, installs the pgx
-// query tracer from internal/observability on the pool config; this package itself reads no environment variables and
-// imports nothing from Datadog.
+// [New] wraps a pool the caller owns and closes. The pool needs at least two connections: Store.Read never waits on
+// an open transaction. In production cmd/memd sizes the pool (MEMD_DB_MAX_CONNS, default
+// max(2*MEMD_WORKER_SLOTS+16, 32)) and, when Datadog is enabled, installs the pgx query tracer from
+// internal/observability on the pool config; this package itself reads no environment variables and imports nothing
+// from Datadog.
 //
 // # Transactions
 //

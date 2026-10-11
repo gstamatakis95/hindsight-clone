@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// ParsedQuery is a recall request after parsing: what every Retriever and the Scorer read.
-type ParsedQuery struct {
+// parsedQuery is a recall request after parsing: what every Retriever and the Scorer read.
+type parsedQuery struct {
 	// Bank is the bank searched.
 	Bank port.BankRef
 	// Text is the query text, cut to MaxQueryTokens.
@@ -47,16 +47,16 @@ type parseDeps struct {
 	count    TokenCounter
 }
 
-// parse validates req and builds the ParsedQuery under the effective config cfg: query cut to
+// parse validates req and builds the parsedQuery under the effective config cfg: query cut to
 // MaxQueryTokens, reference time, fact types, time window (explicit, else timex, which calls TIME_PARSE only
 // for a cue its rules can't resolve), compiled tag filter, per-arm limit and query embedding.
-func parse(ctx context.Context, req RecallRequest, cfg domain.BankConfig, d parseDeps) (*ParsedQuery, error) {
+func parse(ctx context.Context, req RecallRequest, cfg domain.BankConfig, d parseDeps) (*parsedQuery, error) {
 	text := strings.TrimSpace(req.Query)
 	if text == "" {
 		return nil, fmt.Errorf("%w: recall: query is empty", domain.ErrInvalidArgument)
 	}
 	text = truncateTokens(text, MaxQueryTokens, d.count)
-	q := &ParsedQuery{
+	q := &parsedQuery{
 		Bank: req.Bank, Text: text, Types: factTypes(req.Types), Tags: req.Tags,
 		MinScores: req.MinScores, Seq: req.Seq, Config: cfg, At: d.clock.Now(),
 	}
@@ -67,7 +67,7 @@ func parse(ctx context.Context, req RecallRequest, cfg domain.BankConfig, d pars
 	if cfg.Recall != nil {
 		rc = *cfg.Recall
 	}
-	q.Limit = BudgetLimit(rc, req.Budget, req.MaxTokens)
+	q.Limit = budgetLimit(rc, req.Budget, req.MaxTokens)
 	pred, err := d.tags.Compile(ctx, req.Bank, req.Tags, settingsOf(cfg).fuzzyMinSimilarity)
 	if err != nil {
 		return nil, fmt.Errorf("recall: tags: %w", err)

@@ -77,7 +77,7 @@ func withPath(t *testing.T, path string) domain.BankConfig {
 	var cfg domain.BankConfig
 	f := fieldAt(reflect.ValueOf(&cfg).Elem(), idx, true)
 	f.Set(someValue(f.Type()))
-	if got := SetPaths(cfg); len(got) != 1 || got[0] != path {
+	if got := setPaths(cfg); len(got) != 1 || got[0] != path {
 		t.Fatalf("withPath(%q) sets %v", path, got)
 	}
 	return cfg
@@ -120,7 +120,7 @@ func allowedPath(prefixes []string, p string) bool {
 // TestValidateOverridesPathMatrix checks every leaf path against every RPC.
 func TestValidateOverridesPathMatrix(t *testing.T) {
 	for rpc, exp := range expected {
-		for _, p := range LeafPaths() {
+		for _, p := range leafPaths() {
 			if p == "models" {
 				continue
 			}
@@ -166,7 +166,7 @@ func TestValidateOverridesSlotMatrix(t *testing.T) {
 
 // TestValidateOverridesBankConfigAllowsEveryPath: config-level writes accept every field.
 func TestValidateOverridesBankConfigAllowsEveryPath(t *testing.T) {
-	for _, p := range LeafPaths() {
+	for _, p := range leafPaths() {
 		if p == "models" {
 			continue
 		}

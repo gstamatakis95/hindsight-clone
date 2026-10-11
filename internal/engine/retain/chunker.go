@@ -17,17 +17,17 @@ type TokenCounter interface {
 	Count(text string) int
 }
 
-// ApproxTokens is the default TokenCounter: about four characters per token, rounded up. It stands in until a
+// approxTokens is the default TokenCounter: about four characters per token, rounded up. It stands in until a
 // real tokenizer is wired (decision 803).
-type ApproxTokens struct{}
+type approxTokens struct{}
 
-var _ TokenCounter = ApproxTokens{}
+var _ TokenCounter = approxTokens{}
 
 // Count returns ceil(runes / 4).
-func (ApproxTokens) Count(text string) int { return (utf8.RuneCountInString(text) + 3) / 4 }
+func (approxTokens) Count(text string) int { return (utf8.RuneCountInString(text) + 3) / 4 }
 
-// ChunkOptions sizes chunks in tokens.
-type ChunkOptions struct {
+// chunkOptions sizes chunks in tokens.
+type chunkOptions struct {
 	// MaxTokens is the chunk budget; 0 = DefaultChunkMaxTokens.
 	MaxTokens int
 	// OverlapTokens repeats about this many trailing tokens of a plain-text chunk at the start of the next.
@@ -40,20 +40,15 @@ type ChunkOptions struct {
 // separators are tried in order by the plain-text splitter (Hindsight's sentence-aware split).
 var separators = []string{"\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ", ""}
 
-// Chunk splits text into chunks of at most maxTokens tokens (see ChunkWith).
-func Chunk(text string, maxTokens, overlap int, count TokenCounter) []domain.Chunk {
-	return ChunkWith(text, ChunkOptions{MaxTokens: maxTokens, OverlapTokens: overlap}, count)
-}
-
-// ChunkWith splits text into indexed chunks, each with the SHA-256 of its text and its token count. Text
+// chunkWith splits text into indexed chunks, each with the SHA-256 of its text and its token count. Text
 // within the budget is one chunk. A JSON array of objects (a chat) is cut between turns and JSONL between
 // lines, so a turn or line is never split unless it alone exceeds StructuredMaxTokens; a single JSON object
 // stays whole up to StructuredMaxTokens. Anything else is split at the most preferred separator present
 // (paragraph, line, sentence, clause, word, character) and packed greedily. Blank text has no chunks.
-// count nil = ApproxTokens.
-func ChunkWith(text string, o ChunkOptions, count TokenCounter) []domain.Chunk {
+// count nil = approxTokens.
+func chunkWith(text string, o chunkOptions, count TokenCounter) []domain.Chunk {
 	if count == nil {
-		count = ApproxTokens{}
+		count = approxTokens{}
 	}
 	if o.MaxTokens <= 0 {
 		o.MaxTokens = DefaultChunkMaxTokens
@@ -70,7 +65,7 @@ func ChunkWith(text string, o ChunkOptions, count TokenCounter) []domain.Chunk {
 }
 
 // chunkTexts picks the chunking strategy for text's shape.
-func chunkTexts(text string, o ChunkOptions, count TokenCounter) []string {
+func chunkTexts(text string, o chunkOptions, count TokenCounter) []string {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
@@ -140,7 +135,7 @@ func jsonlLines(text string) ([]string, bool) {
 // chunk: open + units joined with sep + closing. A unit whose wrapped form is over o.StructuredMaxTokens is
 // split as text within min(StructuredMaxTokens, MaxTokens); one between the two budgets is kept whole as its
 // own overflow chunk.
-func packStructured(units []string, open, sep, closing string, o ChunkOptions, count TokenCounter) []string {
+func packStructured(units []string, open, sep, closing string, o chunkOptions, count TokenCounter) []string {
 	var out, cur []string
 	wrap := func(us []string) string { return open + strings.Join(us, sep) + closing }
 	flush := func() {
@@ -167,7 +162,7 @@ func packStructured(units []string, open, sep, closing string, o ChunkOptions, c
 // splitRecursive is Hindsight's sentence-aware split: cut text at the first separator present, pack the
 // pieces greedily within maxTokens and recurse with the remaining separators into any piece still over
 // budget. Chunks are whitespace-trimmed; empty ones are dropped. The budget is checked on the joined buffer:
-// size sums the pieces' counts as an upper bound (a subadditive counter such as ApproxTokens never counts
+// size sums the pieces' counts as an upper bound (a subadditive counter such as approxTokens never counts
 // joined text higher than its parts) and is replaced by the exact count of the buffer whenever the sum
 // passes maxTokens, so packing stays linear-ish even when splitting into single characters.
 func splitRecursive(text string, maxTokens int, seps []string, count TokenCounter) []string {

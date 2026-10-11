@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"memd/internal/engine/curate"
 	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
@@ -19,13 +18,6 @@ var _ pb.MemoryUnitServiceServer = (*memoryUnitServer)(nil)
 
 // newMemoryUnitServer returns the MemoryUnitService server over d.
 func newMemoryUnitServer(d Deps) *memoryUnitServer { return &memoryUnitServer{d: d} }
-
-// NewMemoryUnitServer returns the MemoryUnitService server over the lister and the curator.
-//
-//nolint:ireturn // signature fixed by docs/SPEC.md (internal/server).
-func NewMemoryUnitServer(l curate.MemoryLister, c curate.Curator) pb.MemoryUnitServiceServer {
-	return newMemoryUnitServer(Deps{Lister: l, Curator: c})
-}
 
 // unitRef resolves the bank and a required unit id field of a request.
 func unitRef(ctx context.Context, bankID, field, id string) (port.BankRef, port.UnitID, error) {

@@ -28,7 +28,7 @@ func TestServerDefaultsStillValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("defaults written as a level: %v", err)
 	}
-	if !reflect.DeepEqual(config.SetPaths(got), config.SetPaths(defaults)) || len(got.Models) != len(defaults.Models) {
-		t.Fatalf("written defaults differ:\n got  %v\n want %v", config.SetPaths(got), config.SetPaths(defaults))
+	if !reflect.DeepEqual(got, defaults) {
+		t.Fatalf("written defaults differ:\n got  %+v\n want %+v", got, defaults)
 	}
 }

@@ -9,11 +9,11 @@ import (
 // ratios (0.025 / 0.075 / 0.25 of max_tokens) were chosen to match 100 / 300 / 1000 at 4096 tokens.
 const adaptiveReference = 4096
 
-// BudgetLimit returns the per-arm candidate limit for budget b (unspecified = MID). The fixed function returns
+// budgetLimit returns the per-arm candidate limit for budget b (unspecified = MID). The fixed function returns
 // budget_low / budget_mid / budget_high (default 100 / 300 / 1000) as configured. The adaptive function scales
 // that level by maxTokens / 4096 (maxTokens <= 0 = DefaultMaxTokens) and clamps the result to
 // [budget_min, budget_max] (default [20, 2000]). The result is at least 1.
-func BudgetLimit(cfg domain.RecallConfig, b domain.Budget, maxTokens int) int {
+func budgetLimit(cfg domain.RecallConfig, b domain.Budget, maxTokens int) int {
 	level := budgetLevel(cfg, b)
 	if cfg.BudgetFunction != domain.BudgetFunctionAdaptive {
 		return max(level, 1)

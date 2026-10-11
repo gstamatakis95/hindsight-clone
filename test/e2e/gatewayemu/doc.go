@@ -22,8 +22,7 @@
 //   - a structured call by its json_schema name, which is the prompt template name;
 //   - a chat that offers tools as [OpReflectLoop] (a reflect or agentic-refresh turn);
 //   - a tool-less chat by its model: memd binds every slot to "emu-<slot>" ([ModelPrefix], [ModelFor]), so emu-reflect
-//     is [OpReflectFinal], emu-synthesize [OpSynthesize] and emu-mental_model_delta [OpMarkdownDelta]; any other model
-//     is [OpChat];
+//     is [OpReflectFinal] and emu-synthesize [OpSynthesize]; any other model is [OpChat];
 //   - /embeddings and /rerank as [OpEmbeddings] and [OpRerank].
 //
 // The data a reply needs is recovered from the rendered prompts by their structural markers (the chunk after the

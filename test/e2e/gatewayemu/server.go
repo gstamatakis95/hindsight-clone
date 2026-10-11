@@ -37,8 +37,6 @@ const (
 	OpReflectFinal = "reflect_final"
 	// OpSynthesize is the single-shot SYNTHESIZE chat (model ModelFor("synthesize")).
 	OpSynthesize = "synthesize"
-	// OpMarkdownDelta is the markdown MENTAL_MODEL_DELTA chat (model ModelFor("mental_model_delta")).
-	OpMarkdownDelta = "markdown_delta"
 	// OpChat is a plain chat whose model names no known slot; it gets a quoting answer.
 	OpChat = "chat"
 )

@@ -142,7 +142,7 @@ func previewRetain(cfg domain.BankConfig) (domain.PromptPreview, error) {
 	}
 	data := prompts.ExtractData{
 		CustomPrompt:     cfg.CustomExtractionPrompt,
-		CausalLinks:      cfg.Retain != nil && deref(cfg.Retain.ExtractCausalLinks, false),
+		CausalLinks:      cfg.Retain == nil || deref(cfg.Retain.ExtractCausalLinks, true),
 		FreeFormEntities: deref(cfg.EntitiesAllowFreeForm, true),
 		Labels:           cfg.EntityLabels,
 		Mission:          cfg.RetainMission,

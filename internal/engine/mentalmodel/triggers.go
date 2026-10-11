@@ -6,23 +6,16 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
-	"slices"
 	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
 )
 
-// Triggers enqueues automatic refreshes: after consolidation, on retracted sources and on cron schedules.
-// Each refresh goes through the RefreshScheduler (paused and fresh models are skipped; the rest are parked
-// for the debounce or interval floor) and is enqueued in its own short transaction, joining a queued one.
+// Triggers enqueues automatic refreshes on cron schedules (the consolidation job enqueues its own refreshes).
+// Each refresh goes through the RefreshScheduler (paused and fresh models are skipped; the rest are parked for
+// the debounce or interval floor) and is enqueued in its own short transaction, joining a queued one.
 type Triggers interface {
-	// AfterConsolidation refreshes b's stale models whose trigger sets refresh_after_consolidation, and
-	// returns how many refreshes it inserted (joins excluded).
-	AfterConsolidation(ctx context.Context, b port.BankRef) (int, error)
-	// Retracted refreshes b's models whose source_ids include any of ids (invalidated or replaced units),
-	// and returns how many refreshes it inserted.
-	Retracted(ctx context.Context, b port.BankRef, ids []port.UnitID) (int, error)
 	// EnqueueDueCronRefreshes enqueues one refresh per model whose refresh_cron has an unserved fire
 	// time F in (now - cronGrace, now]: no refresh operation of the model was created at or after F, and
 	// F is not before the model's creation. Paused and fresh models and tombstoned banks are skipped; it
@@ -39,8 +32,6 @@ type TriggerDeps struct {
 	Store port.Store
 	// Scheduler decides run now, park or skip.
 	Scheduler RefreshScheduler
-	// Models lists a bank's models.
-	Models ModelLister
 	// Cron finds models with a cron schedule; nil disables cron refreshes.
 	Cron CronSource
 	// Clock is the trigger time.
@@ -92,30 +83,6 @@ func parseCron(expr string) (cron.Schedule, error) {
 		return nil, fmt.Errorf("mentalmodel: cron %q: %w", expr, err)
 	}
 	return sched, nil
-}
-
-// AfterConsolidation lists the bank's refresh_after_consolidation models and triggers each.
-func (t *triggers) AfterConsolidation(ctx context.Context, b port.BankRef) (int, error) {
-	models, err := t.list(ctx, ModelQuery{Bank: b, RefreshAfterConsolidation: true})
-	if err != nil {
-		return 0, err
-	}
-	return t.triggerAll(ctx, models)
-}
-
-// Retracted lists the bank's models and triggers those citing any of ids.
-func (t *triggers) Retracted(ctx context.Context, b port.BankRef, ids []port.UnitID) (int, error) {
-	models, err := t.list(ctx, ModelQuery{Bank: b})
-	if err != nil {
-		return 0, err
-	}
-	var citing []domain.MentalModel
-	for _, m := range models {
-		if slices.ContainsFunc(m.SourceIDs, func(id port.UnitID) bool { return slices.Contains(ids, id) }) {
-			citing = append(citing, m)
-		}
-	}
-	return t.triggerAll(ctx, citing)
 }
 
 // EnqueueDueCronRefreshes triggers every cron model whose latest fire time in the grace window is unserved.
@@ -183,7 +150,7 @@ func (t *triggers) trigger(ctx context.Context, m domain.MentalModel) (bool, err
 	if err != nil {
 		return false, fmt.Errorf("mentalmodel: decide: %w", err)
 	}
-	if dec.Kind == DecisionSkip {
+	if dec.Kind == decisionSkip {
 		return false, nil
 	}
 	var joined bool
@@ -196,11 +163,6 @@ func (t *triggers) trigger(ctx context.Context, m domain.MentalModel) (bool, err
 		return err
 	})
 	return err == nil && !joined, err
-}
-
-// list reads every page of q.
-func (t *triggers) list(ctx context.Context, q ModelQuery) ([]domain.MentalModel, error) {
-	return listAll(ctx, t.d.Models, q)
 }
 
 // listAll reads every page of q from l.

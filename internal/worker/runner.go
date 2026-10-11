@@ -34,7 +34,7 @@ const (
 	claimTimeout = 10 * time.Second
 )
 
-// Handler runs one job kind. Return ErrRetryAt to reschedule, ErrPermanent to fail with no retry.
+// Handler runs one job kind. Return ErrPermanent to fail with no retry; any other error retries.
 type Handler func(ctx context.Context, j port.Job) error
 
 // Job outcomes passed to a JobTraceFunc's finish func.

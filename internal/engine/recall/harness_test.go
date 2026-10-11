@@ -40,13 +40,13 @@ func (wordCounter) Count(s string) int { return len(strings.Fields(s)) }
 type stubArm struct {
 	name   string
 	hits   []port.Hit
-	seen   *ParsedQuery
+	seen   *parsedQuery
 	called int
 }
 
 func (a *stubArm) Name() string { return a.name }
 
-func (a *stubArm) Retrieve(_ context.Context, q *ParsedQuery) ([]Candidate, error) {
+func (a *stubArm) Retrieve(_ context.Context, q *parsedQuery) ([]Candidate, error) {
 	a.seen, a.called = q, a.called+1
 	return candidates(a.name, a.hits, q.Limit), nil
 }

@@ -61,17 +61,6 @@ SELECT id FROM mental_models
 WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND source_ids && @ids::uuid[]
 ORDER BY id COLLATE "C";
 
--- BanksToConsolidate returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact with an embedding (the §0 predicate as in ScopeUnconsolidated, over the same partial index, plus embedding IS NOT NULL per decision 1500).
--- name: BanksToConsolidate :many
-SELECT b.tenant_id, b.id FROM banks b
-WHERE b.deleting_at IS NULL AND EXISTS (
-    SELECT 1 FROM memory_units u
-    WHERE u.tenant_id = b.tenant_id AND u.bank_id = b.id
-      AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
-      AND u.embedding IS NOT NULL
-)
-ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C";
-
 -- EvidenceCitingScopes returns, in byte order, the distinct scope keys of the bank's live observations citing any of the units.
 -- name: EvidenceCitingScopes :many
 SELECT o.scope_key::text AS scope_key FROM memory_units o

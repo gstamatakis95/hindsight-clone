@@ -27,7 +27,7 @@ func TestFuseRRFOrder(t *testing.T) {
 		ArmKeyword:  list(ArmKeyword, "b", "c", "d"),
 		ArmGraph:    list(ArmGraph, "d"),
 	}
-	got := NewRRF().Fuse(lists, 60)
+	got := newRRF().Fuse(lists, 60)
 	// b = 1/61+1/62, d = 1/63+1/61, c = 1/63+1/62, a = 1/61.
 	if want := []port.UnitID{"b", "d", "c", "a"}; !slices.Equal(fusedIDs(got), want) {
 		t.Fatalf("order = %v, want %v", fusedIDs(got), want)
@@ -39,7 +39,7 @@ func TestFuseRRFOrder(t *testing.T) {
 		t.Fatalf("arms of b = %+v", b)
 	}
 	// k <= 0 means 60; ties keep first-seen order (semantic before keyword), not id order.
-	tie := NewRRF().Fuse(map[string][]Candidate{
+	tie := newRRF().Fuse(map[string][]Candidate{
 		ArmSemantic: list(ArmSemantic, "y"), ArmKeyword: list(ArmKeyword, "x"),
 	}, 0)
 	if want := []port.UnitID{"y", "x"}; !slices.Equal(fusedIDs(tie), want) || tie[0].RRF != 1.0/61 {
@@ -52,7 +52,7 @@ func TestFuseStrategyBoostRankSpace(t *testing.T) {
 		ArmSemantic: list(ArmSemantic, "a", "b"),
 		ArmKeyword:  list(ArmKeyword, "c", "d"),
 	}
-	fused := NewRRF().Fuse(lists, 60)
+	fused := newRRF().Fuse(lists, 60)
 	if want := []port.UnitID{"a", "c", "b", "d"}; !slices.Equal(fusedIDs(fused), want) {
 		t.Fatalf("fused = %v, want %v", fusedIDs(fused), want)
 	}

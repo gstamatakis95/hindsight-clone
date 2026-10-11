@@ -57,7 +57,7 @@ func TestSelectDirectives(t *testing.T) {
 }
 
 func TestValidCitations(t *testing.T) {
-	st := &AgentState{
+	st := &agentState{
 		RetrievedUnits:  map[port.UnitID]domain.Unit{"u1": {ID: "u1"}, "o1": {ID: "o1"}},
 		RetrievedModels: map[port.MentalModelID]struct{}{"mm": {}},
 	}

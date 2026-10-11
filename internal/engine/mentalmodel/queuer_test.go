@@ -88,12 +88,12 @@ type emptySynth struct{}
 
 func (emptySynth) Strategy() domain.RefreshStrategy { return domain.RefreshStrategySingleShot }
 
-func (emptySynth) Full(context.Context, domain.MentalModel, domain.BankConfig, int64) (Draft, error) {
-	return Draft{}, ErrNoNewFacts
+func (emptySynth) Full(context.Context, domain.MentalModel, domain.BankConfig, int64) (draft, error) {
+	return draft{}, ErrNoNewFacts
 }
 
-func (emptySynth) Delta(_ context.Context, m domain.MentalModel, _ domain.BankConfig, _ int64) (DeltaDraft, error) {
-	return DeltaDraft{ContentMD: m.ContentMD}, ErrNoNewFacts
+func (emptySynth) Delta(_ context.Context, m domain.MentalModel, _ domain.BankConfig, _ int64) (deltaDraft, error) {
+	return deltaDraft{ContentMD: m.ContentMD}, ErrNoNewFacts
 }
 
 // TestFullWithNothingDraftedKeepsLiveSources checks that a full run that drafts nothing keeps the content

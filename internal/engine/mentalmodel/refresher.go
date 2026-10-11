@@ -105,15 +105,15 @@ type Synthesizer interface {
 	// Strategy is the refresh strategy the synthesizer implements.
 	Strategy() domain.RefreshStrategy
 	// Full writes the document from everything in scope with seq <= upTo.
-	Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (Draft, error)
+	Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (draft, error)
 	// Delta proposes edit ops for what changed in scope with LastSeqSeen < seq <= upTo and applies them
 	// to m.ContentMD (with the one reject-and-retry). When every op is rejected it returns the draft (for
 	// the trace) and an error wrapping ErrAllOpsRejected; the caller keeps the document.
-	Delta(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (DeltaDraft, error)
+	Delta(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (deltaDraft, error)
 }
 
-// Draft is a synthesizer's full-refresh output.
-type Draft struct {
+// draft is a synthesizer's full-refresh output.
+type draft struct {
 	// ContentMD is the drafted markdown document.
 	ContentMD string
 	// SourceIDs are the units the document is based on.
@@ -128,10 +128,10 @@ type Draft struct {
 	FactsRetrieved int
 }
 
-// DeltaDraft is a synthesizer's delta-refresh output.
-type DeltaDraft struct {
+// deltaDraft is a synthesizer's delta-refresh output.
+type deltaDraft struct {
 	// Ops are the final attempt's ops with Applied and SkipReason filled in.
-	Ops []EditOp
+	Ops []domain.DeltaOp
 	// ContentMD is m.ContentMD with the applied ops (unchanged when none applied).
 	ContentMD string
 	// SourceIDs are the new units the edits are based on; the runner adds them to the model's.

@@ -101,8 +101,8 @@ type UnconsolidatedBanksRow struct {
 }
 
 // UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
-// with an embedding created before @before (WP-20, decision 2000). It is BanksToConsolidate plus the grace
-// cut-off, over the same partial index (tenant_id, bank_id, created_at).
+// with an embedding created before @before (decision 2000): the §0 predicate as in ScopeUnconsolidated plus the
+// grace cut-off, over the partial index (tenant_id, bank_id, created_at).
 func (q *Queries) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBanksRow, error) {
 	rows, err := q.db.Query(ctx, unconsolidatedBanks, before)
 	if err != nil {

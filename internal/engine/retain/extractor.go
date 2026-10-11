@@ -22,11 +22,11 @@ type Extractor interface {
 	// Extract makes one LLM call per chunk (EXTRACT slot); mission + speaker context injected. The
 	// strategy for in.Config's extraction mode builds the prompt; chunks mode returns the chunk as a
 	// single fact with no call. It also returns the call's token usage (empty with no call).
-	Extract(ctx context.Context, in ExtractInput) ([]ExtractedFact, []domain.Usage, error)
+	Extract(ctx context.Context, in extractInput) ([]ExtractedFact, []domain.Usage, error)
 }
 
-// ExtractInput is one chunk to extract facts from, with the item context the prompt needs.
-type ExtractInput struct {
+// extractInput is one chunk to extract facts from, with the item context the prompt needs.
+type extractInput struct {
 	// Bank owns the document.
 	Bank port.BankRef
 	// DocumentID is the source document.
@@ -60,7 +60,7 @@ var _ Extractor = (*extractor)(nil)
 // NewExtractor returns the Extractor. modes are the strategies it can run; none = all five built-in ones.
 func NewExtractor(llm port.LLM, router port.ModelRouter, modes ...ExtractionStrategy) Extractor {
 	if len(modes) == 0 {
-		modes = []ExtractionStrategy{Concise(), Verbose(), Verbatim(), Chunks(), Custom()}
+		modes = []ExtractionStrategy{conciseMode(), verboseMode(), verbatimMode(), chunksMode(), customMode()}
 	}
 	m := make(map[domain.ExtractionMode]ExtractionStrategy, len(modes))
 	for _, s := range modes {
@@ -70,7 +70,7 @@ func NewExtractor(llm port.LLM, router port.ModelRouter, modes ...ExtractionStra
 }
 
 // Extract implements Extractor. An unset mode is concise; an unknown one is domain.ErrInvalidArgument.
-func (e *extractor) Extract(ctx context.Context, in ExtractInput) ([]ExtractedFact, []domain.Usage, error) {
+func (e *extractor) Extract(ctx context.Context, in extractInput) ([]ExtractedFact, []domain.Usage, error) {
 	mode := in.Config.ExtractionMode
 	if mode == domain.ExtractionModeUnspecified {
 		mode = domain.ExtractionModeConcise

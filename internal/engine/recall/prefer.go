@@ -20,8 +20,8 @@ type preference struct{}
 
 var _ ObservationPreference = preference{}
 
-// NewObservationPreference returns the ObservationPreference.
-func NewObservationPreference() ObservationPreference { return preference{} }
+// newObservationPreference returns the ObservationPreference.
+func newObservationPreference() ObservationPreference { return preference{} }
 
 // Apply implements ObservationPreference.
 func (preference) Apply(ranked []Candidate, window, maxTokens int, count TokenCounter) []Candidate {

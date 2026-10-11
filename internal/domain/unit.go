@@ -234,8 +234,6 @@ const (
 	CurationInvalidate CurationAction = "invalidate"
 	// CurationRestore moves an archived unit back.
 	CurationRestore CurationAction = "restore"
-	// CurationReprocess tags audit rows of units replaced by ReprocessDocument.
-	CurationReprocess CurationAction = "reprocess"
 )
 
 // AuditEntry is one memory_audit row: what a curation action changed and why. Rows of units replaced by

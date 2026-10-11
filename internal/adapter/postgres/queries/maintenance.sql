@@ -1,6 +1,6 @@
 -- UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
--- with an embedding created before @before (WP-20, decision 2000). It is BanksToConsolidate plus the grace
--- cut-off, over the same partial index (tenant_id, bank_id, created_at).
+-- with an embedding created before @before (decision 2000): the §0 predicate as in ScopeUnconsolidated plus the
+-- grace cut-off, over the partial index (tenant_id, bank_id, created_at).
 -- name: UnconsolidatedBanks :many
 SELECT b.tenant_id, b.id FROM banks b
 WHERE b.deleting_at IS NULL AND EXISTS (

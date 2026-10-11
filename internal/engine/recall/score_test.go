@@ -133,12 +133,12 @@ func TestBoostProofIsolated(t *testing.T) {
 
 func TestBoostNeutral(t *testing.T) {
 	s := settingsOf(domain.BankConfig{})
-	q := &ParsedQuery{At: testNow}
+	q := &parsedQuery{At: testNow}
 	timeless := domain.Unit{Type: domain.FactTypeWorld, Timeless: true, MentionedAt: at(-1000)}
 	undated := domain.Unit{Type: domain.FactTypeObservation}
 	for _, u := range []domain.Unit{timeless, undated} {
 		b := boost(Candidate{Unit: &u}, q, s)
-		if b != (Boosts{Recency: 1, Temporal: 1, Proof: 1}) {
+		if b != (boosts{Recency: 1, Temporal: 1, Proof: 1}) {
 			t.Fatalf("boost(%+v) = %+v, want neutral", u, b)
 		}
 	}

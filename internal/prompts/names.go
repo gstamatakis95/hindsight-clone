@@ -58,11 +58,6 @@ const (
 	// SynthesizeUser is the SYNTHESIZE user message (topic, observations, facts); reads SynthesizeData.
 	SynthesizeUser = "synthesize_user"
 
-	// MentalModelDeltaSystem is the markdown delta system prompt (returns the whole updated document);
-	// reads DeltaData.
-	MentalModelDeltaSystem = "mm_delta_system"
-	// MentalModelDeltaUser is the markdown delta user message; reads DeltaData.
-	MentalModelDeltaUser = "mm_delta_user"
 	// MentalModelStructuredDeltaSystem is the MENTAL_MODEL_DELTA system prompt (edit ops over sections
 	// and blocks); reads DeltaData.
 	MentalModelStructuredDeltaSystem = "mm_structured_delta_system"
@@ -309,18 +304,13 @@ type SynthesizeData struct {
 	Now time.Time `json:"now"`
 }
 
-// DeltaData is read by MentalModelDeltaSystem, MentalModelDeltaUser, MentalModelStructuredDeltaSystem
-// and MentalModelStructuredDeltaUser.
+// DeltaData is read by MentalModelStructuredDeltaSystem and MentalModelStructuredDeltaUser.
 type DeltaData struct {
 	// Name is the mental model's name.
 	Name string `json:"name"`
 	// SourceQuery is the question the page answers (the TOPIC).
 	SourceQuery string `json:"source_query"`
-	// CurrentMarkdown is the current content_md (markdown delta).
-	CurrentMarkdown string `json:"current_markdown"`
-	// Candidate is a fresh synthesis from the new facts (markdown delta, optional).
-	Candidate string `json:"candidate"`
-	// Document is the current content split into sections and blocks with stable ids (structured delta).
+	// Document is the current content split into sections and blocks with stable ids.
 	Document DeltaDocument `json:"document"`
 	// Observations are the observations new since the last refresh (shown first).
 	Observations []SourceFact `json:"observations"`

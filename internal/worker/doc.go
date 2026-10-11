@@ -41,7 +41,6 @@
 //   - consolidate retries without a cap, with exponential backoff from 60 s capped at
 //     [ConsolidateBackoffCap] (30 min). A failed automatic consolidate skips its retry when another
 //     automatic consolidate of the bank is already due ([PendingChecker]); a manual one always retries.
-//   - [RetryAt] / [ErrRetryAt] replaces the backoff time but still counts as an attempt.
 //   - delete_bank re-enqueues itself with backoff before failing its last attempt, so a half-deleted bank is
 //     never abandoned; graph_maintenance and delete_bank re-enqueue themselves (DedupePending) while their
 //     bounded runs report work left; consolidate's engine enqueues its own continuation.

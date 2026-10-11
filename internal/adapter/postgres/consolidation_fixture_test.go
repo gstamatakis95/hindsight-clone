@@ -5,7 +5,7 @@ import (
 	"memd/internal/port"
 )
 
-// embeddedFact is fact with an embedding. UnitRepo.Unconsolidated and Reader.BanksToConsolidate skip units
+// embeddedFact is fact with an embedding. UnitRepo.Unconsolidated and Store.UnconsolidatedBanks skip units
 // without one (decision 1500), so a test expecting a fact among the consolidation candidates builds it here.
 func embeddedFact(b port.BankRef, text string) domain.Unit {
 	u := fact(b, text)

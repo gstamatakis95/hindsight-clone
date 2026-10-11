@@ -19,8 +19,7 @@ const (
 // Permanent errors (ErrPermanent, domain.ErrInvalidArgument) and cancellation never retry. A kind with a
 // cap (domain.OperationKind.MaxAttempts > 0) fails for good once attempt+1 reaches it, the same rule
 // ReclaimStale applies; below the cap it retries after RetryStep × (attempt+1). An uncapped kind
-// (consolidate) retries forever with capped exponential backoff. An *ErrRetryAt with a non-zero At
-// replaces the backoff, but not the cap.
+// (consolidate) retries forever with capped exponential backoff.
 func nextRun(j port.Job, err error, now time.Time) (at time.Time, ok bool) {
 	if permanent(err) {
 		return time.Time{}, false
@@ -28,10 +27,6 @@ func nextRun(j port.Job, err error, now time.Time) (at time.Time, ok bool) {
 	maxAttempts := j.Kind.MaxAttempts()
 	if maxAttempts > 0 && j.Attempt+1 >= maxAttempts {
 		return time.Time{}, false
-	}
-	var ra *ErrRetryAt
-	if errors.As(err, &ra) && !ra.At.IsZero() {
-		return ra.At, true
 	}
 	if maxAttempts == 0 {
 		return now.Add(expBackoff(j.Attempt)), true

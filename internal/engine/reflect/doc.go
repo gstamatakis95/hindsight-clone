@@ -83,8 +83,7 @@
 //
 // [StructuredProjector.Project] resolves the bank's config with the request overrides for the
 // STRUCTURED_OUTPUT binding and makes one structured call whose prompt lists the schema's top-level fields;
-// the gateway validates the reply against the schema. [PromptBuilder] renders the same reflect_system prompt
-// from a config and directives; it is not wired in production (the loop renders its prompt itself).
+// the gateway validates the reply against the schema.
 //
 // # Invariants
 //

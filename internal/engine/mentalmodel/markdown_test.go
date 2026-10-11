@@ -1,7 +1,6 @@
 package mentalmodel
 
 import (
-	"errors"
 	"memd/internal/domain"
 	"reflect"
 	"strings"
@@ -185,56 +184,56 @@ func TestApplyEditsOpKinds(t *testing.T) {
 	first, second := blockID(t, d, "alpha", "first"), blockID(t, d, "alpha", "second")
 	cases := []struct {
 		name string
-		op   EditOp
+		op   domain.DeltaOp
 		want string
 	}{
 		{
 			"add_section",
-			EditOp{Kind: domain.DeltaOpAddSection, Heading: "## Gamma", BlocksMD: []string{"g1", "  ", "\ng2\n"}},
+			domain.DeltaOp{Kind: domain.DeltaOpAddSection, Heading: "## Gamma", BlocksMD: []string{"g1", "  ", "\ng2\n"}},
 			editDoc + "\n## Gamma\n\ng1\n\ng2\n",
 		},
 		{
 			"add_section duplicate heading",
-			EditOp{Kind: domain.DeltaOpAddSection, Heading: "Alpha"},
+			domain.DeltaOp{Kind: domain.DeltaOpAddSection, Heading: "Alpha"},
 			editDoc + "\n## Alpha\n",
 		},
-		{"remove_section", EditOp{Kind: domain.DeltaOpRemoveSection, SectionID: "alpha"}, "## Beta\n\nthird\n"},
+		{"remove_section", domain.DeltaOp{Kind: domain.DeltaOpRemoveSection, SectionID: "alpha"}, "## Beta\n\nthird\n"},
 		{
 			"rename_section",
-			EditOp{Kind: domain.DeltaOpRenameSection, SectionID: "beta", Heading: "# Delta"},
+			domain.DeltaOp{Kind: domain.DeltaOpRenameSection, SectionID: "beta", Heading: "# Delta"},
 			"## Alpha\n\nfirst\n\nsecond\n\n## Delta\n\nthird\n",
 		},
-		{"replace_section_blocks", EditOp{
+		{"replace_section_blocks", domain.DeltaOp{
 			Kind: domain.DeltaOpReplaceSectionBlocks, SectionID: "alpha",
 			BlocksMD: []string{"x", "", "y"},
 		}, "## Alpha\n\nx\n\ny\n\n## Beta\n\nthird\n"},
 		{
 			"append_block",
-			EditOp{Kind: domain.DeltaOpAppendBlock, SectionID: "alpha", BlocksMD: []string{"n1", "n2"}},
+			domain.DeltaOp{Kind: domain.DeltaOpAppendBlock, SectionID: "alpha", BlocksMD: []string{"n1", "n2"}},
 			"## Alpha\n\nfirst\n\nsecond\n\nn1\n\nn2\n\n## Beta\n\nthird\n",
 		},
-		{"insert_block after", EditOp{
+		{"insert_block after", domain.DeltaOp{
 			Kind: domain.DeltaOpInsertBlock, SectionID: "alpha", AfterBlockID: first,
 			BlocksMD: []string{"n1", "n2"},
 		}, "## Alpha\n\nfirst\n\nn1\n\nn2\n\nsecond\n\n## Beta\n\nthird\n"},
 		{
 			"insert_block first",
-			EditOp{Kind: domain.DeltaOpInsertBlock, SectionID: "alpha", BlocksMD: []string{"n0"}},
+			domain.DeltaOp{Kind: domain.DeltaOpInsertBlock, SectionID: "alpha", BlocksMD: []string{"n0"}},
 			"## Alpha\n\nn0\n\nfirst\n\nsecond\n\n## Beta\n\nthird\n",
 		},
-		{"replace_block", EditOp{
+		{"replace_block", domain.DeltaOp{
 			Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: second,
 			BlocksMD: []string{"\nchanged\n"},
 		}, "## Alpha\n\nfirst\n\nchanged\n\n## Beta\n\nthird\n"},
 		{
 			"remove_block",
-			EditOp{Kind: domain.DeltaOpRemoveBlock, SectionID: "alpha", BlockID: first},
+			domain.DeltaOp{Kind: domain.DeltaOpRemoveBlock, SectionID: "alpha", BlockID: first},
 			"## Alpha\n\nsecond\n\n## Beta\n\nthird\n",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, outcome := applyEdits(editDoc, []EditOp{c.op})
+			got, outcome := applyEdits(editDoc, []domain.DeltaOp{c.op})
 			if !outcome[0].Applied || outcome[0].SkipReason != "" {
 				t.Fatalf("op not applied: %+v", outcome[0])
 			}
@@ -250,54 +249,58 @@ func TestApplyEditsSkipReasons(t *testing.T) {
 	first, third := blockID(t, d, "alpha", "first"), blockID(t, d, "beta", "third")
 	cases := []struct {
 		name string
-		op   EditOp
+		op   domain.DeltaOp
 		want string
 	}{
-		{"unknown kind", EditOp{Kind: "explode"}, "unknown op kind: explode"},
+		{"unknown kind", domain.DeltaOp{Kind: "explode"}, "unknown op kind: explode"},
 		{
 			"unknown section",
-			EditOp{Kind: domain.DeltaOpAppendBlock, SectionID: "nope", BlocksMD: []string{"x"}},
+			domain.DeltaOp{Kind: domain.DeltaOpAppendBlock, SectionID: "nope", BlocksMD: []string{"x"}},
 			"unknown section_id: nope",
 		},
-		{"remove unknown section", EditOp{Kind: domain.DeltaOpRemoveSection, SectionID: "nope"}, "unknown section_id: nope"},
+		{
+			"remove unknown section",
+			domain.DeltaOp{Kind: domain.DeltaOpRemoveSection, SectionID: "nope"},
+			"unknown section_id: nope",
+		},
 		{
 			"unknown block",
-			EditOp{Kind: domain.DeltaOpRemoveBlock, SectionID: "alpha", BlockID: "bdeadbeef"},
+			domain.DeltaOp{Kind: domain.DeltaOpRemoveBlock, SectionID: "alpha", BlockID: "bdeadbeef"},
 			"unknown block_id: bdeadbeef",
 		},
-		{"insert after unknown block", EditOp{
+		{"insert after unknown block", domain.DeltaOp{
 			Kind: domain.DeltaOpInsertBlock, SectionID: "alpha",
 			AfterBlockID: "bdeadbeef", BlocksMD: []string{"x"},
 		}, "unknown block_id: bdeadbeef"},
-		{"wrong section", EditOp{
+		{"wrong section", domain.DeltaOp{
 			Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: third,
 			BlocksMD: []string{"x"},
 		}, "block_id " + third + " belongs to section beta, not alpha"},
 		{
 			"empty append",
-			EditOp{Kind: domain.DeltaOpAppendBlock, SectionID: "alpha", BlocksMD: []string{" ", ""}},
+			domain.DeltaOp{Kind: domain.DeltaOpAppendBlock, SectionID: "alpha", BlocksMD: []string{" ", ""}},
 			"block text is empty",
 		},
-		{"no blocks insert", EditOp{Kind: domain.DeltaOpInsertBlock, SectionID: "alpha"}, "block text is empty"},
-		{"empty replace", EditOp{
+		{"no blocks insert", domain.DeltaOp{Kind: domain.DeltaOpInsertBlock, SectionID: "alpha"}, "block text is empty"},
+		{"empty replace", domain.DeltaOp{
 			Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: first,
 			BlocksMD: []string{"\n"},
 		}, "block text is empty"},
-		{"replace two", EditOp{
+		{"replace two", domain.DeltaOp{
 			Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: first,
 			BlocksMD: []string{"a", "b"},
 		}, "replace_block needs exactly one block"},
 		{
 			"replace none",
-			EditOp{Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: first},
+			domain.DeltaOp{Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: first},
 			"replace_block needs exactly one block",
 		},
-		{"add empty heading", EditOp{Kind: domain.DeltaOpAddSection, Heading: " ## "}, "heading is empty"},
-		{"rename empty heading", EditOp{Kind: domain.DeltaOpRenameSection, SectionID: "alpha"}, "heading is empty"},
+		{"add empty heading", domain.DeltaOp{Kind: domain.DeltaOpAddSection, Heading: " ## "}, "heading is empty"},
+		{"rename empty heading", domain.DeltaOp{Kind: domain.DeltaOpRenameSection, SectionID: "alpha"}, "heading is empty"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, outcome := applyEdits(editDoc, []EditOp{c.op})
+			got, outcome := applyEdits(editDoc, []domain.DeltaOp{c.op})
 			if outcome[0].Applied || outcome[0].SkipReason != c.want {
 				t.Fatalf("outcome = %+v, want skip %q", outcome[0], c.want)
 			}
@@ -309,13 +312,13 @@ func TestApplyEditsSkipReasons(t *testing.T) {
 }
 
 func TestApplyEditsPartialAndOrdered(t *testing.T) {
-	ops := []EditOp{
+	ops := []domain.DeltaOp{
 		{Kind: domain.DeltaOpRemoveSection, SectionID: "missing"},
 		{Kind: domain.DeltaOpAddSection, Heading: "New Part"},
 		{Kind: domain.DeltaOpAppendBlock, SectionID: "new-part", BlocksMD: []string{"added later"}},
 		{Kind: domain.DeltaOpRemoveSection, SectionID: "beta"},
 	}
-	orig := make([]EditOp, len(ops))
+	orig := make([]domain.DeltaOp, len(ops))
 	copy(orig, ops)
 	got, outcome := applyEdits(editDoc, ops)
 	want := "## Alpha\n\nfirst\n\nsecond\n\n## New Part\n\nadded later\n"
@@ -331,25 +334,19 @@ func TestApplyEditsPartialAndOrdered(t *testing.T) {
 	if !reflect.DeepEqual(ops, orig) {
 		t.Fatal("applyEdits mutated its input ops")
 	}
-	res, err := ApplyEdits(editDoc, ops)
-	if err != nil || res != want {
-		t.Fatalf("ApplyEdits = %q, %v", res, err)
-	}
 }
 
+// TestApplyEditsAllRejectedAndEmpty checks that a document is returned byte for byte (not re-rendered) when
+// no op applies or there are no ops.
 func TestApplyEditsAllRejectedAndEmpty(t *testing.T) {
 	doc := "# Not   canonical\n\n\n\nbody" // a canonical render would differ
-	got, err := ApplyEdits(doc, []EditOp{{Kind: domain.DeltaOpRemoveSection, SectionID: "nope"}})
-	if !errors.Is(err, ErrAllOpsRejected) || errors.Is(err, domain.ErrUnavailable) {
-		t.Fatalf("err = %v, want ErrAllOpsRejected only", err)
+	got, outcome := applyEdits(doc, []domain.DeltaOp{{Kind: domain.DeltaOpRemoveSection, SectionID: "nope"}})
+	if got != doc || len(outcome) != 1 || outcome[0].Applied || outcome[0].SkipReason == "" {
+		t.Fatalf("all rejected: doc %q, outcome %+v", got, outcome)
 	}
-	if got != doc {
-		t.Fatalf("doc changed: %q", got)
-	}
-	for _, ops := range [][]EditOp{nil, {}} {
-		got, err = ApplyEdits(doc, ops)
-		if err != nil || got != doc {
-			t.Fatalf("empty ops: %q, %v", got, err)
+	for _, ops := range [][]domain.DeltaOp{nil, {}} {
+		if got, _ = applyEdits(doc, ops); got != doc {
+			t.Fatalf("empty ops: %q", got)
 		}
 	}
 }
@@ -359,21 +356,22 @@ func TestApplyEditsOrphanTableRows(t *testing.T) {
 	d := splitMarkdown(doc)
 	table := d.Sections[0].Blocks[0].ID
 	want := "## T\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n\n## U\n\npara\n"
-	for _, op := range []EditOp{
+	for _, op := range []domain.DeltaOp{
 		{Kind: domain.DeltaOpAppendBlock, SectionID: "t", BlocksMD: []string{"| 3 | 4 |"}},
 		{Kind: domain.DeltaOpInsertBlock, SectionID: "t", AfterBlockID: table, BlocksMD: []string{"\n| 3 | 4 |\n"}},
 	} {
-		got, outcome := applyEdits(doc, []EditOp{op})
+		got, outcome := applyEdits(doc, []domain.DeltaOp{op})
 		if got != want || !outcome[0].Applied {
 			t.Fatalf("%s: got %q (%+v), want %q", op.Kind, got, outcome[0], want)
 		}
 	}
 	// Rows after a non-table block, or at the start of a section, stay a block of their own.
-	got, _ := applyEdits(doc, []EditOp{{Kind: domain.DeltaOpAppendBlock, SectionID: "u", BlocksMD: []string{"| 9 |"}}})
+	row := []string{"| 9 |"}
+	got, _ := applyEdits(doc, []domain.DeltaOp{{Kind: domain.DeltaOpAppendBlock, SectionID: "u", BlocksMD: row}})
 	if !strings.HasSuffix(got, "para\n\n| 9 |\n") {
 		t.Fatalf("orphan rows merged into a non-table: %q", got)
 	}
-	got, _ = applyEdits(doc, []EditOp{{Kind: domain.DeltaOpInsertBlock, SectionID: "t", BlocksMD: []string{"| 9 |"}}})
+	got, _ = applyEdits(doc, []domain.DeltaOp{{Kind: domain.DeltaOpInsertBlock, SectionID: "t", BlocksMD: row}})
 	if !strings.HasPrefix(got, "## T\n\n| 9 |\n\n| a | b |") {
 		t.Fatalf("orphan rows at position 0 merged: %q", got)
 	}
@@ -439,22 +437,22 @@ func TestApplyEditsRejectsMultiFragmentBlocks(t *testing.T) {
 		"short closer":   "````\ncode\n```",
 	}
 	for name, text := range bad {
-		for _, op := range []EditOp{
+		for _, op := range []domain.DeltaOp{
 			{Kind: domain.DeltaOpAppendBlock, SectionID: "alpha", BlocksMD: []string{"ok", text}},
 			{Kind: domain.DeltaOpInsertBlock, SectionID: "alpha", BlocksMD: []string{text}},
 			{Kind: domain.DeltaOpReplaceBlock, SectionID: "alpha", BlockID: first, BlocksMD: []string{text}},
 			{Kind: domain.DeltaOpReplaceSectionBlocks, SectionID: "alpha", BlocksMD: []string{text}},
 			{Kind: domain.DeltaOpAddSection, Heading: "New", BlocksMD: []string{text}},
 		} {
-			got, outcome := applyEdits(editDoc, []EditOp{op})
+			got, outcome := applyEdits(editDoc, []domain.DeltaOp{op})
 			if outcome[0].Applied || outcome[0].SkipReason != reasonFragment || got != editDoc {
 				t.Fatalf("%s %s: outcome %+v doc %q", name, op.Kind, outcome[0], got)
 			}
 		}
 	}
 	good := "```\ncode\n\n# comment\n```"
-	op := EditOp{Kind: domain.DeltaOpAppendBlock, SectionID: "beta", BlocksMD: []string{good}}
-	got, outcome := applyEdits(editDoc, []EditOp{op})
+	op := domain.DeltaOp{Kind: domain.DeltaOpAppendBlock, SectionID: "beta", BlocksMD: []string{good}}
+	got, outcome := applyEdits(editDoc, []domain.DeltaOp{op})
 	if !outcome[0].Applied || got != editDoc+"\n"+good+"\n" {
 		t.Fatalf("fenced fragment rejected: %+v %q", outcome[0], got)
 	}

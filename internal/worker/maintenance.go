@@ -374,9 +374,17 @@ func enqueueAutomatic(
 	return joined, err
 }
 
-// pruneOperations prunes terminal operations past their retention.
+// pruneOperations deletes terminal operations that finished more than d.OperationRetention before
+// d.Clock.Now() and returns how many; pending and processing operations are never pruned.
 func pruneOperations(ctx context.Context, d MaintenanceDeps) (int, error) {
-	return PruneOperations(ctx, d.Store, d.Clock, d.OperationRetention)
+	before := d.Clock.Now().Add(-d.OperationRetention)
+	n := 0
+	err := d.Store.InTx(ctx, func(tx port.Tx) error {
+		var err error
+		n, err = tx.Queue().Prune(ctx, before)
+		return err
+	})
+	return n, err
 }
 
 // pruneEvents prunes lifecycle events past their retention.
@@ -386,20 +394,6 @@ func pruneEvents(ctx context.Context, d MaintenanceDeps) (int, error) {
 	err := d.Store.InTx(ctx, func(tx port.Tx) error {
 		var err error
 		n, err = tx.Events().Prune(ctx, before)
-		return err
-	})
-	return n, err
-}
-
-// PruneOperations deletes terminal operations that finished more than olderThan before c.Now() and returns
-// how many; pending and processing operations are never pruned. (The spec's signature has no Clock; it is
-// added so the cut-off comes from the injected clock, decision 503.)
-func PruneOperations(ctx context.Context, s port.Store, c port.Clock, olderThan time.Duration) (int, error) {
-	before := c.Now().Add(-olderThan)
-	n := 0
-	err := s.InTx(ctx, func(tx port.Tx) error {
-		var err error
-		n, err = tx.Queue().Prune(ctx, before)
 		return err
 	})
 	return n, err

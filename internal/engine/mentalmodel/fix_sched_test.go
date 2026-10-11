@@ -94,7 +94,7 @@ func TestWeakerJoinerKeepsUpgrade(t *testing.T) {
 	spec.Trigger.RefreshAfterConsolidation = true
 	e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "new", "proj")
-	if n, err := tr.AfterConsolidation(e.ctx, e.bank); err != nil || n != 1 {
+	if n, err := autoTrigger(e, tr, "status"); err != nil || n != 1 {
 		t.Fatalf("first trigger inserted %d: %v", n, err)
 	}
 	op, joined, err := adm.RefreshMentalModel(e.ctx, RefreshRequest{
@@ -104,7 +104,7 @@ func TestWeakerJoinerKeepsUpgrade(t *testing.T) {
 	if err != nil || !joined {
 		t.Fatalf("manual force_full joined=%v err=%v", joined, err)
 	}
-	if n, err := tr.AfterConsolidation(e.ctx, e.bank); err != nil || n != 0 {
+	if n, err := autoTrigger(e, tr, "status"); err != nil || n != 0 {
 		t.Fatalf("automatic joiner inserted %d: %v", n, err)
 	}
 	op2, joined, err := adm.RefreshMentalModel(e.ctx, RefreshRequest{Bank: e.bank, ID: "status"})

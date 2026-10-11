@@ -29,20 +29,20 @@ var (
 // proximity is the temporal arm's job; decision 901).
 var graphLinkKinds = []domain.LinkKind{domain.LinkSemantic, domain.LinkCausal}
 
-// NewSemantic returns the semantic arm: SearchVector with the min_scores.semantic floor (default 0.3, as
+// newSemantic returns the semantic arm: SearchVector with the min_scores.semantic floor (default 0.3, as
 // Hindsight; an explicit 0 disables it).
-func NewSemantic(r port.Reader) Retriever { return &semantic{r: r} }
+func newSemantic(r port.Reader) Retriever { return &semantic{r: r} }
 
-// NewKeyword returns the keyword arm: SearchText (BM25) with the min_scores.keyword floor.
-func NewKeyword(r port.Reader) Retriever { return &keyword{r: r} }
+// newKeyword returns the keyword arm: SearchText (BM25) with the min_scores.keyword floor.
+func newKeyword(r port.Reader) Retriever { return &keyword{r: r} }
 
-// NewGraph returns the graph arm: its own semantic seeds (the top 20 at cosine >= 0.3, as Hindsight), then
+// newGraph returns the graph arm: its own semantic seeds (the top 20 at cosine >= 0.3, as Hindsight), then
 // ExpandGraph over semantic and causal links up to graph_max_hops (default 1).
-func NewGraph(r port.Reader) Retriever { return &graph{r: r} }
+func newGraph(r port.Reader) Retriever { return &graph{r: r} }
 
-// NewTemporal returns the temporal arm: SearchTemporal over the query window, spread over temporal_buckets
+// newTemporal returns the temporal arm: SearchTemporal over the query window, spread over temporal_buckets
 // (default 4). It returns nothing when the query has no window.
-func NewTemporal(r port.Reader) Retriever { return &temporal{r: r} }
+func newTemporal(r port.Reader) Retriever { return &temporal{r: r} }
 
 // Name implements Retriever.
 func (*semantic) Name() string { return ArmSemantic }
@@ -57,7 +57,7 @@ func (*graph) Name() string { return ArmGraph }
 func (*temporal) Name() string { return ArmTemporal }
 
 // Retrieve implements Retriever.
-func (a *semantic) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, error) {
+func (a *semantic) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, error) {
 	floor, ok := gate{}.ArmFloor(ArmSemantic, q.MinScores)
 	if !ok {
 		floor = semanticMinSimilarity // an explicit 0 disables it
@@ -70,7 +70,7 @@ func (a *semantic) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, e
 }
 
 // Retrieve implements Retriever.
-func (a *keyword) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, error) {
+func (a *keyword) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, error) {
 	floor, _ := gate{}.ArmFloor(ArmKeyword, q.MinScores)
 	hs, err := a.r.SearchText(ctx, port.TextQuery{
 		Bank: q.Bank, Text: q.Text, Types: q.Types, Tags: q.Predicate, MinScore: floor, Seq: q.Seq, Limit: q.Limit,
@@ -79,7 +79,7 @@ func (a *keyword) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, er
 }
 
 // Retrieve implements Retriever.
-func (a *graph) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, error) {
+func (a *graph) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, error) {
 	seeds, err := a.r.SearchVector(ctx, port.VectorQuery{
 		Bank: q.Bank, Embedding: q.Embedding, Types: q.Types, Tags: q.Predicate,
 		MinSimilarity: graphSeedMinSimilarity, Seq: q.Seq, Limit: graphSeedLimit,
@@ -99,7 +99,7 @@ func (a *graph) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, erro
 }
 
 // Retrieve implements Retriever.
-func (a *temporal) Retrieve(ctx context.Context, q *ParsedQuery) ([]Candidate, error) {
+func (a *temporal) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, error) {
 	if q.Window == nil {
 		return nil, nil
 	}
@@ -124,7 +124,7 @@ func candidates(arm string, hs []port.Hit, limit int) []Candidate {
 			continue
 		}
 		seen[h.ID] = true
-		out = append(out, Candidate{ID: h.ID, Arms: map[string]ArmScore{arm: {Rank: len(out) + 1, Score: h.Score}}})
+		out = append(out, Candidate{ID: h.ID, Arms: map[string]armScore{arm: {Rank: len(out) + 1, Score: h.Score}}})
 	}
 	return out
 }

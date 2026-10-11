@@ -447,6 +447,6 @@ func (i *ingestor) runInline(
 		res.Documents[k].UnitsCreated = out.UnitsCreated
 		res.Documents[k].Unchanged = out.Unchanged
 	}
-	res.Usage = SumUsage(usage)
+	res.Usage = sumUsage(usage)
 	return res, nil
 }

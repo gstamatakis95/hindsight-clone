@@ -128,7 +128,4 @@ type Reader interface {
 	ListDocuments(ctx context.Context, q DocumentQuery) ([]domain.Document, error)
 	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids, ordered by id.
 	ModelsCiting(ctx context.Context, b BankRef, ids []UnitID) ([]MentalModelID, error)
-	// BanksToConsolidate returns every bank that is not tombstoned and has a live fact with consolidated_at
-	// and consolidation_failed_at unset (cross-bank; maintenance only).
-	BanksToConsolidate(ctx context.Context) ([]BankRef, error)
 }

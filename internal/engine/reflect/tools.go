@@ -33,11 +33,11 @@ type Tool interface {
 	Schema() json.RawMessage
 	// Call runs the tool with the model's raw arguments, recording what it retrieved in st. A malformed
 	// argument is returned to the model as a tool error; a retrieval failure is returned as an error.
-	Call(ctx context.Context, st *AgentState, args json.RawMessage) (ToolResult, error)
+	Call(ctx context.Context, st *agentState, args json.RawMessage) (toolResult, error)
 }
 
-// ToolResult is one tool call's outcome.
-type ToolResult struct {
+// toolResult is one tool call's outcome.
+type toolResult struct {
 	// Output is the JSON sent back to the model as the tool message.
 	Output json.RawMessage
 	// Done reports that the loop should end (the done tool).
@@ -51,8 +51,8 @@ type ToolResult struct {
 	Error string
 }
 
-// AgentState is the mutable state of one reflect loop, shared by its tools.
-type AgentState struct {
+// agentState is the mutable state of one reflect loop, shared by its tools.
+type agentState struct {
 	// Request is the reflect request.
 	Request ReflectRequest
 	// Config is the effective config (bank < request).

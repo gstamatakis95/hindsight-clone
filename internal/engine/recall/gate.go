@@ -16,8 +16,8 @@ type gate struct{}
 
 var _ ScoreGate = gate{}
 
-// NewScoreGate returns the ScoreGate.
-func NewScoreGate() ScoreGate { return gate{} }
+// newScoreGate returns the ScoreGate.
+func newScoreGate() ScoreGate { return gate{} }
 
 // ArmFloor implements ScoreGate.
 func (gate) ArmFloor(arm string, m domain.MinScores) (float64, bool) {

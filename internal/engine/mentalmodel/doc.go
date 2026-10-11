@@ -53,7 +53,7 @@
 //     budget, default mid), then one SYNTHESIZE call (full) or one MENTAL_MODEL_DELTA call (delta). Both
 //     return [ErrNoNewFacts] before any model call when retrieval finds nothing.
 //  4. Delta edits: MENTAL_MODEL_DELTA proposes edit ops over the document's sections and blocks (ids derived
-//     from content); [ApplyEdits] applies them at once. One retry shows the model the rejected ops when none
+//     from content), applied at once. One retry shows the model the rejected ops when none
 //     applied or any named an unknown id. If every op is still rejected the refresh fails and the document
 //     stays ([ErrAllOpsRejected]); a document is never replaced by a partial one. A delta that changes more
 //     than mental_models.max_delta_ratio of the document (0 = no limit) is redone in full.
@@ -85,8 +85,8 @@
 // config, skips paused or deleted models, and runs a never-refreshed model now and in full. [Triggers]
 // enqueues automatic refreshes through the scheduler: EnqueueDueCronRefreshes serves each refresh_cron
 // schedule (5 fields, UTC) whose latest fire time within the last 5 minutes has no refresh yet; it is what
-// the maintenance tick runs. AfterConsolidation and Retracted exist but are not wired: consolidation
-// enqueues its refreshes in its own apply transaction and curation uses the RefreshQueuer.
+// the maintenance tick runs. Consolidation enqueues its refreshes in its own apply transaction and
+// curation uses the RefreshQueuer.
 //
 // # Failures and pausing
 //

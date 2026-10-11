@@ -13,7 +13,8 @@ import (
 	"strings"
 )
 
-// ErrAllOpsRejected is returned (wrapped) by ApplyEdits when a non-empty op list had no op applied.
+// ErrAllOpsRejected is returned (wrapped) when a delta's non-empty op list still had no op applied after
+// the one retry.
 var ErrAllOpsRejected = errors.New("mentalmodel: every delta op was rejected")
 
 // preambleSectionID is the id of the untitled section holding content that precedes the first heading.
@@ -444,7 +445,7 @@ func unknownSection(id string) string {
 
 // apply applies one op and returns "" when applied, else the skip reason. An op whose BlocksMD has an entry
 // that is not one markdown fragment is skipped whole.
-func (e *editor) apply(op EditOp) string {
+func (e *editor) apply(op domain.DeltaOp) string {
 	if usesBlocks(op.Kind) && badFragments(op.BlocksMD) {
 		return reasonFragment
 	}
@@ -471,7 +472,7 @@ func (e *editor) apply(op EditOp) string {
 }
 
 // addSection appends a level-2 section at the end of the document, id = unique slug of the heading.
-func (e *editor) addSection(op EditOp) string {
+func (e *editor) addSection(op domain.DeltaOp) string {
 	heading := cleanHeading(op.Heading)
 	if heading == "" {
 		return reasonEmptyHeading
@@ -490,7 +491,7 @@ func (e *editor) addSection(op EditOp) string {
 }
 
 // removeSection drops a section and its blocks.
-func (e *editor) removeSection(op EditOp) string {
+func (e *editor) removeSection(op domain.DeltaOp) string {
 	for i, s := range e.doc.Sections {
 		if s.ID == op.SectionID {
 			e.doc.Sections = slices.Delete(e.doc.Sections, i, i+1)
@@ -501,7 +502,7 @@ func (e *editor) removeSection(op EditOp) string {
 }
 
 // renameSection replaces a section's heading; its id stays the same for the rest of the batch.
-func (e *editor) renameSection(op EditOp) string {
+func (e *editor) renameSection(op domain.DeltaOp) string {
 	sec := e.section(op.SectionID)
 	if sec == nil {
 		return unknownSection(op.SectionID)
@@ -515,7 +516,7 @@ func (e *editor) renameSection(op EditOp) string {
 }
 
 // replaceSectionBlocks replaces every block of a section with the non-blank texts.
-func (e *editor) replaceSectionBlocks(op EditOp) string {
+func (e *editor) replaceSectionBlocks(op domain.DeltaOp) string {
 	sec := e.section(op.SectionID)
 	if sec == nil {
 		return unknownSection(op.SectionID)
@@ -525,7 +526,7 @@ func (e *editor) replaceSectionBlocks(op EditOp) string {
 }
 
 // appendBlock adds the blocks at the end of a section.
-func (e *editor) appendBlock(op EditOp) string {
+func (e *editor) appendBlock(op domain.DeltaOp) string {
 	sec := e.section(op.SectionID)
 	if sec == nil {
 		return unknownSection(op.SectionID)
@@ -538,7 +539,7 @@ func (e *editor) appendBlock(op EditOp) string {
 }
 
 // insertBlock adds the blocks after AfterBlockID, or first in the section when it is empty.
-func (e *editor) insertBlock(op EditOp) string {
+func (e *editor) insertBlock(op domain.DeltaOp) string {
 	sec := e.section(op.SectionID)
 	if sec == nil {
 		return unknownSection(op.SectionID)
@@ -559,7 +560,7 @@ func (e *editor) insertBlock(op EditOp) string {
 }
 
 // replaceBlock replaces one block's text, keeping its id for the rest of the batch.
-func (e *editor) replaceBlock(op EditOp) string {
+func (e *editor) replaceBlock(op domain.DeltaOp) string {
 	sec := e.section(op.SectionID)
 	if sec == nil {
 		return unknownSection(op.SectionID)
@@ -579,7 +580,7 @@ func (e *editor) replaceBlock(op EditOp) string {
 }
 
 // removeBlock drops one block.
-func (e *editor) removeBlock(op EditOp) string {
+func (e *editor) removeBlock(op domain.DeltaOp) string {
 	sec := e.section(op.SectionID)
 	if sec == nil {
 		return unknownSection(op.SectionID)
@@ -595,9 +596,9 @@ func (e *editor) removeBlock(op EditOp) string {
 // applyEdits splits doc, applies ops in order and returns the rendered result plus every op with Applied /
 // SkipReason filled in (same order and length as ops). It never mutates ops. When no op applies, doc is
 // returned unchanged; otherwise the result is the canonical render of the edited document.
-func applyEdits(doc string, ops []EditOp) (string, []EditOp) {
+func applyEdits(doc string, ops []domain.DeltaOp) (string, []domain.DeltaOp) {
 	e := newEditor(splitMarkdown(doc))
-	out := make([]EditOp, len(ops))
+	out := make([]domain.DeltaOp, len(ops))
 	applied := false
 	for i, op := range ops {
 		reason := e.apply(op)
@@ -610,22 +611,6 @@ func applyEdits(doc string, ops []EditOp) (string, []EditOp) {
 		return doc, out
 	}
 	return renderDocument(e.doc), out
-}
-
-// ApplyEdits applies delta edit ops to a markdown document. Invalid ops are skipped and the rest applied.
-// An empty op list returns doc unchanged. When ops is non-empty and every op is rejected, it returns doc
-// unchanged and an error wrapping ErrAllOpsRejected.
-func ApplyEdits(doc string, ops []EditOp) (string, error) {
-	if len(ops) == 0 {
-		return doc, nil
-	}
-	result, outcome := applyEdits(doc, ops)
-	for _, op := range outcome {
-		if op.Applied {
-			return result, nil
-		}
-	}
-	return doc, fmt.Errorf("%w: %d op(s), first skip: %s", ErrAllOpsRejected, len(ops), outcome[0].SkipReason)
 }
 
 // changedFraction is the share of before's blocks (by exact text) that are absent from after, in [0,1];

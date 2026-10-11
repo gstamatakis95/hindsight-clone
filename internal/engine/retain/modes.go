@@ -18,11 +18,11 @@ type ExtractionStrategy interface {
 	// metadata (dates, entities, labels).
 	KeepsChunkText() bool
 	// Prompt renders the system and user messages and the JSON Schema of the EXTRACT call for one chunk.
-	Prompt(cfg domain.BankConfig, in ExtractInput) (ExtractPrompt, error)
+	Prompt(cfg domain.BankConfig, in extractInput) (extractPrompt, error)
 }
 
-// ExtractPrompt is one rendered EXTRACT call.
-type ExtractPrompt struct {
+// extractPrompt is one rendered EXTRACT call.
+type extractPrompt struct {
 	// Name is the system template name, also the request Name (tracing, scripted fakes).
 	Name string
 	// System is the system message.
@@ -43,29 +43,29 @@ type strategy struct {
 
 var _ ExtractionStrategy = (*strategy)(nil)
 
-// Concise extracts compact facts (the default mode).
-func Concise() ExtractionStrategy {
+// conciseMode extracts compact facts (the default mode).
+func conciseMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeConcise, tmpl: prompts.ExtractConcise, llm: true}
 }
 
-// Verbose extracts detailed facts with every dimension.
-func Verbose() ExtractionStrategy {
+// verboseMode extracts detailed facts with every dimension.
+func verboseMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeVerbose, tmpl: prompts.ExtractVerbose, llm: true}
 }
 
-// Verbatim keeps each chunk's text as one fact and extracts only its metadata.
-func Verbatim() ExtractionStrategy {
+// verbatimMode keeps each chunk's text as one fact and extracts only its metadata.
+func verbatimMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeVerbatim, tmpl: prompts.ExtractVerbatim, llm: true, verbatim: true}
 }
 
-// Chunks stores each chunk as one fact with no LLM call.
-func Chunks() ExtractionStrategy {
+// chunksMode stores each chunk as one fact with no LLM call.
+func chunksMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeChunks, verbatim: true}
 }
 
-// Custom extracts with BankConfig.CustomExtractionPrompt as the guidelines; a blank prompt falls back to the
+// customMode extracts with BankConfig.CustomExtractionPrompt as the guidelines; a blank prompt falls back to the
 // concise template.
-func Custom() ExtractionStrategy {
+func customMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeCustom, tmpl: prompts.ExtractCustom, llm: true}
 }
 
@@ -80,9 +80,9 @@ func (s *strategy) KeepsChunkText() bool { return s.verbatim }
 
 // Prompt implements ExtractionStrategy. Chunks mode has no prompt (domain.ErrInvalidArgument); custom mode
 // with a blank CustomExtractionPrompt renders the concise template.
-func (s *strategy) Prompt(cfg domain.BankConfig, in ExtractInput) (ExtractPrompt, error) {
+func (s *strategy) Prompt(cfg domain.BankConfig, in extractInput) (extractPrompt, error) {
 	if !s.llm {
-		return ExtractPrompt{}, fmt.Errorf("%w: extraction mode %s makes no call", domain.ErrInvalidArgument, s.mode)
+		return extractPrompt{}, fmt.Errorf("%w: extraction mode %s makes no call", domain.ErrInvalidArgument, s.mode)
 	}
 	tmpl := s.tmpl
 	if s.mode == domain.ExtractionModeCustom && strings.TrimSpace(cfg.CustomExtractionPrompt) == "" {
@@ -102,15 +102,15 @@ func (s *strategy) Prompt(cfg domain.BankConfig, in ExtractInput) (ExtractPrompt
 	}
 	system, err := prompts.Render(tmpl, data)
 	if err != nil {
-		return ExtractPrompt{}, fmt.Errorf("retain: render %s: %w", tmpl, err)
+		return extractPrompt{}, fmt.Errorf("retain: render %s: %w", tmpl, err)
 	}
 	user, err := prompts.Render(prompts.ExtractUser, data)
 	if err != nil {
-		return ExtractPrompt{}, fmt.Errorf("retain: render %s: %w", prompts.ExtractUser, err)
+		return extractPrompt{}, fmt.Errorf("retain: render %s: %w", prompts.ExtractUser, err)
 	}
 	schema, err := prompts.ExtractSchema(tmpl, data.OptionalDimensions)
 	if err != nil {
-		return ExtractPrompt{}, fmt.Errorf("retain: schema %s: %w", tmpl, err)
+		return extractPrompt{}, fmt.Errorf("retain: schema %s: %w", tmpl, err)
 	}
-	return ExtractPrompt{Name: tmpl, System: system, User: user, Schema: schema}, nil
+	return extractPrompt{Name: tmpl, System: system, User: user, Schema: schema}, nil
 }

@@ -2,44 +2,11 @@ package reflect
 
 import (
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"slices"
 	"strings"
 	"time"
 )
-
-// PromptBuilder renders the reflect system prompt.
-type PromptBuilder interface {
-	// System renders reflect_mission + disposition rendered as instructions + directives matching the
-	// request tags. Takes the effective config, so request overrides reach the prompt. It shows the prompt
-	// as a default reflect would send it (every enabled tool offered, no budget section, the clock's now);
-	// a render failure returns "".
-	System(cfg domain.BankConfig, directives []domain.Directive) string
-}
-
-// promptBuilder is the template-backed PromptBuilder.
-type promptBuilder struct {
-	clock port.Clock
-}
-
-var _ PromptBuilder = (*promptBuilder)(nil)
-
-// NewPromptBuilder returns the PromptBuilder that renders the reflect_system template; clock supplies the
-// current time shown in the prompt.
-func NewPromptBuilder(clock port.Clock) PromptBuilder {
-	return &promptBuilder{clock: clock}
-}
-
-// System implements PromptBuilder.
-func (p *promptBuilder) System(cfg domain.BankConfig, directives []domain.Directive) string {
-	data := promptData(cfg, directives, toolSet(cfg, true, nil), p.clock.Now())
-	out, err := prompts.Render(prompts.ReflectSystem, &data)
-	if err != nil {
-		return ""
-	}
-	return out
-}
 
 // promptData fills the ReflectData fields that come from the effective config, the directives and the tools
 // offered: mission, disposition, directives and tool flags. The loop adds the query, budget, context, bank

@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"errors"
 	"fmt"
+	"memd/internal/adapter/postgres"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"strings"
@@ -26,14 +27,14 @@ var (
 const mtCron = "0 * * * *"
 
 // TestMaintenanceReads covers the cross-bank maintenance reads CronModels, FailedRefreshes and
-// BanksToConsolidate, plus UnitRepo.Unconsolidated's embedding filter (decision 1500). Refresh operations
+// UnconsolidatedBanks, plus UnitRepo.Unconsolidated's embedding filter (decision 1500). Refresh operations
 // reach terminal states through the Claimer.
 func TestMaintenanceReads(t *testing.T) {
 	t.Parallel()
 	runQueueCases(t, []queueCase{
 		{"cron_models", testMtCronModels},
 		{"failed_refreshes", testMtFailedRefreshes},
-		{"banks_to_consolidate", testMtBanksToConsolidate},
+		{"unconsolidated_banks", testMtUnconsolidatedBanks},
 		{"unconsolidated_skips_unembedded", testMtUnconsolidatedSkipsUnembedded},
 		{"cross_bank_tenants", testMtCrossBankTenants},
 	})
@@ -177,12 +178,17 @@ func mtFailedRefreshes(t *testing.T, s port.Store) []port.FailedRefresh {
 	return fs
 }
 
-// mtBanksToConsolidate reads BanksToConsolidate through Read() and fails the test on error.
-func mtBanksToConsolidate(t *testing.T, s port.Store) []port.BankRef {
+// mtUnconsolidatedBanks reads UnconsolidatedBanks with a cut-off past every fixture's created_at and fails
+// the test on error.
+func mtUnconsolidatedBanks(t *testing.T, s port.Store) []port.BankRef {
 	t.Helper()
-	bs, err := s.Read().BanksToConsolidate(t.Context())
+	st, ok := s.(*postgres.Store)
+	if !ok {
+		t.Fatalf("store is %T, want *postgres.Store", s)
+	}
+	bs, err := st.UnconsolidatedBanks(t.Context(), time.Now().Add(time.Hour))
 	if err != nil {
-		t.Fatalf("BanksToConsolidate: %v", err)
+		t.Fatalf("UnconsolidatedBanks: %v", err)
 	}
 	return bs
 }
@@ -327,14 +333,14 @@ func testMtFailedRefreshes(t *testing.T, q queueEnv) {
 		map[string]string{a: "boom-a", c: "boom-c", e: "boom-e"})
 }
 
-// testMtBanksToConsolidate: only live banks with an unconsolidated fact that has an embedding are listed,
+// testMtUnconsolidatedBanks: only live banks with an unconsolidated fact that has an embedding are listed,
 // ordered by (tenant, bank). Banks whose facts are all consolidated or parked, a tombstoned bank, a bank
 // whose only pending fact has no embedding, a bank with an observation only and a bank
 // whose only pending fact is archived are not.
-func testMtBanksToConsolidate(t *testing.T, q queueEnv) {
+func testMtUnconsolidatedBanks(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankOtherTenant, mtBankF, mtBankE, mtBankD, mtBankC, bankB, bankA)
-	if got := mtBanksToConsolidate(t, q.s); len(got) != 0 {
-		t.Errorf("BanksToConsolidate with no facts = %v, want none", mtBankKeys(got))
+	if got := mtUnconsolidatedBanks(t, q.s); len(got) != 0 {
+		t.Errorf("UnconsolidatedBanks with no facts = %v, want none", mtBankKeys(got))
 	}
 	insertUnits(t, q.s, mtEmbedded(bankOtherTenant, "other tenant"))
 	insertUnits(t, q.s, mtEmbedded(bankA, "pending a"))
@@ -349,11 +355,11 @@ func testMtBanksToConsolidate(t *testing.T, q queueEnv) {
 	insertUnits(t, q.s, archived)
 	mtArchive(t, q.s, mtBankF, archived.ID)
 
-	wantSeq(t, "BanksToConsolidate", mtBankKeys(mtBanksToConsolidate(t, q.s)),
+	wantSeq(t, "UnconsolidatedBanks", mtBankKeys(mtUnconsolidatedBanks(t, q.s)),
 		mtBankKeys([]port.BankRef{bankA, bankOtherTenant}))
 }
 
-// testMtUnconsolidatedSkipsUnembedded: UnitRepo.Unconsolidated (and BanksToConsolidate) skip a fact without
+// testMtUnconsolidatedSkipsUnembedded: UnitRepo.Unconsolidated (and UnconsolidatedBanks) skip a fact without
 // an embedding, whether inserted without one or cleared by Update, and pick it up again once Update sets
 // one (Update also clears the consolidation stamps).
 func testMtUnconsolidatedSkipsUnembedded(t *testing.T, q queueEnv) {
@@ -369,8 +375,8 @@ func testMtUnconsolidatedSkipsUnembedded(t *testing.T, q queueEnv) {
 	if got := unconsolidated(t, q.s, bankA, nil, 10); len(got) != 0 {
 		t.Errorf("Unconsolidated after clearing f1's embedding = %v, want none", unitIDs(got))
 	}
-	if got := mtBanksToConsolidate(t, q.s); len(got) != 0 {
-		t.Errorf("BanksToConsolidate with no embedded pending fact = %v, want none", mtBankKeys(got))
+	if got := mtUnconsolidatedBanks(t, q.s); len(got) != 0 {
+		t.Errorf("UnconsolidatedBanks with no embedded pending fact = %v, want none", mtBankKeys(got))
 	}
 
 	mtMark(t, q.s, []port.UnitID{f2.ID}, nil)
@@ -382,7 +388,7 @@ func testMtUnconsolidatedSkipsUnembedded(t *testing.T, q queueEnv) {
 	mtUpdate(t, q.s, f1)
 	wantSeq(t, "Unconsolidated after embedding f1 again", unitIDs(unconsolidated(t, q.s, bankA, nil, 10)),
 		[]port.UnitID{f1.ID, f2.ID})
-	wantSeq(t, "BanksToConsolidate after rederive", mtBankKeys(mtBanksToConsolidate(t, q.s)),
+	wantSeq(t, "UnconsolidatedBanks after rederive", mtBankKeys(mtUnconsolidatedBanks(t, q.s)),
 		mtBankKeys([]port.BankRef{bankA}))
 }
 
@@ -406,6 +412,6 @@ func testMtCrossBankTenants(t *testing.T, q queueEnv) {
 	})
 	q.mtWantFailed(t, mtFailedRefreshes(t, q.s), []string{mine},
 		map[string]port.OperationID{mine: failed}, map[string]string{mine: "boom-tenant-1"})
-	wantSeq(t, "BanksToConsolidate", mtBankKeys(mtBanksToConsolidate(t, q.s)),
+	wantSeq(t, "UnconsolidatedBanks", mtBankKeys(mtUnconsolidatedBanks(t, q.s)),
 		mtBankKeys([]port.BankRef{bankA, bankOtherTenant}))
 }

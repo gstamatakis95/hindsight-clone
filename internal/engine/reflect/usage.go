@@ -7,7 +7,7 @@ import (
 
 // addUsage merges one call's usage into st (one entry per slot and model) and enforces the whole-call token
 // budget: past maxTotal (nil or <= 0 = unlimited) reflect fails with RESOURCE_EXHAUSTED.
-func addUsage(st *AgentState, u domain.Usage, maxTotal *int64) error {
+func addUsage(st *agentState, u domain.Usage, maxTotal *int64) error {
 	if u.InputTokens != 0 || u.OutputTokens != 0 {
 		merged := false
 		for i := range st.Usage {

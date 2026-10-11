@@ -73,7 +73,7 @@ type RetainerDeps struct {
 	Linker Linker
 	// Scopes expands the document's tags into scopes for RetainResult.Scopes; nil = none reported.
 	Scopes ScopeExpander
-	// Tokens counts tokens for chunking; nil = ApproxTokens.
+	// Tokens counts tokens for chunking; nil = approxTokens.
 	Tokens TokenCounter
 	// Clock stamps events and progress.
 	Clock port.Clock
@@ -95,7 +95,7 @@ var _ Retainer = (*retainer)(nil)
 // NewRetainer returns the Retainer.
 func NewRetainer(d RetainerDeps) Retainer {
 	if d.Tokens == nil {
-		d.Tokens = ApproxTokens{}
+		d.Tokens = approxTokens{}
 	}
 	if d.NewID == nil {
 		d.NewID = uuid.NewString
@@ -160,7 +160,7 @@ func (r *retainer) ProcessDocument(ctx context.Context, j port.Job) (RetainResul
 		err = r.complete(ctx, rn)
 	}
 	// The scopes follow the tags the run ended with: a retag mid-run is adopted (docSuperseded).
-	res.UnitsCreated, res.Usage, res.Scopes = len(res.UnitIDs), SumUsage(res.Usage), r.scopes(rn)
+	res.UnitsCreated, res.Usage, res.Scopes = len(res.UnitIDs), sumUsage(res.Usage), r.scopes(rn)
 	if errors.Is(err, errSuperseded) {
 		res.Superseded, res.UnitsCreated, res.UnitIDs = true, 0, nil
 		return res, nil
@@ -267,7 +267,7 @@ func (r *retainer) chunks(ctx context.Context, rn *run) ([]domain.Chunk, error) 
 	if runKey == "" {
 		runKey = r.d.NewID()
 	}
-	chunks := ChunkWith(string(raw), ChunkOptions{
+	chunks := chunkWith(string(raw), chunkOptions{
 		MaxTokens: rn.t.chunkMax, OverlapTokens: rn.t.chunkOverlap, StructuredMaxTokens: rn.t.structuredMax,
 	}, r.d.Tokens)
 	rn.hashes = make(map[int]string, len(chunks))
@@ -421,8 +421,8 @@ func (r *retainer) now() time.Time {
 	return r.d.Clock.Now()
 }
 
-// SumUsage sums usage entries per (slot, model), keeping first-seen order.
-func SumUsage(us []domain.Usage) []domain.Usage {
+// sumUsage sums usage entries per (slot, model), keeping first-seen order.
+func sumUsage(us []domain.Usage) []domain.Usage {
 	var out []domain.Usage
 	for _, u := range us {
 		found := false

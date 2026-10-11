@@ -103,8 +103,8 @@ func TestTemporalArmRelevanceFilter(t *testing.T) {
 	})
 	spy := &temporalSpy{Reader: e.store.Read()}
 	w := &domain.TimeWindow{Start: testNow.AddDate(0, 0, -7), End: testNow}
-	q := &ParsedQuery{Bank: testBank, Window: w, Embedding: e.emb.Vector("rocket launch"), Limit: 10}
-	cs, err := NewTemporal(spy).Retrieve(context.Background(), q)
+	q := &parsedQuery{Bank: testBank, Window: w, Embedding: e.emb.Vector("rocket launch"), Limit: 10}
+	cs, err := newTemporal(spy).Retrieve(context.Background(), q)
 	if err != nil {
 		t.Fatal(err)
 	}

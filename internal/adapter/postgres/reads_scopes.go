@@ -201,17 +201,3 @@ func (r *reader) ModelsCiting(ctx context.Context, b port.BankRef, ids []port.Un
 	}
 	return out, nil
 }
-
-// BanksToConsolidate returns, ordered by (tenant, bank), every bank that is not tombstoned and holds an
-// unconsolidated fact with an embedding (decision 1500).
-func (r *reader) BanksToConsolidate(ctx context.Context) ([]port.BankRef, error) {
-	rows, err := r.queries().BanksToConsolidate(ctx)
-	if err != nil {
-		return nil, mapErr("banks to consolidate", err)
-	}
-	out := make([]port.BankRef, len(rows))
-	for i, row := range rows {
-		out[i] = port.BankRef{Tenant: row.TenantID, Bank: row.ID}
-	}
-	return out, nil
-}

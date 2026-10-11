@@ -51,27 +51,27 @@ func TestDecide(t *testing.T) {
 	sched := NewRefreshScheduler(NewChangeDetector(e.store.Read(), e.reads), e.config)
 	m := e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	now := e.clock.Now()
-	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != DecisionSkip || d.Reason != ReasonNotStale {
+	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionSkip || d.Reason != ReasonNotStale {
 		t.Fatalf("fresh: %+v", d)
 	}
 	e.addUnit(domain.FactTypeWorld, "new", "proj")
-	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != DecisionPark || !d.Until.Equal(now.Add(30*time.Second)) {
+	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionPark || !d.Until.Equal(now.Add(30*time.Second)) {
 		t.Fatalf("debounce: %+v", d)
 	}
 	floor, last := 600, now.Add(-time.Minute)
 	m.Spec.Trigger.MinRefreshIntervalSeconds, m.LastRefreshedAt = &floor, &last
-	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != DecisionPark || d.Reason != ReasonIntervalFloor ||
+	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionPark || d.Reason != ReasonIntervalFloor ||
 		!d.Until.Equal(last.Add(10*time.Minute)) {
 		t.Fatalf("floor: %+v", d)
 	}
 	zero := 0
 	m.Spec.Trigger.MinRefreshIntervalSeconds = nil
 	m.Spec.Overrides = &domain.BankConfig{MentalModels: &domain.MentalModelConfig{RefreshDebounceSeconds: &zero}}
-	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != DecisionRunNow {
+	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionRunNow {
 		t.Fatalf("run now: %+v", d)
 	}
 	m.AutoRefreshPaused = true
-	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != DecisionSkip || d.Reason != ReasonPaused {
+	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionSkip || d.Reason != ReasonPaused {
 		t.Fatalf("paused: %+v", d)
 	}
 }
@@ -80,9 +80,15 @@ func TestDecide(t *testing.T) {
 func newTriggers(e *env) (Triggers, Admin) {
 	det := NewChangeDetector(e.store.Read(), e.reads)
 	tr := NewTriggers(TriggerDeps{
-		Store: e.store, Scheduler: NewRefreshScheduler(det, e.config), Models: e.reads, Cron: e.reads, Clock: e.clock,
+		Store: e.store, Scheduler: NewRefreshScheduler(det, e.config), Cron: e.reads, Clock: e.clock,
 	})
 	return tr, NewAdmin(AdminDeps{Store: e.store, Models: e.reads, Detector: det, Clock: e.clock, Config: e.config})
+}
+
+// autoTrigger runs the automatic trigger path for model id (scheduler decision, then a parked or immediate
+// enqueue) and returns how many refreshes it inserted.
+func autoTrigger(e *env, tr Triggers, id port.MentalModelID) (int, error) {
+	return tr.(*triggers).triggerAll(e.ctx, []domain.MentalModel{e.model(id)})
 }
 
 // claimRefresh claims the due refresh job, if any.
@@ -109,10 +115,10 @@ func TestJoiningQueuedRefreshWithForceFullUpgrades(t *testing.T) {
 	spec.Trigger.RefreshAfterConsolidation = true
 	e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "new", "proj")
-	if n, err := tr.AfterConsolidation(e.ctx, e.bank); err != nil || n != 1 {
+	if n, err := autoTrigger(e, tr, "status"); err != nil || n != 1 {
 		t.Fatalf("first trigger inserted %d: %v", n, err)
 	}
-	if n, err := tr.AfterConsolidation(e.ctx, e.bank); err != nil || n != 0 {
+	if n, err := autoTrigger(e, tr, "status"); err != nil || n != 0 {
 		t.Fatalf("second trigger must join, inserted %d: %v", n, err)
 	}
 	if _, _, ok := claimRefresh(e); ok {
@@ -170,7 +176,7 @@ func TestPauseAndManualUnpause(t *testing.T) {
 		h[0].FailureReason != FailureDeltaOpsAllSkipped {
 		t.Fatalf("paused %v history %+v", m.AutoRefreshPaused, h)
 	}
-	if n, _ := tr.AfterConsolidation(e.ctx, e.bank); n != 0 {
+	if n, _ := autoTrigger(e, tr, "status"); n != 0 {
 		t.Fatal("automatic trigger enqueued a paused model")
 	}
 	e.clock.Advance(time.Minute)

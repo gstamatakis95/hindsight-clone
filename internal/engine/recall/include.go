@@ -19,11 +19,11 @@ type Includer interface {
 	//   - entities: the entity state of every entity attached to a result.
 	Enrich(
 		ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, inc domain.RecallInclude,
-	) (Enrichment, error)
+	) (enrichment, error)
 }
 
-// Enrichment is what an Includer attached to a result set.
-type Enrichment struct {
+// enrichment is what an Includer attached to a result set.
+type enrichment struct {
 	// SourceFacts are the facts behind returned observations, by id.
 	SourceFacts map[port.UnitID]domain.Unit
 	// SourceFactsTruncated reports that the source-fact budget cut some off.
@@ -54,31 +54,31 @@ type includer struct {
 
 var _ Includer = (*includer)(nil)
 
-// NewIncluder returns the Includer over r (GetChunks, GetUnits and EntityStates).
-func NewIncluder(r port.Reader, count TokenCounter) Includer {
+// newIncluder returns the Includer over r (GetChunks, GetUnits and EntityStates).
+func newIncluder(r port.Reader, count TokenCounter) Includer {
 	return &includer{r: r, count: count}
 }
 
 // Enrich implements Includer.
 func (in *includer) Enrich(
 	ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, inc domain.RecallInclude,
-) (Enrichment, error) {
-	var e Enrichment
+) (enrichment, error) {
+	var e enrichment
 	var err error
 	if isSet(inc.Chunks) {
 		if e.Chunks, err = in.chunks(ctx, b, results, intOr(inc.ChunksMaxTokens, DefaultChunksMaxTokens)); err != nil {
-			return Enrichment{}, err
+			return enrichment{}, err
 		}
 	}
 	if isSet(inc.SourceFacts) {
 		budget := intOr(inc.SourceFactsMaxTokens, DefaultSourceFactsMaxTokens)
 		if e.SourceFacts, e.SourceFactsTruncated, err = in.sourceFacts(ctx, b, seq, results, budget); err != nil {
-			return Enrichment{}, err
+			return enrichment{}, err
 		}
 	}
 	if isSet(inc.Entities) {
 		if e.Entities, err = in.entities(ctx, b, results); err != nil {
-			return Enrichment{}, err
+			return enrichment{}, err
 		}
 	}
 	return e, nil

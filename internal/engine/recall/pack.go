@@ -26,8 +26,8 @@ type packer struct{ count TokenCounter }
 
 var _ Packer = (*packer)(nil)
 
-// NewPacker returns a Packer counting unit text with count.
-func NewPacker(count TokenCounter) Packer { return &packer{count: count} }
+// newPacker returns a Packer counting unit text with count.
+func newPacker(count TokenCounter) Packer { return &packer{count: count} }
 
 // Pack implements Packer.
 func (p *packer) Pack(cs []Candidate, maxTokens int) []Candidate {

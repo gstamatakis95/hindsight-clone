@@ -38,8 +38,6 @@ var dataFor = map[string]func() any{
 	StructuredOutputUser:             func() any { return &StructuredOutputData{} },
 	SynthesizeSystem:                 func() any { return &SynthesizeData{} },
 	SynthesizeUser:                   func() any { return &SynthesizeData{} },
-	MentalModelDeltaSystem:           func() any { return &DeltaData{} },
-	MentalModelDeltaUser:             func() any { return &DeltaData{} },
 	MentalModelStructuredDeltaSystem: func() any { return &DeltaData{} },
 	MentalModelStructuredDeltaUser:   func() any { return &DeltaData{} },
 	MentalModelRefreshContext:        func() any { return &RefreshContextData{} },
@@ -193,7 +191,7 @@ func TestBranchVariants(t *testing.T) {
 	}
 	for _, tokens := range []int{100, 850, 1000} {
 		d := &DeltaData{DocumentTokens: tokens, DocumentBudget: 1000, Facts: []SourceFact{{ID: "f"}}}
-		variants = append(variants, variant{MentalModelDeltaUser, d}, variant{MentalModelStructuredDeltaUser, d})
+		variants = append(variants, variant{MentalModelStructuredDeltaUser, d})
 	}
 	variants = append(variants, variant{MentalModelRefreshContext, &RefreshContextData{Name: "n"}})
 	for _, v := range variants {
