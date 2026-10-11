@@ -106,26 +106,31 @@ func (s *Service) Reflect(ctx context.Context, req reflect.Request) (reflect.Res
 	return s.d.Agent.Reflect(ctx, req) //nolint:wrapcheck // the agent returns domain error classes
 }
 
-// UpdateMemory edits, invalidates (State invalidated) or restores (State valid) a fact in one transaction and
-// returns the unit and its rederive operation (nil for an invalidate, and for a restore of a live unit with no
-// edits). Observations are rejected with domain.ErrMemoryIsObservation.
+// UpdateMemory edits a live fact in one transaction and returns the unit and its rederive operation.
+// Observations are rejected with domain.ErrMemoryIsObservation; an archived or unknown unit is
+// domain.ErrNotFound.
 func (s *Service) UpdateMemory(ctx context.Context, req UpdateRequest) (domain.Unit, *domain.Operation, error) {
-	return s.curate.Update(ctx, req)
+	return s.curate.Update(ctx, curation{UpdateRequest: req, act: actionEdit})
 }
 
-// InvalidateMemory archives a fact: UpdateMemory with State invalidated and no edits.
+// InvalidateMemory archives a live fact in one transaction and returns it with state invalidated. No job
+// follows, so there is no operation.
 func (s *Service) InvalidateMemory(
 	ctx context.Context, b domain.BankRef, id domain.UnitID, reason string,
-) (domain.Unit, *domain.Operation, error) {
-	return s.curate.Update(ctx, UpdateRequest{Bank: b, ID: id, State: domain.MemoryStateInvalidated, Reason: reason})
+) (domain.Unit, error) {
+	u, _, err := s.curate.Update(ctx, curation{
+		UpdateRequest: UpdateRequest{Bank: b, ID: id, Reason: reason}, act: actionInvalidate,
+	})
+	return u, err
 }
 
-// RestoreMemory brings an archived fact back and queues its rederive: UpdateMemory with State valid and no
-// edits. Restoring a live fact changes nothing and returns no operation.
+// RestoreMemory brings an archived fact back and queues its rederive. Restoring a live fact changes nothing
+// and returns no operation.
 func (s *Service) RestoreMemory(ctx context.Context, req RestoreRequest) (domain.Unit, *domain.Operation, error) {
-	return s.curate.Update(ctx, UpdateRequest{
-		Bank: req.Bank, ID: req.ID, State: domain.MemoryStateValid, Reason: req.Reason, Overrides: req.Overrides,
-	})
+	return s.curate.Update(ctx, curation{UpdateRequest: UpdateRequest{
+		Bank: req.Bank, ID: req.ID, Reason: req.Reason, ResolveEntities: req.ResolveEntities,
+		Overrides: req.Overrides,
+	}, act: actionRestore})
 }
 
 // RunRetainJob runs a retain_document job: it processes the job's document and records the result

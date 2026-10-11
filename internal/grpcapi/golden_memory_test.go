@@ -6,9 +6,11 @@ import (
 	"memd/internal/memory"
 	"memd/internal/recall"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	reflecteng "memd/internal/reflect"
@@ -96,9 +98,9 @@ func TestGoldenRetainRequest(t *testing.T) {
 // TestGoldenRecallRequest checks every RecallRequest field, the tag filter and the time window.
 func TestGoldenRecallRequest(t *testing.T) {
 	in := &pb.RecallRequest{
-		BankId: "bank-2",
-		Query:  "what happened",
-		Types:  []pb.FactType{pb.FactType_FACT_TYPE_EXPERIENCE, pb.FactType_FACT_TYPE_OBSERVATION},
+		BankId:    "bank-2",
+		Query:     "what happened",
+		FactTypes: []pb.FactType{pb.FactType_FACT_TYPE_EXPERIENCE, pb.FactType_FACT_TYPE_OBSERVATION},
 		Tags: &pb.TagFilter{
 			Tags: []string{"flat-tag"}, Match: pb.TagsMatch_TAGS_MATCH_ALL_STRICT,
 			Groups: []*pb.TagGroup{{Node: &pb.TagGroup_Leaf{Leaf: &pb.TagLeaf{
@@ -185,7 +187,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		ExtraDirectives: []*pb.Directive{{
 			Id: "dir-1", Name: "dir-name", Rules: []string{"be brief"}, Tags: []string{"dir-tag"}, Active: true,
 		}},
-		Include:   &pb.ReflectInclude{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
+		Include:   &pb.ReflectInclude{BasedOn: ptr(false), Trace: true, ToolOutputs: ptr(false)},
 		QueryTime: timestamppb.New(goldenTime(5)),
 		Arms:      []string{"text"},
 		Overrides: &pb.ReflectOverrides{
@@ -231,21 +233,33 @@ func TestGoldenReflectRequest(t *testing.T) {
 	checkGolden(t, got, want)
 }
 
-// TestUpdateMemoryEntitiesPresence checks that an unset EntityList (unchanged) and a set but empty one
-// (clear) stay distinct.
-func TestUpdateMemoryEntitiesPresence(t *testing.T) {
-	unset, err := updateMemoryRequestFromProto(&pb.UpdateMemoryRequest{MemoryId: "m"})
+// TestUpdateMemoryMask checks the UpdateMemory mask: empty = the populated MemoryEdit fields, a named field
+// applies even when unset (a clear), and a path below a top-level field is INVALID_ARGUMENT on update_mask.
+func TestUpdateMemoryMask(t *testing.T) {
+	implicit, err := updateMemoryRequestFromProto(&pb.UpdateMemoryRequest{MemoryId: "m", Memory: &pb.MemoryEdit{
+		Text: "new", OccurredStart: timestamppb.New(goldenTime(1)),
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if unset.Entities != nil {
-		t.Errorf("unset entities = %#v, want nil (unchanged)", unset.Entities)
+	slices.Sort(implicit.Fields)
+	if want := []memory.EditField{memory.EditOccurredStart, memory.EditText}; !slices.Equal(implicit.Fields, want) {
+		t.Errorf("implicit mask fields = %v, want %v", implicit.Fields, want)
 	}
-	cleared, err := updateMemoryRequestFromProto(&pb.UpdateMemoryRequest{MemoryId: "m", Entities: &pb.EntityList{}})
+	cleared, err := updateMemoryRequestFromProto(&pb.UpdateMemoryRequest{
+		MemoryId: "m", UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"entities", "occurred_end"}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cleared.Entities == nil || len(cleared.Entities) != 0 {
-		t.Errorf("empty entity list = %#v, want a non-nil empty slice (clear)", cleared.Entities)
+	if want := []memory.EditField{memory.EditEntities, memory.EditOccurredEnd}; !slices.Equal(cleared.Fields, want) ||
+		cleared.Edit.Entities != nil || cleared.Edit.OccurredEnd != nil {
+		t.Errorf("explicit mask = %v %+v, want %v with the values cleared", cleared.Fields, cleared.Edit, want)
+	}
+	_, err = updateMemoryRequestFromProto(&pb.UpdateMemoryRequest{
+		MemoryId: "m", UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"occurred_start.seconds"}},
+	})
+	if v := domain.FieldViolations(err); len(v) != 1 || v[0].Field != "update_mask" {
+		t.Errorf("nested path: err = %v, want a violation on update_mask", err)
 	}
 }

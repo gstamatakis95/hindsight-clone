@@ -37,7 +37,7 @@ func TestListMemoriesPaging(t *testing.T) {
 	}
 	for _, req := range []ListRequest{
 		{Bank: testBank, PageToken: "!!not-a-token"},
-		{Bank: testBank, Types: []domain.FactType{"bogus"}},
+		{Bank: testBank, FactTypes: []domain.FactType{"bogus"}},
 		{Bank: testBank, State: "bogus"},
 		{Bank: testBank, Tags: domain.TagFilter{Groups: []domain.TagGroup{{Kind: domain.TagGroupAllOf}}}},
 	} {

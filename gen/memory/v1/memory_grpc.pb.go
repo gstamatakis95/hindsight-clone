@@ -89,19 +89,24 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MemoryService_Retain_FullMethodName         = "/memory.v1.MemoryService/Retain"
-	MemoryService_Recall_FullMethodName         = "/memory.v1.MemoryService/Recall"
-	MemoryService_Reflect_FullMethodName        = "/memory.v1.MemoryService/Reflect"
-	MemoryService_ListRecallArms_FullMethodName = "/memory.v1.MemoryService/ListRecallArms"
+	MemoryService_Retain_FullMethodName           = "/memory.v1.MemoryService/Retain"
+	MemoryService_Recall_FullMethodName           = "/memory.v1.MemoryService/Recall"
+	MemoryService_Reflect_FullMethodName          = "/memory.v1.MemoryService/Reflect"
+	MemoryService_ListRecallArms_FullMethodName   = "/memory.v1.MemoryService/ListRecallArms"
+	MemoryService_ListMemories_FullMethodName     = "/memory.v1.MemoryService/ListMemories"
+	MemoryService_GetMemory_FullMethodName        = "/memory.v1.MemoryService/GetMemory"
+	MemoryService_UpdateMemory_FullMethodName     = "/memory.v1.MemoryService/UpdateMemory"
+	MemoryService_InvalidateMemory_FullMethodName = "/memory.v1.MemoryService/InvalidateMemory"
+	MemoryService_RestoreMemory_FullMethodName    = "/memory.v1.MemoryService/RestoreMemory"
 )
 
 // MemoryServiceClient is the client API for MemoryService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// MemoryService stores content as memories and answers questions from them.
+// MemoryService stores content as memories, answers questions from them, and lists and curates them.
 type MemoryServiceClient interface {
-	// Retain stores content and extracts memory units from it. Synchronous by default (returns after units
+	// Retain stores content and extracts memories from it. Synchronous by default (returns after the memories
 	// commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
 	// bank creates it with tenant defaults.
 	Retain(ctx context.Context, in *RetainRequest, opts ...grpc.CallOption) (*RetainResponse, error)
@@ -116,6 +121,19 @@ type MemoryServiceClient interface {
 	// names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
 	// MinScores.arms accept.
 	ListRecallArms(ctx context.Context, in *ListRecallArmsRequest, opts ...grpc.CallOption) (*ListRecallArmsResponse, error)
+	// ListMemories lists live and invalidated memories (raw facts and observations) with filters and keyset
+	// pagination. Returns no total.
+	ListMemories(ctx context.Context, in *ListMemoriesRequest, opts ...grpc.CallOption) (*ListMemoriesResponse, error)
+	// GetMemory returns one memory, live or invalidated.
+	GetMemory(ctx context.Context, in *GetMemoryRequest, opts ...grpc.CallOption) (*GetMemoryResponse, error)
+	// UpdateMemory edits a live raw fact; observations are rejected. It enqueues a rederive_memory job.
+	UpdateMemory(ctx context.Context, in *UpdateMemoryRequest, opts ...grpc.CallOption) (*UpdateMemoryResponse, error)
+	// InvalidateMemory archives a live raw fact: recall and consolidation stop seeing it, and RestoreMemory
+	// brings it back. Observations are rejected. Everything happens in the call; no operation is returned.
+	InvalidateMemory(ctx context.Context, in *InvalidateMemoryRequest, opts ...grpc.CallOption) (*InvalidateMemoryResponse, error)
+	// RestoreMemory brings an invalidated raw fact back and enqueues a rederive_memory job. Restoring a live
+	// fact changes nothing.
+	RestoreMemory(ctx context.Context, in *RestoreMemoryRequest, opts ...grpc.CallOption) (*RestoreMemoryResponse, error)
 }
 
 type memoryServiceClient struct {
@@ -166,13 +184,63 @@ func (c *memoryServiceClient) ListRecallArms(ctx context.Context, in *ListRecall
 	return out, nil
 }
 
+func (c *memoryServiceClient) ListMemories(ctx context.Context, in *ListMemoriesRequest, opts ...grpc.CallOption) (*ListMemoriesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMemoriesResponse)
+	err := c.cc.Invoke(ctx, MemoryService_ListMemories_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) GetMemory(ctx context.Context, in *GetMemoryRequest, opts ...grpc.CallOption) (*GetMemoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMemoryResponse)
+	err := c.cc.Invoke(ctx, MemoryService_GetMemory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) UpdateMemory(ctx context.Context, in *UpdateMemoryRequest, opts ...grpc.CallOption) (*UpdateMemoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateMemoryResponse)
+	err := c.cc.Invoke(ctx, MemoryService_UpdateMemory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) InvalidateMemory(ctx context.Context, in *InvalidateMemoryRequest, opts ...grpc.CallOption) (*InvalidateMemoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvalidateMemoryResponse)
+	err := c.cc.Invoke(ctx, MemoryService_InvalidateMemory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) RestoreMemory(ctx context.Context, in *RestoreMemoryRequest, opts ...grpc.CallOption) (*RestoreMemoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RestoreMemoryResponse)
+	err := c.cc.Invoke(ctx, MemoryService_RestoreMemory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MemoryServiceServer is the server API for MemoryService service.
 // All implementations must embed UnimplementedMemoryServiceServer
 // for forward compatibility.
 //
-// MemoryService stores content as memories and answers questions from them.
+// MemoryService stores content as memories, answers questions from them, and lists and curates them.
 type MemoryServiceServer interface {
-	// Retain stores content and extracts memory units from it. Synchronous by default (returns after units
+	// Retain stores content and extracts memories from it. Synchronous by default (returns after the memories
 	// commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
 	// bank creates it with tenant defaults.
 	Retain(context.Context, *RetainRequest) (*RetainResponse, error)
@@ -187,6 +255,19 @@ type MemoryServiceServer interface {
 	// names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
 	// MinScores.arms accept.
 	ListRecallArms(context.Context, *ListRecallArmsRequest) (*ListRecallArmsResponse, error)
+	// ListMemories lists live and invalidated memories (raw facts and observations) with filters and keyset
+	// pagination. Returns no total.
+	ListMemories(context.Context, *ListMemoriesRequest) (*ListMemoriesResponse, error)
+	// GetMemory returns one memory, live or invalidated.
+	GetMemory(context.Context, *GetMemoryRequest) (*GetMemoryResponse, error)
+	// UpdateMemory edits a live raw fact; observations are rejected. It enqueues a rederive_memory job.
+	UpdateMemory(context.Context, *UpdateMemoryRequest) (*UpdateMemoryResponse, error)
+	// InvalidateMemory archives a live raw fact: recall and consolidation stop seeing it, and RestoreMemory
+	// brings it back. Observations are rejected. Everything happens in the call; no operation is returned.
+	InvalidateMemory(context.Context, *InvalidateMemoryRequest) (*InvalidateMemoryResponse, error)
+	// RestoreMemory brings an invalidated raw fact back and enqueues a rederive_memory job. Restoring a live
+	// fact changes nothing.
+	RestoreMemory(context.Context, *RestoreMemoryRequest) (*RestoreMemoryResponse, error)
 	mustEmbedUnimplementedMemoryServiceServer()
 }
 
@@ -208,6 +289,21 @@ func (UnimplementedMemoryServiceServer) Reflect(context.Context, *ReflectRequest
 }
 func (UnimplementedMemoryServiceServer) ListRecallArms(context.Context, *ListRecallArmsRequest) (*ListRecallArmsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListRecallArms not implemented")
+}
+func (UnimplementedMemoryServiceServer) ListMemories(context.Context, *ListMemoriesRequest) (*ListMemoriesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMemories not implemented")
+}
+func (UnimplementedMemoryServiceServer) GetMemory(context.Context, *GetMemoryRequest) (*GetMemoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMemory not implemented")
+}
+func (UnimplementedMemoryServiceServer) UpdateMemory(context.Context, *UpdateMemoryRequest) (*UpdateMemoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateMemory not implemented")
+}
+func (UnimplementedMemoryServiceServer) InvalidateMemory(context.Context, *InvalidateMemoryRequest) (*InvalidateMemoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InvalidateMemory not implemented")
+}
+func (UnimplementedMemoryServiceServer) RestoreMemory(context.Context, *RestoreMemoryRequest) (*RestoreMemoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RestoreMemory not implemented")
 }
 func (UnimplementedMemoryServiceServer) mustEmbedUnimplementedMemoryServiceServer() {}
 func (UnimplementedMemoryServiceServer) testEmbeddedByValue()                       {}
@@ -302,6 +398,96 @@ func _MemoryService_ListRecallArms_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MemoryService_ListMemories_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMemoriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).ListMemories(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_ListMemories_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).ListMemories(ctx, req.(*ListMemoriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_GetMemory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMemoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).GetMemory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_GetMemory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).GetMemory(ctx, req.(*GetMemoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_UpdateMemory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateMemoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).UpdateMemory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_UpdateMemory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).UpdateMemory(ctx, req.(*UpdateMemoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_InvalidateMemory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvalidateMemoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).InvalidateMemory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_InvalidateMemory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).InvalidateMemory(ctx, req.(*InvalidateMemoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_RestoreMemory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RestoreMemoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).RestoreMemory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_RestoreMemory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).RestoreMemory(ctx, req.(*RestoreMemoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MemoryService_ServiceDesc is the grpc.ServiceDesc for MemoryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -325,33 +511,43 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListRecallArms",
 			Handler:    _MemoryService_ListRecallArms_Handler,
 		},
+		{
+			MethodName: "ListMemories",
+			Handler:    _MemoryService_ListMemories_Handler,
+		},
+		{
+			MethodName: "GetMemory",
+			Handler:    _MemoryService_GetMemory_Handler,
+		},
+		{
+			MethodName: "UpdateMemory",
+			Handler:    _MemoryService_UpdateMemory_Handler,
+		},
+		{
+			MethodName: "InvalidateMemory",
+			Handler:    _MemoryService_InvalidateMemory_Handler,
+		},
+		{
+			MethodName: "RestoreMemory",
+			Handler:    _MemoryService_RestoreMemory_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "memory/v1/memory.proto",
 }
 
 const (
-	MemoryUnitService_ListMemories_FullMethodName          = "/memory.v1.MemoryUnitService/ListMemories"
-	MemoryUnitService_GetMemory_FullMethodName             = "/memory.v1.MemoryUnitService/GetMemory"
 	MemoryUnitService_GetObservationHistory_FullMethodName = "/memory.v1.MemoryUnitService/GetObservationHistory"
-	MemoryUnitService_UpdateMemory_FullMethodName          = "/memory.v1.MemoryUnitService/UpdateMemory"
 )
 
 // MemoryUnitServiceClient is the client API for MemoryUnitService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// MemoryUnitService lists, reads and curates individual memory units.
+// MemoryUnitService reads the version history of observations.
 type MemoryUnitServiceClient interface {
-	// ListMemories lists live and archived units with filters and keyset pagination. Returns no total.
-	ListMemories(ctx context.Context, in *ListMemoriesRequest, opts ...grpc.CallOption) (*ListMemoriesResponse, error)
-	// GetMemory returns one unit, live or invalidated.
-	GetMemory(ctx context.Context, in *GetMemoryRequest, opts ...grpc.CallOption) (*GetMemoryResponse, error)
 	// GetObservationHistory returns every version of an observation, oldest first.
 	GetObservationHistory(ctx context.Context, in *GetObservationHistoryRequest, opts ...grpc.CallOption) (*GetObservationHistoryResponse, error)
-	// UpdateMemory edits, invalidates or restores a raw fact; observations are rejected. Edit and restore
-	// enqueue a rederive_memory job; invalidate needs none.
-	UpdateMemory(ctx context.Context, in *UpdateMemoryRequest, opts ...grpc.CallOption) (*UpdateMemoryResponse, error)
 }
 
 type memoryUnitServiceClient struct {
@@ -360,26 +556,6 @@ type memoryUnitServiceClient struct {
 
 func NewMemoryUnitServiceClient(cc grpc.ClientConnInterface) MemoryUnitServiceClient {
 	return &memoryUnitServiceClient{cc}
-}
-
-func (c *memoryUnitServiceClient) ListMemories(ctx context.Context, in *ListMemoriesRequest, opts ...grpc.CallOption) (*ListMemoriesResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListMemoriesResponse)
-	err := c.cc.Invoke(ctx, MemoryUnitService_ListMemories_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *memoryUnitServiceClient) GetMemory(ctx context.Context, in *GetMemoryRequest, opts ...grpc.CallOption) (*GetMemoryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetMemoryResponse)
-	err := c.cc.Invoke(ctx, MemoryUnitService_GetMemory_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *memoryUnitServiceClient) GetObservationHistory(ctx context.Context, in *GetObservationHistoryRequest, opts ...grpc.CallOption) (*GetObservationHistoryResponse, error) {
@@ -392,31 +568,14 @@ func (c *memoryUnitServiceClient) GetObservationHistory(ctx context.Context, in 
 	return out, nil
 }
 
-func (c *memoryUnitServiceClient) UpdateMemory(ctx context.Context, in *UpdateMemoryRequest, opts ...grpc.CallOption) (*UpdateMemoryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateMemoryResponse)
-	err := c.cc.Invoke(ctx, MemoryUnitService_UpdateMemory_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // MemoryUnitServiceServer is the server API for MemoryUnitService service.
 // All implementations must embed UnimplementedMemoryUnitServiceServer
 // for forward compatibility.
 //
-// MemoryUnitService lists, reads and curates individual memory units.
+// MemoryUnitService reads the version history of observations.
 type MemoryUnitServiceServer interface {
-	// ListMemories lists live and archived units with filters and keyset pagination. Returns no total.
-	ListMemories(context.Context, *ListMemoriesRequest) (*ListMemoriesResponse, error)
-	// GetMemory returns one unit, live or invalidated.
-	GetMemory(context.Context, *GetMemoryRequest) (*GetMemoryResponse, error)
 	// GetObservationHistory returns every version of an observation, oldest first.
 	GetObservationHistory(context.Context, *GetObservationHistoryRequest) (*GetObservationHistoryResponse, error)
-	// UpdateMemory edits, invalidates or restores a raw fact; observations are rejected. Edit and restore
-	// enqueue a rederive_memory job; invalidate needs none.
-	UpdateMemory(context.Context, *UpdateMemoryRequest) (*UpdateMemoryResponse, error)
 	mustEmbedUnimplementedMemoryUnitServiceServer()
 }
 
@@ -427,17 +586,8 @@ type MemoryUnitServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedMemoryUnitServiceServer struct{}
 
-func (UnimplementedMemoryUnitServiceServer) ListMemories(context.Context, *ListMemoriesRequest) (*ListMemoriesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListMemories not implemented")
-}
-func (UnimplementedMemoryUnitServiceServer) GetMemory(context.Context, *GetMemoryRequest) (*GetMemoryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetMemory not implemented")
-}
 func (UnimplementedMemoryUnitServiceServer) GetObservationHistory(context.Context, *GetObservationHistoryRequest) (*GetObservationHistoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetObservationHistory not implemented")
-}
-func (UnimplementedMemoryUnitServiceServer) UpdateMemory(context.Context, *UpdateMemoryRequest) (*UpdateMemoryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateMemory not implemented")
 }
 func (UnimplementedMemoryUnitServiceServer) mustEmbedUnimplementedMemoryUnitServiceServer() {}
 func (UnimplementedMemoryUnitServiceServer) testEmbeddedByValue()                           {}
@@ -460,42 +610,6 @@ func RegisterMemoryUnitServiceServer(s grpc.ServiceRegistrar, srv MemoryUnitServ
 	s.RegisterService(&MemoryUnitService_ServiceDesc, srv)
 }
 
-func _MemoryUnitService_ListMemories_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListMemoriesRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MemoryUnitServiceServer).ListMemories(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MemoryUnitService_ListMemories_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MemoryUnitServiceServer).ListMemories(ctx, req.(*ListMemoriesRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MemoryUnitService_GetMemory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetMemoryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MemoryUnitServiceServer).GetMemory(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MemoryUnitService_GetMemory_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MemoryUnitServiceServer).GetMemory(ctx, req.(*GetMemoryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _MemoryUnitService_GetObservationHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetObservationHistoryRequest)
 	if err := dec(in); err != nil {
@@ -514,24 +628,6 @@ func _MemoryUnitService_GetObservationHistory_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
-func _MemoryUnitService_UpdateMemory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateMemoryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MemoryUnitServiceServer).UpdateMemory(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MemoryUnitService_UpdateMemory_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MemoryUnitServiceServer).UpdateMemory(ctx, req.(*UpdateMemoryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // MemoryUnitService_ServiceDesc is the grpc.ServiceDesc for MemoryUnitService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -540,20 +636,8 @@ var MemoryUnitService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*MemoryUnitServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "ListMemories",
-			Handler:    _MemoryUnitService_ListMemories_Handler,
-		},
-		{
-			MethodName: "GetMemory",
-			Handler:    _MemoryUnitService_GetMemory_Handler,
-		},
-		{
 			MethodName: "GetObservationHistory",
 			Handler:    _MemoryUnitService_GetObservationHistory_Handler,
-		},
-		{
-			MethodName: "UpdateMemory",
-			Handler:    _MemoryUnitService_UpdateMemory_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

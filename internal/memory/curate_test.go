@@ -16,12 +16,9 @@ import (
 // invalidate archives f1 through InvalidateMemory.
 func (e *curateEnv) invalidate(s *Service) domain.Unit {
 	e.t.Helper()
-	u, op, err := s.InvalidateMemory(e.ctx, testBank, idF1, "wrong")
+	u, err := s.InvalidateMemory(e.ctx, testBank, idF1, "wrong")
 	if err != nil {
 		e.t.Fatal(err)
-	}
-	if op != nil {
-		e.t.Fatalf("invalidate returned operation %+v, want none", op)
 	}
 	return u
 }
@@ -71,14 +68,15 @@ func (e *curateEnv) auditActions() []domain.CurationAction {
 	return out
 }
 
-// assertInvalidateEffects checks the jobs, audit row and event an invalidate of f1 commits: a refresh for the
-// model whose source_ids cite the fact (none for a model citing only the deleted observation or another
+// assertInvalidateEffects checks the jobs, audit row and event an invalidate of f1 commits: a refresh for
+// each model whose source_ids cite the fact or the deleted observation (none for a model citing only another
 // fact), consolidate and graph.
 func (e *curateEnv) assertInvalidateEffects() {
 	e.t.Helper()
 	t := e.t
-	if keys := e.serialKeys(domain.OperationKindRefreshMentalModel); !slices.Equal(keys, []string{"mm:m-fact"}) {
-		t.Errorf("refresh jobs = %v, want mm:m-fact", keys)
+	want := []string{"mm:m-fact", "mm:m-obs"}
+	if keys := e.serialKeys(domain.OperationKindRefreshMentalModel); !slices.Equal(keys, want) {
+		t.Errorf("refresh jobs = %v, want %v", keys, want)
 	}
 	if keys := e.serialKeys(domain.OperationKindConsolidate); !slices.Equal(keys, []string{"consolidate"}) {
 		t.Errorf("consolidate jobs = %v", keys)
@@ -119,6 +117,39 @@ func TestInvalidateRemovesCitingObservationsAndQueuesRefresh(t *testing.T) {
 	}
 
 	e.assertInvalidateEffects()
+}
+
+func TestCurationRefreshesModelsCitingDeletedObservations(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(e *curateEnv) error
+		want []string
+	}{
+		{"invalidate", func(e *curateEnv) error {
+			_, err := e.service(nil).InvalidateMemory(e.ctx, testBank, idF1, "wrong")
+			return err
+		}, []string{"mm:m-fact", "mm:m-obs"}},
+		{"edit", func(e *curateEnv) error {
+			_, _, err := e.curator().Update(e.ctx, edit(idF1, Edit{Text: "Alice likes oolong tea"}, EditText))
+			return err
+		}, []string{"mm:m-obs"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newCurateEnv(t)
+			// o1 cites f1, so curating f1 deletes o1: m-obs, which cites only o1, is now stale too.
+			e.addModels(map[domain.MentalModelID][]domain.UnitID{
+				"m-fact": {idF1}, "m-obs": {idO1}, "m-other": {idF2},
+			})
+			if err := tc.run(e); err != nil {
+				t.Fatal(err)
+			}
+			e.assertNotLive(idO1)
+			if keys := e.serialKeys(domain.OperationKindRefreshMentalModel); !slices.Equal(keys, tc.want) {
+				t.Errorf("refresh jobs = %v, want %v", keys, tc.want)
+			}
+		})
+	}
 }
 
 // restoreF1 invalidates f1, drains the consolidation it queued and restores it, returning the rederive job.
@@ -221,10 +252,10 @@ func (e *curateEnv) rederiveEdited(names []string) {
 func TestEditClearsEmbeddingAndQueuesRederive(t *testing.T) {
 	e := newCurateEnv(t)
 	text := "Alice prefers oolong tea"
-	u, op, err := e.curator().Update(e.ctx, UpdateRequest{
-		Bank: testBank, ID: idF1, Text: &text, FactType: domain.FactTypeExperience,
-		Entities: []string{"Alice", "Carol"}, Reason: "typo",
-	})
+	req := edit(idF1, Edit{Text: text, FactType: domain.FactTypeExperience, Entities: []string{"Alice", "Carol"}},
+		EditText, EditFactType, EditEntities)
+	req.Reason = "typo"
+	u, op, err := e.curator().Update(e.ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +276,7 @@ func TestEditClearsEmbeddingAndQueuesRederive(t *testing.T) {
 
 func TestEditClearEntities(t *testing.T) {
 	e := newCurateEnv(t)
-	_, _, err := e.curator().Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, Entities: []string{}})
+	_, _, err := e.curator().Update(e.ctx, edit(idF1, Edit{}, EditEntities))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,37 +295,30 @@ func TestEditClearEntities(t *testing.T) {
 func TestCuratorRejectsObservations(t *testing.T) {
 	e := newCurateEnv(t)
 	c := e.curator()
-	text := "x"
-	empty := ""
+	x := Edit{Text: "x"}
+	invalidate := func(id domain.UnitID) curation {
+		return curation{UpdateRequest: UpdateRequest{Bank: testBank, ID: id}, act: actionInvalidate}
+	}
 	cases := []struct {
 		name string
-		req  UpdateRequest
+		req  curation
 		want error
 	}{
-		{"edit observation", UpdateRequest{ID: idO1, Text: &text}, domain.ErrInvalidArgument},
+		{"edit observation", edit(idO1, x, EditText), domain.ErrInvalidArgument},
+		{"invalidate observation", invalidate(idO1), domain.ErrInvalidArgument},
+		{"nothing to do", edit(idF1, x), domain.ErrInvalidArgument},
+		{"unknown field", edit(idF1, x, "state"), domain.ErrInvalidArgument},
+		{"empty text", edit(idF1, Edit{}, EditText), domain.ErrInvalidArgument},
+		{"to observation", edit(idF1, Edit{FactType: domain.FactTypeObservation}, EditFactType), domain.ErrInvalidArgument},
+		{"unknown unit", edit(idNope, x, EditText), domain.ErrNotFound},
 		{
-			"invalidate observation",
-			UpdateRequest{ID: idO1, State: domain.MemoryStateInvalidated},
-			domain.ErrInvalidArgument,
+			"restore unknown",
+			curation{UpdateRequest: UpdateRequest{Bank: testBank, ID: idNope}, act: actionRestore},
+			domain.ErrNotFound,
 		},
-		{
-			"invalidate with edits",
-			UpdateRequest{ID: idF1, Text: &text, State: domain.MemoryStateInvalidated},
-			domain.ErrInvalidArgument,
-		},
-		{"nothing to do", UpdateRequest{ID: idF1}, domain.ErrInvalidArgument},
-		{"empty text", UpdateRequest{ID: idF1, Text: &empty}, domain.ErrInvalidArgument},
-		{
-			"to observation",
-			UpdateRequest{ID: idF1, FactType: domain.FactTypeObservation},
-			domain.ErrInvalidArgument,
-		},
-		{"unknown unit", UpdateRequest{ID: idNope, Text: &text}, domain.ErrNotFound},
-		{"restore unknown", UpdateRequest{ID: idNope, State: domain.MemoryStateValid}, domain.ErrNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.req.Bank = testBank
 			if _, _, err := c.Update(e.ctx, tc.req); !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
@@ -310,9 +334,7 @@ func TestCuratorRejectsObservations(t *testing.T) {
 
 func TestRestoreLiveUnitIsNoop(t *testing.T) {
 	e := newCurateEnv(t)
-	u, op, err := e.curator().Update(e.ctx, UpdateRequest{
-		Bank: testBank, ID: idF1, State: domain.MemoryStateValid,
-	})
+	u, op, err := e.service(nil).RestoreMemory(e.ctx, RestoreRequest{Bank: testBank, ID: idF1})
 	if err != nil || op != nil || u.ID != idF1 {
 		t.Fatalf("restore of a live unit = %+v %v %v", u, op, err)
 	}
@@ -357,13 +379,13 @@ func TestRederiveSkipsWhenTextChanged(t *testing.T) {
 	e := newCurateEnv(t)
 	c := e.curator()
 	first := "Alice likes jasmine tea"
-	if _, _, err := c.Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, Text: &first}); err != nil {
+	if _, _, err := c.Update(e.ctx, edit(idF1, Edit{Text: first}, EditText)); err != nil {
 		t.Fatal(err)
 	}
 	jobs := e.claim(domain.OperationKindRederiveMemory)
 	second := "Alice likes black tea"
 	emb := editingEmbedder{Embedder: e.emb, edit: func() {
-		if _, _, err := c.Update(e.ctx, UpdateRequest{Bank: testBank, ID: idF1, Text: &second}); err != nil {
+		if _, _, err := c.Update(e.ctx, edit(idF1, Edit{Text: second}, EditText)); err != nil {
 			t.Error(err)
 		}
 	}}

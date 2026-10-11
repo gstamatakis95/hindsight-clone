@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	pb "memd/gen/memory/v1"
 )
@@ -45,11 +46,11 @@ func TestScenarios(t *testing.T) {
 func (e *env) retainSync(t *testing.T) {
 	const bank = "sc-retain-sync"
 	doc := e.retain(t, bank, aliceDoc, aliceText)
-	if doc.GetUnitsCreated() < 1 || doc.GetUnchanged() {
+	if doc.GetMemoriesCreated() < 1 || doc.GetUnchanged() {
 		t.Fatalf("retain: %+v", doc)
 	}
-	if got := len(e.facts(t, bank, aliceDoc)); got != int(doc.GetUnitsCreated()) {
-		t.Fatalf("listed %d facts right after the sync retain, want %d", got, doc.GetUnitsCreated())
+	if got := len(e.facts(t, bank, aliceDoc)); got != int(doc.GetMemoriesCreated()) {
+		t.Fatalf("listed %d facts right after the sync retain, want %d", got, doc.GetMemoriesCreated())
 	}
 	again := e.retain(t, bank, aliceDoc, aliceText)
 	if !again.GetUnchanged() {
@@ -246,13 +247,13 @@ func (e *env) invalidateRestore(t *testing.T) {
 		t.Fatal("no Lisbon fact")
 	}
 	seq := e.changeSeq(t, bank)
-	inv, err := e.c.Units.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
-		BankId: bank, MemoryId: target.GetId(), State: pb.MemoryState_MEMORY_STATE_INVALIDATED, Reason: "wrong",
+	inv, err := e.c.Memory.InvalidateMemory(e.ctx(t), &pb.InvalidateMemoryRequest{
+		BankId: bank, MemoryId: target.GetId(), Reason: "wrong",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inv.GetMemory().GetState() != pb.MemoryState_MEMORY_STATE_INVALIDATED || inv.GetOperation() != nil {
+	if inv.GetMemory().GetState() != pb.MemoryState_MEMORY_STATE_INVALIDATED {
 		t.Fatalf("invalidate: %+v", inv)
 	}
 	if _, ok := e.recall(t, bank, "Alice Lisbon")[target.GetId()]; ok {
@@ -260,8 +261,8 @@ func (e *env) invalidateRestore(t *testing.T) {
 	}
 	seq = e.wantSeqAfter(t, bank, seq, "invalidate")
 	e.idle(t, bank)
-	res, err := e.c.Units.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
-		BankId: bank, MemoryId: target.GetId(), State: pb.MemoryState_MEMORY_STATE_VALID, Reason: "right after all",
+	res, err := e.c.Memory.RestoreMemory(e.ctx(t), &pb.RestoreMemoryRequest{
+		BankId: bank, MemoryId: target.GetId(), Reason: "right after all",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -283,8 +284,9 @@ func (e *env) invalidateRestore(t *testing.T) {
 func (e *env) editFact(t *testing.T, bank, id string, seq int64) {
 	t.Helper()
 	text := "Alice moved to Porto in 2023."
-	ed, err := e.c.Units.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
-		BankId: bank, MemoryId: id, Text: &text, Reason: "she moved again",
+	ed, err := e.c.Memory.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
+		BankId: bank, MemoryId: id, Memory: &pb.MemoryEdit{Text: text}, Reason: "she moved again",
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"text"}},
 	})
 	if err != nil {
 		t.Fatal(err)

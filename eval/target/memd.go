@@ -110,7 +110,7 @@ func (m *Memd) Recall(
 	for _, r := range resp.GetResults() {
 		out.Results = append(out.Results, harness.Memory{
 			ID: r.GetId(), Text: r.GetText(),
-			Type:     strings.ToLower(strings.TrimPrefix(r.GetType().String(), "FACT_TYPE_")),
+			Type:     strings.ToLower(strings.TrimPrefix(r.GetFactType().String(), "FACT_TYPE_")),
 			Entities: r.GetEntities(), Context: r.GetContext(),
 			OccurredStart: protoTime(r.GetOccurredStart()), OccurredEnd: protoTime(r.GetOccurredEnd()),
 			MentionedAt: protoTime(r.GetMentionedAt()), DocumentID: r.GetDocumentId(), ChunkID: r.GetChunkId(),

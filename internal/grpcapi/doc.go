@@ -109,10 +109,11 @@
 // levels that travel both ways (configs, overrides, specs). proto -> domain fails only on an undefined enum
 // number or an invalid timestamp (INVALID_ARGUMENT); domain -> proto never fails, and an unknown domain enum
 // becomes *_UNSPECIFIED. Enum strings are the lowercase value names without the prefix; a zero time is a nil
-// Timestamp; presence is kept where it matters (UpdateMemoryRequest.entities unset = unchanged, set and empty =
-// clear). Every tag filter is one TagFilter message converted to one domain.TagFilter (an unset one is the zero
-// filter); the receiving service checks it (both forms set, groups on a list RPC). An Operation goes out with its
-// bank_id, and its kind-specific result as debug_summary, compact JSON text that is not a stable contract.
+// Timestamp; presence is kept where it matters (an UpdateMemory mask path names a MemoryEdit field to apply,
+// so a named but unset field clears it). Every tag filter is one TagFilter message converted to one
+// domain.TagFilter (an unset one is the zero filter); the receiving service checks it (both forms set, groups on
+// a list RPC). An Operation goes out with its bank_id, and its kind-specific result as debug_summary, compact
+// JSON text that is not a stable contract.
 // Mental-model detail is trimmed here: METADATA is the spec plus status, CONTENT adds content and structured
 // output, FULL adds source ids and the last trace; Get defaults to FULL, List to METADATA, and Create, Update and
 // Clear return FULL.
