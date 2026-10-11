@@ -45,6 +45,8 @@ const (
 	envHeartbeatInterval   = "MEMD_HEARTBEAT_INTERVAL"
 	envStaleAfter          = "MEMD_STALE_AFTER"
 	envMaintenanceInterval = "MEMD_MAINTENANCE_INTERVAL"
+	envConsolidationGrace  = "MEMD_CONSOLIDATION_RECONCILE_GRACE"
+	envWorkerHealthAddr    = "MEMD_WORKER_HEALTH_ADDR"
 	envRPCDeadline         = "MEMD_RPC_DEADLINE"
 	envDBMaxConns          = "MEMD_DB_MAX_CONNS"
 	envLogLevel            = "MEMD_LOG_LEVEL"
@@ -62,6 +64,7 @@ const (
 	defaultHeartbeat         = 15 * time.Second
 	defaultStaleAfter        = 2 * time.Minute
 	defaultMaintenance       = 60 * time.Second
+	defaultConsolidationWait = 10 * time.Minute
 	defaultRPCDeadline       = 120 * time.Second
 )
 
@@ -107,6 +110,11 @@ type Config struct {
 	StaleAfter time.Duration
 	// MaintenanceInterval is the maintenance tick period.
 	MaintenanceInterval time.Duration
+	// ConsolidationGrace is how old an unconsolidated unit must be before the maintenance tick consolidates
+	// its bank (decision 2000).
+	ConsolidationGrace time.Duration
+	// WorkerHealthAddr, when set, is where the worker serves grpc.health.v1 (worker and all modes).
+	WorkerHealthAddr string
 	// RPCDeadline applies to calls without a deadline; 0 = none.
 	RPCDeadline time.Duration
 	// DBMaxConns caps the Postgres pool; 0 = sized from the worker slots.
@@ -181,6 +189,14 @@ var settings = []setting{
 	{
 		envMaintenanceInterval, "maintenance tick period", defaultMaintenance.String(),
 		duration(func(c *Config) *time.Duration { return &c.MaintenanceInterval }),
+	},
+	{
+		envConsolidationGrace, "age of an unconsolidated unit before the maintenance tick consolidates its bank",
+		defaultConsolidationWait.String(), duration(func(c *Config) *time.Duration { return &c.ConsolidationGrace }),
+	},
+	{
+		envWorkerHealthAddr, "worker grpc.health listen address (empty = none)", "",
+		str(func(c *Config) *string { return &c.WorkerHealthAddr }),
 	},
 	{
 		envRPCDeadline, "deadline of calls that carry none (0 = none)", defaultRPCDeadline.String(),
@@ -354,9 +370,9 @@ func (c Config) Validate() error {
 func (c Config) validateWorker() []error {
 	var errs []error
 	if c.WorkerSlots <= 0 || c.PollInterval <= 0 || c.HeartbeatInterval <= 0 || c.StaleAfter <= 0 ||
-		c.MaintenanceInterval <= 0 {
-		errs = append(errs, errors.New("worker slots, poll, heartbeat, stale-after and maintenance intervals "+
-			"must be positive"))
+		c.MaintenanceInterval <= 0 || c.ConsolidationGrace <= 0 {
+		errs = append(errs, errors.New("worker slots, poll, heartbeat, stale-after, maintenance intervals and "+
+			"the consolidation grace must be positive"))
 	}
 	if c.HeartbeatInterval > 0 && c.StaleAfter > 0 && c.HeartbeatInterval*4 >= c.StaleAfter*3 {
 		errs = append(errs, fmt.Errorf("%s (%s) must be below 3/4 of %s (%s)",

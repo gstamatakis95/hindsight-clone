@@ -54,6 +54,15 @@ type ports struct {
 	db       pinger
 	stranded worker.StrandedFactSource
 	batches  worker.BatchSettler
+	maint    maintenanceReads
+}
+
+// maintenanceReads are the maintenance tick's reads the ports don't expose; the Postgres store implements
+// them (decisions 2000-2002).
+type maintenanceReads interface {
+	worker.ConsolidationCandidates
+	worker.StalledDeleteSource
+	worker.GraphWorkSource
 }
 
 // deps is everything the two modes run.
@@ -125,6 +134,7 @@ func openAdapters(ctx context.Context, cfg Config) (ports, func(), error) {
 	store := postgres.New(pool)
 	return ports{
 		store: store, claimer: store, blob: blob, gw: gw, db: pool, stranded: store, batches: store,
+		maint: store,
 	}, pool.Close, nil
 }
 
@@ -188,16 +198,19 @@ func wireEngines(
 			Scopes: c.scopes, Tokens: tok,
 			Checkpoint: func(j port.Job) consolidate.Checkpointer { return worker.NewCheckpoint(claimer, j.ID) },
 		}),
-		Refresher: mm.runner,
-		Deleter:   d.server.Deleter,
-		Rederiver: curate.NewRederiver(curate.RederiverDeps{Store: store, Embedder: p.gw, Linker: c.linker}),
-		Retagger:  d.server.Retagger,
-		Graph:     maintenance.NewGraphMaintainer(store, c.linker, clock),
-		Store:     store,
-		Clock:     clock,
+		Refresher:  mm.runner,
+		Deleter:    d.server.Deleter,
+		Rederiver:  curate.NewRederiver(curate.RederiverDeps{Store: store, Embedder: p.gw, Linker: c.linker}),
+		Retagger:   d.server.Retagger,
+		Graph:      maintenance.NewGraphMaintainer(store, c.linker, clock),
+		Store:      store,
+		Clock:      clock,
+		Checkpoint: func(j port.Job) worker.Checkpoint { return worker.NewCheckpoint(claimer, j.ID) },
 	}
 	d.maintenance = worker.MaintenanceDeps{
-		Claimer: claimer, Store: store, Clock: clock, Consolidation: c.read, CronRefresh: mm.triggers,
+		Claimer: claimer, Store: store, Clock: clock, CronRefresh: mm.triggers,
+		Consolidation: p.maint, Config: c.resolver, ConsolidationGrace: cfg.ConsolidationGrace,
+		Deletes: p.maint, Graph: p.maint,
 		RefreshFailures: mentalmodel.NewRefreshFailureReconciler(c.read, store, c.resolver, clock),
 		Stranded:        p.stranded, Batches: p.batches, Interval: cfg.MaintenanceInterval, StaleAfter: cfg.StaleAfter,
 		Logger: log,
