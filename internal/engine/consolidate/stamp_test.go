@@ -2,6 +2,7 @@ package consolidate
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/fake"
 	"memd/internal/port"
@@ -96,8 +97,10 @@ func TestRunClearedEarlierScopeIsNotStamped(t *testing.T) {
 	e.script(e.cite("Alice and Carol like tea", "f1", "f2"))
 	h := e.beforeScope(func() {
 		e.tx(func(tx port.Tx) error {
-			_, err := NewInvalidator().ClearScopes(t.Context(), tx, bank, []port.ScopeKey{scopeOf("a")})
-			return err
+			if _, err := NewInvalidator().ClearScopes(t.Context(), tx, bank, []port.ScopeKey{scopeOf("a")}); err != nil {
+				return fmt.Errorf("clear scope a: %w", err)
+			}
+			return nil
 		})
 	}, "b")
 	res := e.run(autoJob())
@@ -135,7 +138,7 @@ func TestRunCoSourceInvalidatedIsNotStamped(t *testing.T) {
 	e.beforeScope(func() {
 		e.tx(func(tx port.Tx) error {
 			if _, err := NewInvalidator().ClearForMemory(t.Context(), tx, bank, "f3"); err != nil {
-				return err
+				return fmt.Errorf("clear for f3: %w", err)
 			}
 			return tx.Units().Archive(t.Context(), bank, "f3", "wrong")
 		})
@@ -171,7 +174,7 @@ func TestRunCoSourceRetaggedIsNotStamped(t *testing.T) {
 				return err
 			}
 			if _, err := NewInvalidator().ClearDocumentUnits(t.Context(), tx, bank, "d2"); err != nil {
-				return err
+				return fmt.Errorf("clear d2: %w", err)
 			}
 			_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d2", []string{"c"}, seq)
 			return err

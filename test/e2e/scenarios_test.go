@@ -173,7 +173,7 @@ func (e *env) consolidationTriggersRefresh(t *testing.T) {
 	e.idle(t, bank)
 	created, err := e.c.MentalModels.CreateMentalModel(e.ctx(t), &pb.CreateMentalModelRequest{
 		BankId: bank, Spec: &pb.MentalModelSpec{
-			Id: "people", Name: "People", SourceQuery: "Who are the people we know about?",
+			Id: "alice", Name: "Alice", SourceQuery: "What do we know about Alice?",
 			Trigger: &pb.RefreshTrigger{
 				Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT, RefreshAfterConsolidation: true,
 			},
@@ -183,20 +183,21 @@ func (e *env) consolidationTriggersRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.waitOp(t, bank, created.GetBuild().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
-	built := e.model(t, bank, "people").GetVersion()
-	e.retain(t, bank, "doc-bob", "Bob plays chess on Sundays. Bob lives in Porto.")
+	built := e.model(t, bank, "alice").GetVersion()
+	e.retain(t, bank, "doc-alice-2", "Alice adopted a cat named Miso. Alice plays the violin on weekends.")
 	e.idle(t, bank)
 	if failed := e.refreshOps(t, bank, pb.OperationStatus_OPERATION_STATUS_FAILED); len(failed) != 0 {
 		t.Fatalf("%d refreshes failed, first: %s", len(failed), failed[0].GetError())
 	}
-	if done := e.refreshOps(t, bank, pb.OperationStatus_OPERATION_STATUS_COMPLETED); len(done) < 2 {
+	done := e.refreshOps(t, bank, pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	if len(done) < 2 {
 		t.Fatalf("%d completed refreshes, want the build and the one consolidation triggered", len(done))
 	}
-	if v := e.model(t, bank, "people").GetVersion(); v <= built {
-		t.Fatalf("version %d after the triggered refresh, want above the build's %d", v, built)
+	if v := e.model(t, bank, "alice").GetVersion(); v <= built {
+		t.Fatalf("version %d after the triggered refresh, want above the build's %d; refreshes: %v", v, built, done)
 	}
 	time.Sleep(3 * time.Second) // one maintenance interval (2 s), so a failure would have been reconciled
-	if m := e.model(t, bank, "people"); m.GetAutoRefreshPaused() {
+	if m := e.model(t, bank, "alice"); m.GetAutoRefreshPaused() {
 		t.Fatalf("model paused after a consolidation-triggered refresh: %+v", m)
 	}
 }
