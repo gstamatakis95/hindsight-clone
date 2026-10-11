@@ -22,7 +22,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-12 | Mental model engine | merged (dbfa13f) | wp/WP-12-mentalmodel | — | — | — | — |
 | WP-13 | Bank, curation, documents, maintenance | merged (fffcf5b) | wp/WP-13-bank-curate-docs-maint | — | — | — | — |
 | WP-15 | Port extension (CCR batch) | merged (b5d9e2d) | wp/WP-15-port-extension | 9f9451e | — | batch applied | coverage gap: CitingScopes/IDsByDocument on unknown/tombstoned bank |
-| WP-14 | Integration | waiting | — | — | all | — | — |
+| WP-14 | Integration | merged (14a a28bc05, 14b 6bb3dde) | — | — | — | — | — |
 
 ## Environment notes
 
@@ -299,3 +299,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   Accepted gap: the ChangeDetector uses the default 0.45 fuzzy floor (needs a ConfigResolver; deferred to avoid
   a constructor change under WP-14b).
 - 2026-10-11 WP-17 merged (tag-only changes adopted by a running retain/reprocess; 3 overflow markers). Gates pass. WP-14b must rebase; a sync Retain overlapping a tag-only UpdateDocument now succeeds.
+- 2026-10-11 WP-14b merged as 6bb3dde. Accepted out-of-scope fixes: retain_batch settlement (decision 1453) and
+  stranded-fact reads (decision 1452), both Postgres store methods consumed via worker interfaces. ValidateOverrides
+  RPC-name bug fixed. All gates incl. make e2e (9 scenarios + golden fixtures) pass on main. Phase 3 complete.
+- Next: Phase 4 final review (2 reviewers: A = platform/API sections, B = engines/jobs/rules), then fix-up WPs.
