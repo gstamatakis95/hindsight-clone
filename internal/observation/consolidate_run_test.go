@@ -300,6 +300,7 @@ func TestModelReaches(t *testing.T) {
 	m := func(tags []string, tr domain.RefreshTrigger) domain.MentalModel {
 		return domain.MentalModel{Spec: domain.MentalModelSpec{Tags: tags, Trigger: tr}}
 	}
+	trig := func(f domain.TagFilter) domain.RefreshTrigger { return domain.RefreshTrigger{Tags: f} }
 	group := domain.TagGroup{Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{Tags: []string{"x"}}}
 	tests := []struct {
 		name  string
@@ -312,9 +313,9 @@ func TestModelReaches(t *testing.T) {
 		{"tagged model, shared scope", m([]string{"x"}, domain.RefreshTrigger{}), nil, false},
 		{"tagged model, containing scope", m([]string{"x"}, domain.RefreshTrigger{}), []string{"x", "y"}, true},
 		{"tagged model, other scope", m([]string{"x"}, domain.RefreshTrigger{}), []string{"y"}, false},
-		{"exact mode", m([]string{"x"}, domain.RefreshTrigger{TagsMatch: domain.TagsMatchExact}), []string{"x", "y"}, false},
-		{"tag groups", m(nil, domain.RefreshTrigger{TagGroups: []domain.TagGroup{group}}), []string{"x"}, true},
-		{"tag groups, shared", m(nil, domain.RefreshTrigger{TagGroups: []domain.TagGroup{group}}), nil, false},
+		{"exact mode", m([]string{"x"}, trig(domain.TagFilter{Match: domain.TagsMatchExact})), []string{"x", "y"}, false},
+		{"tag groups", m(nil, trig(domain.TagFilter{Groups: []domain.TagGroup{group}})), []string{"x"}, true},
+		{"tag groups, shared", m(nil, trig(domain.TagFilter{Groups: []domain.TagGroup{group}})), nil, false},
 	}
 	for _, tc := range tests {
 		if got := modelReaches(tc.model, tc.tags); got != tc.want {

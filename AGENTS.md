@@ -65,6 +65,10 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - Doc comment on every exported identifier, every method in an interface and every package (doc.go).
 - McCabe complexity <= 15 and lines <= 120. Split the function; don't suppress the linter.
 - No `//nolint` without a reason comment.
+- Errors are domain error classes (internal/domain/errors.go), wrapped with fmt.Errorf("%w: ..."); the API sends
+  their reason as google.rpc.ErrorInfo. A validation error that names a request field or config path uses
+  domain.InvalidField, so the client gets a BadRequest field violation. List RPCs apply domain.ListPage and take
+  a domain.TagFilter (api/AGENTS.md has the API conventions).
 - Prompts live in internal/prompts/templates. Never inline prompt text in Go.
 - New behaviour knobs go in BankConfig, in their phase group (retain, observations, recall, reflect, mental_models,
   models), and in the overrides message of each RPC that may change them. Operator-only settings go in a section
@@ -75,7 +79,7 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim. A handler
   takes the `*jobs.Run` it runs under: report progress with run.Report (it returns domain.ErrCancelled once the
   job is cancelled or its bank deleted), check run.Alive before an irreversible step, and record results with
-  run.SetResult; keep result keys stable (GetOperation shows them).
+  run.SetResult; keep result keys stable (GetOperation shows them as Operation.debug_summary).
 - Never call an LLM, embedder, reranker, recall, reflect or timex inside DB.InTx: read, call, then write in a
   short tx. tools/txcheck enforces the lexical case (a model call written inside the InTx literal).
 - Any tx that changes memory content calls tx.Seq(bank) first and stamps the rows it writes with it.

@@ -29,7 +29,7 @@ func TestIngestUnchangedMakesNoLLMCall(t *testing.T) {
 
 	for _, async := range []bool{false, true} {
 		res := e.ingest(RetainRequest{RunAsync: async, Items: []RetainItem{item}})
-		if !res.Documents[0].Unchanged || res.Documents[0].OperationID != "" {
+		if !res.Documents[0].Unchanged || res.Documents[0].Operation != nil {
 			t.Errorf("async=%v: result %+v, want unchanged with no operation", async, res.Documents[0])
 		}
 	}
@@ -151,9 +151,10 @@ func TestIngestAsyncEnqueuesChildrenUnderBatch(t *testing.T) {
 			{Content: "two", Timeless: true},
 		},
 	})
-	if res.ParentOperationID == "" || len(res.Documents) != 2 || res.Documents[1].DocumentID == "" {
+	if len(res.Documents) != 2 || res.Documents[1].DocumentID == "" {
 		t.Fatalf("result = %+v", res)
 	}
+	checkOperations(t, res)
 	if len(e.llm.Calls()) != 0 {
 		t.Fatalf("async retain called the model")
 	}
@@ -164,12 +165,30 @@ func TestIngestAsyncEnqueuesChildrenUnderBatch(t *testing.T) {
 	checkFirstChild(e, e.claimRetain(), res, ts)
 }
 
+// checkOperations checks an async retain returns the operations it enqueued, read back whole: a pending
+// retain_batch parent of the bank, and one pending retain_document child per document under it.
+func checkOperations(t *testing.T, res RetainResult) {
+	t.Helper()
+	p := res.BatchOperation
+	if p == nil || p.ID == "" || p.Bank != testBank || p.Kind != domain.OperationKindRetainBatch ||
+		p.Status != domain.OperationStatusPending {
+		t.Fatalf("batch operation = %+v", p)
+	}
+	for i, d := range res.Documents {
+		op := d.Operation
+		if op == nil || op.Bank != testBank || op.Kind != domain.OperationKindRetainDocument || op.ParentID != p.ID ||
+			op.Status != domain.OperationStatusPending || op.CreatedAt.IsZero() {
+			t.Fatalf("document %d operation = %+v", i, op)
+		}
+	}
+}
+
 // checkFirstChild checks the first item's job: parent, serial key, merged overrides and pinned payload.
 func checkFirstChild(e *env, j store.Job, res RetainResult, ts time.Time) {
 	t := e.t
 	t.Helper()
-	if j.ParentID != res.ParentOperationID || j.SerialKey != jobs.DocumentSerialKey("d1") ||
-		j.ID != res.Documents[0].OperationID {
+	if j.ParentID != res.BatchOperation.ID || j.SerialKey != jobs.DocumentSerialKey("d1") ||
+		j.ID != res.Documents[0].Operation.ID {
 		t.Errorf("job = %+v", j)
 	}
 	o := j.Overrides

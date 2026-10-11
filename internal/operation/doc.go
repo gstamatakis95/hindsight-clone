@@ -14,23 +14,24 @@
 // transaction after checking the bank is live: an unknown or tombstoned bank is domain.ErrNotFound (SPEC: once a
 // bank is deleting, reads return NOT_FOUND; GetBank NOT_FOUND is the delete's completion signal). ListOperations
 // pages newest first. ListEvents returns the events after a seq, of the requested types (empty = all), and the last
-// seq scanned; a limit of 0 or less is 100 and any limit is capped at 1000 (the store's EventRepo.List treats <= 0
-// as no limit, so the service always passes a bound).
+// seq scanned (the next after_seq). Both apply domain.ListPage to the page size: 0 is 100, any size is capped at
+// 1000 and a negative one is domain.ErrInvalidArgument (the store's EventRepo.List treats <= 0 as no limit, so the
+// service always passes a bound).
 //
 // # Control
 //
 // [Service.CancelOperation] cancels through Queue.Cancel: a pending row becomes CANCELLED at once; a processing row
 // records the request and becomes CANCELLED when its handler stops at its next checkpoint. A terminal operation is
-// domain.ErrFailedPrecondition, and so is any delete_bank: the bank is already tombstoned, and a stopped delete
-// would leave it so.
+// domain.ErrOperationNotCancellable (FAILED_PRECONDITION), and so is any delete_bank: the bank is already
+// tombstoned, and a stopped delete would leave it so.
 //
 // [Service.RetryOperation] re-queues a FAILED or CANCELLED operation through Queue.Retry (PENDING, run_at = now,
-// attempt reset); any other status is domain.ErrFailedPrecondition. On a bank being deleted only delete_bank may be
-// retried (that resumes the delete); any other job would only be skipped by claims and removed with the bank, so
-// it is refused like every other write to a deleting bank (domain.ErrBankDeleting).
+// attempt reset); any other status is domain.ErrOperationNotRetryable (FAILED_PRECONDITION). On a bank being deleted
+// only delete_bank may be retried (that resumes the delete); any other job would only be skipped by claims and removed
+// with the bank, so it is refused like every other write to a deleting bank (domain.ErrBankDeleting).
 //
 // # Tests
 //
-// Tests run on a pgtest database: the ListEvents default and cap, and the delete_bank and deleting-bank rules of
+// Tests run on a pgtest database: the ListEvents page bounds, and the delete_bank and deleting-bank rules of
 // cancel and retry.
 package operation

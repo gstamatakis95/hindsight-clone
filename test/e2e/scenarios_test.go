@@ -67,8 +67,8 @@ func (e *env) retainSync(t *testing.T) {
 	e.idle(t, bank)
 }
 
-// retainAsync: run_async returns operation ids under a retain_batch parent; the barrier drains, every child
-// completes and the units are there.
+// retainAsync: run_async returns the enqueued operations (with their bank) under a retain_batch parent; the
+// barrier drains, every child completes and the units are there.
 func (e *env) retainAsync(t *testing.T) {
 	const bank = "sc-retain-async"
 	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
@@ -78,17 +78,21 @@ func (e *env) retainAsync(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.GetParentOperationId() == "" || len(resp.GetDocuments()) != 2 {
+	parent := resp.GetBatchOperation()
+	if parent.GetId() == "" || parent.GetBankId() != bank ||
+		parent.GetKind() != pb.OperationKind_OPERATION_KIND_RETAIN_BATCH || len(resp.GetDocuments()) != 2 {
 		t.Fatalf("async retain: %+v", resp)
 	}
 	e.idle(t, bank)
 	for _, d := range resp.GetDocuments() {
-		if d.GetOperationId() == "" {
-			t.Fatalf("document %s has no operation", d.GetDocumentId())
+		op := d.GetOperation()
+		if op.GetId() == "" || op.GetParentId() != parent.GetId() ||
+			op.GetKind() != pb.OperationKind_OPERATION_KIND_RETAIN_DOCUMENT {
+			t.Fatalf("document %s operation: %+v", d.GetDocumentId(), op)
 		}
-		e.waitOp(t, bank, d.GetOperationId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+		e.waitOp(t, bank, op.GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	}
-	e.waitOp(t, bank, resp.GetParentOperationId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	e.waitOp(t, bank, parent.GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	if len(e.facts(t, bank, "")) < 4 {
 		t.Fatalf("async retain stored %d facts", len(e.facts(t, bank, "")))
 	}
@@ -135,7 +139,7 @@ func (e *env) mentalModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.waitOp(t, bank, created.GetBuild().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	e.waitOp(t, bank, created.GetOperation().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	first := e.model(t, bank, "alice")
 	if first.GetVersion() < 1 || strings.TrimSpace(first.GetContentMd()) == "" {
 		t.Fatalf("agentic build: version %d, content %q", first.GetVersion(), first.GetContentMd())
@@ -150,11 +154,11 @@ func (e *env) mentalModels(t *testing.T) {
 	op := e.waitOp(t, bank, ref.GetOperation().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	second := e.model(t, bank, "alice")
 	if second.GetVersion() <= first.GetVersion() || strings.TrimSpace(second.GetContentMd()) == "" {
-		t.Fatalf("single-shot refresh: version %d -> %d, result %v", first.GetVersion(), second.GetVersion(),
-			op.GetResult())
+		t.Fatalf("single-shot refresh: version %d -> %d, summary %s", first.GetVersion(), second.GetVersion(),
+			op.GetDebugSummary())
 	}
-	if !strings.Contains(op.GetResult().String(), "single_shot") {
-		t.Fatalf("refresh result %v, want strategy single_shot", op.GetResult())
+	if !strings.Contains(op.GetDebugSummary(), "single_shot") {
+		t.Fatalf("refresh debug summary %s, want strategy single_shot", op.GetDebugSummary())
 	}
 }
 
@@ -184,7 +188,7 @@ func (e *env) consolidationTriggersRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.waitOp(t, bank, created.GetBuild().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	e.waitOp(t, bank, created.GetOperation().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	built := e.model(t, bank, "alice").GetVersion()
 	e.retain(t, bank, "doc-alice-2", "Alice adopted a cat named Miso. Alice plays the violin on weekends.")
 	e.idle(t, bank)
@@ -248,7 +252,7 @@ func (e *env) invalidateRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inv.GetMemory().GetState() != pb.MemoryState_MEMORY_STATE_INVALIDATED || inv.GetOperationId() != "" {
+	if inv.GetMemory().GetState() != pb.MemoryState_MEMORY_STATE_INVALIDATED || inv.GetOperation() != nil {
 		t.Fatalf("invalidate: %+v", inv)
 	}
 	if _, ok := e.recall(t, bank, "Alice Lisbon")[target.GetId()]; ok {
@@ -262,10 +266,10 @@ func (e *env) invalidateRestore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.GetOperationId() == "" {
+	if res.GetOperation().GetId() == "" {
 		t.Fatal("restore queued no rederive")
 	}
-	e.waitOp(t, bank, res.GetOperationId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	e.waitOp(t, bank, res.GetOperation().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	e.idle(t, bank)
 	if _, ok := e.recall(t, bank, "Alice Lisbon")[target.GetId()]; !ok {
 		t.Fatal("restored fact not recalled")
@@ -285,11 +289,11 @@ func (e *env) editFact(t *testing.T, bank, id string, seq int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ed.GetMemory().GetText() != text || ed.GetOperationId() == "" || ed.GetMemory().GetEditedAt() == nil {
+	if ed.GetMemory().GetText() != text || ed.GetOperation().GetId() == "" || ed.GetMemory().GetEditedAt() == nil {
 		t.Fatalf("edit: %+v", ed)
 	}
 	e.wantSeqAfter(t, bank, seq, "edit")
-	e.waitOp(t, bank, ed.GetOperationId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	e.waitOp(t, bank, ed.GetOperation().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	e.idle(t, bank)
 	if got := e.recall(t, bank, "Alice Porto 2023"); got[id] != text {
 		t.Fatalf("edited fact not recalled with its new text: %v", got)
@@ -387,7 +391,7 @@ func (e *env) retainAsync1(t *testing.T, bank, doc, content string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return resp.GetDocuments()[0].GetOperationId()
+	return resp.GetDocuments()[0].GetOperation().GetId()
 }
 
 // crashReclaim: a worker killed mid-job leaves the row PROCESSING; once its heartbeat is stale the

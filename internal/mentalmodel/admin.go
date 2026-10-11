@@ -18,12 +18,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// Page size defaults for the list RPCs.
-const (
-	defaultPageSize = 50
-	maxPageSize     = 500
-)
-
 // modelIDPattern is a valid model id: lowercase alphanumerics and hyphens.
 var modelIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
@@ -35,11 +29,9 @@ type ListRequest struct {
 	FolderPrefix string
 	// Detail is how much of each model to load.
 	Detail domain.Detail
-	// Tags filters by model tags; empty = none.
-	Tags []string
-	// TagsMatch is how Tags compare.
-	TagsMatch domain.TagsMatch
-	// PageSize caps the page; 0 = the RPC default.
+	// Tags filters by the models' own tags, flat form only; empty tags = none, unset match = any.
+	Tags domain.TagFilter
+	// PageSize caps the page (domain.ListPage); 0 = the default.
 	PageSize int
 	// PageToken continues a previous listing; empty = first page.
 	PageToken string
@@ -61,7 +53,7 @@ type HistoryRequest struct {
 	ID domain.MentalModelID
 	// Kind limits entries to one kind; unspecified = all.
 	Kind domain.HistoryKind
-	// PageSize caps the page; 0 = the RPC default.
+	// PageSize caps the page (domain.ListPage); 0 = the default.
 	PageSize int
 	// PageToken continues a previous listing; empty = first page.
 	PageToken string
@@ -134,15 +126,19 @@ func (s *Service) GetMentalModel(
 	return s.present(ctx, m, detail)
 }
 
-// ListMentalModels returns one page of the bank's models ordered by id, at detail (unspecified = metadata).
+// ListMentalModels returns one page of the bank's models ordered by id, at detail (unspecified = metadata). The
+// page size follows domain.ListPage and the tag filter must be flat (domain.ErrInvalidArgument otherwise).
 func (s *Service) ListMentalModels(ctx context.Context, req ListRequest) (ModelPage, error) {
-	size := req.PageSize
-	if size <= 0 {
-		size = defaultPageSize
+	size, err := domain.ListPage.Size(req.PageSize)
+	if err != nil {
+		return ModelPage{}, fmt.Errorf("mentalmodel: list: %w", err)
+	}
+	if err := req.Tags.RequireFlat(); err != nil {
+		return ModelPage{}, fmt.Errorf("mentalmodel: list: %w", err)
 	}
 	items, next, err := s.d.DB.Read().ListMentalModels(ctx, store.ModelQuery{
-		Bank: req.Bank, FolderPrefix: normalizeFolder(req.FolderPrefix), Tags: domain.NormalizeTags(req.Tags),
-		TagsMatch: req.TagsMatch, PageSize: min(size, maxPageSize), PageToken: req.PageToken,
+		Bank: req.Bank, FolderPrefix: normalizeFolder(req.FolderPrefix), Tags: domain.NormalizeTags(req.Tags.Tags),
+		TagsMatch: req.Tags.Match, PageSize: size, PageToken: req.PageToken,
 	})
 	if err != nil {
 		return ModelPage{}, fmt.Errorf("mentalmodel: list: %w", err)
@@ -255,23 +251,23 @@ func (s *Service) ClearMentalModel(
 	return s.present(ctx, m, domain.DetailFull)
 }
 
-// ListMentalModelHistory returns one page of the model's history, newest first, paged with an offset token.
+// ListMentalModelHistory returns one page of the model's history, newest first, paged with an offset token; the
+// page size follows domain.ListPage.
 func (s *Service) ListMentalModelHistory(ctx context.Context, req HistoryRequest) (HistoryPage, error) {
 	offset := 0
 	if req.PageToken != "" {
 		n, err := strconv.Atoi(req.PageToken)
 		if err != nil || n < 0 {
-			return HistoryPage{}, fmt.Errorf("%w: bad page token", domain.ErrInvalidArgument)
+			return HistoryPage{}, domain.InvalidField("page_token", "bad page token")
 		}
 		offset = n
 	}
-	size := req.PageSize
-	if size <= 0 {
-		size = defaultPageSize
+	size, err := domain.ListPage.Size(req.PageSize)
+	if err != nil {
+		return HistoryPage{}, fmt.Errorf("mentalmodel: history: %w", err)
 	}
-	size = min(size, maxPageSize)
 	var entries []domain.MentalModelHistoryEntry
-	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
+	err = s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.MentalModels().Get(ctx, req.Bank, req.ID); err != nil {
 			return err
 		}
@@ -371,7 +367,7 @@ func lockedModel(
 // stalenessConfig is the config needsRefresh reads for m on a model read: the model's config when its scope has
 // a fuzzy leaf (the fuzzy floor matters), else the zero config, so a plain read resolves no config.
 func (s *Service) stalenessConfig(ctx context.Context, m domain.MentalModel) (domain.BankConfig, error) {
-	if !hasFuzzyLeaf(resolveScope(m).TagGroups) {
+	if !hasFuzzyLeaf(resolveScope(m).Tags.Groups) {
 		return domain.BankConfig{}, nil
 	}
 	return s.modelConfig(ctx, m)
@@ -402,10 +398,12 @@ func normalizeSpec(spec domain.MentalModelSpec) (domain.MentalModelSpec, error) 
 			return spec, fmt.Errorf("%w: refresh_cron: %w", domain.ErrInvalidArgument, err)
 		}
 	}
-	for _, g := range t.TagGroups {
-		if err := g.Validate(); err != nil {
-			return spec, fmt.Errorf("mentalmodel: trigger tag_groups: %w", err)
-		}
+	if len(t.Tags.Tags) > 0 {
+		return spec, domain.InvalidField("spec.trigger.tags.tags",
+			"trigger tags.tags must be empty: a model reads with its own tags (spec.tags)")
+	}
+	if err := t.Tags.Validate(); err != nil {
+		return spec, fmt.Errorf("mentalmodel: trigger tags: %w", err)
 	}
 	spec.Tags = domain.NormalizeTags(spec.Tags)
 	spec.FolderPath = normalizeFolder(spec.FolderPath)
@@ -419,7 +417,7 @@ func normalizeFolder(p string) string { return strings.Trim(strings.TrimSpace(p)
 // differs between two specs. Tags and fact types compare as sets and tag groups by value, nil equal to empty.
 func scopeChanged(a, b domain.MentalModelSpec) bool {
 	return a.SourceQuery != b.SourceQuery || !domain.SameTagSet(a.Tags, b.Tags) ||
-		a.Trigger.TagsMatch != b.Trigger.TagsMatch || !sameTagGroups(a.Trigger.TagGroups, b.Trigger.TagGroups) ||
+		a.Trigger.Tags.Match != b.Trigger.Tags.Match || !sameTagGroups(a.Trigger.Tags.Groups, b.Trigger.Tags.Groups) ||
 		!sameFactTypes(a.Trigger.FactTypes, b.Trigger.FactTypes)
 }
 
@@ -452,8 +450,15 @@ func (s *Service) PreviewMentalModelRefresh(
 	return s.refresh(ctx, b, id, refreshOptions{Manual: true, DryRun: true, Strategy: strategy})
 }
 
-// SearchMentalModels ranks the bank's pages by fused full-text and semantic scores (recall.Engine.SearchPages).
+// SearchMentalModels ranks the bank's pages by fused full-text and semantic scores (recall.Engine.SearchPages),
+// returning at most req.Limit hits under domain.SearchResults (0 = 10, capped at 100, negative =
+// domain.ErrInvalidArgument).
 func (s *Service) SearchMentalModels(ctx context.Context, req recall.SearchPagesRequest) ([]domain.PageHit, error) {
+	limit, err := domain.SearchResults.Size(req.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("mentalmodel: search: %w", err)
+	}
+	req.Limit = limit
 	hits, err := s.d.Recall.SearchPages(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("mentalmodel: search: %w", err)

@@ -147,9 +147,23 @@ func tagGroupsToProto(in []domain.TagGroup) []*pb.TagGroup {
 	return out
 }
 
-// tagFilter builds a request's TagFilter from its flat tags, match mode and tag groups.
-func (d *decoder) tagFilter(tags []string, match pb.TagsMatch, groups []*pb.TagGroup) domain.TagFilter {
-	return domain.TagFilter{Tags: tags, Match: fromEnum[domain.TagsMatch](d, match), Groups: d.tagGroups(groups)}
+// tagFilter converts a TagFilter, the one tag-filter message of every site; nil = the zero filter (no filter).
+// Validation (both forms set, flat-only sites) is the receiving service's.
+func (d *decoder) tagFilter(f *pb.TagFilter) domain.TagFilter {
+	if f == nil {
+		return domain.TagFilter{}
+	}
+	return domain.TagFilter{
+		Tags: f.GetTags(), Match: fromEnum[domain.TagsMatch](d, f.GetMatch()), Groups: d.tagGroups(f.GetGroups()),
+	}
+}
+
+// tagFilterToProto converts a TagFilter; the zero filter = nil.
+func tagFilterToProto(f domain.TagFilter) *pb.TagFilter {
+	if len(f.Tags) == 0 && f.Match == domain.TagsMatchUnspecified && len(f.Groups) == 0 {
+		return nil
+	}
+	return &pb.TagFilter{Tags: f.Tags, Match: toEnum[pb.TagsMatch](f.Match), Groups: tagGroupsToProto(f.Groups)}
 }
 
 // ---------- scores and memories ----------

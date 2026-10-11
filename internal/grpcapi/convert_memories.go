@@ -23,8 +23,7 @@ func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (memory.ListRequest
 		Start:      d.tsPtr(r.GetStart()),
 		End:        d.tsPtr(r.GetEnd()),
 		TimeField:  fromEnum[domain.TimeField](&d, r.GetTimeField()),
-		Tags:       r.GetTags(),
-		TagsMatch:  fromEnum[domain.TagsMatch](&d, r.GetTagsMatch()),
+		Tags:       d.tagFilter(r.GetTags()),
 		PageSize:   int(r.GetPageSize()),
 		PageToken:  r.GetPageToken(),
 	}
@@ -87,7 +86,7 @@ func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (memory.UpdateReque
 }
 
 // updateResultToProto converts what memory.Service.UpdateMemory returns (the unit after the change and the
-// rederive_memory operation, empty for invalidate) to an UpdateMemoryResponse.
-func updateResultToProto(u domain.Unit, op domain.OperationID) *pb.UpdateMemoryResponse {
-	return &pb.UpdateMemoryResponse{Memory: unitToProto(u), OperationId: string(op)}
+// rederive_memory operation, nil for invalidate) to an UpdateMemoryResponse.
+func updateResultToProto(u domain.Unit, op *domain.Operation) *pb.UpdateMemoryResponse {
+	return &pb.UpdateMemoryResponse{Memory: unitToProto(u), Operation: operationPtrToProto(op)}
 }

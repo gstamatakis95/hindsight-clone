@@ -22,14 +22,6 @@ type queue struct {
 
 var _ store.Queue = (*queue)(nil)
 
-// List page sizes (decision 111).
-const (
-	// defaultOpsPageSize is the page size of a List call that asks for none.
-	defaultOpsPageSize = 50
-	// maxOpsPageSize caps the page size of a List call.
-	maxOpsPageSize = 500
-)
-
 // Enqueue inserts j, or joins (and locks FOR UPDATE) a joinable row under its effective dedupe policy. It
 // takes FOR KEY SHARE on the bank row first and the dedupe advisory lock in its own statement before the
 // lookup. A deadlock with another enqueuer surfaces as domain.ErrConflict (decision 110).
@@ -244,18 +236,19 @@ func (r *queue) Get(ctx context.Context, b domain.BankRef, id domain.OperationID
 	return operationOf(row)
 }
 
-// List pages b's operations newest first; the token is the last row's (created_at, id).
+// List pages b's operations newest first; the token is the last row's (created_at, id). A page size of 0 or less
+// is domain.ListPage's default and a larger one is capped at its maximum.
 func (r *queue) List(
 	ctx context.Context, b domain.BankRef, f store.OperationFilter,
 ) ([]domain.Operation, string, error) {
 	size := f.PageSize
 	if size <= 0 {
-		size = defaultOpsPageSize
+		size = domain.ListPage.Default
 	}
-	size = min(size, maxOpsPageSize)
+	size = min(size, domain.ListPage.Max)
 	arg := db.QueueListParams{
 		TenantID: b.Tenant, BankID: b.Bank, Status: textPtr(f.Status), Kind: textPtr(f.Kind),
-		ExcludeParents: f.ExcludeParents, Lim: int32(size + 1), //nolint:gosec // size <= maxOpsPageSize
+		ExcludeParents: f.ExcludeParents, Lim: int32(size + 1), //nolint:gosec // size <= domain.ListPage.Max
 	}
 	if f.PageToken != "" {
 		at, id, err := decodeOpsToken(f.PageToken)
@@ -293,7 +286,7 @@ func (r *queue) Cancel(ctx context.Context, b domain.BankRef, id domain.Operatio
 	}
 	row, err := r.q.QueueCancel(ctx, db.QueueCancelParams{TenantID: b.Tenant, BankID: b.Bank, ID: uid})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Operation{}, r.wrongStatus(ctx, b, uid, "cancel")
+		return domain.Operation{}, r.wrongStatus(ctx, b, uid, "cancel", domain.ErrOperationNotCancellable)
 	}
 	if err != nil {
 		return domain.Operation{}, mapErr(fmt.Sprintf("cancel %s", id), err)
@@ -312,7 +305,7 @@ func (r *queue) Retry(ctx context.Context, b domain.BankRef, id domain.Operation
 	}
 	row, err := r.q.QueueRetry(ctx, db.QueueRetryParams{TenantID: b.Tenant, BankID: b.Bank, ID: uid})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Operation{}, r.wrongStatus(ctx, b, uid, "retry")
+		return domain.Operation{}, r.wrongStatus(ctx, b, uid, "retry", domain.ErrOperationNotRetryable)
 	}
 	if err != nil {
 		return domain.Operation{}, mapErr(fmt.Sprintf("retry %s", id), err)
@@ -344,14 +337,14 @@ func (r *queue) lockForRetry(ctx context.Context, b domain.BankRef, id uuid.UUID
 	return mapErr("retry: dedupe lock", err)
 }
 
-// wrongStatus explains why a bank-scoped status update matched nothing: domain.ErrNotFound when b has no
-// such operation, domain.ErrFailedPrecondition otherwise.
-func (r *queue) wrongStatus(ctx context.Context, b domain.BankRef, id uuid.UUID, what string) error {
+// wrongStatus explains why a bank-scoped status update (cancel or retry) matched nothing: domain.ErrNotFound
+// when b has no such operation, else class (domain.ErrOperationNotCancellable or ErrOperationNotRetryable).
+func (r *queue) wrongStatus(ctx context.Context, b domain.BankRef, id uuid.UUID, what string, class error) error {
 	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, BankID: b.Bank, ID: id})
 	if err != nil {
 		return mapErr(fmt.Sprintf("%s %s", what, id), err)
 	}
-	return fmt.Errorf("%w: %s %s: status %s", domain.ErrFailedPrecondition, what, id, row.Status)
+	return fmt.Errorf("%w: %s %s: status %s", class, what, id, row.Status)
 }
 
 // Prune deletes terminal operations finished before before.

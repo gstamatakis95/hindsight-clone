@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -86,10 +87,10 @@ type RefreshTrigger struct {
 	RefreshCron string `json:"refresh_cron,omitempty"`
 	// MinRefreshIntervalSeconds is the interval floor; nil = MentalModelConfig value.
 	MinRefreshIntervalSeconds *int `json:"min_refresh_interval_seconds,omitempty"`
-	// TagsMatch applies to the model's tags; unset = all_strict when the model is tagged.
-	TagsMatch TagsMatch `json:"tags_match,omitempty"`
-	// TagGroups override the model's tags and TagsMatch.
-	TagGroups []TagGroup `json:"tag_groups,omitempty"`
+	// Tags is the scope's tag filter without flat tags (those are the model's own, MentalModelSpec.Tags): Match
+	// applies to the model's tags (unset = all_strict when the model is tagged), and Groups, when set, replace
+	// the model's tags and Match. See [MentalModelSpec.ScopeFilter].
+	Tags TagFilter `json:"tags,omitzero"`
 	// FactTypes limits the scope; empty = all.
 	FactTypes []FactType `json:"fact_types,omitempty"`
 	// ExcludeMentalModels hides other models from the agentic refresh.
@@ -124,7 +125,7 @@ type MentalModelSpec struct {
 	SourceQuery string `json:"source_query,omitempty"`
 	// FolderPath places the page in a folder tree.
 	FolderPath string `json:"folder_path,omitempty"`
-	// Tags scope the model.
+	// Tags label the model (list filters, tag counts) and scope what it reads ([MentalModelSpec.ScopeFilter]).
 	Tags []string `json:"tags,omitempty"`
 	// MaxTokens overrides MentalModelConfig.MaxContentTokens.
 	MaxTokens *int `json:"max_tokens,omitempty"`
@@ -132,6 +133,23 @@ type MentalModelSpec struct {
 	Trigger RefreshTrigger `json:"trigger"`
 	// Overrides are applied to every refresh.
 	Overrides *BankConfig `json:"overrides,omitempty"`
+}
+
+// ScopeFilter is the tag filter the model reads with and goes stale by: the trigger's tag groups when set,
+// else the model's normalized tags under the trigger's match mode (unset = all_strict when the model is
+// tagged, any when it is untagged).
+func (s MentalModelSpec) ScopeFilter() TagFilter {
+	if len(s.Trigger.Tags.Groups) > 0 {
+		return TagFilter{Groups: slices.Clone(s.Trigger.Tags.Groups)}
+	}
+	f := TagFilter{Tags: NormalizeTags(s.Tags), Match: s.Trigger.Tags.Match}
+	if f.Match == TagsMatchUnspecified {
+		f.Match = TagsMatchAny
+		if len(f.Tags) > 0 {
+			f.Match = TagsMatchAllStrict
+		}
+	}
+	return f
 }
 
 // MentalModel is a synthesized page with its refresh state.

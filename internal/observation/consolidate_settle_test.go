@@ -52,7 +52,7 @@ func TestApplyTakesSeqFirst(t *testing.T) {
 // healthy. The probe uses the broken binding, fails, and nothing is parked.
 func TestSettleProbesTheScopeBinding(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{Strategies: []domain.ConsolidationStrategy{{
-		Name: "s", Scopes: []domain.ScopePattern{{Tags: []string{"x"}}}, ConsolidateModel: consolidateModel("broken"),
+		Name: "s", Scopes: []domain.TagFilter{{Tags: []string{"x"}}}, ConsolidateModel: consolidateModel("broken"),
 	}}}})
 	e.fact("f1", "Fact one", "x")
 	e.script(ok(reply(nil, nil)))

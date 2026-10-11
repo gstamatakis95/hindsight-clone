@@ -25,14 +25,18 @@ func strategyClaims(st domain.ConsolidationStrategy, tags []string) bool {
 	return false
 }
 
-// patternMatches compares a scope's tags against one pattern with domain.MatchTags. Unspecified mode is
-// all_strict: the scope holds every pattern tag (others allowed) and the shared scope never matches, as
-// in Hindsight. A pattern with no tags matches only under exact (the shared scope); otherwise it is
-// ignored, so an empty pattern never claims every scope. An explicit any or all pattern follows
-// MatchTags, which admits untagged units, so it also matches the shared scope; use any_strict or
-// all_strict (or leave the mode unset) to exclude it.
-func patternMatches(p domain.ScopePattern, tags []string) bool {
-	mode := p.TagsMatch
+// patternMatches compares a scope's tags against one pattern, a tag filter. Groups, when set, must all match
+// (domain.MatchGroup). Otherwise the flat tags compare with domain.MatchTags, where an unspecified mode is
+// all_strict: the scope holds every pattern tag (others allowed) and the shared scope never matches, as in
+// Hindsight. A flat pattern with no tags matches only under exact (the shared scope); otherwise it is ignored, so
+// an empty pattern never claims every scope. An explicit any or all pattern follows MatchTags, which admits
+// untagged units, so it also matches the shared scope; use any_strict or all_strict (or leave the mode unset) to
+// exclude it.
+func patternMatches(p domain.TagFilter, tags []string) bool {
+	if len(p.Groups) > 0 {
+		return domain.MatchFilter(tags, domain.TagFilter{Groups: p.Groups})
+	}
+	mode := p.Match
 	if mode == domain.TagsMatchUnspecified {
 		mode = domain.TagsMatchAllStrict
 	}

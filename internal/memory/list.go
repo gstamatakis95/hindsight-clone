@@ -28,11 +28,9 @@ type ListRequest struct {
 	End *time.Time
 	// TimeField is the timestamp Start and End filter on; unspecified = created_at.
 	TimeField domain.TimeField
-	// Tags filters by tags; empty = no filter.
-	Tags []string
-	// TagsMatch is how Tags compare.
-	TagsMatch domain.TagsMatch
-	// PageSize caps the page; 0 = the RPC default.
+	// Tags filters by tags, flat form only; empty tags = no filter, unset match = any.
+	Tags domain.TagFilter
+	// PageSize caps the page (domain.ListPage); 0 = the default.
 	PageSize int
 	// PageToken continues a previous listing; empty = first page.
 	PageToken string
@@ -45,14 +43,6 @@ type Page struct {
 	// NextPageToken continues the listing; empty = last page.
 	NextPageToken string
 }
-
-// Page size bounds of the memory listing.
-const (
-	// defaultPageSize is the page size when a request sets none.
-	defaultPageSize = 100
-	// maxPageSize caps a requested page size.
-	maxPageSize = 1000
-)
 
 // ListMemories validates req, decodes its page token and reads one page plus one unit to know whether more
 // follow. Units come newest first (created_at, then id); no total is computed.
@@ -71,16 +61,24 @@ func (s *Service) ListMemories(ctx context.Context, req ListRequest) (Page, erro
 	if len(units) > size {
 		page.Items = units[:size]
 		last := page.Items[size-1]
-		page.NextPageToken, err = encodeToken(store.UnitCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+		page.NextPageToken, err = domain.EncodePageToken(store.UnitCursor{CreatedAt: last.CreatedAt, ID: last.ID})
 		if err != nil {
-			return Page{}, err
+			return Page{}, fmt.Errorf("list memories: %w", err)
 		}
 	}
 	return page, nil
 }
 
-// unitQuery turns a request into a UnitQuery, validating enums and decoding the page token.
+// unitQuery turns a request into a UnitQuery, validating enums, the page size (domain.ListPage) and the flat tag
+// filter, and decoding the page token.
 func unitQuery(req ListRequest) (store.UnitQuery, error) {
+	size, err := domain.ListPage.Size(req.PageSize)
+	if err != nil {
+		return store.UnitQuery{}, fmt.Errorf("list memories: %w", err)
+	}
+	if err := req.Tags.RequireFlat(); err != nil {
+		return store.UnitQuery{}, fmt.Errorf("list memories: %w", err)
+	}
 	for _, t := range req.Types {
 		if !knownFactType(t) {
 			return store.UnitQuery{}, fmt.Errorf("%w: unknown fact type %q", domain.ErrInvalidArgument, t)
@@ -94,12 +92,12 @@ func unitQuery(req ListRequest) (store.UnitQuery, error) {
 	q := store.UnitQuery{
 		Bank: req.Bank, Types: req.Types, Q: req.Q, DocumentID: req.DocumentID, EntityID: req.EntityID,
 		State: req.State, Start: req.Start, End: req.End, TimeField: req.TimeField,
-		Tags: domain.NormalizeTags(req.Tags), TagsMatch: req.TagsMatch, Limit: pageSize(req.PageSize),
+		Tags: domain.NormalizeTags(req.Tags.Tags), TagsMatch: req.Tags.Match, Limit: size,
 	}
 	if req.PageToken != "" {
 		var c store.UnitCursor
-		if err := decodeToken(req.PageToken, &c); err != nil {
-			return store.UnitQuery{}, err
+		if err := domain.DecodePageToken(req.PageToken, &c); err != nil {
+			return store.UnitQuery{}, fmt.Errorf("list memories: %w", err)
 		}
 		q.After = &c
 	}

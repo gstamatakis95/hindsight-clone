@@ -442,6 +442,8 @@ DIRECTIVES = [
         FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE
     )
     """,
+    # ListDirectives pages a bank's directives oldest first by (created_at, id).
+    'CREATE INDEX directives_bank_created_idx ON directives (tenant_id, bank_id, created_at, id COLLATE "C")',
 ]
 
 JOBS = [

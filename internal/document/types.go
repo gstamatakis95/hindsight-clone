@@ -35,17 +35,15 @@ type ListRequest struct {
 	Bank domain.BankRef
 	// Q is a case-insensitive substring filter on the document id; empty = none.
 	Q string
-	// Tags filters by document tags; empty = none.
-	Tags []string
-	// TagsMatch is how Tags compare; unspecified = any_strict.
-	TagsMatch domain.TagsMatch
+	// Tags filters by document tags, flat form only; empty tags = none, unset match = any_strict.
+	Tags domain.TagFilter
 	// Start is the inclusive lower bound on TimeField; nil = unbounded.
 	Start *time.Time
 	// End is the exclusive upper bound on TimeField; nil = unbounded.
 	End *time.Time
 	// TimeField is the timestamp Start and End filter on; unspecified = created_at.
 	TimeField domain.DocTimeField
-	// PageSize caps the page; 0 = DefaultPageSize.
+	// PageSize caps the page (domain.ListPage); 0 = the default.
 	PageSize int
 	// PageToken continues a previous listing; empty = first page.
 	PageToken string

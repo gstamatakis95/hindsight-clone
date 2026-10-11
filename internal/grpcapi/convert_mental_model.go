@@ -117,9 +117,7 @@ func refreshTracePtrToProto(t *domain.RefreshTrace) *pb.RefreshTrace {
 // resolvedScopeToProto converts a ResolvedScope.
 func resolvedScopeToProto(s mentalmodel.ResolvedScope) *pb.ResolvedScope {
 	return &pb.ResolvedScope{
-		Tags:      s.Tags,
-		TagsMatch: toEnum[pb.TagsMatch](s.TagsMatch),
-		TagGroups: tagGroupsToProto(s.TagGroups),
+		Tags:      tagFilterToProto(s.Tags),
 		FactTypes: toEnums[pb.FactType](s.FactTypes),
 	}
 }
@@ -185,8 +183,7 @@ func listMentalModelsFromProto(r *pb.ListMentalModelsRequest) (mentalmodel.ListR
 		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		FolderPrefix: r.GetFolderPrefix(),
 		Detail:       fromEnum[domain.Detail](&d, r.GetDetail()),
-		Tags:         r.GetTags(),
-		TagsMatch:    fromEnum[domain.TagsMatch](&d, r.GetTagsMatch()),
+		Tags:         d.tagFilter(r.GetTags()),
 		PageSize:     int(r.GetPageSize()),
 		PageToken:    r.GetPageToken(),
 	}
@@ -220,7 +217,7 @@ func searchPagesFromProto(r *pb.SearchPagesRequest) recall.SearchPagesRequest {
 		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		Query:        r.GetQuery(),
 		FolderPrefix: r.GetFolderPrefix(),
-		Limit:        int(r.GetLimit()),
+		Limit:        int(r.GetMaxResults()),
 	}
 }
 

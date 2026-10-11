@@ -15,6 +15,7 @@ func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
 		{ID: "Bad_ID"},
 		{ID: "x", Trigger: domain.RefreshTrigger{RefreshAfterConsolidation: true, RefreshCron: "0 * * * *"}},
 		{ID: "y", Trigger: domain.RefreshTrigger{RefreshCron: "not a cron"}},
+		{ID: "z", Trigger: domain.RefreshTrigger{Tags: domain.TagFilter{Tags: []string{"a"}}}}, // flat tags: spec.tags
 	}
 	for _, s := range bad {
 		if _, _, err := adm.CreateMentalModel(e.ctx, e.bank, s); !errors.Is(err, domain.ErrInvalidArgument) {
@@ -140,14 +141,14 @@ func TestScopeChangedComparesSets(t *testing.T) {
 	leaf := domain.TagGroup{Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{Tags: []string{"a"}}}
 	base := domain.MentalModelSpec{SourceQuery: "q", Trigger: domain.RefreshTrigger{
 		FactTypes: []domain.FactType{domain.FactTypeWorld, domain.FactTypeExperience},
-		TagGroups: []domain.TagGroup{leaf},
+		Tags:      domain.TagFilter{Groups: []domain.TagGroup{leaf}},
 	}}
 	same := base
 	same.Tags = []string{}
 	same.Trigger.FactTypes = []domain.FactType{domain.FactTypeExperience, domain.FactTypeWorld}
-	same.Trigger.TagGroups = []domain.TagGroup{leaf}
+	same.Trigger.Tags.Groups = []domain.TagGroup{leaf}
 	empty, emptied := domain.MentalModelSpec{}, domain.MentalModelSpec{Tags: []string{}}
-	emptied.Trigger.FactTypes, emptied.Trigger.TagGroups = []domain.FactType{}, []domain.TagGroup{}
+	emptied.Trigger.FactTypes, emptied.Trigger.Tags.Groups = []domain.FactType{}, []domain.TagGroup{}
 	if scopeChanged(base, same) || scopeChanged(empty, emptied) {
 		t.Fatal("equal scopes reported changed")
 	}

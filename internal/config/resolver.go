@@ -70,7 +70,7 @@ func (r *Resolver) levels(ctx context.Context, b domain.BankRef) ([]domain.BankC
 			return err
 		}
 		if bk.Deleting() {
-			return fmt.Errorf("%w: bank %s is being deleted", domain.ErrNotFound, b.Bank)
+			return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b.Bank)
 		}
 		bank = bk.Config
 		return nil

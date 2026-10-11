@@ -44,10 +44,10 @@
 //
 // [Service.GetBankStats] returns the bank's counts from indexed COUNT queries (no counter tables).
 // [Service.ListTags] pages tags with counts from a [ListTagsRequest]: source defaults to memories (live units), the
-// prefix is normalized like a tag, page_size 0 means [DefaultPageSize] (100) and larger sizes are capped at
-// [MaxPageSize] (1000), and the opaque page token carries the last tag of the previous page (a malformed token is
-// domain.ErrInvalidArgument). It asks the store for one row more than the page to learn whether a next page
-// exists.
+// prefix is normalized like a tag, page_size follows [domain.ListPage] (0 means 100, larger sizes are capped at
+// 1000, negative is invalid), and the opaque page token carries the last tag of the previous page (a malformed
+// token is domain.ErrInvalidArgument). It asks the store for one row more than the page to learn whether a next
+// page exists.
 //
 // # Bank delete
 //

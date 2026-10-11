@@ -67,12 +67,13 @@
 // Token arguments from the model are clamped to [1000, 16000]. Every retrieval honours the request's tag
 // filter, fact types, seq bound and excluded models. A retrieval error is never answered around: it fails
 // the call, keeping its class when it is already classified (cancellation, invalid argument, failed
-// precondition, not found, unavailable) and otherwise as domain.ErrUnavailable.
+// precondition, not found) and otherwise, a failing dependency included, as domain.ErrRetrievalUnavailable
+// (UNAVAILABLE).
 //
 // # Budgets and errors
 //
 // Every model call's usage is charged to the run; past reflect.max_total_tokens (unset = unlimited) the
-// call fails with domain.ErrResourceExhausted (RESOURCE_EXHAUSTED). A blank final answer is
+// call fails with domain.ErrMaxTotalTokens (RESOURCE_EXHAUSTED). A blank final answer is
 // domain.ErrUnavailable. The answer's soft length target is the request's max_tokens, else
 // reflect.max_answer_tokens (default 4096). The query time defaults to clock.Clock's now.
 //

@@ -46,6 +46,15 @@ func mapErr(what string, err error) error {
 	return fmt.Errorf("%w: %s: %w", domain.ErrUnavailable, what, err)
 }
 
+// bankErr maps the error of a bank-row lookup of b: no row is domain.ErrBankNotFound, anything else goes
+// through mapErr.
+func bankErr(b domain.BankRef, err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
+	}
+	return mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+}
+
 // pgClass picks the domain error class of a Postgres SQLSTATE.
 func pgClass(code string) error {
 	switch code {

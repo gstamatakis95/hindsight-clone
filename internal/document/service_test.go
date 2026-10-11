@@ -13,8 +13,8 @@ import (
 	"testing"
 )
 
-// TestListDocuments pages newest first with normalized tag filters (any_strict by default), rejects a
-// malformed token and a negative page size, and caps an oversized page.
+// TestListDocuments pages newest first with normalized tag filters (any_strict by default) and rejects a
+// malformed token.
 func TestListDocuments(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
@@ -37,18 +37,14 @@ func TestListDocuments(t *testing.T) {
 		}
 	}
 	s := document.New(document.Deps{DB: f.store, Blob: fake.NewBlob(), Clock: f.clock})
-	got := listAll(t, s, document.ListRequest{Bank: listed, Tags: []string{"B", " A"}, PageSize: 2})
+	tags := domain.TagFilter{Tags: []string{"B", " A"}}
+	got := listAll(t, s, document.ListRequest{Bank: listed, Tags: tags, PageSize: 2})
 	if want := []domain.DocumentID{"d5", "d4", "d3", "d2", "d1"}; !slices.Equal(got, want) {
 		t.Fatalf("listed %v, want %v", got, want)
 	}
-	for _, req := range []document.ListRequest{{Bank: listed, PageToken: "!!"}, {Bank: listed, PageSize: -1}} {
-		if _, err := s.ListDocuments(ctx, req); !errors.Is(err, domain.ErrInvalidArgument) {
-			t.Fatalf("%+v: %v, want ErrInvalidArgument", req, err)
-		}
-	}
-	res, err := s.ListDocuments(ctx, document.ListRequest{Bank: listed, PageSize: 5000})
-	if err != nil || len(res.Items) != 6 || res.NextPageToken != "" {
-		t.Fatalf("oversized page: %d items, %v", len(res.Items), err)
+	if _, err := s.ListDocuments(ctx, document.ListRequest{Bank: listed, PageToken: "!!"}); !errors.Is(err,
+		domain.ErrInvalidArgument) {
+		t.Fatalf("malformed page token: %v, want ErrInvalidArgument", err)
 	}
 }
 

@@ -1,6 +1,6 @@
 // Package grpcapi is the gRPC surface of memd: one handler type per memory.v1 service, the tenant, deadline and
 // paging interceptors, grpc.health.v1 with its readiness probes, the proto <-> domain conversion, FieldMask
-// patches, and the mapping from domain errors to gRPC status codes.
+// patches, and the mapping from domain errors to gRPC statuses with google.rpc error details.
 //
 // # Where it sits
 //
@@ -28,12 +28,15 @@
 // Four unary interceptors run first, in this order; options passed to New chain after them:
 //
 //   - [TenantInterceptor] reads the tenant from the x-tenant-id metadata header ([TenantHeader]); exactly one
-//     non-empty value is required, else INVALID_ARGUMENT. The tenant is never read from the request body
+//     non-empty value is required, else INVALID_ARGUMENT naming x-tenant-id. The tenant is never read from the
+//     request body
 //     (auth is out of scope). Health checks need no tenant. [TenantFrom] / [WithTenant] read and set it.
 //   - [DeadlineInterceptor] gives a call without a deadline the default one (Options.DefaultDeadline, from
 //     api.rpc_deadline in the server config file); 0 = none.
-//   - The paging interceptor rejects a negative page_size or limit field with INVALID_ARGUMENT; 0 keeps
-//     meaning "the server default".
+//   - The paging interceptor rejects a negative page_size or max_results field with INVALID_ARGUMENT naming the
+//     field; 0 keeps meaning the default. The bounds themselves (domain.ListPage: 0 = 100, at most 1000;
+//     domain.SearchResults: 0 = 10, at most 100) are applied by the services, which also reject a negative
+//     size, so the rule holds for every caller.
 //   - The arm-name interceptor finds every RecallConfig in a request (config levels and patches, templates, spec
 //     and request overrides) and rejects recall.arms or recall.arm_boosts names outside Options.RecallArms, the
 //     registered recall arms (config.CheckArms), with INVALID_ARGUMENT. A request's own arms and min_scores.arms
@@ -78,19 +81,25 @@
 //
 //	context.DeadlineExceeded      DEADLINE_EXCEEDED
 //	context.Canceled              CANCELLED
-//	domain.ErrNotFound            NOT_FOUND
+//	domain.ErrNotFound            NOT_FOUND            (refined: ErrBankNotFound)
 //	domain.ErrAlreadyExists       ALREADY_EXISTS
-//	domain.ErrInvalidArgument     INVALID_ARGUMENT  (includes ErrTooManyScopes)
-//	domain.ErrFailedPrecondition  FAILED_PRECONDITION  (includes ErrBankDeleting)
-//	domain.ErrUnavailable         UNAVAILABLE
-//	domain.ErrResourceExhausted   RESOURCE_EXHAUSTED
+//	domain.ErrInvalidArgument     INVALID_ARGUMENT     (refined: ErrTooManyScopes, ErrMemoryIsObservation)
+//	domain.ErrFailedPrecondition  FAILED_PRECONDITION  (refined: ErrBankDeleting, ErrModelUnbound,
+//	                                                    ErrOperationNotCancellable, ErrOperationNotRetryable)
+//	domain.ErrUnavailable         UNAVAILABLE          (refined: ErrRetrievalUnavailable, ErrContextOverflow)
+//	domain.ErrResourceExhausted   RESOURCE_EXHAUSTED   (refined: ErrMaxTotalTokens)
 //	domain.ErrCancelled           ABORTED
 //	domain.ErrConflict            ABORTED
 //	anything else                 INTERNAL
 //
-// An error that already carries a gRPC status passes through. ABORTED covers two classes: domain.ErrConflict,
-// a concurrent writer won (for example a superseded sync Retain, or an entity pruned under a retain or
-// curation on every transaction attempt), and the client may retry; and domain.ErrCancelled, the work was
+// Every status carries a google.rpc.ErrorInfo with domain [ErrorDomain] ("memd") and the reason of the most
+// specific domain class in the error (domain.ReasonOf: BANK_DELETING rather than FAILED_PRECONDITION), or
+// DEADLINE_EXCEEDED, CANCELLED or INTERNAL for errors without one. An error built with domain.InvalidField (request
+// ids, paging, tag filters, config validation paths, update masks) also carries a google.rpc.BadRequest with one
+// field violation per named field, every one of an errors.Join. The proto file header lists the reasons per
+// code. An error that already carries a gRPC status passes through unchanged. ABORTED covers two classes:
+// CONFLICT, a concurrent writer won (for example a superseded sync Retain, or an entity pruned under a retain or
+// curation on every transaction attempt), and the client may retry; and OPERATION_CANCELLED, the work was
 // cancelled.
 //
 // # Conversion
@@ -101,9 +110,12 @@
 // number or an invalid timestamp (INVALID_ARGUMENT); domain -> proto never fails, and an unknown domain enum
 // becomes *_UNSPECIFIED. Enum strings are the lowercase value names without the prefix; a zero time is a nil
 // Timestamp; presence is kept where it matters (UpdateMemoryRequest.entities unset = unchanged, set and empty =
-// clear). Mental-model detail is trimmed here: METADATA is the spec plus status, CONTENT adds content and
-// structured output, FULL adds source ids and the last trace; Get defaults to FULL, List to METADATA, and
-// Create, Update and Clear return FULL.
+// clear). Every tag filter is one TagFilter message converted to one domain.TagFilter (an unset one is the zero
+// filter); the receiving service checks it (both forms set, groups on a list RPC). An Operation goes out with its
+// bank_id, and its kind-specific result as debug_summary, compact JSON text that is not a stable contract.
+// Mental-model detail is trimmed here: METADATA is the spec plus status, CONTENT adds content and structured
+// output, FULL adds source ids and the last trace; Get defaults to FULL, List to METADATA, and Create, Update and
+// Clear return FULL.
 //
 // # Health
 //
@@ -115,8 +127,8 @@
 // # Tests
 //
 // The tests here need no database: golden tests pin the Retain, Recall and Reflect request conversions, and
-// others cover the interceptors, error mapping, enum mapping, FieldMask patches, override lists, mental-model
-// detail and health. The API's behaviour through the real engines (every RPC wired, config-write validation,
-// spec overrides, document retags, reflect's based_on) is tested in cmd/memd over the wired stack. SPEC "gRPC
-// surface", "Code standards" and "Behavioural rules".
+// others cover the interceptors, error mapping and details, the tag filter of every request, the Operation shape,
+// enum mapping, FieldMask patches, override lists, mental-model detail and health. The API's behaviour through the
+// real engines (every RPC wired, config-write validation, spec overrides, document retags, reflect's based_on) is
+// tested in cmd/memd over the wired stack. SPEC "gRPC surface", "Code standards" and "Behavioural rules".
 package grpcapi

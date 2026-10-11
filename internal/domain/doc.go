@@ -49,6 +49,11 @@
 // [TagPredicate.Eval] and the Postgres rendering agree with. A [TagPredicate] is a compiled filter (fuzzy leaves
 // resolved) that the searches and the graph take, and a [SeqRange] bounds them to a snapshot.
 //
+// [TagFilter] is the one filter shape every request uses (recall, reflect, the list RPCs, a mental model's scope,
+// directives and consolidation strategy patterns): flat tags with a match mode, or groups, never both
+// ([TagFilter.Validate]); list sites take the flat form only ([TagFilter.RequireFlat]). A mental model's effective
+// scope is [MentalModelSpec.ScopeFilter].
+//
 // # Directives
 //
 // [SelectDirectives] is the one rule for which directives apply to a request: reflect, the mental-model synthesize
@@ -64,13 +69,23 @@
 //
 // # Errors
 //
-// The error values are classes: wrap them with fmt.Errorf("%w: ...", ErrX) and test with errors.Is. The server maps
-// each class to one gRPC code ([ErrNotFound] NOT_FOUND, [ErrAlreadyExists] ALREADY_EXISTS, [ErrInvalidArgument]
-// INVALID_ARGUMENT, [ErrFailedPrecondition] FAILED_PRECONDITION, [ErrUnavailable] UNAVAILABLE, [ErrResourceExhausted]
-// RESOURCE_EXHAUSTED, ...). Some wrap a broader class: [ErrBankDeleting] and [ErrModelUnbound] wrap
-// ErrFailedPrecondition, [ErrContextOverflow] wraps ErrUnavailable and [ErrTooManyScopes] wraps ErrInvalidArgument.
-// [ErrConflict] means a concurrent writer won a race and the caller may retry; [ErrCancelled] means the operation was
-// cancelled or its bank deleted.
+// The error values are classes ([Error]): wrap them with fmt.Errorf("%w: ...", ErrX) and test with errors.Is. The
+// server maps each root class to one gRPC code ([ErrNotFound] NOT_FOUND, [ErrAlreadyExists] ALREADY_EXISTS,
+// [ErrInvalidArgument] INVALID_ARGUMENT, [ErrFailedPrecondition] FAILED_PRECONDITION, [ErrUnavailable] UNAVAILABLE,
+// [ErrResourceExhausted] RESOURCE_EXHAUSTED, ...) and sends the most specific class's stable reason ([ReasonOf]) as
+// google.rpc.ErrorInfo. Refined classes keep their parent's code and add a reason: [ErrBankNotFound] (NOT_FOUND);
+// [ErrTooManyScopes] and [ErrMemoryIsObservation] (INVALID_ARGUMENT); [ErrBankDeleting], [ErrModelUnbound],
+// [ErrOperationNotCancellable] and [ErrOperationNotRetryable] (FAILED_PRECONDITION); [ErrContextOverflow] and
+// [ErrRetrievalUnavailable] (UNAVAILABLE); [ErrMaxTotalTokens] (RESOURCE_EXHAUSTED). [ErrConflict] means a concurrent
+// writer won a race and the caller may retry; [ErrCancelled] means the operation was cancelled or its bank deleted.
+// [InvalidField] builds an ErrInvalidArgument that names the offending request field or config path;
+// [FieldViolations] collects them, so the server can send a google.rpc.BadRequest.
+//
+// # Paging
+//
+// [PageBounds] states a listing's size rule once: [ListPage] (page_size: 0 = 100, at most 1000) for every List RPC
+// and [SearchResults] (max_results: 0 = 10, at most 100) for page search; a negative size is an [InvalidField] error.
+// [EncodePageToken] and [DecodePageToken] make a keyset position an opaque base64url JSON token.
 //
 // # Testing
 //

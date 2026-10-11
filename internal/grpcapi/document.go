@@ -2,7 +2,6 @@ package grpcapi
 
 import (
 	"context"
-	"fmt"
 	"memd/internal/document"
 	"memd/internal/domain"
 
@@ -69,7 +68,7 @@ func (h *DocumentHandler) UpdateDocument(
 	}
 	if req.GetTags() == nil {
 		// The new set replaces the old one entirely, so it must be given; an empty set clears the tags.
-		return nil, toStatus(fmt.Errorf("%w: tags is required", domain.ErrInvalidArgument))
+		return nil, toStatus(domain.InvalidField("tags", "tags is required"))
 	}
 	tags := req.GetTags().GetTags()
 	if tags == nil {

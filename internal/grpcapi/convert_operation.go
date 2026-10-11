@@ -1,20 +1,24 @@
 package grpcapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"memd/internal/domain"
 	"memd/internal/store"
 
 	pb "memd/gen/memory/v1"
 )
 
-// operationToProto converts an Operation. Bank, SerialKey and WorkerID are not on the wire.
+// operationToProto converts an Operation. The bank's tenant, SerialKey and WorkerID are not on the wire; the
+// kind-specific result goes out as debug_summary, its compact JSON text.
 func operationToProto(o domain.Operation) *pb.Operation {
 	return &pb.Operation{
 		Id:                 string(o.ID),
+		BankId:             o.Bank.Bank,
 		Kind:               toEnum[pb.OperationKind](o.Kind),
 		Status:             toEnum[pb.OperationStatus](o.Status),
 		Error:              o.Error,
-		Result:             jsonToStruct(o.Result),
+		DebugSummary:       debugSummary(o.Result),
 		Usage:              usagesToProto(o.Usage),
 		EffectiveOverrides: configToProto(o.EffectiveOverrides),
 		ParentId:           string(o.ParentID),
@@ -25,6 +29,18 @@ func operationToProto(o domain.Operation) *pb.Operation {
 		Attempts:           i32(o.Attempts),
 		HeartbeatAt:        tsPtrToProto(o.HeartbeatAt),
 	}
+}
+
+// debugSummary returns a result JSON as compact text; empty or invalid JSON = "".
+func debugSummary(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var b bytes.Buffer
+	if err := json.Compact(&b, raw); err != nil {
+		return ""
+	}
+	return b.String()
 }
 
 // operationPtrToProto converts an optional Operation; nil = nil.

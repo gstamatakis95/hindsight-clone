@@ -74,7 +74,7 @@ type OperationFilter struct {
 	Kind domain.OperationKind
 	// ExcludeParents drops retain_batch parents.
 	ExcludeParents bool
-	// PageSize caps the page (the adapter applies a default and a maximum).
+	// PageSize caps the page; 0 or less = domain.ListPage's default, capped at its maximum.
 	PageSize int
 	// PageToken continues a previous page; empty = first page.
 	PageToken string

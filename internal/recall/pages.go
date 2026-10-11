@@ -13,10 +13,8 @@ import (
 	"unicode"
 )
 
-// Page search defaults.
+// Page search constants: the RRF k and the snippet length.
 const (
-	// DefaultPageLimit is SearchPages' hit cap when the request sets none.
-	DefaultPageLimit = 10
 	pageRRFK         = 60
 	pageSnippetRunes = 200
 )
@@ -29,7 +27,7 @@ type SearchPagesRequest struct {
 	Query string
 	// FolderPrefix limits pages to a folder subtree; empty = all.
 	FolderPrefix string
-	// Limit caps the hits; 0 = the RPC default.
+	// Limit caps the hits; 0 or less = domain.SearchResults' default (10).
 	Limit int
 }
 
@@ -69,7 +67,7 @@ func (r *Engine) SearchPages(ctx context.Context, req SearchPagesRequest) ([]dom
 	fusePages(scores)
 	limit := req.Limit
 	if limit <= 0 {
-		limit = DefaultPageLimit
+		limit = domain.SearchResults.Default
 	}
 	var hits []domain.PageHit
 	for _, sc := range scores {

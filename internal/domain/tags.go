@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
@@ -77,29 +76,37 @@ type TagGroup struct {
 	Not *TagGroup `json:"not,omitempty"`
 }
 
-// TagFilter is a request's tag filter: flat tags with a match mode, or tag groups. On Recall and Reflect
-// the two are mutually exclusive (Validate rejects both with ErrInvalidArgument). Several top-level groups
-// are AND-ed. Only a mental model's RefreshTrigger.tag_groups override its tags; that is resolved before a
-// TagFilter is built.
+// TagFilter is the one tag-filter shape of every request that filters by tag (memory.v1.TagFilter): flat tags
+// with a match mode, or tag groups, never both (Validate). Several top-level groups are AND-ed. Each site owns
+// the default of an unset Match. The list RPCs take only the flat form (RequireFlat); a mental model's scope
+// takes its flat tags from the model ([MentalModel.ScopeFilter]).
 type TagFilter struct {
 	// Tags are flat filter tags.
 	Tags []string `json:"tags,omitempty"`
-	// Match is how Tags compare.
+	// Match is how Tags compare; unset = the site's default.
 	Match TagsMatch `json:"match,omitempty"`
-	// Groups are tag groups, AND-ed; mutually exclusive with Tags on Recall and Reflect.
+	// Groups are tag groups, AND-ed; mutually exclusive with Tags.
 	Groups []TagGroup `json:"groups,omitempty"`
 }
 
-// Validate rejects a filter that sets both flat tags and tag groups (INVALID_ARGUMENT on Recall and
-// Reflect) and groups whose Kind and branches disagree.
+// Validate rejects a filter that sets both flat tags and tag groups, and groups whose Kind and branches
+// disagree, with an ErrInvalidArgument naming the tags field.
 func (f TagFilter) Validate() error {
 	if len(f.Tags) > 0 && len(f.Groups) > 0 {
-		return fmt.Errorf("%w: tags and tag_groups are mutually exclusive", ErrInvalidArgument)
+		return InvalidField("tags", "tags.tags and tags.groups are mutually exclusive")
 	}
 	for _, g := range f.Groups {
 		if err := g.Validate(); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// RequireFlat rejects a filter with tag groups: the list RPCs filter with flat tags only.
+func (f TagFilter) RequireFlat() error {
+	if len(f.Groups) > 0 {
+		return InvalidField("tags.groups", "tag groups are not supported here; use tags.tags and tags.match")
 	}
 	return nil
 }
@@ -116,7 +123,7 @@ func (g TagGroup) Validate() error {
 		ok = g.Leaf == nil && len(g.Groups) == 0 && g.Not != nil
 	}
 	if !ok {
-		return fmt.Errorf("%w: malformed tag group %q", ErrInvalidArgument, g.Kind)
+		return InvalidField("tags.groups", "malformed tag group %q", g.Kind)
 	}
 	for _, c := range g.Groups {
 		if err := c.Validate(); err != nil {

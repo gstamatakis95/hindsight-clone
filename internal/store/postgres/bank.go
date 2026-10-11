@@ -24,7 +24,7 @@ var _ store.BankRepo = (*bankRepo)(nil)
 func (r *bankRepo) Get(ctx context.Context, b domain.BankRef) (domain.Bank, error) {
 	row, err := r.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
 	if err != nil {
-		return domain.Bank{}, mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+		return domain.Bank{}, bankErr(b, err)
 	}
 	return bankOf(row)
 }
@@ -81,7 +81,7 @@ func (r *bankRepo) MarkDeleting(ctx context.Context, b domain.BankRef, at time.T
 		return mapErr("mark bank deleting", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("%w: bank %s/%s", domain.ErrNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
 	}
 	return nil
 }

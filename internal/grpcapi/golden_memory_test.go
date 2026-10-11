@@ -96,15 +96,16 @@ func TestGoldenRetainRequest(t *testing.T) {
 // TestGoldenRecallRequest checks every RecallRequest field, the tag filter and the time window.
 func TestGoldenRecallRequest(t *testing.T) {
 	in := &pb.RecallRequest{
-		BankId:    "bank-2",
-		Query:     "what happened",
-		Types:     []pb.FactType{pb.FactType_FACT_TYPE_EXPERIENCE, pb.FactType_FACT_TYPE_OBSERVATION},
-		Tags:      []string{"flat-tag"},
-		TagsMatch: pb.TagsMatch_TAGS_MATCH_ALL_STRICT,
-		TagGroups: []*pb.TagGroup{{Node: &pb.TagGroup_Leaf{Leaf: &pb.TagLeaf{
-			Tags: []string{"group-tag"}, Match: pb.TagsMatch_TAGS_MATCH_EXACT,
-			Resolve: pb.TagLeaf_RESOLVE_FUZZY,
-		}}}},
+		BankId: "bank-2",
+		Query:  "what happened",
+		Types:  []pb.FactType{pb.FactType_FACT_TYPE_EXPERIENCE, pb.FactType_FACT_TYPE_OBSERVATION},
+		Tags: &pb.TagFilter{
+			Tags: []string{"flat-tag"}, Match: pb.TagsMatch_TAGS_MATCH_ALL_STRICT,
+			Groups: []*pb.TagGroup{{Node: &pb.TagGroup_Leaf{Leaf: &pb.TagLeaf{
+				Tags: []string{"group-tag"}, Match: pb.TagsMatch_TAGS_MATCH_EXACT,
+				Resolve: pb.TagLeaf_RESOLVE_FUZZY,
+			}}}},
+		},
 		Budget:             pb.Budget_BUDGET_HIGH,
 		MaxTokens:          1234,
 		QueryTime:          timestamppb.New(goldenTime(2)),
@@ -169,13 +170,14 @@ func TestGoldenRecallRequest(t *testing.T) {
 // TestGoldenReflectRequest checks every ReflectRequest field, the tag filter and the include flags.
 func TestGoldenReflectRequest(t *testing.T) {
 	in := &pb.ReflectRequest{
-		BankId:    "bank-3",
-		Query:     "why",
-		Tags:      []string{"reflect-tag"},
-		TagsMatch: pb.TagsMatch_TAGS_MATCH_ANY_STRICT,
-		TagGroups: []*pb.TagGroup{{Node: &pb.TagGroup_NoneOf{NoneOf: &pb.TagGroup{
-			Node: &pb.TagGroup_Leaf{Leaf: &pb.TagLeaf{Tags: []string{"not-tag"}, Match: pb.TagsMatch_TAGS_MATCH_ANY}},
-		}}}},
+		BankId: "bank-3",
+		Query:  "why",
+		Tags: &pb.TagFilter{
+			Tags: []string{"reflect-tag"}, Match: pb.TagsMatch_TAGS_MATCH_ANY_STRICT,
+			Groups: []*pb.TagGroup{{Node: &pb.TagGroup_NoneOf{NoneOf: &pb.TagGroup{
+				Node: &pb.TagGroup_Leaf{Leaf: &pb.TagLeaf{Tags: []string{"not-tag"}, Match: pb.TagsMatch_TAGS_MATCH_ANY}},
+			}}}},
+		},
 		Budget:             pb.Budget_BUDGET_MID,
 		MaxTokens:          ptr[int32](321),
 		ResponseSchemaJson: `{"type":"object"}`,

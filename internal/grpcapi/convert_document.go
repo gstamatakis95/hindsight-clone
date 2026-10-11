@@ -35,8 +35,7 @@ func listDocumentsFromProto(r *pb.ListDocumentsRequest) (document.ListRequest, e
 	out := document.ListRequest{
 		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		Q:         r.GetQ(),
-		Tags:      r.GetTags(),
-		TagsMatch: fromEnum[domain.TagsMatch](&d, r.GetTagsMatch()),
+		Tags:      d.tagFilter(r.GetTags()),
 		Start:     d.tsPtr(r.GetStart()),
 		End:       d.tsPtr(r.GetEnd()),
 		TimeField: fromEnum[domain.DocTimeField](&d, r.GetTimeField()),

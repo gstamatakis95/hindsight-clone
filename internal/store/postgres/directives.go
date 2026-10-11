@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
 	"memd/internal/domain"
 	"memd/internal/store"
 	"memd/internal/store/postgres/db"
@@ -44,6 +45,29 @@ func (r *directiveRepo) List(ctx context.Context, b domain.BankRef, activeOnly b
 	if err != nil {
 		return nil, mapErr("list directives", err)
 	}
+	return directivesOf(b, rows), nil
+}
+
+// Page returns one keyset page of the bank's directives, oldest first (created_at, then id in byte order). An
+// empty q.Tags is no tag filter.
+func (r *directiveRepo) Page(ctx context.Context, q store.DirectiveQuery) ([]domain.Directive, error) {
+	match, tags := tagFilterArgs(q.Tags, q.TagsMatch)
+	arg := db.DirectivePageParams{
+		TenantID: q.Bank.Tenant, BankID: q.Bank.Bank, ActiveOnly: q.ActiveOnly, TagsMatch: match, FilterTags: tags,
+		Lim: int32(min(q.Limit, math.MaxInt32)), //nolint:gosec // clamped to the int32 range
+	}
+	if q.After != nil {
+		arg.AfterCreatedAt, arg.AfterID = &q.After.CreatedAt, string(q.After.ID)
+	}
+	rows, err := r.q.DirectivePage(ctx, arg)
+	if err != nil {
+		return nil, mapErr("page directives", err)
+	}
+	return directivesOf(q.Bank, rows), nil
+}
+
+// directivesOf converts directive rows of bank b.
+func directivesOf(b domain.BankRef, rows []db.Directive) []domain.Directive {
 	out := make([]domain.Directive, len(rows))
 	for i, row := range rows {
 		out[i] = domain.Directive{
@@ -51,7 +75,7 @@ func (r *directiveRepo) List(ctx context.Context, b domain.BankRef, activeOnly b
 			Active: row.Active, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		}
 	}
-	return out, nil
+	return out
 }
 
 // Delete removes the directive; unknown = domain.ErrNotFound.

@@ -123,7 +123,7 @@ func (t *tx) Seq(ctx context.Context, b domain.BankRef) (int64, error) {
 func (t *tx) missingOrDeleting(ctx context.Context, b domain.BankRef) error {
 	bank, err := t.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
 	if err != nil {
-		return mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+		return bankErr(b, err)
 	}
 	if bank.DeletingAt != nil {
 		return fmt.Errorf("%w: %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)

@@ -58,7 +58,7 @@ func New(d Deps) *Agent {
 }
 
 // Reflect runs up to max_iterations (default 10 at MID); the agent must retrieve before done; citations it never
-// retrieved are dropped; past max_total_tokens it stops with domain.ErrResourceExhausted; an optional
+// retrieved are dropped; past max_total_tokens it stops with domain.ErrMaxTotalTokens; an optional
 // structured-output pass projects the answer onto the request's schema.
 func (r *Agent) Reflect(ctx context.Context, req Request) (Result, error) {
 	start := r.d.Clock.Now()

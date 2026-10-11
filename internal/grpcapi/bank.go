@@ -2,7 +2,6 @@ package grpcapi
 
 import (
 	"context"
-	"fmt"
 	"memd/internal/bank"
 	"memd/internal/configsvc"
 	"memd/internal/domain"
@@ -219,11 +218,9 @@ func (h *BankHandler) CreateBankFromTemplate(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	resp := &pb.CreateBankFromTemplateResponse{Bank: bankToProto(out)}
-	for _, op := range builds {
-		resp.MentalModelBuilds = append(resp.MentalModelBuilds, operationToProto(op))
-	}
-	return resp, nil
+	return &pb.CreateBankFromTemplateResponse{
+		Bank: bankToProto(out), MentalModelOperations: operationsToProto(builds),
+	}, nil
 }
 
 // UpsertDirective creates or replaces a directive.
@@ -235,7 +232,7 @@ func (h *BankHandler) UpsertDirective(
 		return nil, toStatus(err)
 	}
 	if req.GetDirective() == nil {
-		return nil, toStatus(fmt.Errorf("%w: directive is required", domain.ErrInvalidArgument))
+		return nil, toStatus(domain.InvalidField("directive", "directive is required"))
 	}
 	in := upsertDirectiveFromProto(req)
 	in.Bank = b
@@ -246,7 +243,7 @@ func (h *BankHandler) UpsertDirective(
 	return &pb.UpsertDirectiveResponse{Directive: directiveToProto(out)}, nil
 }
 
-// ListDirectives lists the bank's directives, filtered by tags and activity.
+// ListDirectives pages the bank's directives, filtered by tags and activity.
 func (h *BankHandler) ListDirectives(
 	ctx context.Context, req *pb.ListDirectivesRequest,
 ) (*pb.ListDirectivesResponse, error) {
@@ -254,11 +251,18 @@ func (h *BankHandler) ListDirectives(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Config.ListDirectives(ctx, b, req.GetTags(), req.GetActiveOnly())
+	in, err := listDirectivesFromProto(req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.ListDirectivesResponse{Directives: directivesToProto(out)}, nil
+	in.Bank = b
+	out, err := h.Config.ListDirectives(ctx, in)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &pb.ListDirectivesResponse{
+		Directives: directivesToProto(out.Items), NextPageToken: out.NextPageToken,
+	}, nil
 }
 
 // DeleteDirective removes one directive.

@@ -42,10 +42,10 @@ func tagFilterArgs(tags []string, mode domain.TagsMatch) (match string, filter [
 func (r *reader) listedBank(ctx context.Context, b domain.BankRef) error {
 	row, err := r.queries().GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
 	if err != nil {
-		return mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+		return bankErr(b, err)
 	}
 	if row.DeletingAt != nil {
-		return fmt.Errorf("%w: bank %s/%s is being deleted", domain.ErrNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
 	}
 	return nil
 }
@@ -118,10 +118,10 @@ func (r *reader) ObservationHistory(
 func (r *reader) BankStats(ctx context.Context, b domain.BankRef) (domain.BankStats, error) {
 	row, err := r.queries().ReadsBankStats(ctx, db.ReadsBankStatsParams{TenantID: b.Tenant, BankID: b.Bank})
 	if err != nil {
-		return domain.BankStats{}, mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+		return domain.BankStats{}, bankErr(b, err)
 	}
 	if row.DeletingAt != nil {
-		return domain.BankStats{}, fmt.Errorf("%w: bank %s/%s is being deleted", domain.ErrNotFound, b.Tenant, b.Bank)
+		return domain.BankStats{}, fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
 	}
 	byType, err := countMap[domain.FactType]("units by fact type", row.UnitsByFactType)
 	if err != nil {

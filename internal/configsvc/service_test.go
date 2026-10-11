@@ -91,7 +91,7 @@ func TestDirectives(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc
 	b := domain.BankRef{Tenant: "t", Bank: "new"}
-	if _, err := s.ListDirectives(e.ctx, b, nil, false); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := s.ListDirectives(e.ctx, ListDirectivesRequest{Bank: b}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("list on unknown bank: %v", err)
 	}
 	stored, err := s.UpsertDirective(e.ctx, domain.Directive{Bank: b, Name: "a", Tags: []string{"B", "a"}})
@@ -107,14 +107,7 @@ func TestDirectives(t *testing.T) {
 		t.Fatalf("replace = %+v %v", replaced, err)
 	}
 	seedDirectives(t, e, b)
-	got, _ := s.ListDirectives(e.ctx, b, []string{"team"}, false)
-	if want := []string{"off", "team"}; !slices.Equal(names(got), want) {
-		t.Errorf("list by tag = %v, want %v", names(got), want)
-	}
-	got, _ = s.ListDirectives(e.ctx, b, nil, true)
-	if want := []string{"global", "renamed", "sales", "team"}; !slices.Equal(names(got), want) {
-		t.Errorf("list active = %v, want %v", names(got), want)
-	}
+	checkDirectiveListing(t, e, b)
 	if err := s.DeleteDirective(e.ctx, b, stored.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +119,59 @@ func TestDirectives(t *testing.T) {
 		domain.ErrBankDeleting) {
 		t.Errorf("UpsertDirective on a deleting bank: %v, want ErrBankDeleting", err)
 	}
-	if _, err := s.ListDirectives(e.ctx, b, nil, false); !errors.Is(err, domain.ErrNotFound) {
+	if _, err := s.ListDirectives(e.ctx, ListDirectivesRequest{Bank: b}); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("ListDirectives on a deleting bank: %v, want ErrNotFound", err)
 	}
+}
+
+// checkDirectiveListing checks ListDirectives' filters over the seeded directives, paging one at a time: a tag
+// (any_strict by default), active only, an explicit any (untagged ones pass), and tag groups refused.
+func checkDirectiveListing(t *testing.T, e env, b domain.BankRef) {
+	t.Helper()
+	for _, tc := range []struct {
+		req  ListDirectivesRequest
+		want []string
+	}{
+		{ListDirectivesRequest{Bank: b, Tags: domain.TagFilter{Tags: []string{"team"}}}, []string{"off", "team"}},
+		{ListDirectivesRequest{Bank: b, ActiveOnly: true}, []string{"global", "renamed", "sales", "team"}},
+		{
+			ListDirectivesRequest{Bank: b, Tags: domain.TagFilter{Tags: []string{"team", "sales"}, Match: domain.TagsMatchAny}},
+			[]string{"global", "off", "sales", "team"},
+		},
+	} {
+		if got := names(listAllDirectives(t, e, tc.req)); !slices.Equal(got, tc.want) {
+			t.Errorf("list %+v = %v, want %v", tc.req, got, tc.want)
+		}
+	}
+	groups := ListDirectivesRequest{Bank: b, Tags: domain.TagFilter{Groups: []domain.TagGroup{{
+		Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{Tags: []string{"team"}},
+	}}}}
+	if _, err := e.svc.ListDirectives(e.ctx, groups); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("list with tag groups: %v, want ErrInvalidArgument", err)
+	}
+}
+
+// listAllDirectives pages through req one directive at a time and checks the keyset order (created_at, id).
+func listAllDirectives(t *testing.T, e env, req ListDirectivesRequest) []domain.Directive {
+	t.Helper()
+	req.PageSize = 1
+	var out []domain.Directive
+	for range 20 {
+		page, err := e.svc.ListDirectives(e.ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, page.Items...)
+		if page.NextPageToken == "" {
+			for i := 1; i < len(out); i++ {
+				if out[i].CreatedAt.Before(out[i-1].CreatedAt) {
+					t.Fatalf("directive pages out of order: %v", names(out))
+				}
+			}
+			return out
+		}
+		req.PageToken = page.NextPageToken
+	}
+	t.Fatal("directive paging did not end")
+	return nil
 }

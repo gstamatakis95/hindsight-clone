@@ -96,7 +96,7 @@ func (r *Engine) CheckArms(names []string) error { return r.arms.check("arms", n
 func (r *Engine) Recall(ctx context.Context, req Request) (Result, error) {
 	start := r.clock.Now()
 	if strings.TrimSpace(req.Query) == "" {
-		return Result{}, fmt.Errorf("%w: recall: query is empty", domain.ErrInvalidArgument)
+		return Result{}, domain.InvalidField("query", "recall: query is empty")
 	}
 	if err := r.arms.checkRequest(req); err != nil {
 		return Result{}, fmt.Errorf("recall: %w", err)

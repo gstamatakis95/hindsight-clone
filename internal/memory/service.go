@@ -107,22 +107,22 @@ func (s *Service) Reflect(ctx context.Context, req reflect.Request) (reflect.Res
 }
 
 // UpdateMemory edits, invalidates (State invalidated) or restores (State valid) a fact in one transaction and
-// returns the unit and its rederive operation (empty for an invalidate, and for a restore of a live unit
-// with no edits). Observations are rejected with domain.ErrInvalidArgument.
-func (s *Service) UpdateMemory(ctx context.Context, req UpdateRequest) (domain.Unit, domain.OperationID, error) {
+// returns the unit and its rederive operation (nil for an invalidate, and for a restore of a live unit with no
+// edits). Observations are rejected with domain.ErrMemoryIsObservation.
+func (s *Service) UpdateMemory(ctx context.Context, req UpdateRequest) (domain.Unit, *domain.Operation, error) {
 	return s.curate.Update(ctx, req)
 }
 
 // InvalidateMemory archives a fact: UpdateMemory with State invalidated and no edits.
 func (s *Service) InvalidateMemory(
 	ctx context.Context, b domain.BankRef, id domain.UnitID, reason string,
-) (domain.Unit, domain.OperationID, error) {
+) (domain.Unit, *domain.Operation, error) {
 	return s.curate.Update(ctx, UpdateRequest{Bank: b, ID: id, State: domain.MemoryStateInvalidated, Reason: reason})
 }
 
 // RestoreMemory brings an archived fact back and queues its rederive: UpdateMemory with State valid and no
 // edits. Restoring a live fact changes nothing and returns no operation.
-func (s *Service) RestoreMemory(ctx context.Context, req RestoreRequest) (domain.Unit, domain.OperationID, error) {
+func (s *Service) RestoreMemory(ctx context.Context, req RestoreRequest) (domain.Unit, *domain.Operation, error) {
 	return s.curate.Update(ctx, UpdateRequest{
 		Bank: req.Bank, ID: req.ID, State: domain.MemoryStateValid, Reason: req.Reason, Overrides: req.Overrides,
 	})

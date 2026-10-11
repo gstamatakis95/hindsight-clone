@@ -1,14 +1,12 @@
 package grpcapi
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"memd/internal/domain"
 	"strings"
 	"time"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -229,18 +227,6 @@ func structToProto(m map[string]any) *structpb.Struct {
 	}
 	s, err := structpb.NewStruct(m)
 	if err != nil {
-		return nil
-	}
-	return s
-}
-
-// jsonToStruct decodes a JSON object into a Struct; empty or non-object JSON = nil.
-func jsonToStruct(raw json.RawMessage) *structpb.Struct {
-	if len(raw) == 0 {
-		return nil
-	}
-	s := &structpb.Struct{}
-	if err := protojson.Unmarshal(raw, s); err != nil {
 		return nil
 	}
 	return s

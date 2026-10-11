@@ -23,17 +23,50 @@
 // into a BankConfig level. Model routing: see ModelBindings.
 //
 // Async work. Background work runs as operations. An RPC whose requested work runs in the background returns
-// its Operation (or operation id), and OperationService reports its status and progress; follow-up jobs an RPC
-// triggers on its own (such as consolidation after a retain) are not returned. Retain is synchronous by
-// default, returning once units are committed; run_async=true makes it return operation ids instead. Recall
-// and Reflect are synchronous.
+// the Operation it enqueued, in a field named operation (or operations, batch_operation,
+// mental_model_operations), never a bare id; OperationService reports its status and progress. Follow-up jobs
+// an RPC triggers on its own (such as consolidation after a retain) are not returned. Retain is synchronous by
+// default, returning once units are committed; run_async=true makes it return the enqueued operations instead.
+// Recall and Reflect are synchronous.
 //
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
-// poll OperationService.ListEvents with after_seq.
+// poll OperationService.ListEvents with after_seq, passing the previous response's next_after_seq.
+//
+// Paging. Every List RPC takes page_size and page_token and returns next_page_token (empty = no more pages).
+// page_size 0 = 100, larger than 1000 = 1000, negative = INVALID_ARGUMENT. A page token is opaque and only
+// valid for the same request; a malformed one is INVALID_ARGUMENT. ListEvents pages by sequence instead
+// (page_size + after_seq / next_after_seq), and SearchPages takes max_results (0 = 10, larger than 100 = 100,
+// negative = INVALID_ARGUMENT).
+//
+// Tag filters. Every request that filters by tag takes one TagFilter: flat tags under a match mode, or
+// boolean tag groups (setting both = INVALID_ARGUMENT). Each TagFilter field states its default match mode.
+// List RPCs take only the flat form for now: groups there are INVALID_ARGUMENT.
+//
+// Errors. Every error carries a canonical gRPC code and a google.rpc.ErrorInfo detail with domain "memd" and
+// a stable reason; INVALID_ARGUMENT also carries a google.rpc.BadRequest detail whose field violations name
+// the offending request fields (for a config, the BankConfig path, for example reflect.disposition.empathy)
+// when the server knows them. Clients branch on the code, then the reason; the message is for humans. The reasons, by code:
+//   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
+//                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
+//   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
+//                        read of a bank being deleted)
+//   ALREADY_EXISTS       ALREADY_EXISTS (a create collided with an existing id)
+//   FAILED_PRECONDITION  FAILED_PRECONDITION (the state forbids the call), BANK_DELETING (a write to a bank
+//                        being deleted), MODEL_UNBOUND (a model slot the call needs has no binding),
+//                        OPERATION_NOT_CANCELLABLE, OPERATION_NOT_RETRYABLE (the operation's status or kind
+//                        forbids it)
+//   UNAVAILABLE          UNAVAILABLE (a dependency failed; retry with backoff), RETRIEVAL_UNAVAILABLE (a
+//                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
+//   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens)
+//   ABORTED              OPERATION_CANCELLED (the operation was cancelled or its bank deleted), CONFLICT (a
+//                        concurrent writer won; retry)
+//   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
+//   CANCELLED            CANCELLED (the client cancelled the call)
+//   INTERNAL             INTERNAL (a server bug)
+// The x-tenant-id header is checked first: missing or invalid = INVALID_ARGUMENT with field x-tenant-id.
 //
 // Naming. Every RPC has its own <Rpc>Request and <Rpc>Response. Every enum value is prefixed with its enum
-// name, and value 0 is *_UNSPECIFIED. List RPCs page with page_size + page_token / next_page_token. Patch
-// RPCs take a google.protobuf.FieldMask update_mask.
+// name, and value 0 is *_UNSPECIFIED. Patch RPCs take a google.protobuf.FieldMask update_mask.
 syntax = "proto3";
 
 package memory.v1;
@@ -47,7 +80,7 @@ option go_package = "memd/gen/memory/v1;memoryv1";
 // MemoryService stores content as memories and answers questions from them.
 service MemoryService {
   // Retain stores content and extracts memory units from it. Synchronous by default (returns after units
-  // commit); run_async=true enqueues retain_document jobs and returns their ids. A write to an unknown
+  // commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
   // bank creates it with tenant defaults.
   rpc Retain(RetainRequest) returns (RetainResponse);
   // Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
@@ -167,7 +200,7 @@ service BankService {
   rpc CreateBankFromTemplate(CreateBankFromTemplateRequest) returns (CreateBankFromTemplateResponse);
   // UpsertDirective creates (empty id) or replaces a directive.
   rpc UpsertDirective(UpsertDirectiveRequest) returns (UpsertDirectiveResponse);
-  // ListDirectives lists the bank's directives, optionally by tag and active state.
+  // ListDirectives pages through the bank's directives, oldest first, optionally by tag and active state.
   rpc ListDirectives(ListDirectivesRequest) returns (ListDirectivesResponse);
   // DeleteDirective deletes one directive.
   rpc DeleteDirective(DeleteDirectiveRequest) returns (DeleteDirectiveResponse);
@@ -217,16 +250,19 @@ message RetainRequest {
   RetainOverrides overrides = 4;
   // Do not enqueue consolidation after this retain, so a manual Consolidate can run with its own settings.
   bool skip_consolidation = 5;
-  // false (default) = return after units commit; true = enqueue jobs and return operation ids.
+  // false (default) = return after units commit; true = enqueue jobs and return their operations.
   bool run_async = 6;
 }
 
 // RetainResponse reports per-document outcomes.
 message RetainResponse {
-  // One entry per item. Sync: fully filled; async: document and operation ids only.
+  reserved 2;
+  reserved "parent_operation_id";
+  // One entry per item. Sync: fully filled; async: document ids, unchanged flags and operations only.
   repeated RetainedDocument documents = 1;
-  // retain_batch parent operation; set when there was more than one document.
-  string parent_operation_id = 2;
+  // The retain_batch parent operation; set when run_async enqueued more than one document. Its status
+  // aggregates the retain_document children.
+  Operation batch_operation = 4;
   // Token usage per slot and model of the LLM and embedding calls a synchronous retain made; empty when
   // run_async (the usage is then on the retain_document operations).
   repeated SlotUsage usage = 3;
@@ -271,33 +307,33 @@ message EntityHint {
 
 // RetainedDocument reports the outcome for one retained document.
 message RetainedDocument {
+  reserved 4;
+  reserved "operation_id";
   // Document id (given or generated).
   string document_id = 1;
   // Units created; 0 when unchanged or async.
   int32 units_created = 2;
   // Same content and overrides hash as the last completed retain: nothing was re-extracted.
   bool unchanged = 3;
-  // retain_document operation id; set when run_async.
-  string operation_id = 4;
+  // The retain_document operation; set when run_async and the document changed.
+  Operation operation = 5;
 }
 
 // ---- Recall ----
 
 // RecallRequest retrieves memories for a query.
 message RecallRequest {
+  reserved 5, 6;
+  reserved "tags_match", "tag_groups";
   // Bank to search; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Query text, at most 500 tokens.
   string query = 2;
   // Fact types to return; empty = all.
   repeated FactType types = 3;
-  // Flat tag filter; mutually exclusive with tag_groups (both set = INVALID_ARGUMENT).
-  repeated string tags = 4;
-  // How tags must match.
-  TagsMatch tags_match = 5;
-  // Boolean tag filter, top-level groups AND-ed; mutually exclusive with tags (both set =
-  // INVALID_ARGUMENT).
-  repeated TagGroup tag_groups = 6;
+  // Tag filter on the memories' tags; unset = no filter. Flat tags or groups; tags.match unset =
+  // TAGS_MATCH_ANY.
+  TagFilter tags = 4;
   // Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
   Budget budget = 7;
   // Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
@@ -368,18 +404,15 @@ message EntityState {
 
 // ReflectRequest asks the reflect agent a question.
 message ReflectRequest {
+  reserved 4, 5;
+  reserved "tags_match", "tag_groups";
   // Bank to reason over; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // The question to answer in natural language.
   string query = 2;
-  // Flat tag filter for retrieval and directive selection; mutually exclusive with tag_groups (both set =
-  // INVALID_ARGUMENT).
-  repeated string tags = 3;
-  // How tags must match.
-  TagsMatch tags_match = 4;
-  // Boolean tag filter for retrieval, top-level groups AND-ed; mutually exclusive with tags (both set =
-  // INVALID_ARGUMENT).
-  repeated TagGroup tag_groups = 5;
+  // Tag filter for retrieval and directive selection; unset = no filter (only untagged directives apply).
+  // Flat tags or groups; tags.match unset = TAGS_MATCH_ANY.
+  TagFilter tags = 3;
   // Size class scaling iterations and recall budgets, default BUDGET_LOW.
   Budget budget = 6;
   // Token cap on the final answer; overrides ReflectConfig.max_answer_tokens.
@@ -520,6 +553,8 @@ enum MemoryState {
 
 // ListMemoriesRequest filters and pages the bank's units.
 message ListMemoriesRequest {
+  reserved 11;
+  reserved "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Fact types; empty = all.
@@ -538,11 +573,10 @@ message ListMemoriesRequest {
   google.protobuf.Timestamp end = 8;
   // Timestamp the range applies to.
   TimeField time_field = 9;
-  // Tag filter.
-  repeated string tags = 10;
-  // How tags must match.
-  TagsMatch tags_match = 11;
-  // Maximum units per page; 0 = server default.
+  // Tag filter on the units' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
+  // TAGS_MATCH_ANY.
+  TagFilter tags = 10;
+  // Maximum units per page; 0 = 100, at most 1000.
   int32 page_size = 12;
   // Token from a previous response; empty = first page.
   string page_token = 13;
@@ -651,10 +685,12 @@ message UpdateMemoryRequest {
 
 // UpdateMemoryResponse carries the curated unit.
 message UpdateMemoryResponse {
+  reserved 2;
+  reserved "operation_id";
   // The unit after the change.
   Memory memory = 1;
-  // rederive_memory operation id; empty for invalidate.
-  string operation_id = 2;
+  // The rederive_memory operation; unset for an invalidate (and a restore of a live unit with no edits).
+  Operation operation = 3;
 }
 
 // EntityList wraps a list of entity names so that unset can differ from empty.
@@ -673,21 +709,22 @@ message EntityList {
 
 // ListDocumentsRequest filters and pages the bank's documents.
 message ListDocumentsRequest {
+  reserved 4;
+  reserved "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Case-insensitive document id substring; empty = no filter.
   string q = 2;
-  // Tag filter.
-  repeated string tags = 3;
-  // How tags must match, default TAGS_MATCH_ANY_STRICT.
-  TagsMatch tags_match = 4;
+  // Tag filter on the documents' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
+  // TAGS_MATCH_ANY_STRICT.
+  TagFilter tags = 3;
   // Inclusive start of the time range on time_field.
   google.protobuf.Timestamp start = 5;
   // Exclusive end of the time range on time_field.
   google.protobuf.Timestamp end = 6;
   // Timestamp the range applies to.
   DocTimeField time_field = 7;
-  // Maximum documents per page; 0 = server default.
+  // Maximum documents per page; 0 = 100, at most 1000.
   int32 page_size = 8;
   // Token from a previous response; empty = first page.
   string page_token = 9;
@@ -822,7 +859,7 @@ message ConsolidateResponse {
 message ListScopesRequest {
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
-  // Maximum scopes per page; 0 = server default.
+  // Maximum scopes per page; 0 = 100, at most 1000.
   int32 page_size = 2;
   // Token from a previous response; empty = first page.
   string page_token = 3;
@@ -934,10 +971,12 @@ message CreateMentalModelRequest {
 
 // CreateMentalModelResponse carries the new model and its first build.
 message CreateMentalModelResponse {
+  reserved 2;
+  reserved "build";
   // The model, with no content yet.
   MentalModel mental_model = 1;
   // The refresh_mental_model operation building the first version.
-  Operation build = 2;
+  Operation operation = 3;
 }
 
 // ---- GetMentalModel ----
@@ -974,17 +1013,18 @@ enum Detail {
 
 // ListMentalModelsRequest filters and pages the bank's models.
 message ListMentalModelsRequest {
+  reserved 5;
+  reserved "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Only models whose folder path starts with this; empty = all.
   string folder_prefix = 2;
   // How much of each model to return, default DETAIL_METADATA.
   Detail detail = 3;
-  // Tag filter on the models' tags.
-  repeated string tags = 4;
-  // How tags must match.
-  TagsMatch tags_match = 5;
-  // Maximum models per page; 0 = server default.
+  // Tag filter on the models' own tags (MentalModelSpec.tags); unset or empty tags = no filter. Flat form
+  // only; tags.match unset = TAGS_MATCH_ANY.
+  TagFilter tags = 4;
+  // Maximum models per page; 0 = 100, at most 1000.
   int32 page_size = 6;
   // Token from a previous response; empty = first page.
   string page_token = 7;
@@ -1079,12 +1119,10 @@ message DryRunRefreshResponse {
 
 // ResolvedScope is the effective filter a refresh reads with, after defaults and overrides.
 message ResolvedScope {
-  // Effective flat tags.
-  repeated string tags = 1;
-  // Effective tag match.
-  TagsMatch tags_match = 2;
-  // Effective tag groups, top-level groups AND-ed; when set they replace tags and tags_match.
-  repeated TagGroup tag_groups = 3;
+  reserved 2, 3;
+  reserved "tags_match", "tag_groups";
+  // Effective tag filter: the trigger's groups, or the model's tags under the effective match mode.
+  TagFilter tags = 1;
   // Effective fact types; empty = all.
   repeated FactType fact_types = 4;
 }
@@ -1115,7 +1153,7 @@ message GetMentalModelHistoryRequest {
   string mental_model_id = 2;
   // Only this kind; unspecified = both.
   HistoryKind kind = 3;
-  // Maximum entries per page; 0 = server default.
+  // Maximum entries per page; 0 = 100, at most 1000.
   int32 page_size = 4;
   // Token from a previous response; empty = first page.
   string page_token = 5;
@@ -1188,14 +1226,16 @@ message DeleteFolderResponse {
 
 // SearchPagesRequest searches mental-model pages.
 message SearchPagesRequest {
+  reserved 4;
+  reserved "limit";
   // Bank to search; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Search text.
   string query = 2;
   // Only pages whose folder path starts with this; empty = all.
   string folder_prefix = 3;
-  // Maximum hits; 0 = server default.
-  int32 limit = 4;
+  // Maximum hits; 0 = 10, at most 100, negative = INVALID_ARGUMENT.
+  int32 max_results = 5;
 }
 
 // SearchPagesResponse lists matching pages.
@@ -1236,7 +1276,8 @@ message MentalModel {
   bool is_stale = 6;
   // Wall clock of the last completed refresh, including no-op refreshes.
   google.protobuf.Timestamp last_refreshed_at = 7;
-  // The bank change_seq the last successful refresh read up to (its watermark).
+  // The bank change_seq the last successful refresh read up to (its watermark): the same counter as
+  // LifecycleEvent.seq and BankStats.change_seq.
   int64 last_seq_seen = 8;
   // When the last refresh failed; unset if none has.
   google.protobuf.Timestamp last_refresh_failed_at = 9;
@@ -1260,7 +1301,8 @@ message MentalModelSpec {
   string source_query = 3;
   // Folder the page lives in, for example team/projects.
   string folder_path = 4;
-  // Tags that scope what the model reads and when it goes stale.
+  // Tags of the model: ListMentalModels and ListTags filter on them, and they scope what the model reads
+  // and when it goes stale (see RefreshTrigger.tags).
   repeated string tags = 5;
   // Token cap on the content; overrides MentalModelConfig.max_content_tokens.
   optional int32 max_tokens = 6;
@@ -1274,6 +1316,8 @@ message MentalModelSpec {
 // RefreshTrigger decides when and how a model refreshes, and what scope it reads. Unset fields fall back
 // to MentalModelConfig.
 message RefreshTrigger {
+  reserved 5, 6;
+  reserved "tags_match", "tag_groups";
   // Full or delta; unset = MentalModelConfig.default_mode.
   RefreshMode mode = 1;
   // Agentic or single-shot; unset = MentalModelConfig.default_strategy.
@@ -1284,10 +1328,11 @@ message RefreshTrigger {
   string refresh_cron = 3;
   // Minimum seconds between triggered refreshes; unset = MentalModelConfig value.
   optional int32 min_refresh_interval_seconds = 4;
-  // How the model's tags filter memories, default TAGS_MATCH_ALL_STRICT when the model is tagged.
-  TagsMatch tags_match = 5;
-  // Boolean tag filter, top-level groups AND-ed; when set it replaces the model's tags and tags_match.
-  repeated TagGroup tag_groups = 6;
+  // What the model reads, by tag. The flat tags always come from MentalModelSpec.tags, so tags.tags must
+  // stay empty (INVALID_ARGUMENT otherwise); tags.match is how the model's tags filter memories, unset =
+  // TAGS_MATCH_ALL_STRICT when the model is tagged (TAGS_MATCH_ANY otherwise). tags.groups, when set,
+  // replace the model's tags and the match mode.
+  TagFilter tags = 19;
   // Fact types in scope; empty = all.
   repeated FactType fact_types = 7;
   // Do not read other mental models while refreshing.
@@ -1510,7 +1555,8 @@ message BankStats {
   int64 unconsolidated_units = 7;
   // Time of the last write to memory content.
   google.protobuf.Timestamp last_memory_write_at = 8;
-  // The bank's commit-ordered change counter.
+  // The bank's commit-ordered change counter: the same counter as LifecycleEvent.seq and
+  // MentalModel.last_seq_seen.
   int64 change_seq = 9;
 }
 
@@ -1524,7 +1570,7 @@ message ListTagsRequest {
   TagSource source = 2;
   // Only tags starting with this; empty = all.
   string prefix = 3;
-  // Maximum tags per page; 0 = server default.
+  // Maximum tags per page; 0 = 100, at most 1000.
   int32 page_size = 4;
   // Token from a previous response; empty = first page.
   string page_token = 5;
@@ -1708,10 +1754,12 @@ message CreateBankFromTemplateRequest {
 
 // CreateBankFromTemplateResponse carries the new bank and its model builds.
 message CreateBankFromTemplateResponse {
+  reserved 2;
+  reserved "mental_model_builds";
   // The newly created bank, with the template config as its own overrides.
   Bank bank = 1;
-  // One refresh_mental_model operation per template model.
-  repeated Operation mental_model_builds = 2;
+  // One refresh_mental_model operation per template model, building its first version.
+  repeated Operation mental_model_operations = 3;
 }
 
 // ---- UpsertDirective ----
@@ -1732,20 +1780,27 @@ message UpsertDirectiveResponse {
 
 // ---- ListDirectives ----
 
-// ListDirectivesRequest filters the bank's directives.
+// ListDirectivesRequest filters and pages the bank's directives.
 message ListDirectivesRequest {
   // Bank id; unknown = NOT_FOUND.
   string bank_id = 1;
-  // Only directives applying to these tags; empty = all.
-  repeated string tags = 2;
+  // Tag filter on the directives' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
+  // TAGS_MATCH_ANY_STRICT (directives sharing a tag; untagged ones are left out).
+  TagFilter tags = 2;
   // Only active directives.
   bool active_only = 3;
+  // Maximum directives per page; 0 = 100, at most 1000.
+  int32 page_size = 4;
+  // Token from a previous response; empty = first page.
+  string page_token = 5;
 }
 
-// ListDirectivesResponse lists directives.
+// ListDirectivesResponse is one page of directives, oldest first.
 message ListDirectivesResponse {
-  // Matching directives.
+  // Directives on this page.
   repeated Directive directives = 1;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
 }
 
 // ---- DeleteDirective ----
@@ -1860,7 +1915,7 @@ message ListOperationsRequest {
   OperationKind kind = 3;
   // Omit retain_batch parents, listing only operations that do work.
   bool exclude_parents = 4;
-  // Maximum operations per page; 0 = server default.
+  // Maximum operations per page; 0 = 100, at most 1000.
   int32 page_size = 5;
   // Token from a previous response; empty = first page.
   string page_token = 6;
@@ -1910,25 +1965,30 @@ message RetryOperationResponse {
 
 // ListEventsRequest polls a bank's lifecycle events after a known sequence number.
 message ListEventsRequest {
+  reserved 3;
+  reserved "limit";
   // Bank to read; unknown bank = NOT_FOUND.
   string bank_id = 1;
-  // Return only events with seq greater than this; 0 = from the oldest retained event.
+  // Return only events with seq greater than this (the previous response's next_after_seq); 0 = from the
+  // oldest retained event.
   int64 after_seq = 2;
-  // Soft maximum of events to return; 0 = server default. A page never splits a seq group: it is
-  // extended past the limit to finish the last seq it includes.
-  int32 limit = 3;
+  // Soft maximum of events per page; 0 = 100, at most 1000, negative = INVALID_ARGUMENT. A page never
+  // splits a seq group: it is extended past page_size to finish the last seq it includes.
+  int32 page_size = 5;
   // Only these event types; empty = all types.
   repeated EventType types = 4;
 }
 
 // ListEventsResponse returns events in seq order.
 message ListEventsResponse {
+  reserved 2;
+  reserved "last_seq";
   // Events with seq > after_seq, ascending.
   repeated LifecycleEvent events = 1;
   // Seq to pass as after_seq on the next poll: the highest seq scanned for this page, including events
   // the types filter dropped, and never below the request's after_seq (so a filter over non-matching
-  // events still advances).
-  int64 last_seq = 2;
+  // events still advances). An integer cursor a consumer can persist.
+  int64 next_after_seq = 3;
 }
 
 // LifecycleEvent is one row of the lifecycle_events table, written in the state change's transaction.
@@ -1950,18 +2010,23 @@ message LifecycleEvent {
 
 // ---- Resources ----
 
-// Operation is one background job row.
+// Operation is one background job: what it does, where it is, and what it used.
 message Operation {
+  reserved 5;
+  reserved "result";
   // Operation (job) id.
   string id = 1;
+  // Bank the operation belongs to; GetOperation, CancelOperation and RetryOperation take it with id.
+  string bank_id = 15;
   // Job type.
   OperationKind kind = 2;
   // Lifecycle state.
   OperationStatus status = 3;
   // Last error message; set when FAILED.
   string error = 4;
-  // Kind-specific summary of the outcome; informational only, not a stable contract.
-  google.protobuf.Struct result = 5;
+  // A kind-specific summary of the outcome as a JSON object, for people and logs. It is NOT a stable
+  // contract: keys may change in any release, so never parse it in client logic.
+  string debug_summary = 16;
   // Token usage per slot and model of every LLM call the job made.
   repeated SlotUsage usage = 6;
   // The overrides the run actually used (request, strategy and stored overrides merged).
@@ -1977,9 +2042,11 @@ message Operation {
   // When a parked job becomes claimable: backoff, debounce or refresh interval floor.
   google.protobuf.Timestamp next_run_at = 12;
   // Earlier attempts that failed with a retry or were reclaimed (0 on the first run); transient failures
-  // retry with backoff (60 s x attempt) up to the kind's limit (consolidate: unbounded).
+  // retry with backoff up to the kind's limit (consolidate: unbounded). With next_run_at it tells a
+  // retrying operation from a parked one.
   int32 attempts = 13;
-  // Worker liveness while PROCESSING; the runner heartbeats every 15 s.
+  // Last sign of life from the worker while PROCESSING; an old value means the operation is stalled and
+  // will be reclaimed.
   google.protobuf.Timestamp heartbeat_at = 14;
 }
 
@@ -2031,10 +2098,20 @@ message ObservationScopes {
   optional int32 max_combinations = 3;
 }
 
-// TagGroup is one node of a boolean tag-filter tree; a repeated top-level tag_groups list is AND-ed. On
-// RecallRequest and ReflectRequest, tags and tag_groups are mutually exclusive: setting both is
-// INVALID_ARGUMENT. Only a mental model's RefreshTrigger.tag_groups (and the matching
-// ResolvedScope.tag_groups) replace the model's tags + tags_match.
+// TagFilter filters by tag: flat tags under a match mode, or boolean tag groups. tags/match and groups are
+// mutually exclusive (setting both = INVALID_ARGUMENT). An unset TagFilter, or one with no tags and no groups
+// and a match other than TAGS_MATCH_EXACT, filters nothing. List RPCs accept only the flat form (groups =
+// INVALID_ARGUMENT).
+message TagFilter {
+  // Flat filter tags, compared under match.
+  repeated string tags = 1;
+  // How tags must match; unset = the default the TagFilter field documents.
+  TagsMatch match = 2;
+  // Boolean tag groups; top-level groups are AND-ed.
+  repeated TagGroup groups = 3;
+}
+
+// TagGroup is one node of a boolean tag-filter tree; TagFilter.groups AND-s its top-level groups.
 message TagGroup {
   // The node: a leaf test or a boolean combination of child groups.
   oneof node {
@@ -2342,8 +2419,11 @@ message ConsolidationStrategy {
   reserved 7;
   // Strategy name, unique within the list.
   string name = 1;
-  // Scope patterns; the strategy applies to a scope matching any of them.
-  repeated ScopePattern scopes = 2;
+  // Scope patterns, each a tag filter on the scope's tag set; the strategy applies to a scope matching any
+  // of them. A pattern's match unset = TAGS_MATCH_ALL_STRICT (the scope holds every pattern tag; the shared
+  // scope never matches). A pattern with no tags and no groups matches only under TAGS_MATCH_EXACT (the
+  // shared scope); otherwise it is ignored. Groups are allowed.
+  repeated TagFilter scopes = 2;
   // Observations mission for matched scopes; empty = the bank's.
   string mission = 3;
   // Cap on observations per matched scope.
@@ -2356,14 +2436,6 @@ message ConsolidationStrategy {
   ModelBinding consolidate_model = 8;
   // DEDUP_CHECK model for matched scopes; unset = the bank's.
   ModelBinding dedup_check_model = 9;
-}
-
-// ScopePattern matches observation scopes by tag.
-message ScopePattern {
-  // Tags to test against the scope's tag set.
-  repeated string tags = 1;
-  // How the tags must match.
-  TagsMatch tags_match = 2;
 }
 
 // RecallConfig tunes the recall pipeline: the arms, RRF fusion, rerank, boosts and packing.
@@ -2625,8 +2697,9 @@ enum Budget {
 // TagsMatch decides how a tag list filters memories. The STRICT variants exclude untagged memories; the
 // plain variants also accept untagged (global) ones.
 enum TagsMatch {
-  // Not set; behaves as TAGS_MATCH_ANY unless the field documents another default (TagLeaf and
-  // ListDocuments: ANY_STRICT; RefreshTrigger on a tagged model: ALL_STRICT).
+  // Not set; the field's documented default applies (TAGS_MATCH_ANY unless it says otherwise: TagLeaf,
+  // ListDocuments and ListDirectives use ANY_STRICT; RefreshTrigger on a tagged model and strategy scope
+  // patterns use ALL_STRICT).
   TAGS_MATCH_UNSPECIFIED = 0;
   // At least one of the tags, or untagged.
   TAGS_MATCH_ANY = 1;
@@ -2752,7 +2825,7 @@ enum OperationStatus {
   OPERATION_STATUS_UNSPECIFIED = 0;
   // Queued, possibly parked until next_run_at.
   OPERATION_STATUS_PENDING = 1;
-  // Claimed by a worker, which heartbeats it; reclaimed to PENDING if the heartbeat is over 2 minutes old.
+  // Claimed by a worker, which heartbeats it; reclaimed to PENDING if the worker stops heartbeating.
   OPERATION_STATUS_PROCESSING = 2;
   // Finished successfully. Terminal; pruned after the retention period.
   OPERATION_STATUS_COMPLETED = 3;

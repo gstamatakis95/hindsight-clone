@@ -91,11 +91,11 @@ func (h *OperationHandler) ListEvents(ctx context.Context, req *pb.ListEventsReq
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	events, last, err := h.Operations.ListEvents(ctx, b, req.GetAfterSeq(), int(req.GetLimit()), types)
+	events, last, err := h.Operations.ListEvents(ctx, b, req.GetAfterSeq(), int(req.GetPageSize()), types)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.ListEventsResponse{Events: eventsToProto(events), LastSeq: last}, nil
+	return &pb.ListEventsResponse{Events: eventsToProto(events), NextAfterSeq: last}, nil
 }
 
 // operationRef builds the bank ref of a request and checks its required operation id.

@@ -73,12 +73,9 @@ type RefreshOutcome struct {
 
 // ResolvedScope mirrors memory.v1.ResolvedScope: the effective scope of a model after defaults.
 type ResolvedScope struct {
-	// Tags are the model's tags.
-	Tags []string
-	// TagsMatch is the effective match mode for Tags.
-	TagsMatch domain.TagsMatch
-	// TagGroups override Tags and TagsMatch when set.
-	TagGroups []domain.TagGroup
+	// Tags is the effective tag filter (domain.MentalModelSpec.ScopeFilter): the trigger's groups, or the
+	// model's tags under the effective match mode.
+	Tags domain.TagFilter
 	// FactTypes limits the scope; empty = all.
 	FactTypes []domain.FactType
 }

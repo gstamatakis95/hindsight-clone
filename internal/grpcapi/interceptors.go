@@ -2,7 +2,6 @@ package grpcapi
 
 import (
 	"context"
-	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"strings"
@@ -11,9 +10,7 @@ import (
 	pb "memd/gen/memory/v1"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protopath"
 	"google.golang.org/protobuf/reflect/protorange"
@@ -42,7 +39,8 @@ func WithTenant(ctx context.Context, tenant string) context.Context {
 }
 
 // TenantInterceptor reads the tenant from the x-tenant-id header into the context. A missing, empty,
-// repeated or malformed header fails with INVALID_ARGUMENT (decision 600). Health checks need no tenant.
+// repeated or malformed header fails with INVALID_ARGUMENT naming the x-tenant-id field (decision 600).
+// Health checks need no tenant.
 func TenantInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
@@ -53,7 +51,7 @@ func TenantInterceptor() grpc.UnaryServerInterceptor {
 		md, _ := metadata.FromIncomingContext(ctx)
 		vals := md.Get(TenantHeader)
 		if len(vals) != 1 {
-			return nil, status.Errorf(codes.InvalidArgument, "exactly one %s header is required", TenantHeader)
+			return nil, toStatus(domain.InvalidField(TenantHeader, "exactly one %s header is required", TenantHeader))
 		}
 		if err := checkName("tenant", vals[0]); err != nil {
 			return nil, toStatus(err)
@@ -81,19 +79,22 @@ const maxNameLen = 256
 
 // checkName validates a tenant or bank id: non-empty, not "." or "..", at most 256 bytes, and free of '/'
 // and control characters. Blob keys are "{tenant}/{bank}/...", so a '/' would let one bank's prefix cover
-// another's, and a dot segment would make the key a relative path on stores or tools that normalize it.
+// another's, and a dot segment would make the key a relative path on stores or tools that normalize it. The
+// error names the request field: bank_id, or x-tenant-id for the tenant.
 func checkName(what, v string) error {
-	if v == "" {
-		return fmt.Errorf("%w: %s is required", domain.ErrInvalidArgument, what)
+	field := what
+	if what == "tenant" {
+		field = TenantHeader
 	}
-	if v == "." || v == ".." {
-		return fmt.Errorf("%w: %s must not be %q", domain.ErrInvalidArgument, what, v)
-	}
-	if len(v) > maxNameLen {
-		return fmt.Errorf("%w: %s is longer than %d bytes", domain.ErrInvalidArgument, what, maxNameLen)
-	}
-	if strings.ContainsFunc(v, func(r rune) bool { return r == '/' || r < 0x20 || r == 0x7f }) {
-		return fmt.Errorf("%w: %s %q contains '/' or a control character", domain.ErrInvalidArgument, what, v)
+	switch {
+	case v == "":
+		return domain.InvalidField(field, "%s is required", what)
+	case v == "." || v == "..":
+		return domain.InvalidField(field, "%s must not be %q", what, v)
+	case len(v) > maxNameLen:
+		return domain.InvalidField(field, "%s is longer than %d bytes", what, maxNameLen)
+	case strings.ContainsFunc(v, func(r rune) bool { return r == '/' || r < 0x20 || r == 0x7f }):
+		return domain.InvalidField(field, "%s %q contains '/' or a control character", what, v)
 	}
 	return nil
 }
@@ -113,13 +114,14 @@ func bankRef(ctx context.Context, bankID string) (domain.BankRef, error) {
 // requireID rejects an empty id field.
 func requireID(field, v string) error {
 	if v == "" {
-		return fmt.Errorf("%w: %s is required", domain.ErrInvalidArgument, field)
+		return domain.InvalidField(field, "%s is required", field)
 	}
 	return nil
 }
 
-// pagingInterceptor rejects a request whose page_size or limit is negative (INVALID_ARGUMENT); 0 keeps
-// meaning "the server default".
+// pagingInterceptor rejects a request whose page_size or max_results is negative (INVALID_ARGUMENT naming the
+// field); 0 keeps meaning "the default" (domain.ListPage, domain.SearchResults). The services check again, so
+// this is the API's guard, not the only one.
 func pagingInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
@@ -133,12 +135,12 @@ func pagingInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
-// checkPaging returns ErrInvalidArgument when m's page_size or limit field is negative.
+// checkPaging returns an ErrInvalidArgument naming the field when m's page_size or max_results is negative.
 func checkPaging(m protoreflect.Message) error {
-	for _, name := range []protoreflect.Name{"page_size", "limit"} {
+	for _, name := range []protoreflect.Name{"page_size", "max_results"} {
 		fd := m.Descriptor().Fields().ByName(name)
 		if fd != nil && fd.Kind() == protoreflect.Int32Kind && m.Get(fd).Int() < 0 {
-			return fmt.Errorf("%w: %s must not be negative", domain.ErrInvalidArgument, name)
+			return domain.InvalidField(string(name), "%s must not be negative", name)
 		}
 	}
 	return nil

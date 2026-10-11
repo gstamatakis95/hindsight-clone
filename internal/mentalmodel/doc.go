@@ -31,10 +31,12 @@
 // Untagged writes never make a tagged model stale, even when its refresh reads untagged memories. The staleness
 // check reads BankSeq first, then checks both conditions with no model call.
 //
-// The scope: tags_match defaults to all_strict for a tagged model and any for an untagged one, tag groups
-// override flat tags, and fuzzy tag leaves are resolved to the bank's exact tags (recall.Engine.CompileTags)
-// before the scope query, at the effective recall.fuzzy_tag_min_similarity of the model (server < tenant < bank
-// < the model's overrides), so staleness sees exactly what recall would retrieve.
+// The scope (domain.MentalModelSpec.ScopeFilter): the model's tags under the trigger's match mode, which defaults to
+// all_strict for a tagged model and any for an untagged one; the trigger's tag groups override the flat tags (a
+// trigger's tag filter never carries flat tags of its own: they are the model's), and fuzzy tag leaves are resolved to
+// the bank's exact tags (recall.Engine.CompileTags) before the scope query, at the effective
+// recall.fuzzy_tag_min_similarity of the model (server < tenant < bank < the model's overrides), so staleness sees
+// exactly what recall would retrieve.
 //
 // # Refresh pipeline
 //
@@ -106,15 +108,15 @@
 //
 // # RPCs
 //
-// [Service.CreateMentalModel] validates the id (lowercase alphanumerics and hyphens), normalizes tags and
-// folder, creates the bank on first write, and queues the first build as a manual full refresh in the same
-// transaction. [Service.GetMentalModel] computes is_stale at full detail. [Service.ListMentalModels] pages by id
-// (page size 50, max 500). [Service.UpdateMentalModel] applies a pure [SpecPatch]; a changed source query or
-// scope resets last_seq_seen so the next refresh runs in full. [Service.RefreshMentalModel] queues a manual
-// refresh or joins and upgrades the queued one. [Service.ClearMentalModel] empties content, structured output,
-// sources and the watermark, keeping the cleared content as a history entry. [Service.ListMentalModelHistory],
-// [Service.DeleteMentalModel] and [Service.DeleteMentalModelFolder] (recursive; an empty path is rejected)
-// complete the admin surface. Create, Update, Refresh and Clear take tx.Seq first.
+// [Service.CreateMentalModel] validates the id (lowercase alphanumerics and hyphens), normalizes tags and folder,
+// creates the bank on first write, and queues the first build as a manual full refresh in the same transaction.
+// [Service.GetMentalModel] computes is_stale at full detail. [Service.ListMentalModels] pages by id (domain.ListPage:
+// page size 100, max 1000; the tag filter is flat only). [Service.UpdateMentalModel] applies a pure [SpecPatch]; a
+// changed source query or scope resets last_seq_seen so the next refresh runs in full. [Service.RefreshMentalModel]
+// queues a manual refresh or joins and upgrades the queued one. [Service.ClearMentalModel] empties content, structured
+// output, sources and the watermark, keeping the cleared content as a history entry. [Service.ListMentalModelHistory],
+// [Service.DeleteMentalModel] and [Service.DeleteMentalModelFolder] (recursive; an empty path is rejected) complete the
+// admin surface. Create, Update, Refresh and Clear take tx.Seq first.
 //
 // The single-shot synthesize prompt carries the bank's directives that domain.SelectDirectives picks for the
 // model's scope filter: the filter the agentic strategy hands reflect, so both strategies apply the same

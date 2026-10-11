@@ -64,10 +64,11 @@ type RetainItem struct {
 
 // RetainResult mirrors memory.v1.RetainResponse.
 type RetainResult struct {
-	// Documents has one entry per item, in item order: sync = filled; async = operation ids only.
+	// Documents has one entry per item, in item order: sync = filled; async = document ids, unchanged flags and
+	// operations only.
 	Documents []RetainedDocument
-	// ParentOperationID is the retain_batch parent, set when an async retain enqueues more than one document.
-	ParentOperationID domain.OperationID
+	// BatchOperation is the retain_batch parent, set when an async retain enqueues more than one document.
+	BatchOperation *domain.Operation
 	// Usage is the per-slot token usage of a sync retain's model calls (RetainResponse.usage); empty for
 	// async (each job records its own).
 	Usage []domain.Usage
@@ -81,8 +82,8 @@ type RetainedDocument struct {
 	UnitsCreated int
 	// Unchanged reports the same content + overrides hash; nothing re-extracted.
 	Unchanged bool
-	// OperationID is the retain_document operation (async), or empty for an inline run.
-	OperationID domain.OperationID
+	// Operation is the retain_document operation (async, changed document), or nil for an inline run.
+	Operation *domain.Operation
 }
 
 // ingestorDeps are the ingestor's dependencies.
@@ -315,12 +316,12 @@ func (i *ingestor) storeBlobs(ctx context.Context, plans []*itemPlan) error {
 }
 
 // write upserts the changed documents and, for an async retain, enqueues their retain_document jobs (under a
-// retain_batch parent when there are several), in one transaction.
+// retain_batch parent when there are several) and reads the enqueued operations back, in one transaction.
 func (i *ingestor) write(ctx context.Context, req RetainRequest, plans []*itemPlan) (RetainResult, error) {
 	var res RetainResult
-	var opIDs []domain.OperationID
+	var ops []*domain.Operation
 	err := i.d.Store.InTx(ctx, func(tx store.Tx) error {
-		res, opIDs = RetainResult{}, make([]domain.OperationID, len(plans))
+		res, ops = RetainResult{}, make([]*domain.Operation, len(plans))
 		changed := 0
 		for _, p := range plans {
 			if !p.unchanged {
@@ -351,7 +352,7 @@ func (i *ingestor) write(ctx context.Context, req RetainRequest, plans []*itemPl
 			return nil
 		}
 		var err error
-		res.ParentOperationID, err = i.enqueue(ctx, tx, req.Bank, plans, changed, opIDs)
+		res.BatchOperation, err = i.enqueue(ctx, tx, req.Bank, plans, changed, ops)
 		return err
 	})
 	if err != nil {
@@ -359,36 +360,52 @@ func (i *ingestor) write(ctx context.Context, req RetainRequest, plans []*itemPl
 	}
 	for k, p := range plans {
 		res.Documents = append(res.Documents, RetainedDocument{
-			DocumentID: p.doc, Unchanged: p.unchanged, OperationID: opIDs[k],
+			DocumentID: p.doc, Unchanged: p.unchanged, Operation: ops[k],
 		})
 	}
 	return res, nil
 }
 
 // enqueue inserts the retain_document jobs of the changed plans, under a retain_batch parent when there are
-// several, and records their ids in opIDs.
+// several, reads each operation back into ops and returns the parent (nil when there is none).
 func (i *ingestor) enqueue(
-	ctx context.Context, tx store.Tx, b domain.BankRef, plans []*itemPlan, changed int, opIDs []domain.OperationID,
-) (domain.OperationID, error) {
-	var parent domain.OperationID
+	ctx context.Context, tx store.Tx, b domain.BankRef, plans []*itemPlan, changed int, ops []*domain.Operation,
+) (*domain.Operation, error) {
+	var parentID domain.OperationID
 	if changed > 1 {
 		id, _, err := jobs.EnqueueRetainBatch(ctx, tx, b, changed)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		parent = id
+		parentID = id
 	}
 	for k, p := range plans {
 		if p.unchanged {
 			continue
 		}
-		var err error
-		opIDs[k], _, err = jobs.EnqueueRetainDocument(ctx, tx, b, p.payload, p.overrides, parent)
+		id, _, err := jobs.EnqueueRetainDocument(ctx, tx, b, p.payload, p.overrides, parentID)
 		if err != nil {
-			return "", err
+			return nil, err
+		}
+		if ops[k], err = readOperation(ctx, tx, b, id); err != nil {
+			return nil, err
 		}
 	}
-	return parent, nil
+	if parentID == "" {
+		return nil, nil
+	}
+	return readOperation(ctx, tx, b, parentID)
+}
+
+// readOperation reads operation id of bank b in tx.
+func readOperation(
+	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.OperationID,
+) (*domain.Operation, error) {
+	op, err := tx.Queue().Get(ctx, b, id)
+	if err != nil {
+		return nil, err
+	}
+	return &op, nil
 }
 
 // runInline runs the Retainer for each changed document of a sync retain, in item order.

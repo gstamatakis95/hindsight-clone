@@ -19,12 +19,13 @@ func inTx(t *testing.T, db store.DB, fn func(tx store.Tx) error) {
 	}
 }
 
-// TestListEventsDefaultAndCap: ListEvents with limit 0 returns the default (100), not the whole history; a limit
-// above the cap returns 1000; a small limit is kept.
-func TestListEventsDefaultAndCap(t *testing.T) {
+// TestListEventsPageBounds checks the paging convention (domain.ListPage) on ListEvents: page_size 0 returns the
+// default (100), not the whole history; a size above the cap returns 1000; a small size is kept; a negative size
+// is ErrInvalidArgument naming page_size.
+func TestListEventsPageBounds(t *testing.T) {
 	db := pgtest.NewStore(t)
 	b := domain.BankRef{Tenant: "t", Bank: "events"}
-	const total = MaxEventsLimit + 50
+	total := domain.ListPage.Max + 50
 	for range total { // one seq per event, so the soft limit never extends a page over a seq group
 		inTx(t, db, func(tx store.Tx) error {
 			if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
@@ -40,16 +41,21 @@ func TestListEventsDefaultAndCap(t *testing.T) {
 		})
 	}
 	s := New(Deps{DB: db})
-	for _, tc := range []struct{ limit, want int }{
-		{0, DefaultEventsLimit}, {-1, DefaultEventsLimit}, {3, 3}, {total, MaxEventsLimit},
+	for _, tc := range []struct{ size, want int }{
+		{0, domain.ListPage.Default}, {3, 3}, {total, domain.ListPage.Max},
 	} {
-		events, _, err := s.ListEvents(t.Context(), b, 0, tc.limit, nil)
+		events, _, err := s.ListEvents(t.Context(), b, 0, tc.size, nil)
 		if err != nil {
-			t.Fatalf("ListEvents(limit %d): %v", tc.limit, err)
+			t.Fatalf("ListEvents(page_size %d): %v", tc.size, err)
 		}
 		if len(events) != tc.want {
-			t.Errorf("ListEvents(limit %d) returned %d events, want %d", tc.limit, len(events), tc.want)
+			t.Errorf("ListEvents(page_size %d) returned %d events, want %d", tc.size, len(events), tc.want)
 		}
+	}
+	_, _, err := s.ListEvents(t.Context(), b, 0, -1, nil)
+	if vs := domain.FieldViolations(err); !errors.Is(err, domain.ErrInvalidArgument) || len(vs) != 1 ||
+		vs[0].Field != "page_size" {
+		t.Errorf("ListEvents(page_size -1) = %v (%v), want ErrInvalidArgument on page_size", err, vs)
 	}
 }
 

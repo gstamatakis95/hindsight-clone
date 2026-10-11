@@ -40,7 +40,8 @@
 // # Directives
 //
 // [Service.UpsertDirective] normalizes tags and creates (empty ID) or replaces a directive;
-// [Service.ListDirectives] filters by tag overlap, optionally active only; [Service.DeleteDirective] removes one.
+// [Service.ListDirectives] pages them oldest first (created_at, then id; domain.ListPage), filtered by a flat tag
+// filter (unset match = any_strict: a shared tag) and optionally active only; [Service.DeleteDirective] removes one.
 // Which directives apply to a request is domain.SelectDirectives, the rule reflect and the mental-model synthesize
 // prompt share; the prompt preview applies it with no request tags (the untagged directives). Directives are read
 // in a short transaction because store.Reader has no directive read.

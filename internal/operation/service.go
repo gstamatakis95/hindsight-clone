@@ -23,14 +23,6 @@ func New(d Deps) *Service {
 	return &Service{d: d}
 }
 
-// ListEvents page bounds: the limit of a request that sets none, and the cap of any request.
-const (
-	// DefaultEventsLimit is the ListEvents limit when a request sets 0 or less.
-	DefaultEventsLimit = 100
-	// MaxEventsLimit caps a requested ListEvents limit.
-	MaxEventsLimit = 1000
-)
-
 // GetOperation returns one operation of b; an unknown operation, or an unknown or tombstoned bank, is
 // domain.ErrNotFound.
 func (s *Service) GetOperation(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
@@ -43,14 +35,19 @@ func (s *Service) GetOperation(ctx context.Context, b domain.BankRef, id domain.
 	return op, err
 }
 
-// ListOperations pages b's operations, newest first, and returns the next page token; an unknown or tombstoned
-// bank is domain.ErrNotFound.
+// ListOperations pages b's operations, newest first, and returns the next page token; the page size follows
+// domain.ListPage. An unknown or tombstoned bank is domain.ErrNotFound.
 func (s *Service) ListOperations(
 	ctx context.Context, b domain.BankRef, f store.OperationFilter,
 ) ([]domain.Operation, string, error) {
+	size, err := domain.ListPage.Size(f.PageSize)
+	if err != nil {
+		return nil, "", fmt.Errorf("list operations: %w", err)
+	}
+	f.PageSize = size
 	var ops []domain.Operation
 	var next string
-	err := s.readBank(ctx, b, func(tx store.Tx) error {
+	err = s.readBank(ctx, b, func(tx store.Tx) error {
 		var err error
 		ops, next, err = tx.Queue().List(ctx, b, f)
 		return err
@@ -58,28 +55,29 @@ func (s *Service) ListOperations(
 	return ops, next, err
 }
 
-// ListEvents returns b's events with seq > afterSeq, of types (empty = all), and the last seq scanned. A limit of
-// 0 or less is DefaultEventsLimit and one above MaxEventsLimit is capped. An unknown or tombstoned bank is
+// ListEvents returns b's events with seq > afterSeq, of types (empty = all), and the last seq scanned (the next
+// after_seq). pageSize is a soft limit that follows domain.ListPage (0 = 100, capped at 1000, negative =
+// domain.ErrInvalidArgument): a page is extended to finish its last seq. An unknown or tombstoned bank is
 // domain.ErrNotFound.
 func (s *Service) ListEvents(
-	ctx context.Context, b domain.BankRef, afterSeq int64, limit int, types []domain.EventType,
+	ctx context.Context, b domain.BankRef, afterSeq int64, pageSize int, types []domain.EventType,
 ) ([]domain.LifecycleEvent, int64, error) {
-	if limit <= 0 {
-		limit = DefaultEventsLimit
+	size, err := domain.ListPage.Size(pageSize)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list events: %w", err)
 	}
-	limit = min(limit, MaxEventsLimit)
 	var events []domain.LifecycleEvent
 	var last int64
-	err := s.readBank(ctx, b, func(tx store.Tx) error {
+	err = s.readBank(ctx, b, func(tx store.Tx) error {
 		var err error
-		events, last, err = tx.Events().List(ctx, b, afterSeq, limit, types)
+		events, last, err = tx.Events().List(ctx, b, afterSeq, size, types)
 		return err
 	})
 	return events, last, err
 }
 
 // CancelOperation marks a pending or processing operation CANCELLED (a running handler stops at its next
-// checkpoint); a terminal one, and any delete_bank, is domain.ErrFailedPrecondition.
+// checkpoint); a terminal one, and any delete_bank, is domain.ErrOperationNotCancellable.
 func (s *Service) CancelOperation(
 	ctx context.Context, b domain.BankRef, id domain.OperationID,
 ) (domain.Operation, error) {
@@ -90,7 +88,7 @@ func (s *Service) CancelOperation(
 			return err
 		}
 		if cur.Kind == domain.OperationKindDeleteBank {
-			return fmt.Errorf("%w: a delete_bank operation can't be cancelled", domain.ErrFailedPrecondition)
+			return fmt.Errorf("%w: a delete_bank operation can't be cancelled", domain.ErrOperationNotCancellable)
 		}
 		op, err = tx.Queue().Cancel(ctx, b, id)
 		return err
@@ -99,8 +97,8 @@ func (s *Service) CancelOperation(
 }
 
 // RetryOperation re-queues a FAILED or CANCELLED operation as PENDING; any other status is
-// domain.ErrFailedPrecondition, and so is an operation other than delete_bank on a bank being deleted
-// (domain.ErrBankDeleting).
+// domain.ErrOperationNotRetryable, and an operation other than delete_bank on a bank being deleted is
+// domain.ErrBankDeleting.
 func (s *Service) RetryOperation(
 	ctx context.Context, b domain.BankRef, id domain.OperationID,
 ) (domain.Operation, error) {
@@ -134,7 +132,7 @@ func (s *Service) readBank(ctx context.Context, b domain.BankRef, fn func(tx sto
 			return err
 		}
 		if bank.DeletingAt != nil {
-			return fmt.Errorf("%w: bank %s is being deleted", domain.ErrNotFound, b.Bank)
+			return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b.Bank)
 		}
 		return fn(tx)
 	})

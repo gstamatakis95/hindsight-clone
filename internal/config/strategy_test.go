@@ -10,13 +10,13 @@ import (
 // under exact.
 func TestMatchStrategy(t *testing.T) {
 	strategies := []domain.ConsolidationStrategy{
-		{Name: "exact-acme", Scopes: []domain.ScopePattern{
-			{Tags: []string{"company:acme"}, TagsMatch: domain.TagsMatchExact},
+		{Name: "exact-acme", Scopes: []domain.TagFilter{
+			{Tags: []string{"company:acme"}, Match: domain.TagsMatchExact},
 		}},
-		{Name: "team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}}, {Tags: []string{"squad"}}}},
-		{Name: "any-acme", Scopes: []domain.ScopePattern{{Tags: []string{"company:acme"}}}},
-		{Name: "empty", Scopes: []domain.ScopePattern{{}}},
-		{Name: "shared", Scopes: []domain.ScopePattern{{TagsMatch: domain.TagsMatchExact}}},
+		{Name: "team", Scopes: []domain.TagFilter{{Tags: []string{"team"}}, {Tags: []string{"squad"}}}},
+		{Name: "any-acme", Scopes: []domain.TagFilter{{Tags: []string{"company:acme"}}}},
+		{Name: "empty", Scopes: []domain.TagFilter{{}}},
+		{Name: "shared", Scopes: []domain.TagFilter{{Match: domain.TagsMatchExact}}},
 	}
 	tests := []struct {
 		tags []string
