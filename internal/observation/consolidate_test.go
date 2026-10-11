@@ -237,7 +237,7 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 	cfg := domain.BankConfig{Observations: &domain.ObservationConfig{
 		Mission: "BANK-MISSION", Strategies: []domain.ConsolidationStrategy{{
 			Name:             "team",
-			Scopes:           []domain.ScopePattern{{Tags: []string{"team"}}},
+			Scopes:           []domain.TagFilter{{Tags: []string{"team"}}},
 			Mission:          "STRATEGY-MISSION",
 			ConsolidateModel: consolidateModel("strategy-model"),
 		}},

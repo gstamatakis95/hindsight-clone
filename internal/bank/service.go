@@ -112,7 +112,7 @@ func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) (domain.Bank, 
 		return domain.Bank{}, err
 	}
 	if bank.Deleting() {
-		return domain.Bank{}, fmt.Errorf("%w: bank %s/%s is being deleted", domain.ErrNotFound, b.Tenant, b.Bank)
+		return domain.Bank{}, fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
 	}
 	return bank, nil
 }

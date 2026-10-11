@@ -44,7 +44,8 @@
 //  5. In one write transaction: Banks().Ensure, tx.Seq(bank) (taken before Enqueue for lock order), upsert
 //     each changed document (which clears extracted_at), and for run_async enqueue one retain_document job
 //     per changed document (serial key "doc:{id}", DedupeNone, the merged overrides on the job), under a
-//     retain_batch parent when more than one document changed.
+//     retain_batch parent when more than one document changed, and read each operation back in the same
+//     transaction, so the response carries the operations themselves.
 //  6. A sync retain then runs the retainer inline (jobs.Inline, which reports nothing) for each changed
 //     document, in item order, and returns units created and per-slot usage. If a newer retain took the
 //     document over meanwhile, the sync call fails with [ErrSuperseded] (domain.ErrConflict, ABORTED; the
@@ -145,13 +146,13 @@
 //     (jobs.QueueModelRefresh);
 //  6. a memory_curated event stamped with the seq.
 //
-// No job follows; the response is the unit with state invalidated, no embedding and no operation id.
+// No job follows; the response is the unit with state invalidated, no embedding and no operation.
 //
 // Restore and/or edit (state valid, or edit fields):
 //
 //  1. tx.Seq(bank); with state valid, UnitRepo.Restore moves an archived unit back (reattaching the entities
 //     and causal links that still exist) and stamps it consolidated; state valid on a live unit is no state
-//     change, and with no edits nothing is written and the operation id is empty;
+//     change, and with no edits nothing is written and no operation is returned;
 //  2. edits write the new values with edited_at, the seq and a cleared embedding (the unit leaves semantic
 //     search until the rederive), stamp the unit consolidated, delete the observations citing it (resetting
 //     their co-sources) and enqueue graph_maintenance; a new occurrence date clears Timeless;

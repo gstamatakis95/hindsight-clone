@@ -8,7 +8,7 @@
 The file has six parts, in this order:
 
 1. A header comment with the conventions every service shares (tenant header, unknown banks, the config
-   hierarchy, async operations, events, naming).
+   hierarchy, async operations, events, paging, tag filters, the error model with its reason table, naming).
 2. All service blocks.
 3. One section per service, in the same order as the service blocks, under a
    `// ======================= <Service> =======================` banner. Inside it, one
@@ -44,8 +44,21 @@ Where a new type goes:
   `RecallConfig.arms` / `arm_boosts`, `MinScores.arms`, `Scores.arms`), validated by the server against its
   registry. Never add a field named after one arm.
 - **Keep the naming rules.** Every RPC gets its own `<Rpc>Request` / `<Rpc>Response`. Every enum value is
-  prefixed with its enum name, and value 0 is `*_UNSPECIFIED`. List RPCs page with `page_size` + `page_token` /
-  `next_page_token`. Patch RPCs take a `google.protobuf.FieldMask update_mask`.
+  prefixed with its enum name, and value 0 is `*_UNSPECIFIED`. Patch RPCs take a `google.protobuf.FieldMask
+  update_mask`.
+- **One paging convention.** A List RPC takes `int32 page_size` ("0 = 100, at most 1000") and `string page_token`
+  and returns `string next_page_token`; the service applies `domain.ListPage` (negative = INVALID_ARGUMENT), and
+  the paging interceptor checks every `page_size` and `max_results` field by name. A search takes `max_results`
+  (`domain.SearchResults`). A feed consumers persist pages by an integer cursor (`ListEvents`: `after_seq` /
+  `next_after_seq`).
+- **One tag-filter shape.** A field that filters by tag is a `TagFilter` named `tags` (a strategy's `scopes`), never
+  separate tags / match / groups fields; its comment states the default match mode and whether groups are
+  allowed. It converts to one `domain.TagFilter` (`decoder.tagFilter`).
+- **Async work returns the Operation.** An RPC that enqueues returns the `Operation` messages it created (`operation`,
+  `operations`, `batch_operation`, `mental_model_operations`), never a bare id.
+- **Errors.** Codes are canonical; every status carries `google.rpc.ErrorInfo` (domain `memd`, reason from the domain
+  error class). A new reason is a new refined class in `internal/domain/errors.go` plus a row in the header's error
+  table. Validation errors name their field with `domain.InvalidField`, which becomes a `BadRequest` field violation.
 - **Keep lines to 120 columns or fewer** and the file `buf format` clean. If `buf format` joins a line that ends
   up too long, keep the break with a trailing comment (see `PreviewConsolidationStrategies`).
 

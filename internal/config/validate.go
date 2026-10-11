@@ -12,17 +12,18 @@ import (
 // Validate checks one config level below the server: a tenant or bank config, a bank template, a request's
 // overrides or a stored spec's overrides. On top of ValidateServer's rules it rejects models.embed, because
 // every stored embedding shares one vector space, so the embedding model is chosen once, in the server config
-// file. Failures are domain.ErrInvalidArgument.
+// file. Failures are domain.ErrInvalidArgument naming the BankConfig path (domain.InvalidField).
 func Validate(c domain.BankConfig) error {
 	if c.Models != nil && c.Models.Embed != nil {
-		return fmt.Errorf("%w: models.embed can only be set in the server config file", domain.ErrInvalidArgument)
+		return domain.InvalidField("models.embed", "models.embed can only be set in the server config file")
 	}
 	return ValidateServer(c)
 }
 
 // ValidateServer checks a config level, the server level included: each disposition trait in 0..5 (0 = unset),
-// consolidation strategy names unique, a reconcile grace that is not negative, and every set model binding
-// naming a model. Failures are domain.ErrInvalidArgument.
+// consolidation strategy names unique and their scope patterns well formed, a reconcile grace that is not
+// negative, and every set model binding naming a model. Failures are domain.ErrInvalidArgument naming each
+// offending BankConfig path (domain.InvalidField), joined.
 func ValidateServer(c domain.BankConfig) error {
 	var errs []error
 	if c.Reflect != nil {
@@ -38,18 +39,16 @@ func ValidateServer(c domain.BankConfig) error {
 	if c.Observations != nil {
 		errs = append(errs, checkStrategies(c.Observations.Strategies))
 		if g := c.Observations.ReconcileGraceSeconds; g != nil && *g < 0 {
-			errs = append(errs, fmt.Errorf("observations.reconcile_grace_seconds = %d, want >= 0", *g))
+			errs = append(errs, domain.InvalidField("observations.reconcile_grace_seconds",
+				"observations.reconcile_grace_seconds = %d, want >= 0", *g))
 		}
 	}
-	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("%w: %w", domain.ErrInvalidArgument, err)
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // CheckArms checks a config level's recall arm names against the arms the server registered (the wiring passes
 // recall.Engine's names): every name in recall.arms must be registered and listed once, and every recall.arm_boosts
-// key must be registered. Failures are domain.ErrInvalidArgument.
+// key must be registered. Failures are domain.ErrInvalidArgument naming the path.
 func CheckArms(c domain.BankConfig, registered []string) error {
 	if c.Recall == nil {
 		return nil
@@ -57,11 +56,12 @@ func CheckArms(c domain.BankConfig, registered []string) error {
 	known := func(n string) bool { return slices.Contains(registered, n) }
 	seen := map[string]bool{}
 	for i, n := range c.Recall.Arms {
+		path := fmt.Sprintf("recall.arms[%d]", i)
 		switch {
 		case !known(n):
-			return unknownArm(fmt.Sprintf("recall.arms[%d]", i), n, registered)
+			return unknownArm(path, n, registered)
 		case seen[n]:
-			return fmt.Errorf("%w: recall.arms[%d]: arm %q is listed twice", domain.ErrInvalidArgument, i, n)
+			return domain.InvalidField(path, "%s: arm %q is listed twice", path, n)
 		}
 		seen[n] = true
 	}
@@ -75,7 +75,7 @@ func CheckArms(c domain.BankConfig, registered []string) error {
 
 // unknownArm is the error for an unregistered arm name at path.
 func unknownArm(path, name string, registered []string) error {
-	return fmt.Errorf("%w: %s: unknown recall arm %q (registered: %s)", domain.ErrInvalidArgument, path, name,
+	return domain.InvalidField(path, "%s: unknown recall arm %q (registered: %s)", path, name,
 		strings.Join(registered, ", "))
 }
 
@@ -89,7 +89,8 @@ func checkDisposition(d *domain.Disposition) error {
 		v    int
 	}{{"skepticism", d.Skepticism}, {"literalism", d.Literalism}, {"empathy", d.Empathy}} {
 		if t.v < 0 || t.v > 5 {
-			return fmt.Errorf("reflect.disposition.%s = %d, want 1-5 (0 = unset)", t.name, t.v)
+			path := "reflect.disposition." + t.name
+			return domain.InvalidField(path, "%s = %d, want 1-5 (0 = unset)", path, t.v)
 		}
 	}
 	return nil
@@ -98,20 +99,28 @@ func checkDisposition(d *domain.Disposition) error {
 // checkBinding requires a set binding to name a model.
 func checkBinding(path string, b *domain.ModelBinding) error {
 	if b != nil && b.Model == "" {
-		return fmt.Errorf("%s: model is required", path)
+		return domain.InvalidField(path+".model", "%s: model is required", path)
 	}
 	return nil
 }
 
-// checkStrategies requires strategy names to be unique and each strategy's bindings to name a model.
+// checkStrategies requires strategy names to be unique, each scope pattern to be a valid tag filter (flat tags
+// or groups, not both), and each strategy's bindings to name a model.
 func checkStrategies(strategies []domain.ConsolidationStrategy) error {
 	seen := map[string]bool{}
 	for i, s := range strategies {
 		at := fmt.Sprintf("observations.strategies[%d]", i)
 		if s.Name != "" && seen[s.Name] {
-			return fmt.Errorf("%s: name %q is used twice", at, s.Name)
+			return domain.InvalidField(at+".name", "%s: name %q is used twice", at, s.Name)
 		}
 		seen[s.Name] = true
+		for j, p := range s.Scopes {
+			if err := p.Validate(); err != nil {
+				path := fmt.Sprintf("%s.scopes[%d]", at, j)
+				return domain.InvalidField(path, "%s: %s", path,
+					strings.TrimPrefix(err.Error(), domain.ErrInvalidArgument.Error()+": "))
+			}
+		}
 		if err := errors.Join(checkBinding(at+".consolidate_model", s.ConsolidateModel),
 			checkBinding(at+".dedup_check_model", s.DedupCheckModel)); err != nil {
 			return err

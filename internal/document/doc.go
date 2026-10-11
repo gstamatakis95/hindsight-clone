@@ -69,9 +69,10 @@
 //
 // # Listing and reading
 //
-//   - ListDocuments returns one keyset page, newest first (created_at, then id). page_size 0 means
-//     [DefaultPageSize] (100), larger values are capped at [MaxPageSize] (1000), and a negative size is
-//     domain.ErrInvalidArgument. tags_match defaults to any_strict and tags are normalized. The page token is
+//   - ListDocuments returns one keyset page, newest first (created_at, then id). page_size follows
+//     [domain.ListPage] (0 means 100, larger values are capped at 1000, a negative size is
+//     domain.ErrInvalidArgument). The tag filter is flat only, its match defaults to any_strict and its tags are
+//     normalized. The page token is
 //     opaque base64url JSON of (created_at, id), and a malformed token is domain.ErrInvalidArgument. An
 //     unknown or tombstoned bank is domain.ErrNotFound.
 //   - GetDocument reads the document in a short transaction (tombstoned bank = domain.ErrNotFound) and,

@@ -1,8 +1,8 @@
 package grpcapi
 
 import (
-	"fmt"
 	"memd/internal/bank"
+	"memd/internal/configsvc"
 	"memd/internal/domain"
 
 	pb "memd/gen/memory/v1"
@@ -135,7 +135,7 @@ func previewPromptFromProto(r *pb.PreviewPromptRequest) (domain.PromptOperation,
 		return op, nil, d.err
 	}
 	if d.err == nil && op != want {
-		return op, nil, fmt.Errorf("%w: overrides do not match operation %s", domain.ErrInvalidArgument, op)
+		return op, nil, domain.InvalidField("overrides", "overrides do not match operation %s", op)
 	}
 	return op, o, d.err
 }
@@ -175,4 +175,14 @@ func upsertDirectiveFromProto(r *pb.UpsertDirectiveRequest) domain.Directive {
 	out := directiveFromProto(r.GetDirective())
 	out.Bank = domain.BankRef{Bank: r.GetBankId()}
 	return out
+}
+
+// listDirectivesFromProto converts a ListDirectivesRequest; the bank is set by the caller.
+func listDirectivesFromProto(r *pb.ListDirectivesRequest) (configsvc.ListDirectivesRequest, error) {
+	var d decoder
+	out := configsvc.ListDirectivesRequest{
+		Tags: d.tagFilter(r.GetTags()), ActiveOnly: r.GetActiveOnly(),
+		PageSize: int(r.GetPageSize()), PageToken: r.GetPageToken(),
+	}
+	return out, d.err
 }

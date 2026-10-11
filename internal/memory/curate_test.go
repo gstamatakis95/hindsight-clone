@@ -20,8 +20,8 @@ func (e *curateEnv) invalidate(s *Service) domain.Unit {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if op != "" {
-		e.t.Fatalf("invalidate returned operation %q, want none", op)
+	if op != nil {
+		e.t.Fatalf("invalidate returned operation %+v, want none", op)
 	}
 	return u
 }
@@ -130,11 +130,11 @@ func (e *curateEnv) restoreF1(s *Service) store.Job {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	if op == "" || u.State != domain.MemoryStateValid {
-		e.t.Fatalf("restore = %+v, op %q", u, op)
+	if op == nil || u.State != domain.MemoryStateValid {
+		e.t.Fatalf("restore = %+v, op %v", u, op)
 	}
 	jobs := e.claim(domain.OperationKindRederiveMemory)
-	if len(jobs) != 1 || jobs[0].ID != op || jobs[0].SerialKey != "doc:d1" {
+	if len(jobs) != 1 || jobs[0].ID != op.ID || jobs[0].SerialKey != "doc:d1" {
 		e.t.Fatalf("rederive jobs = %+v", jobs)
 	}
 	return jobs[0]
@@ -228,15 +228,16 @@ func TestEditClearsEmbeddingAndQueuesRederive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op == "" || u.Text != text || u.Type != domain.FactTypeExperience || u.EditedAt == nil {
-		t.Fatalf("edit = %+v op %q", u, op)
+	if op == nil || op.Kind != domain.OperationKindRederiveMemory ||
+		u.Text != text || u.Type != domain.FactTypeExperience || u.EditedAt == nil {
+		t.Fatalf("edit = %+v op %+v", u, op)
 	}
 	if got, _ := e.unit(idF1); got.Embedding != nil || got.Text != text || got.EditedAt == nil {
 		t.Errorf("stored edit = %+v", got)
 	}
 	e.assertNotLive(idO1)
 	if audits := e.store.recorded(); len(audits) != 1 || audits[0].Action != domain.CurationEdit ||
-		audits[0].OperationID != op || audits[0].Before == nil || audits[0].After == nil {
+		audits[0].OperationID != op.ID || audits[0].Before == nil || audits[0].After == nil {
 		t.Errorf("audit = %+v", audits)
 	}
 	e.rederiveEdited([]string{"Alice", "Carol"})
@@ -312,8 +313,8 @@ func TestRestoreLiveUnitIsNoop(t *testing.T) {
 	u, op, err := e.curator().Update(e.ctx, UpdateRequest{
 		Bank: testBank, ID: idF1, State: domain.MemoryStateValid,
 	})
-	if err != nil || op != "" || u.ID != idF1 {
-		t.Fatalf("restore of a live unit = %+v %q %v", u, op, err)
+	if err != nil || op != nil || u.ID != idF1 {
+		t.Fatalf("restore of a live unit = %+v %v %v", u, op, err)
 	}
 	if len(e.store.recorded()) != 0 {
 		t.Error("no-op restore wrote an audit row")

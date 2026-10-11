@@ -207,7 +207,7 @@ func TestFieldMaskImpliedLeaves(t *testing.T) {
 		t.Fatal(err)
 	}
 	cur := domain.MentalModelSpec{ID: "m", Tags: []string{"a"}, Trigger: domain.RefreshTrigger{
-		TagsMatch: domain.TagsMatchAll, FactTypes: []domain.FactType{domain.FactTypeWorld},
+		Tags: domain.TagFilter{Match: domain.TagsMatchAll}, FactTypes: []domain.FactType{domain.FactTypeWorld},
 	}}
 	gotSpec, err := spec(cur)
 	if err != nil {

@@ -110,20 +110,13 @@ type Label struct {
 	Value string `json:"value"`
 }
 
-// ScopePattern matches observation scopes by their tags.
-type ScopePattern struct {
-	// Tags are the pattern's tags.
-	Tags []string `json:"tags,omitempty"`
-	// TagsMatch is how Tags compare against a scope's tags.
-	TagsMatch TagsMatch `json:"tags_match,omitempty"`
-}
-
 // ConsolidationStrategy overrides consolidation settings for the scopes its patterns match.
 type ConsolidationStrategy struct {
 	// Name identifies the strategy; unique within one strategy list.
 	Name string `json:"name"`
-	// Scopes are the patterns; the first strategy with a matching pattern wins.
-	Scopes []ScopePattern `json:"scopes,omitempty"`
+	// Scopes are the patterns, tag filters on a scope's tag set (unset match = all_strict); the first strategy
+	// with a matching pattern wins (config.MatchStrategy).
+	Scopes []TagFilter `json:"scopes,omitempty"`
 	// Mission replaces the observations mission for matched scopes.
 	Mission string `json:"mission,omitempty"`
 	// MaxObservationsPerScope caps observations per matched scope.

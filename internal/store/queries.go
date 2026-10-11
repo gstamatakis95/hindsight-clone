@@ -217,3 +217,27 @@ type DocumentCursor struct {
 	// ID is the last listed document's id.
 	ID domain.DocumentID `json:"i"`
 }
+
+// DirectiveQuery selects one page of a bank's directives (DirectiveRepo.Page). Zero fields do not filter.
+type DirectiveQuery struct {
+	// Bank is the bank listed.
+	Bank domain.BankRef
+	// ActiveOnly keeps only active directives.
+	ActiveOnly bool
+	// Tags filters by normalized directive tags with domain.MatchTags semantics; empty = none.
+	Tags []string
+	// TagsMatch is how Tags compare.
+	TagsMatch domain.TagsMatch
+	// After continues a listing: only directives strictly after this cursor; nil = first page.
+	After *DirectiveCursor
+	// Limit caps the result (> 0).
+	Limit int
+}
+
+// DirectiveCursor is a keyset position in a directive listing.
+type DirectiveCursor struct {
+	// CreatedAt is the last listed directive's created_at.
+	CreatedAt time.Time `json:"c"`
+	// ID is the last listed directive's id.
+	ID domain.DirectiveID `json:"i"`
+}

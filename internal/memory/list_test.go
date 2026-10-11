@@ -16,7 +16,7 @@ func TestListMemoriesPaging(t *testing.T) {
 	tok, pages := "", 0
 	for {
 		page, err := s.ListMemories(e.ctx, ListRequest{
-			Bank: testBank, PageSize: 2, PageToken: tok, Tags: []string{" Team ", "team"},
+			Bank: testBank, PageSize: 2, PageToken: tok, Tags: domain.TagFilter{Tags: []string{" Team ", "team"}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -39,6 +39,7 @@ func TestListMemoriesPaging(t *testing.T) {
 		{Bank: testBank, PageToken: "!!not-a-token"},
 		{Bank: testBank, Types: []domain.FactType{"bogus"}},
 		{Bank: testBank, State: "bogus"},
+		{Bank: testBank, Tags: domain.TagFilter{Groups: []domain.TagGroup{{Kind: domain.TagGroupAllOf}}}},
 	} {
 		if _, err := s.ListMemories(e.ctx, req); !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("ListMemories(%+v) err = %v, want invalid argument", req, err)

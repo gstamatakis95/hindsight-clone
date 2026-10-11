@@ -39,26 +39,91 @@ func (s *Service) UpsertDirective(ctx context.Context, d domain.Directive) (doma
 	return out, nil
 }
 
-// ListDirectives returns the bank's directives sharing a tag with tags (every one when tags is empty), only active
-// ones when activeOnly; an unknown or tombstoned bank is domain.ErrNotFound.
-func (s *Service) ListDirectives(
-	ctx context.Context, b domain.BankRef, tags []string, activeOnly bool,
-) ([]domain.Directive, error) {
-	dirs, err := s.readDirectives(ctx, b, activeOnly)
+// ListDirectivesRequest mirrors memory.v1.ListDirectivesRequest.
+type ListDirectivesRequest struct {
+	// Bank is the bank listed.
+	Bank domain.BankRef
+	// Tags filters by the directives' tags, flat form only; empty tags = none, unset match = any_strict
+	// (directives sharing a tag; untagged ones are left out).
+	Tags domain.TagFilter
+	// ActiveOnly keeps only active directives.
+	ActiveOnly bool
+	// PageSize caps the page (domain.ListPage); 0 = the default.
+	PageSize int
+	// PageToken continues a previous listing; empty = first page.
+	PageToken string
+}
+
+// DirectivePage is one page of directives.
+type DirectivePage struct {
+	// Items are the page's directives, oldest first.
+	Items []domain.Directive
+	// NextPageToken continues the listing; empty = last page.
+	NextPageToken string
+}
+
+// ListDirectives returns one keyset page of the bank's directives, oldest first (created_at, then id): only active
+// ones when req.ActiveOnly, and those whose tags pass the flat tag filter (unset match = any_strict). The page size
+// follows domain.ListPage; tag groups and a malformed page token are domain.ErrInvalidArgument. An unknown or
+// tombstoned bank is domain.ErrNotFound.
+func (s *Service) ListDirectives(ctx context.Context, req ListDirectivesRequest) (DirectivePage, error) {
+	q, err := directiveQuery(req)
 	if err != nil {
-		return nil, err
+		return DirectivePage{}, err
 	}
-	want := domain.NormalizeTags(tags)
-	if len(want) == 0 {
-		return dirs, nil
+	size := q.Limit
+	q.Limit = size + 1
+	var dirs []domain.Directive
+	err = s.d.DB.InTx(ctx, func(tx store.Tx) error {
+		dirs = nil
+		if err := liveBank(ctx, tx, req.Bank); err != nil {
+			return err
+		}
+		var err error
+		dirs, err = tx.Directives().Page(ctx, q)
+		return err
+	})
+	if err != nil {
+		return DirectivePage{}, err
 	}
-	out := make([]domain.Directive, 0, len(dirs))
-	for _, dir := range dirs {
-		if overlaps(domain.NormalizeTags(dir.Tags), want) {
-			out = append(out, dir)
+	page := DirectivePage{Items: dirs}
+	if len(dirs) > size {
+		page.Items = dirs[:size]
+		last := page.Items[size-1]
+		page.NextPageToken, err = domain.EncodePageToken(store.DirectiveCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+		if err != nil {
+			return DirectivePage{}, fmt.Errorf("list directives: %w", err)
 		}
 	}
-	return out, nil
+	return page, nil
+}
+
+// directiveQuery turns a request into a DirectiveQuery, validating the page size and the flat tag filter and
+// decoding the page token.
+func directiveQuery(req ListDirectivesRequest) (store.DirectiveQuery, error) {
+	size, err := domain.ListPage.Size(req.PageSize)
+	if err != nil {
+		return store.DirectiveQuery{}, fmt.Errorf("list directives: %w", err)
+	}
+	if err := req.Tags.RequireFlat(); err != nil {
+		return store.DirectiveQuery{}, fmt.Errorf("list directives: %w", err)
+	}
+	match := req.Tags.Match
+	if match == domain.TagsMatchUnspecified {
+		match = domain.TagsMatchAnyStrict
+	}
+	q := store.DirectiveQuery{
+		Bank: req.Bank, ActiveOnly: req.ActiveOnly, Tags: domain.NormalizeTags(req.Tags.Tags), TagsMatch: match,
+		Limit: size,
+	}
+	if req.PageToken != "" {
+		var c store.DirectiveCursor
+		if err := domain.DecodePageToken(req.PageToken, &c); err != nil {
+			return store.DirectiveQuery{}, fmt.Errorf("list directives: %w", err)
+		}
+		q.After = &c
+	}
+	return q, nil
 }
 
 // DeleteDirective removes one directive. It is a write that never creates the bank: an unknown bank or directive
@@ -82,13 +147,10 @@ func (s *Service) readDirectives(ctx context.Context, b domain.BankRef, activeOn
 	var out []domain.Directive
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		out = nil
-		bank, err := tx.Banks().Get(ctx, b)
-		if err != nil {
+		if err := liveBank(ctx, tx, b); err != nil {
 			return err
 		}
-		if bank.Deleting() {
-			return fmt.Errorf("%w: bank %s/%s is being deleted", domain.ErrNotFound, b.Tenant, b.Bank)
-		}
+		var err error
 		out, err = tx.Directives().List(ctx, b, activeOnly)
 		return err
 	})
@@ -98,12 +160,14 @@ func (s *Service) readDirectives(ctx context.Context, b domain.BankRef, activeOn
 	return out, nil
 }
 
-// overlaps reports whether the normalized tag sets a and b share a tag.
-func overlaps(a, b []string) bool {
-	for _, t := range a {
-		if slices.Contains(b, t) {
-			return true
-		}
+// liveBank returns domain.ErrBankNotFound unless b exists and is not tombstoned.
+func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
+	bank, err := tx.Banks().Get(ctx, b)
+	if err != nil {
+		return err
 	}
-	return false
+	if bank.Deleting() {
+		return fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+	}
+	return nil
 }

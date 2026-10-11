@@ -16,8 +16,8 @@ func TestStrategyPreview(t *testing.T) {
 		e.observation("obs-"+id, "obs "+id, tags, id)
 	}
 	draft := []domain.ConsolidationStrategy{
-		{Name: "exact-team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}, TagsMatch: domain.TagsMatchExact}}},
-		{Name: "team", Scopes: []domain.ScopePattern{{Tags: []string{"team"}}}},
+		{Name: "exact-team", Scopes: []domain.TagFilter{{Tags: []string{"team"}, Match: domain.TagsMatchExact}}},
+		{Name: "team", Scopes: []domain.TagFilter{{Tags: []string{"team"}}}},
 	}
 	p, err := e.service().PreviewConsolidationStrategies(t.Context(), bank, draft)
 	if err != nil {

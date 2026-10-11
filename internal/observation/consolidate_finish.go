@@ -89,31 +89,15 @@ func (r *run) reaching(s domain.ScopeKey) []domain.MentalModel {
 	return out
 }
 
-// modelReaches reports whether observations of a scope with tags fall in model m's scope: its tag
-// groups (AND-ed) when set, else its tags under its tags_match (unset = all_strict when tagged, any when
-// untagged). The shared scope never reaches a tagged model (untagged writes never make it stale).
+// modelReaches reports whether observations of a scope with tags fall in model m's scope
+// (MentalModelSpec.ScopeFilter: its tag groups when set, else its tags under the effective match mode). The
+// shared scope never reaches a tagged model (untagged writes never make it stale).
 func modelReaches(m domain.MentalModel, tags []string) bool {
-	tr := m.Spec.Trigger
-	tagged := len(domain.NormalizeTags(m.Spec.Tags)) > 0 || len(tr.TagGroups) > 0
-	if tagged && len(tags) == 0 {
+	f := m.Spec.ScopeFilter()
+	if (len(f.Tags) > 0 || len(f.Groups) > 0) && len(tags) == 0 {
 		return false
 	}
-	if len(tr.TagGroups) > 0 {
-		for _, g := range tr.TagGroups {
-			if !domain.MatchGroup(tags, g) {
-				return false
-			}
-		}
-		return true
-	}
-	mode := tr.TagsMatch
-	if mode == domain.TagsMatchUnspecified {
-		mode = domain.TagsMatchAny
-		if tagged {
-			mode = domain.TagsMatchAllStrict
-		}
-	}
-	return domain.MatchTags(tags, m.Spec.Tags, mode)
+	return domain.MatchFilter(tags, f)
 }
 
 // enqueueRefreshes queues one refresh per model in the caller's tx (which already took tx.Seq), due at

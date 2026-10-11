@@ -48,11 +48,11 @@ func (r registry) check(field string, names []string) error {
 	seen := make(map[string]bool, len(names))
 	for _, n := range names {
 		if _, ok := r.byName[n]; !ok {
-			return fmt.Errorf("%w: %s: unknown recall arm %q (registered: %s)", domain.ErrInvalidArgument, field, n,
+			return domain.InvalidField(field, "%s: unknown recall arm %q (registered: %s)", field, n,
 				strings.Join(r.names(), ", "))
 		}
 		if seen[n] {
-			return fmt.Errorf("%w: %s: recall arm %q is listed twice", domain.ErrInvalidArgument, field, n)
+			return domain.InvalidField(field, "%s: recall arm %q is listed twice", field, n)
 		}
 		seen[n] = true
 	}

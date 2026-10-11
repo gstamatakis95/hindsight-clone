@@ -97,23 +97,34 @@ func TestDeadlineInterceptor(t *testing.T) {
 	}
 }
 
-// TestPagingInterceptor checks a negative page_size or limit is INVALID_ARGUMENT and 0 (the server default) passes.
+// TestPagingInterceptor checks a negative page_size or max_results is INVALID_ARGUMENT naming the field, and 0
+// (the default) passes.
 func TestPagingInterceptor(t *testing.T) {
 	info := &grpc.UnaryServerInfo{FullMethod: "/memory.v1.X/Y"}
 	tests := []struct {
-		req  proto.Message
-		want codes.Code
+		req   proto.Message
+		field string
 	}{
-		{&pb.ListScopesRequest{PageSize: -1}, codes.InvalidArgument},
-		{&pb.ListEventsRequest{Limit: -1}, codes.InvalidArgument},
-		{&pb.ListScopesRequest{}, codes.OK},
-		{&pb.ListEventsRequest{Limit: 5}, codes.OK},
+		{&pb.ListScopesRequest{PageSize: -1}, "page_size"},
+		{&pb.ListEventsRequest{PageSize: -1}, "page_size"},
+		{&pb.SearchPagesRequest{MaxResults: -1}, "max_results"},
+		{&pb.ListScopesRequest{}, ""},
+		{&pb.ListEventsRequest{PageSize: 5}, ""},
 	}
 	for _, tc := range tests {
 		_, err := pagingInterceptor()(context.Background(), tc.req, info,
 			func(context.Context, any) (any, error) { return nil, nil })
-		if got := status.Code(err); got != tc.want {
-			t.Errorf("%v: code = %v, want %v", tc.req, got, tc.want)
+		if tc.field == "" {
+			if err != nil {
+				t.Errorf("%v: %v, want OK", tc.req, err)
+			}
+			continue
+		}
+		if got := status.Code(err); got != codes.InvalidArgument {
+			t.Errorf("%v: code = %v, want INVALID_ARGUMENT", tc.req, got)
+		}
+		if got := fieldsOf(err); len(got) != 1 || got[0] != tc.field {
+			t.Errorf("%v: field violations %v, want [%s]", tc.req, got, tc.field)
 		}
 	}
 }

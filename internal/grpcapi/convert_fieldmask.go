@@ -1,7 +1,6 @@
 package grpcapi
 
 import (
-	"fmt"
 	"memd/internal/config"
 	"memd/internal/configsvc"
 	"memd/internal/domain"
@@ -40,14 +39,14 @@ func maskPaths(msg proto.Message, mask *fieldmaskpb.FieldMask, immutable ...stri
 	}
 	m := &fieldmaskpb.FieldMask{Paths: append([]string(nil), mask.GetPaths()...)}
 	if !m.IsValid(msg) {
-		return nil, fmt.Errorf("%w: invalid update_mask %v for %s", domain.ErrInvalidArgument, mask.GetPaths(),
+		return nil, domain.InvalidField("update_mask", "invalid update_mask %v for %s", mask.GetPaths(),
 			msg.ProtoReflect().Descriptor().FullName())
 	}
 	m.Normalize()
 	for _, p := range m.GetPaths() {
 		for _, im := range immutable {
 			if p == im || strings.HasPrefix(p, im+".") {
-				return nil, fmt.Errorf("%w: %s cannot be updated", domain.ErrInvalidArgument, p)
+				return nil, domain.InvalidField("update_mask", "%s cannot be updated", p)
 			}
 		}
 	}
@@ -128,7 +127,7 @@ func specPatch(patch *pb.MentalModelSpec, mask *fieldmaskpb.FieldMask) (mentalmo
 		}
 		mapped, ok := refreshPath(rest)
 		if !ok {
-			return nil, fmt.Errorf("%w: invalid update_mask path %q", domain.ErrInvalidArgument, p)
+			return nil, domain.InvalidField("update_mask", "invalid update_mask path %q", p)
 		}
 		paths[i] = "overrides." + mapped
 	}

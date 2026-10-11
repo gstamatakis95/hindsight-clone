@@ -283,7 +283,7 @@ func sampleModel(b domain.BankRef, id domain.MentalModelID) domain.MentalModel {
 			Trigger: domain.RefreshTrigger{
 				Mode: domain.RefreshModeDelta, Strategy: domain.RefreshStrategySingleShot,
 				RefreshAfterConsolidation: true, MinRefreshIntervalSeconds: ptr(60),
-				TagsMatch: domain.TagsMatchAllStrict, FactTypes: []domain.FactType{domain.FactTypeWorld},
+				Tags: domain.TagFilter{Match: domain.TagsMatchAllStrict}, FactTypes: []domain.FactType{domain.FactTypeWorld},
 				IncludeChunks: ptr(false), Budget: domain.BudgetHigh, KeepTrace: true,
 			},
 			Overrides: &domain.BankConfig{

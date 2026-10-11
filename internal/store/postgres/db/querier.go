@@ -106,6 +106,11 @@ type Querier interface {
 	DirectiveDelete(ctx context.Context, arg DirectiveDeleteParams) (int64, error)
 	// DirectiveList returns a bank's directives (only active ones when active_only), oldest first.
 	DirectiveList(ctx context.Context, arg DirectiveListParams) ([]Directive, error)
+	// DirectivePage returns one keyset page of a bank's directives, oldest first (created_at, then id in byte
+	// order), after the (after_created_at, after_id) position when set, only active ones when active_only, and
+	// filtered by tags under tags_match with the listing semantics of ReadsListDocuments (no filter_tags = no
+	// filter).
+	DirectivePage(ctx context.Context, arg DirectivePageParams) ([]Directive, error)
 	// DirectiveUpsert creates a directive or replaces its name, rules, tags and active flag.
 	DirectiveUpsert(ctx context.Context, arg DirectiveUpsertParams) error
 	// DocumentComplete stamps the hashes and extracted_at of a finished retain.

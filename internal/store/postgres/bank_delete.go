@@ -157,10 +157,10 @@ func (r *bankRepo) deleteUnkeyed(ctx context.Context, b domain.BankRef) error {
 func (r *bankRepo) lockTombstoned(ctx context.Context, b domain.BankRef) error {
 	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, ID: b.Bank})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: bank %s/%s", domain.ErrNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
 	}
 	if err != nil {
-		return mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+		return bankErr(b, err)
 	}
 	if deletingAt == nil {
 		return fmt.Errorf("%w: bank %s/%s is not being deleted", domain.ErrFailedPrecondition, b.Tenant, b.Bank)
@@ -173,10 +173,10 @@ func (r *bankRepo) lockTombstoned(ctx context.Context, b domain.BankRef) error {
 func (r *bankRepo) requireTombstoned(ctx context.Context, b domain.BankRef) error {
 	bank, err := r.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: bank %s/%s", domain.ErrNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
 	}
 	if err != nil {
-		return mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+		return bankErr(b, err)
 	}
 	if bank.DeletingAt == nil {
 		return fmt.Errorf("%w: bank %s/%s is not being deleted", domain.ErrFailedPrecondition, b.Tenant, b.Bank)

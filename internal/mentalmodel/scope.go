@@ -9,40 +9,22 @@ import (
 	"slices"
 )
 
-// resolveScope applies the scope defaults to m: tags_match defaults to all_strict when the model is tagged
-// (any otherwise), and tag groups override the flat tags.
+// resolveScope applies the scope defaults to m (domain.MentalModelSpec.ScopeFilter): the match mode defaults to
+// all_strict when the model is tagged (any otherwise), and tag groups override the flat tags.
 func resolveScope(m domain.MentalModel) ResolvedScope {
-	t := m.Spec.Trigger
-	s := ResolvedScope{FactTypes: slices.Clone(t.FactTypes)}
-	if len(t.TagGroups) > 0 {
-		s.TagGroups = slices.Clone(t.TagGroups)
-		s.TagsMatch = domain.TagsMatchUnspecified
-		return s
-	}
-	s.Tags = domain.NormalizeTags(m.Spec.Tags)
-	s.TagsMatch = t.TagsMatch
-	if s.TagsMatch == domain.TagsMatchUnspecified {
-		s.TagsMatch = domain.TagsMatchAny
-		if len(s.Tags) > 0 {
-			s.TagsMatch = domain.TagsMatchAllStrict
-		}
-	}
-	return s
+	return ResolvedScope{Tags: m.Spec.ScopeFilter(), FactTypes: slices.Clone(m.Spec.Trigger.FactTypes)}
 }
 
 // tagFilter is the scope as the recall and reflect libraries take it.
 func (s ResolvedScope) tagFilter() domain.TagFilter {
-	if len(s.TagGroups) > 0 {
-		return domain.TagFilter{Groups: slices.Clone(s.TagGroups)}
-	}
-	return domain.TagFilter{Tags: slices.Clone(s.Tags), Match: s.TagsMatch}
+	return domain.TagFilter{Tags: slices.Clone(s.Tags.Tags), Match: s.Tags.Match, Groups: slices.Clone(s.Tags.Groups)}
 }
 
 // predicate adds the staleness rule to p, the scope's compiled tag filter (nil = no filter). With
 // stalenessOnly, a tagged scope also excludes untagged units: untagged writes never make a tagged model
 // stale, even when its refresh reads untagged memories (tags_match any / all).
 func (s ResolvedScope) predicate(p *domain.TagPredicate, stalenessOnly bool) *domain.TagPredicate {
-	if !stalenessOnly || (len(s.TagGroups) == 0 && len(s.Tags) == 0) {
+	if !stalenessOnly || (len(s.Tags.Groups) == 0 && len(s.Tags.Tags) == 0) {
 		return p
 	}
 	untagged := domain.TagPredicate{Op: domain.PredicateTags, Tags: []string{}, Match: domain.TagsMatchExact}
@@ -56,15 +38,16 @@ func (s ResolvedScope) predicate(p *domain.TagPredicate, stalenessOnly bool) *do
 // tagPredicate compiles the tags or tag groups alone; nil = no tag filter. A scope with a fuzzy leaf needs
 // the bank's tags and compiles in scopeQuery instead.
 func (s ResolvedScope) tagPredicate() *domain.TagPredicate {
+	f := s.Tags
 	switch {
-	case len(s.TagGroups) > 0:
-		args := make([]domain.TagPredicate, len(s.TagGroups))
-		for i, g := range s.TagGroups {
+	case len(f.Groups) > 0:
+		args := make([]domain.TagPredicate, len(f.Groups))
+		for i, g := range f.Groups {
 			args[i] = compileGroup(g)
 		}
 		return &domain.TagPredicate{Op: domain.PredicateAnd, Args: args}
-	case len(s.Tags) > 0 || s.TagsMatch == domain.TagsMatchExact:
-		return &domain.TagPredicate{Op: domain.PredicateTags, Tags: slices.Clone(s.Tags), Match: s.TagsMatch}
+	case len(f.Tags) > 0 || f.Match == domain.TagsMatchExact:
+		return &domain.TagPredicate{Op: domain.PredicateTags, Tags: slices.Clone(f.Tags), Match: f.Match}
 	}
 	return nil
 }
@@ -121,7 +104,7 @@ func scopeQuery(
 ) (store.ScopeQuery, error) {
 	s := resolveScope(m)
 	tags := s.tagPredicate()
-	if hasFuzzyLeaf(s.TagGroups) {
+	if hasFuzzyLeaf(s.Tags.Groups) {
 		if tc == nil {
 			return store.ScopeQuery{}, fmt.Errorf("%w: mentalmodel: no tag compiler for a fuzzy scope",
 				domain.ErrFailedPrecondition)

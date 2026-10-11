@@ -16,6 +16,9 @@ linters:
       # errors crossing a boundary are already domain error classes (the jobs catalogue returns the store's)
       ignore-package-globs: ["memd/internal/store", "memd/internal/graph", "memd/internal/ai", "memd/internal/blob",
         "memd/internal/jobs"]
+      # wrapcheck's defaults plus domain.InvalidField, the constructor of a field-naming invalid-argument error
+      ignore-sigs: [".Errorf(", "errors.New(", "errors.Unwrap(", "errors.Join(", ".Wrap(", ".Wrapf(", ".WithMessage(",
+        ".WithMessagef(", ".WithStack(", "domain.InvalidField("]
     depguard:
       rules:
         domain:

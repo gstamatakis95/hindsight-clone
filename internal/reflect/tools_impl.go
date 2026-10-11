@@ -100,15 +100,16 @@ func decodeArgs(name string, raw json.RawMessage, v any) (toolResult, bool) {
 
 // retrievalError classifies a dependency error; it always fails reflect (strict: it never answers from
 // evidence it could not gather). A caller's ctx error and an already classified error (invalid argument,
-// failed precondition, not found, unavailable) keep their class; anything else is UNAVAILABLE. The one
-// argument error the model controls, an over-long query, is caught before the call (checkQuery).
+// failed precondition, not found) keep their class; anything else, a failing dependency included, is
+// domain.ErrRetrievalUnavailable (UNAVAILABLE). The one argument error the model controls, an over-long query,
+// is caught before the call (checkQuery).
 func retrievalError(ctx context.Context, name string, err error) (toolResult, error) {
 	switch {
 	case ctx.Err() != nil, errors.Is(err, domain.ErrInvalidArgument), errors.Is(err, domain.ErrFailedPrecondition),
-		errors.Is(err, domain.ErrNotFound), errors.Is(err, domain.ErrUnavailable):
+		errors.Is(err, domain.ErrNotFound):
 		return toolResult{}, fmt.Errorf("reflect: %s: %w", name, err)
 	default:
-		return toolResult{}, fmt.Errorf("%w: reflect: %s: %w", domain.ErrUnavailable, name, err)
+		return toolResult{}, fmt.Errorf("%w: reflect: %s: %w", domain.ErrRetrievalUnavailable, name, err)
 	}
 }
 

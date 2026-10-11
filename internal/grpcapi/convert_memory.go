@@ -63,7 +63,7 @@ func (d *decoder) retainItems(in []*pb.RetainItem) []memory.RetainItem {
 func retainedDocToProto(x memory.RetainedDocument) *pb.RetainedDocument {
 	return &pb.RetainedDocument{
 		DocumentId: string(x.DocumentID), UnitsCreated: i32(x.UnitsCreated), Unchanged: x.Unchanged,
-		OperationId: string(x.OperationID),
+		Operation: operationPtrToProto(x.Operation),
 	}
 }
 
@@ -78,7 +78,7 @@ func retainResultToProto(r memory.RetainResult) *pb.RetainResponse {
 		}
 	}
 	return &pb.RetainResponse{
-		Documents: docs, ParentOperationId: string(r.ParentOperationID), Usage: usagesToProto(r.Usage),
+		Documents: docs, BatchOperation: operationPtrToProto(r.BatchOperation), Usage: usagesToProto(r.Usage),
 	}
 }
 
@@ -91,7 +91,7 @@ func recallRequestFromProto(r *pb.RecallRequest) (recall.Request, error) {
 		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
 		Types:              fromEnums[domain.FactType](&d, r.GetTypes()),
-		Tags:               d.tagFilter(r.GetTags(), r.GetTagsMatch(), r.GetTagGroups()),
+		Tags:               d.tagFilter(r.GetTags()),
 		Budget:             fromEnum[domain.Budget](&d, r.GetBudget()),
 		MaxTokens:          int(r.GetMaxTokens()),
 		QueryTime:          d.tsPtr(r.GetQueryTime()),
@@ -182,7 +182,7 @@ func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.Request, error) {
 	out := reflecteng.Request{
 		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
-		Tags:               d.tagFilter(r.GetTags(), r.GetTagsMatch(), r.GetTagGroups()),
+		Tags:               d.tagFilter(r.GetTags()),
 		Budget:             fromEnum[domain.Budget](&d, r.GetBudget()),
 		MaxTokens:          optInt(r.MaxTokens),
 		ResponseSchemaJSON: r.GetResponseSchemaJson(),

@@ -2,7 +2,6 @@ package grpcapi
 
 import (
 	"context"
-	"fmt"
 	"memd/internal/domain"
 	"memd/internal/mentalmodel"
 
@@ -39,7 +38,7 @@ func (h *MentalModelHandler) CreateMentalModel(
 		return nil, toStatus(err)
 	}
 	if req.GetSpec() == nil {
-		return nil, toStatus(fmt.Errorf("%w: spec is required", domain.ErrInvalidArgument))
+		return nil, toStatus(domain.InvalidField("spec", "spec is required"))
 	}
 	var d decoder
 	spec := d.spec(req.GetSpec())
@@ -55,7 +54,7 @@ func (h *MentalModelHandler) CreateMentalModel(
 	}
 	return &pb.CreateMentalModelResponse{
 		MentalModel: mentalModelToProto(m, domain.DetailFull),
-		Build:       operationToProto(op),
+		Operation:   operationToProto(op),
 	}, nil
 }
 

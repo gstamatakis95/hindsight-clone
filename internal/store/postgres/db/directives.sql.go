@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 )
 
 const directiveDelete = `-- name: DirectiveDelete :execrows
@@ -43,6 +44,77 @@ type DirectiveListParams struct {
 // DirectiveList returns a bank's directives (only active ones when active_only), oldest first.
 func (q *Queries) DirectiveList(ctx context.Context, arg DirectiveListParams) ([]Directive, error) {
 	rows, err := q.db.Query(ctx, directiveList, arg.TenantID, arg.BankID, arg.ActiveOnly)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Directive{}
+	for rows.Next() {
+		var i Directive
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.BankID,
+			&i.ID,
+			&i.Name,
+			&i.Rules,
+			&i.Tags,
+			&i.Active,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const directivePage = `-- name: DirectivePage :many
+SELECT tenant_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives
+WHERE tenant_id = $1 AND bank_id = $2 AND (NOT $3::boolean OR active)
+  AND (CASE $4::text
+      WHEN 'exact' THEN tags @> $5::text[] AND tags <@ $5::text[]
+      WHEN 'any_strict' THEN cardinality($5::text[]) = 0 OR tags && $5::text[]
+      WHEN 'all_strict' THEN tags @> $5::text[]
+      WHEN 'all' THEN cardinality($5::text[]) = 0 OR cardinality(tags) = 0 OR tags @> $5::text[]
+      ELSE cardinality($5::text[]) = 0 OR cardinality(tags) = 0 OR tags && $5::text[]
+  END)
+  AND ($6::timestamptz IS NULL
+      OR created_at > $6::timestamptz
+      OR (created_at = $6::timestamptz AND id COLLATE "C" > $7::text))
+ORDER BY created_at, id COLLATE "C"
+LIMIT $8::int
+`
+
+type DirectivePageParams struct {
+	TenantID       string
+	BankID         string
+	ActiveOnly     bool
+	TagsMatch      string
+	FilterTags     []string
+	AfterCreatedAt *time.Time
+	AfterID        string
+	Lim            int32
+}
+
+// DirectivePage returns one keyset page of a bank's directives, oldest first (created_at, then id in byte
+// order), after the (after_created_at, after_id) position when set, only active ones when active_only, and
+// filtered by tags under tags_match with the listing semantics of ReadsListDocuments (no filter_tags = no
+// filter).
+func (q *Queries) DirectivePage(ctx context.Context, arg DirectivePageParams) ([]Directive, error) {
+	rows, err := q.db.Query(ctx, directivePage,
+		arg.TenantID,
+		arg.BankID,
+		arg.ActiveOnly,
+		arg.TagsMatch,
+		arg.FilterTags,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

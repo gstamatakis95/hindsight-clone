@@ -96,6 +96,31 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","query":"Summarize
 grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.BankService/GetBankStats
 ```
 
+### API conventions
+
+The header of `api/memory/v1/memory.proto` states these once:
+
+- **Paging.** Every List RPC takes `page_size` (0 = 100, at most 1000, negative = `INVALID_ARGUMENT`) and
+  `page_token`, and returns `next_page_token` (empty = done). `ListEvents` pages by sequence: `page_size` plus
+  `after_seq`, continuing from the response's `next_after_seq`. `SearchPages` takes `max_results` (0 = 10, at
+  most 100).
+- **Tag filters.** Every request that filters by tag takes one `TagFilter`: flat `tags` under a `match` mode, or
+  boolean `groups` (not both). List RPCs accept the flat form only.
+- **Async work.** An RPC that enqueues work returns the `Operation` itself (`operation`, `batch_operation`,
+  `mental_model_operations`), with its `bank_id`; poll `OperationService.GetOperation`. `debug_summary` is for
+  people, not for parsing.
+- **Errors.** Every error carries a `google.rpc.ErrorInfo` (domain `memd`) whose `reason` is a stable code such as
+  `BANK_DELETING` or `MODEL_UNBOUND`; `INVALID_ARGUMENT` also carries a `google.rpc.BadRequest` naming the
+  offending fields, for example `page_size` or `reflect.disposition.empathy`.
+
+```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' \
+  -d '{"bank_id":"b1","query":"Alice","tags":{"tags":["team"],"match":"TAGS_MATCH_ANY_STRICT"}}' \
+  localhost:50051 memory.v1.MemoryService/Recall
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","after_seq":0,"page_size":50}' \
+  localhost:50051 memory.v1.OperationService/ListEvents
+```
+
 ### Recall arms
 
 Recall runs several retrieval arms concurrently and fuses their ranked lists with RRF. The built-in arms are:

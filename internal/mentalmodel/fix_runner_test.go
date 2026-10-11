@@ -16,7 +16,7 @@ func fuzzySpec() domain.MentalModelSpec {
 	}}
 	return domain.MentalModelSpec{ID: "status", Name: "Status", SourceQuery: "q", Trigger: domain.RefreshTrigger{
 		Mode: domain.RefreshModeFull, Strategy: domain.RefreshStrategySingleShot,
-		TagGroups: []domain.TagGroup{{Kind: domain.TagGroupAnyOf, Groups: []domain.TagGroup{leaf}}},
+		Tags: domain.TagFilter{Groups: []domain.TagGroup{{Kind: domain.TagGroupAnyOf, Groups: []domain.TagGroup{leaf}}}},
 	}}
 }
 
@@ -82,7 +82,7 @@ func TestAgenticRefreshSetsContext(t *testing.T) {
 func TestDeltaPreCheckReadsUntaggedUnits(t *testing.T) {
 	e := newEnv(t)
 	m, _ := builtModel(e, domain.RefreshStrategySingleShot)
-	m.Spec.Trigger.TagsMatch = domain.TagsMatchAny
+	m.Spec.Trigger.Tags.Match = domain.TagsMatchAny
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Carol reviews the project")
 	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{

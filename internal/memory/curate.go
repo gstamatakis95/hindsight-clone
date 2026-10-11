@@ -23,39 +23,48 @@ func newCurator(d curatorDeps) *curator {
 }
 
 // Update validates req and commits it in one transaction: invalidate, or restore and/or edit. It rejects
-// observations, writes an audit row and returns the rederive operation id (empty for an invalidate).
-func (c *curator) Update(ctx context.Context, req UpdateRequest) (domain.Unit, domain.OperationID, error) {
+// observations, writes an audit row and returns the rederive operation, read back in the same transaction (nil
+// for an invalidate).
+func (c *curator) Update(ctx context.Context, req UpdateRequest) (domain.Unit, *domain.Operation, error) {
 	if err := validateUpdate(req); err != nil {
-		return domain.Unit{}, "", err
+		return domain.Unit{}, nil, err
 	}
 	names, err := c.snapshotNames(ctx, req)
 	if err != nil {
-		return domain.Unit{}, "", err
+		return domain.Unit{}, nil, err
 	}
 	change, err := c.planEntities(ctx, req, names)
 	if err != nil {
-		return domain.Unit{}, "", err
+		return domain.Unit{}, nil, err
 	}
 	models, err := c.citingModels(ctx, req)
 	if err != nil {
-		return domain.Unit{}, "", err
+		return domain.Unit{}, nil, err
 	}
 	var (
 		out domain.Unit
-		op  domain.OperationID
+		op  *domain.Operation
 	)
 	err = c.d.Store.InTx(ctx, func(tx store.Tx) error {
-		out, op = domain.Unit{}, ""
+		out, op = domain.Unit{}, nil
 		var err error
 		if req.State == domain.MemoryStateInvalidated {
 			out, err = c.invalidate(ctx, tx, req, models)
 			return err
 		}
-		out, op, err = c.restoreOrEdit(ctx, tx, req, change)
-		return err
+		var id domain.OperationID
+		if out, id, err = c.restoreOrEdit(ctx, tx, req, change); err != nil || id == "" {
+			return err
+		}
+		got, err := tx.Queue().Get(ctx, req.Bank, id)
+		if err != nil {
+			return err
+		}
+		op = &got
+		return nil
 	})
 	if err != nil {
-		return domain.Unit{}, "", fmt.Errorf("update memory %s: %w", req.ID, err)
+		return domain.Unit{}, nil, fmt.Errorf("update memory %s: %w", req.ID, err)
 	}
 	return out, op, nil
 }
@@ -71,10 +80,10 @@ func validateUpdate(req UpdateRequest) error {
 	switch req.State {
 	case domain.MemoryStateUnspecified, domain.MemoryStateValid, domain.MemoryStateInvalidated:
 	default:
-		return fmt.Errorf("%w: unknown memory state %q", domain.ErrInvalidArgument, req.State)
+		return domain.InvalidField("state", "unknown memory state %q", req.State)
 	}
 	if req.ID == "" {
-		return fmt.Errorf("%w: memory id is required", domain.ErrInvalidArgument)
+		return domain.InvalidField("memory_id", "memory id is required")
 	}
 	return validateFields(req)
 }
@@ -83,16 +92,16 @@ func validateUpdate(req UpdateRequest) error {
 func validateFields(req UpdateRequest) error {
 	switch {
 	case req.State == domain.MemoryStateInvalidated && hasEdits(req):
-		return fmt.Errorf("%w: invalidate can't be combined with edits", domain.ErrInvalidArgument)
+		return domain.InvalidField("state", "invalidate can't be combined with edits")
 	case req.State == domain.MemoryStateUnspecified && !hasEdits(req):
 		return fmt.Errorf("%w: nothing to update", domain.ErrInvalidArgument)
 	case req.FactType != domain.FactTypeUnspecified && req.FactType != domain.FactTypeWorld &&
 		req.FactType != domain.FactTypeExperience:
-		return fmt.Errorf("%w: fact type can only change between world and experience", domain.ErrInvalidArgument)
+		return domain.InvalidField("fact_type", "fact type can only change between world and experience")
 	case req.Text != nil && *req.Text == "":
-		return fmt.Errorf("%w: text can't be empty", domain.ErrInvalidArgument)
+		return domain.InvalidField("text", "text can't be empty")
 	case req.ClearOccurred && (req.OccurredStart != nil || req.OccurredEnd != nil):
-		return fmt.Errorf("%w: clear_occurred can't be combined with occurred dates", domain.ErrInvalidArgument)
+		return domain.InvalidField("clear_occurred", "clear_occurred can't be combined with occurred dates")
 	}
 	return nil
 }
@@ -107,8 +116,7 @@ func liveFact(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.Unit
 		return domain.Unit{}, fmt.Errorf("%w: memory %s", domain.ErrNotFound, id)
 	}
 	if us[0].Type == domain.FactTypeObservation {
-		return domain.Unit{}, fmt.Errorf("%w: observations are not curated directly; they re-derive from "+
-			"their sources", domain.ErrInvalidArgument)
+		return domain.Unit{}, fmt.Errorf("%w: memory %s", domain.ErrMemoryIsObservation, id)
 	}
 	return us[0], nil
 }

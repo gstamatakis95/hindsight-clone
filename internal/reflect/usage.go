@@ -25,7 +25,7 @@ func addUsage(st *agentState, u domain.Usage, maxTotal *int64) error {
 	st.TotalTokens += u.InputTokens + u.OutputTokens
 	if maxTotal != nil && *maxTotal > 0 && st.TotalTokens > *maxTotal {
 		return fmt.Errorf("%w: reflect used %d tokens, over max_total_tokens %d",
-			domain.ErrResourceExhausted, st.TotalTokens, *maxTotal)
+			domain.ErrMaxTotalTokens, st.TotalTokens, *maxTotal)
 	}
 	return nil
 }

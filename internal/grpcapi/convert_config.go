@@ -225,11 +225,11 @@ func labelsToProto(in []domain.EntityLabel) []*pb.EntityLabel {
 
 // strategy converts a ConsolidationStrategy.
 func (d *decoder) strategy(s *pb.ConsolidationStrategy) domain.ConsolidationStrategy {
-	var pats []domain.ScopePattern
+	var pats []domain.TagFilter
 	if s.GetScopes() != nil {
-		pats = make([]domain.ScopePattern, len(s.GetScopes()))
+		pats = make([]domain.TagFilter, len(s.GetScopes()))
 		for i, p := range s.GetScopes() {
-			pats[i] = domain.ScopePattern{Tags: p.GetTags(), TagsMatch: fromEnum[domain.TagsMatch](d, p.GetTagsMatch())}
+			pats[i] = d.tagFilter(p)
 		}
 	}
 	return domain.ConsolidationStrategy{
@@ -256,11 +256,11 @@ func (d *decoder) strategies(in []*pb.ConsolidationStrategy) []domain.Consolidat
 
 // strategyToProto converts a ConsolidationStrategy.
 func strategyToProto(s domain.ConsolidationStrategy) *pb.ConsolidationStrategy {
-	var pats []*pb.ScopePattern
+	var pats []*pb.TagFilter
 	if s.Scopes != nil {
-		pats = make([]*pb.ScopePattern, len(s.Scopes))
+		pats = make([]*pb.TagFilter, len(s.Scopes))
 		for i, p := range s.Scopes {
-			pats[i] = &pb.ScopePattern{Tags: p.Tags, TagsMatch: toEnum[pb.TagsMatch](p.TagsMatch)}
+			pats[i] = &pb.TagFilter{Tags: p.Tags, Match: toEnum[pb.TagsMatch](p.Match), Groups: tagGroupsToProto(p.Groups)}
 		}
 	}
 	return &pb.ConsolidationStrategy{

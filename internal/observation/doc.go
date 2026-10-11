@@ -80,12 +80,12 @@
 //
 // # Mental-model refreshes
 //
-// When a batch writes an observation, the same transaction enqueues refresh_mental_model (jobs.EnqueueRefresh:
-// payload jobs.RefreshPayload with the model id only, serial key "mm:{id}", DedupePending) for every listed
-// model the scope reaches: its tag groups when set, else its tags under its tags_match (unset = all_strict for a
-// tagged model, any for an untagged one); the shared scope never reaches a tagged model. The job is due at
-// domain.RefreshDueAt: after mental_models.refresh_debounce_seconds (default 30; an unset or non-positive value
-// counts as the default here) or at the end of the model's minimum refresh interval, whichever is later.
+// When a batch writes an observation, the same transaction enqueues refresh_mental_model (jobs.EnqueueRefresh: payload
+// jobs.RefreshPayload with the model id only, serial key "mm:{id}", DedupePending) for every listed model the scope
+// reaches (domain.MentalModelSpec.ScopeFilter: its tag groups when set, else its tags under the trigger's match mode,
+// unset = all_strict for a tagged model, any for an untagged one); the shared scope never reaches a tagged model. The
+// job is due at domain.RefreshDueAt: after mental_models.refresh_debounce_seconds (default 30; an unset or non-positive
+// value counts as the default here) or at the end of the model's minimum refresh interval, whichever is later.
 //
 // # RPCs
 //

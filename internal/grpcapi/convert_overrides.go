@@ -1,7 +1,6 @@
 package grpcapi
 
 import (
-	"fmt"
 	"memd/internal/domain"
 	"strings"
 
@@ -57,8 +56,8 @@ func retainOverridesToProto(c *domain.BankConfig) *pb.RetainOverrides {
 // noOverrideArms rejects overrides.recall.arms: a Recall or Reflect picks its arms with the request's own arms field.
 func (d *decoder) noOverrideArms(r *pb.RecallConfig) {
 	if len(r.GetArms()) > 0 {
-		d.fail(fmt.Errorf("%w: overrides.recall.arms: set the request's arms field instead",
-			domain.ErrInvalidArgument))
+		d.fail(domain.InvalidField("overrides.recall.arms",
+			"overrides.recall.arms: set the request's arms field instead"))
 	}
 }
 

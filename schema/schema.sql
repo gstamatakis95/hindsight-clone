@@ -673,6 +673,12 @@ ALTER TABLE ONLY public.unit_entities
     ADD CONSTRAINT unit_entities_pkey PRIMARY KEY (unit_id, entity_id);
 
 --
+-- Name: directives_bank_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX directives_bank_created_idx ON public.directives USING btree (tenant_id, bank_id, created_at, id COLLATE "C");
+
+--
 -- Name: documents_tags_gin; Type: INDEX; Schema: public; Owner: -
 --
 

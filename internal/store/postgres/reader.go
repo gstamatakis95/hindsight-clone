@@ -74,7 +74,7 @@ func (r *reader) GetUnits(ctx context.Context, b domain.BankRef, ids []domain.Un
 func (r *reader) BankSeq(ctx context.Context, b domain.BankRef) (int64, error) {
 	seq, err := r.queries().BankChangeSeq(ctx, db.BankChangeSeqParams{TenantID: b.Tenant, ID: b.Bank})
 	if err != nil {
-		return 0, mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+		return 0, bankErr(b, err)
 	}
 	return seq, nil
 }

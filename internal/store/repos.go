@@ -153,6 +153,9 @@ type DirectiveRepo interface {
 	// List returns the bank's directives (only active ones when activeOnly), oldest first. Tag selection
 	// is domain.SelectDirectives.
 	List(ctx context.Context, b domain.BankRef, activeOnly bool) ([]domain.Directive, error)
+	// Page returns one keyset page of the bank's directives for the ListDirectives RPC, oldest first
+	// (created_at, then id), filtered by q.
+	Page(ctx context.Context, q DirectiveQuery) ([]domain.Directive, error)
 	// Delete removes the directive; unknown = domain.ErrNotFound.
 	Delete(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error
 }

@@ -2,18 +2,8 @@ package bank
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-)
-
-// Page-size bounds of ListTags.
-const (
-	// DefaultPageSize is the page size when a request asks for none.
-	DefaultPageSize = 100
-	// MaxPageSize caps a requested page size.
-	MaxPageSize = 1000
 )
 
 // ListTagsRequest mirrors memory.v1.ListTagsRequest.
@@ -24,7 +14,7 @@ type ListTagsRequest struct {
 	Source domain.TagSource
 	// Prefix limits tags to those starting with it; empty = all.
 	Prefix string
-	// PageSize caps the page; 0 = DefaultPageSize.
+	// PageSize caps the page (domain.ListPage); 0 = the default.
 	PageSize int
 	// PageToken continues a previous listing; empty = first page.
 	PageToken string
@@ -49,17 +39,23 @@ func (s *Service) GetBankStats(ctx context.Context, b domain.BankRef) (domain.Ba
 }
 
 // ListTags returns one page of tag counts. The prefix is normalized like a tag (NFC, lowercase, trimmed), since
-// stored tags are; the page token carries the last tag of the previous page.
+// stored tags are; the page size follows domain.ListPage, and the page token carries the last tag of the
+// previous page.
 func (s *Service) ListTags(ctx context.Context, req ListTagsRequest) (TagPage, error) {
+	size, err := domain.ListPage.Size(req.PageSize)
+	if err != nil {
+		return TagPage{}, fmt.Errorf("list tags: %w", err)
+	}
 	var tok tagToken
-	if err := decodeToken(req.PageToken, &tok); err != nil {
-		return TagPage{}, err
+	if req.PageToken != "" {
+		if err := domain.DecodePageToken(req.PageToken, &tok); err != nil {
+			return TagPage{}, fmt.Errorf("list tags: %w", err)
+		}
 	}
 	source := req.Source
 	if source == domain.TagSourceUnspecified {
 		source = domain.TagSourceMemories
 	}
-	size := pageSize(req.PageSize)
 	tags, err := s.d.DB.Read().TagCounts(ctx, req.Bank, source, domain.NormalizeTag(req.Prefix), tok.After, size+1)
 	if err != nil {
 		return TagPage{}, fmt.Errorf("list tags: %w", err)
@@ -67,50 +63,15 @@ func (s *Service) ListTags(ctx context.Context, req ListTagsRequest) (TagPage, e
 	page := TagPage{Tags: tags}
 	if len(tags) > size {
 		page.Tags = tags[:size]
-		page.NextPageToken = encodeToken(tagToken{After: tags[size-1].Tag})
+		if page.NextPageToken, err = domain.EncodePageToken(tagToken{After: tags[size-1].Tag}); err != nil {
+			return TagPage{}, fmt.Errorf("list tags: %w", err)
+		}
 	}
 	return page, nil
-}
-
-// pageSize clamps a requested page size to (0, MaxPageSize]; 0 or less = DefaultPageSize.
-func pageSize(n int) int {
-	switch {
-	case n <= 0:
-		return DefaultPageSize
-	case n > MaxPageSize:
-		return MaxPageSize
-	default:
-		return n
-	}
 }
 
 // tagToken is the decoded form of a ListTags page token.
 type tagToken struct {
 	// After is the last tag of the previous page.
 	After string `json:"a"`
-}
-
-// encodeToken returns v as an opaque, URL-safe page token.
-func encodeToken(v any) string {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return ""
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-// decodeToken decodes a page token into v; empty leaves v unchanged, a malformed one is
-// domain.ErrInvalidArgument.
-func decodeToken(tok string, v any) error {
-	if tok == "" {
-		return nil
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(tok)
-	if err == nil {
-		err = json.Unmarshal(raw, v)
-	}
-	if err != nil {
-		return fmt.Errorf("%w: malformed page token: %w", domain.ErrInvalidArgument, err)
-	}
-	return nil
 }

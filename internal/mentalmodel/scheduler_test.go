@@ -14,7 +14,7 @@ import (
 func TestUntaggedWriteNeverStalesTaggedModel(t *testing.T) {
 	e := newEnv(t)
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-	spec.Trigger.TagsMatch = domain.TagsMatchAny
+	spec.Trigger.Tags.Match = domain.TagsMatchAny
 	m := e.addModel(spec)
 	cases := []struct {
 		name  string

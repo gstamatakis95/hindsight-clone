@@ -91,7 +91,7 @@ func TestEffectiveUnknownOrDeletingBank(t *testing.T) {
 func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	strat := domain.ConsolidationStrategy{
 		Name:                    "people",
-		Scopes:                  []domain.ScopePattern{{Tags: []string{"people"}}},
+		Scopes:                  []domain.TagFilter{{Tags: []string{"people"}}},
 		Mission:                 "strategy",
 		MaxObservationsPerScope: ptr(7),
 		SourceFactsMaxTokens:    ptr(11),
@@ -120,7 +120,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	}
 	// A request's own strategies replace the bank's list before matching.
 	reqStrat := domain.ConsolidationStrategy{
-		Name: "req", Scopes: []domain.ScopePattern{{Tags: []string{"people"}}}, Mission: "request strategy",
+		Name: "req", Scopes: []domain.TagFilter{{Tags: []string{"people"}}}, Mission: "request strategy",
 	}
 	got, err = r.ForScope(context.Background(), scope, &domain.BankConfig{
 		Observations: &domain.ObservationConfig{Strategies: []domain.ConsolidationStrategy{reqStrat}},
