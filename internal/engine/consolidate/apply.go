@@ -4,31 +4,31 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"time"
 )
 
 // applyInput is one batch's decision to write.
 type applyInput struct {
-	scope   port.ScopeKey
+	scope   domain.ScopeKey
 	actions []ConsolidationAction
 	// incomplete reports that decide dropped part of the decision (mergeUpdates): nothing is stamped.
 	incomplete bool
-	batch      []port.UnitID               // the batch's facts
-	stamp      []port.UnitID               // the facts whose last scope this is: stamped in this transaction
-	expect     map[port.UnitID]domain.Unit // the facts as planned (seq and tags)
-	cited      map[port.UnitID][]port.ScopeKey
+	batch      []domain.UnitID               // the batch's facts
+	stamp      []domain.UnitID               // the facts whose last scope this is: stamped in this transaction
+	expect     map[domain.UnitID]domain.Unit // the facts as planned (seq and tags)
+	cited      map[domain.UnitID][]domain.ScopeKey
 	refresh    []domain.MentalModel // models this scope reaches: refreshed when the batch writes
 	mm         *domain.MentalModelConfig
 }
 
 // applyOutput is what one apply transaction committed.
 type applyOutput struct {
-	wrote     bool          // an observation was written
-	cited     []port.UnitID // facts the written observations cite in this scope
-	stamped   []port.UnitID // facts stamped consolidated
-	unsettled []port.UnitID // facts whose decision did not fully land: not stamped this run
+	wrote     bool            // an observation was written
+	cited     []domain.UnitID // facts the written observations cite in this scope
+	stamped   []domain.UnitID // facts stamped consolidated
+	unsettled []domain.UnitID // facts whose decision did not fully land: not stamped this run
 }
 
 // apply writes one batch's decision in one short transaction with no model call: tx.Seq, then each
@@ -41,7 +41,7 @@ type applyOutput struct {
 // re-decides them (decision 1000).
 func (c *consolidator) apply(ctx context.Context, in applyInput) (applyOutput, error) {
 	var out applyOutput
-	err := c.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := c.d.Store.InTx(ctx, func(tx store.Tx) error {
 		out = applyOutput{}
 		now := c.d.Clock.Now()
 		// Seq first, every time: it locks the bank row, so no edit or retag can commit between the
@@ -90,8 +90,8 @@ func (c *consolidator) apply(ctx context.Context, in applyInput) (applyOutput, e
 // writeActions writes every action that can land, stamped with seq, and returns the facts the written
 // actions cite (empty when nothing was written) and whether every action landed.
 func (c *consolidator) writeActions(
-	ctx context.Context, tx port.Tx, in applyInput, live map[port.UnitID]domain.Unit, seq int64, now time.Time,
-) (cited []port.UnitID, complete bool, err error) {
+	ctx context.Context, tx store.Tx, in applyInput, live map[domain.UnitID]domain.Unit, seq int64, now time.Time,
+) (cited []domain.UnitID, complete bool, err error) {
 	complete = true
 	for _, a := range in.actions {
 		obs, ok, err := c.target(ctx, tx, in.scope, a, live)
@@ -117,13 +117,13 @@ func (c *consolidator) writeActions(
 // liveFacts re-reads ids and keeps those unchanged since they were planned: same seq and same tags. An
 // edit or a retag bumps the seq, so a changed fact is treated as gone.
 func liveFacts(
-	ctx context.Context, tx port.Tx, b port.BankRef, ids []port.UnitID, expect map[port.UnitID]domain.Unit,
-) (map[port.UnitID]domain.Unit, error) {
+	ctx context.Context, tx store.Tx, b domain.BankRef, ids []domain.UnitID, expect map[domain.UnitID]domain.Unit,
+) (map[domain.UnitID]domain.Unit, error) {
 	facts, err := tx.GetUnits(ctx, b, ids)
 	if err != nil {
 		return nil, fmt.Errorf("re-read facts: %w", err)
 	}
-	live := map[port.UnitID]domain.Unit{}
+	live := map[domain.UnitID]domain.Unit{}
 	for _, f := range facts {
 		if p, ok := expect[f.ID]; ok && p.Seq == f.Seq && domain.SameTagSet(p.Tags, f.Tags) {
 			live[f.ID] = f
@@ -137,10 +137,10 @@ func liveFacts(
 // in. A concurrent clear, retag or invalidate may have deleted that observation since, resetting the unit
 // without changing its seq (decision 1801). The caller holds tx.Seq, so no clear can commit in between.
 func stampable(
-	ctx context.Context, tx port.Tx, ids []port.UnitID, live map[port.UnitID]domain.Unit,
-	cited map[port.UnitID][]port.ScopeKey,
-) ([]port.UnitID, error) {
-	var out []port.UnitID
+	ctx context.Context, tx store.Tx, ids []domain.UnitID, live map[domain.UnitID]domain.Unit,
+	cited map[domain.UnitID][]domain.ScopeKey,
+) ([]domain.UnitID, error) {
+	var out []domain.UnitID
 	for _, id := range ids {
 		if _, ok := live[id]; !ok {
 			continue
@@ -167,7 +167,7 @@ func stampable(
 // one for a create. ok is false when the action must be skipped: a cited fact is not live, or the update's
 // observation is gone or left the scope.
 func (c *consolidator) target(
-	ctx context.Context, tx port.Tx, s port.ScopeKey, a ConsolidationAction, live map[port.UnitID]domain.Unit,
+	ctx context.Context, tx store.Tx, s domain.ScopeKey, a ConsolidationAction, live map[domain.UnitID]domain.Unit,
 ) (domain.Unit, bool, error) {
 	if len(a.Evidence) == 0 {
 		return domain.Unit{}, false, nil
@@ -178,7 +178,7 @@ func (c *consolidator) target(
 		}
 	}
 	if a.Kind == ActionUpdate {
-		cur, err := tx.GetUnits(ctx, s.BankRef, []port.UnitID{a.ObservationID})
+		cur, err := tx.GetUnits(ctx, s.BankRef, []domain.UnitID{a.ObservationID})
 		if err != nil {
 			return domain.Unit{}, false, fmt.Errorf("re-read observation %s: %w", a.ObservationID, err)
 		}
@@ -200,7 +200,7 @@ func (c *consolidator) target(
 // writeObservation upserts obs with the action's text and embedding at the next version (1 for a new
 // one), adds the evidence and records the version with every source the observation now cites.
 func writeObservation(
-	ctx context.Context, tx port.Tx, obs domain.Unit, a ConsolidationAction, seq int64, now time.Time,
+	ctx context.Context, tx store.Tx, obs domain.Unit, a ConsolidationAction, seq int64, now time.Time,
 ) error {
 	sources := slices.Clone(obs.SourceIDs)
 	for _, e := range a.Evidence {

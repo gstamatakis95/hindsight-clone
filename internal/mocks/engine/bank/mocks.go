@@ -8,7 +8,7 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sync"
 )
 
@@ -22,10 +22,10 @@ var _ bank.BankDeleter = &BankDeleter{}
 //
 //		// make and configure a mocked bank.BankDeleter
 //		mockedBankDeleter := &BankDeleter{
-//			RunFunc: func(ctx context.Context, j port.Job) (bool, error) {
+//			RunFunc: func(ctx context.Context, j store.Job) (bool, error) {
 //				panic("mock out the Run method")
 //			},
-//			TombstoneFunc: func(ctx context.Context, b port.BankRef) (domain.Operation, error) {
+//			TombstoneFunc: func(ctx context.Context, b domain.BankRef) (domain.Operation, error) {
 //				panic("mock out the Tombstone method")
 //			},
 //		}
@@ -36,10 +36,10 @@ var _ bank.BankDeleter = &BankDeleter{}
 //	}
 type BankDeleter struct {
 	// RunFunc mocks the Run method.
-	RunFunc func(ctx context.Context, j port.Job) (bool, error)
+	RunFunc func(ctx context.Context, j store.Job) (bool, error)
 
 	// TombstoneFunc mocks the Tombstone method.
-	TombstoneFunc func(ctx context.Context, b port.BankRef) (domain.Operation, error)
+	TombstoneFunc func(ctx context.Context, b domain.BankRef) (domain.Operation, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -48,14 +48,14 @@ type BankDeleter struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// J is the j argument value.
-			J port.Job
+			J store.Job
 		}
 		// Tombstone holds details about calls to the Tombstone method.
 		Tombstone []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 		}
 	}
 	lockRun       sync.RWMutex
@@ -63,13 +63,13 @@ type BankDeleter struct {
 }
 
 // Run calls RunFunc.
-func (mock *BankDeleter) Run(ctx context.Context, j port.Job) (bool, error) {
+func (mock *BankDeleter) Run(ctx context.Context, j store.Job) (bool, error) {
 	if mock.RunFunc == nil {
 		panic("BankDeleter.RunFunc: method is nil but BankDeleter.Run was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}{
 		Ctx: ctx,
 		J:   j,
@@ -86,11 +86,11 @@ func (mock *BankDeleter) Run(ctx context.Context, j port.Job) (bool, error) {
 //	len(mockedBankDeleter.RunCalls())
 func (mock *BankDeleter) RunCalls() []struct {
 	Ctx context.Context
-	J   port.Job
+	J   store.Job
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}
 	mock.lockRun.RLock()
 	calls = mock.calls.Run
@@ -99,13 +99,13 @@ func (mock *BankDeleter) RunCalls() []struct {
 }
 
 // Tombstone calls TombstoneFunc.
-func (mock *BankDeleter) Tombstone(ctx context.Context, b port.BankRef) (domain.Operation, error) {
+func (mock *BankDeleter) Tombstone(ctx context.Context, b domain.BankRef) (domain.Operation, error) {
 	if mock.TombstoneFunc == nil {
 		panic("BankDeleter.TombstoneFunc: method is nil but BankDeleter.Tombstone was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -122,11 +122,11 @@ func (mock *BankDeleter) Tombstone(ctx context.Context, b port.BankRef) (domain.
 //	len(mockedBankDeleter.TombstoneCalls())
 func (mock *BankDeleter) TombstoneCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
+	B   domain.BankRef
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}
 	mock.lockTombstone.RLock()
 	calls = mock.calls.Tombstone
@@ -144,7 +144,7 @@ var _ bank.PromptPreviewer = &PromptPreviewer{}
 //
 //		// make and configure a mocked bank.PromptPreviewer
 //		mockedPromptPreviewer := &PromptPreviewer{
-//			PreviewFunc: func(ctx context.Context, b port.BankRef, op domain.PromptOperation, o domain.BankConfig) (domain.PromptPreview, error) {
+//			PreviewFunc: func(ctx context.Context, b domain.BankRef, op domain.PromptOperation, o domain.BankConfig) (domain.PromptPreview, error) {
 //				panic("mock out the Preview method")
 //			},
 //		}
@@ -155,7 +155,7 @@ var _ bank.PromptPreviewer = &PromptPreviewer{}
 //	}
 type PromptPreviewer struct {
 	// PreviewFunc mocks the Preview method.
-	PreviewFunc func(ctx context.Context, b port.BankRef, op domain.PromptOperation, o domain.BankConfig) (domain.PromptPreview, error)
+	PreviewFunc func(ctx context.Context, b domain.BankRef, op domain.PromptOperation, o domain.BankConfig) (domain.PromptPreview, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -164,7 +164,7 @@ type PromptPreviewer struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Op is the op argument value.
 			Op domain.PromptOperation
 			// O is the o argument value.
@@ -175,13 +175,13 @@ type PromptPreviewer struct {
 }
 
 // Preview calls PreviewFunc.
-func (mock *PromptPreviewer) Preview(ctx context.Context, b port.BankRef, op domain.PromptOperation, o domain.BankConfig) (domain.PromptPreview, error) {
+func (mock *PromptPreviewer) Preview(ctx context.Context, b domain.BankRef, op domain.PromptOperation, o domain.BankConfig) (domain.PromptPreview, error) {
 	if mock.PreviewFunc == nil {
 		panic("PromptPreviewer.PreviewFunc: method is nil but PromptPreviewer.Preview was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 		Op  domain.PromptOperation
 		O   domain.BankConfig
 	}{
@@ -202,13 +202,13 @@ func (mock *PromptPreviewer) Preview(ctx context.Context, b port.BankRef, op dom
 //	len(mockedPromptPreviewer.PreviewCalls())
 func (mock *PromptPreviewer) PreviewCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
+	B   domain.BankRef
 	Op  domain.PromptOperation
 	O   domain.BankConfig
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 		Op  domain.PromptOperation
 		O   domain.BankConfig
 	}
@@ -228,7 +228,7 @@ var _ bank.StatsReader = &StatsReader{}
 //
 //		// make and configure a mocked bank.StatsReader
 //		mockedStatsReader := &StatsReader{
-//			StatsFunc: func(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+//			StatsFunc: func(ctx context.Context, b domain.BankRef) (domain.BankStats, error) {
 //				panic("mock out the Stats method")
 //			},
 //			TagsFunc: func(ctx context.Context, req bank.ListTagsRequest) (bank.TagPage, error) {
@@ -242,7 +242,7 @@ var _ bank.StatsReader = &StatsReader{}
 //	}
 type StatsReader struct {
 	// StatsFunc mocks the Stats method.
-	StatsFunc func(ctx context.Context, b port.BankRef) (domain.BankStats, error)
+	StatsFunc func(ctx context.Context, b domain.BankRef) (domain.BankStats, error)
 
 	// TagsFunc mocks the Tags method.
 	TagsFunc func(ctx context.Context, req bank.ListTagsRequest) (bank.TagPage, error)
@@ -254,7 +254,7 @@ type StatsReader struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 		}
 		// Tags holds details about calls to the Tags method.
 		Tags []struct {
@@ -269,13 +269,13 @@ type StatsReader struct {
 }
 
 // Stats calls StatsFunc.
-func (mock *StatsReader) Stats(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+func (mock *StatsReader) Stats(ctx context.Context, b domain.BankRef) (domain.BankStats, error) {
 	if mock.StatsFunc == nil {
 		panic("StatsReader.StatsFunc: method is nil but StatsReader.Stats was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -292,11 +292,11 @@ func (mock *StatsReader) Stats(ctx context.Context, b port.BankRef) (domain.Bank
 //	len(mockedStatsReader.StatsCalls())
 func (mock *StatsReader) StatsCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
+	B   domain.BankRef
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}
 	mock.lockStats.RLock()
 	calls = mock.calls.Stats
@@ -350,13 +350,13 @@ var _ bank.TemplateCodec = &TemplateCodec{}
 //
 //		// make and configure a mocked bank.TemplateCodec
 //		mockedTemplateCodec := &TemplateCodec{
-//			CreateFunc: func(ctx context.Context, b port.BankRef, t domain.BankTemplate) (domain.Bank, error) {
+//			CreateFunc: func(ctx context.Context, b domain.BankRef, t domain.BankTemplate) (domain.Bank, error) {
 //				panic("mock out the Create method")
 //			},
-//			CreateNamedFunc: func(ctx context.Context, b port.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error) {
+//			CreateNamedFunc: func(ctx context.Context, b domain.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error) {
 //				panic("mock out the CreateNamed method")
 //			},
-//			ExportFunc: func(ctx context.Context, b port.BankRef) (domain.BankTemplate, error) {
+//			ExportFunc: func(ctx context.Context, b domain.BankRef) (domain.BankTemplate, error) {
 //				panic("mock out the Export method")
 //			},
 //		}
@@ -367,13 +367,13 @@ var _ bank.TemplateCodec = &TemplateCodec{}
 //	}
 type TemplateCodec struct {
 	// CreateFunc mocks the Create method.
-	CreateFunc func(ctx context.Context, b port.BankRef, t domain.BankTemplate) (domain.Bank, error)
+	CreateFunc func(ctx context.Context, b domain.BankRef, t domain.BankTemplate) (domain.Bank, error)
 
 	// CreateNamedFunc mocks the CreateNamed method.
-	CreateNamedFunc func(ctx context.Context, b port.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error)
+	CreateNamedFunc func(ctx context.Context, b domain.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error)
 
 	// ExportFunc mocks the Export method.
-	ExportFunc func(ctx context.Context, b port.BankRef) (domain.BankTemplate, error)
+	ExportFunc func(ctx context.Context, b domain.BankRef) (domain.BankTemplate, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -382,7 +382,7 @@ type TemplateCodec struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// T is the t argument value.
 			T domain.BankTemplate
 		}
@@ -391,7 +391,7 @@ type TemplateCodec struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Name is the name argument value.
 			Name string
 			// T is the t argument value.
@@ -402,7 +402,7 @@ type TemplateCodec struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 		}
 	}
 	lockCreate      sync.RWMutex
@@ -411,13 +411,13 @@ type TemplateCodec struct {
 }
 
 // Create calls CreateFunc.
-func (mock *TemplateCodec) Create(ctx context.Context, b port.BankRef, t domain.BankTemplate) (domain.Bank, error) {
+func (mock *TemplateCodec) Create(ctx context.Context, b domain.BankRef, t domain.BankTemplate) (domain.Bank, error) {
 	if mock.CreateFunc == nil {
 		panic("TemplateCodec.CreateFunc: method is nil but TemplateCodec.Create was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 		T   domain.BankTemplate
 	}{
 		Ctx: ctx,
@@ -436,12 +436,12 @@ func (mock *TemplateCodec) Create(ctx context.Context, b port.BankRef, t domain.
 //	len(mockedTemplateCodec.CreateCalls())
 func (mock *TemplateCodec) CreateCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
+	B   domain.BankRef
 	T   domain.BankTemplate
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 		T   domain.BankTemplate
 	}
 	mock.lockCreate.RLock()
@@ -451,13 +451,13 @@ func (mock *TemplateCodec) CreateCalls() []struct {
 }
 
 // CreateNamed calls CreateNamedFunc.
-func (mock *TemplateCodec) CreateNamed(ctx context.Context, b port.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error) {
+func (mock *TemplateCodec) CreateNamed(ctx context.Context, b domain.BankRef, name string, t domain.BankTemplate) (domain.Bank, []domain.Operation, error) {
 	if mock.CreateNamedFunc == nil {
 		panic("TemplateCodec.CreateNamedFunc: method is nil but TemplateCodec.CreateNamed was just called")
 	}
 	callInfo := struct {
 		Ctx  context.Context
-		B    port.BankRef
+		B    domain.BankRef
 		Name string
 		T    domain.BankTemplate
 	}{
@@ -478,13 +478,13 @@ func (mock *TemplateCodec) CreateNamed(ctx context.Context, b port.BankRef, name
 //	len(mockedTemplateCodec.CreateNamedCalls())
 func (mock *TemplateCodec) CreateNamedCalls() []struct {
 	Ctx  context.Context
-	B    port.BankRef
+	B    domain.BankRef
 	Name string
 	T    domain.BankTemplate
 } {
 	var calls []struct {
 		Ctx  context.Context
-		B    port.BankRef
+		B    domain.BankRef
 		Name string
 		T    domain.BankTemplate
 	}
@@ -495,13 +495,13 @@ func (mock *TemplateCodec) CreateNamedCalls() []struct {
 }
 
 // Export calls ExportFunc.
-func (mock *TemplateCodec) Export(ctx context.Context, b port.BankRef) (domain.BankTemplate, error) {
+func (mock *TemplateCodec) Export(ctx context.Context, b domain.BankRef) (domain.BankTemplate, error) {
 	if mock.ExportFunc == nil {
 		panic("TemplateCodec.ExportFunc: method is nil but TemplateCodec.Export was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -518,11 +518,11 @@ func (mock *TemplateCodec) Export(ctx context.Context, b port.BankRef) (domain.B
 //	len(mockedTemplateCodec.ExportCalls())
 func (mock *TemplateCodec) ExportCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
+	B   domain.BankRef
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}
 	mock.lockExport.RLock()
 	calls = mock.calls.Export

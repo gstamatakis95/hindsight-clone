@@ -8,7 +8,6 @@ import (
 	"memd/internal/engine/recall"
 	rf "memd/internal/engine/reflect"
 	"memd/internal/fake"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"slices"
 	"strings"
@@ -50,7 +49,7 @@ func TestReflectRetrievalErrorIsUnavailable(t *testing.T) {
 	}
 	t.Run("page reader", func(t *testing.T) {
 		h := newHarness(t, domain.BankConfig{})
-		h.pages.SearchPagesFunc = func(context.Context, port.BankRef, string, int) ([]domain.PageHit, error) {
+		h.pages.SearchPagesFunc = func(context.Context, domain.BankRef, string, int) ([]domain.PageHit, error) {
 			return nil, errors.New("pages down")
 		}
 		h.turns(calls(rf.ToolSearchMentalModels, `{"query":"alice"}`), doneCall("never"))
@@ -214,7 +213,7 @@ func TestReflectMaxTotalTokensExhausted(t *testing.T) {
 		h := newHarness(t, cfg, unit("u1", "Alice likes tea"))
 		h.turns(withUsage(recallCall(), 40, 10), withUsage(doneCall("tea", "u1"), 30, 10))
 		h.llm.Script(domain.ModelSlotStructuredOutput, prompts.StructuredOutputSystem,
-			fake.Reply{JSON: `{"drink":"tea"}`, Usage: port.Usage{InputTokens: 15, OutputTokens: 5}})
+			fake.Reply{JSON: `{"drink":"tea"}`, Usage: domain.Usage{InputTokens: 15, OutputTokens: 5}})
 		_, err := h.reflect(func(r *rf.ReflectRequest) {
 			r.ResponseSchemaJSON = `{"type":"object","properties":{"drink":{"type":"string"}}}`
 		})
@@ -306,10 +305,10 @@ func TestReflectCitationFiltering(t *testing.T) {
 	obs := unit("o1", "Alice is a tea person")
 	obs.Type = domain.FactTypeObservation
 	h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"), unit("u2", "Bob likes coffee"), obs)
-	h.pages.SearchPagesFunc = func(context.Context, port.BankRef, string, int) ([]domain.PageHit, error) {
+	h.pages.SearchPagesFunc = func(context.Context, domain.BankRef, string, int) ([]domain.PageHit, error) {
 		return []domain.PageHit{{MentalModelID: "mm-tea", Score: 0.9}}, nil
 	}
-	h.pages.ReadPagesFunc = func(context.Context, port.BankRef, []port.MentalModelID) ([]domain.MentalModel, error) {
+	h.pages.ReadPagesFunc = func(context.Context, domain.BankRef, []domain.MentalModelID) ([]domain.MentalModel, error) {
 		return []domain.MentalModel{{Spec: domain.MentalModelSpec{ID: "mm-tea", Name: "Tea"}, ContentMD: "Tea page"}}, nil
 	}
 	h.turns(
@@ -322,14 +321,14 @@ func TestReflectCitationFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ids []port.UnitID
+	var ids []domain.UnitID
 	for _, m := range res.BasedOn.Memories {
 		ids = append(ids, m.ID)
 	}
-	if !slices.Equal(ids, []port.UnitID{"u1", "o1"}) {
+	if !slices.Equal(ids, []domain.UnitID{"u1", "o1"}) {
 		t.Errorf("memories = %v, want [u1 o1] (u2 retrieved but not cited; u9, o404 never retrieved)", ids)
 	}
-	if !slices.Equal(res.BasedOn.MentalModelIDs, []port.MentalModelID{"mm-tea"}) {
+	if !slices.Equal(res.BasedOn.MentalModelIDs, []domain.MentalModelID{"mm-tea"}) {
 		t.Errorf("mental models = %v, want [mm-tea]", res.BasedOn.MentalModelIDs)
 	}
 
@@ -422,7 +421,7 @@ func TestReflectExtraDirectivesAdded(t *testing.T) {
 	if !containsAll(string(done.Parameters), "directive_compliance", "Answer formally.", "End with a summary line.") {
 		t.Errorf("done tool lacks the directive variant: %s", done.Parameters)
 	}
-	if !slices.Equal(res.BasedOn.DirectiveIDs, []port.DirectiveID{global}) {
+	if !slices.Equal(res.BasedOn.DirectiveIDs, []domain.DirectiveID{global}) {
 		t.Errorf("directive ids = %v, want [%s]", res.BasedOn.DirectiveIDs, global)
 	}
 
@@ -436,7 +435,7 @@ func TestReflectExtraDirectivesAdded(t *testing.T) {
 		r.ApplyAllDirectives = true
 		r.ExtraDirectives = []domain.Directive{{ID: "caller-id", Rules: []string{"Extra rule."}}}
 	})
-	if !slices.Equal(res.BasedOn.DirectiveIDs, []port.DirectiveID{global, teamA}) {
+	if !slices.Equal(res.BasedOn.DirectiveIDs, []domain.DirectiveID{global, teamA}) {
 		t.Errorf("apply_all ids = %v (extras never appear as stored directive ids)", res.BasedOn.DirectiveIDs)
 	}
 	_, call = run(nil)
@@ -451,7 +450,7 @@ func TestReflectStructuredOutput(t *testing.T) {
 	h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
 	h.turns(recallCall(), withUsage(doneCall("Alice likes tea.", "u1"), 10, 5))
 	h.llm.Script(domain.ModelSlotStructuredOutput, prompts.StructuredOutputSystem,
-		fake.Reply{JSON: `{"drink":"tea"}`, Usage: port.Usage{InputTokens: 7, OutputTokens: 3}})
+		fake.Reply{JSON: `{"drink":"tea"}`, Usage: domain.Usage{InputTokens: 7, OutputTokens: 3}})
 	res, err := h.reflect(func(r *rf.ReflectRequest) { r.ResponseSchemaJSON = schema })
 	if err != nil {
 		t.Fatal(err)
@@ -573,7 +572,7 @@ func TestReflectRequestValidation(t *testing.T) {
 	if _, err := h.reflect(func(r *rf.ReflectRequest) { r.Query = " " }); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("empty query: %v", err)
 	}
-	_, err := h.reflect(func(r *rf.ReflectRequest) { r.Bank = port.BankRef{Tenant: "t1", Bank: "nope"} })
+	_, err := h.reflect(func(r *rf.ReflectRequest) { r.Bank = domain.BankRef{Tenant: "t1", Bank: "nope"} })
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("unknown bank: %v", err)
 	}

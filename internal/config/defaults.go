@@ -2,20 +2,12 @@ package config
 
 import (
 	"fmt"
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"strings"
 )
 
-// Environment variables read by ServerDefaults.
-const (
-	// EnvModel is the default gateway model for every LLM slot (all but RERANK and EMBED).
-	EnvModel = "MEMD_MODEL"
-	// EnvModelPrefix + an upper-case slot name (MEMD_MODEL_EXTRACT, MEMD_MODEL_RERANK, ...) binds one slot,
-	// winning over EnvModel. RERANK is bound only this way.
-	EnvModelPrefix = "MEMD_MODEL_"
-)
-
-// llmSlots are the slots EnvModel binds; bindableSlots adds RERANK. EMBED is server-wide and never
+// llmSlots are the slots ai.EnvModel binds; bindableSlots adds RERANK. EMBED is server-wide and never
 // part of a BankConfig.
 var (
 	llmSlots = []domain.ModelSlot{
@@ -27,15 +19,15 @@ var (
 )
 
 // ServerDefaults is the server level of the config hierarchy: every default the spec states, plus the
-// model bindings from the environment (EnvModel for every LLM slot, EnvModelPrefix+SLOT per slot).
+// model bindings from the environment (ai.EnvModel for every LLM slot, ai.EnvModelPrefix+SLOT per slot).
 // Knobs whose default the spec leaves open stay unset; the engine that reads them owns that default.
-// A slot with no model in the environment stays unbound, and port.ModelRouter rejects calls on it;
+// A slot with no model in the environment stays unbound, and ai.Router rejects calls on it;
 // without a RERANK binding, recall.rerank defaults to false.
 func ServerDefaults(env func(string) string) (domain.BankConfig, error) {
 	cfg := specDefaults()
-	def := strings.TrimSpace(env(EnvModel))
+	def := strings.TrimSpace(env(ai.EnvModel))
 	for _, s := range bindableSlots {
-		model := strings.TrimSpace(env(EnvModelPrefix + strings.ToUpper(string(s))))
+		model := strings.TrimSpace(env(ai.EnvModelPrefix + strings.ToUpper(string(s))))
 		if model == "" && s != domain.ModelSlotRerank {
 			model = def
 		}

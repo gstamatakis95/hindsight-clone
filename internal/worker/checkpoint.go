@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // Checkpoint lets a handler report progress and learn whether it was cancelled.
@@ -17,14 +17,14 @@ type Checkpoint interface {
 
 // checkpoint implements Checkpoint for one operation.
 type checkpoint struct {
-	c  port.Claimer
-	op port.OperationID
+	c  store.Claimer
+	op domain.OperationID
 }
 
 var _ Checkpoint = (*checkpoint)(nil)
 
 // NewCheckpoint returns the Checkpoint of operation op. The caller stamps p.At from its injected Clock.
-func NewCheckpoint(c port.Claimer, op port.OperationID) Checkpoint {
+func NewCheckpoint(c store.Claimer, op domain.OperationID) Checkpoint {
 	return &checkpoint{c: c, op: op}
 }
 

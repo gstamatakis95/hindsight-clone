@@ -7,7 +7,6 @@ package mockworker
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/worker"
 	"sync"
 )
@@ -94,10 +93,10 @@ var _ worker.OperationControl = &OperationControl{}
 //
 //		// make and configure a mocked worker.OperationControl
 //		mockedOperationControl := &OperationControl{
-//			CancelFunc: func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+//			CancelFunc: func(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 //				panic("mock out the Cancel method")
 //			},
-//			RetryFunc: func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+//			RetryFunc: func(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 //				panic("mock out the Retry method")
 //			},
 //		}
@@ -108,10 +107,10 @@ var _ worker.OperationControl = &OperationControl{}
 //	}
 type OperationControl struct {
 	// CancelFunc mocks the Cancel method.
-	CancelFunc func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
+	CancelFunc func(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
 
 	// RetryFunc mocks the Retry method.
-	RetryFunc func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
+	RetryFunc func(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -120,18 +119,18 @@ type OperationControl struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.OperationID
+			ID domain.OperationID
 		}
 		// Retry holds details about calls to the Retry method.
 		Retry []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.OperationID
+			ID domain.OperationID
 		}
 	}
 	lockCancel sync.RWMutex
@@ -139,14 +138,14 @@ type OperationControl struct {
 }
 
 // Cancel calls CancelFunc.
-func (mock *OperationControl) Cancel(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+func (mock *OperationControl) Cancel(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	if mock.CancelFunc == nil {
 		panic("OperationControl.CancelFunc: method is nil but OperationControl.Cancel was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.OperationID
+		B   domain.BankRef
+		ID  domain.OperationID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -164,13 +163,13 @@ func (mock *OperationControl) Cancel(ctx context.Context, b port.BankRef, id por
 //	len(mockedOperationControl.CancelCalls())
 func (mock *OperationControl) CancelCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.OperationID
+	B   domain.BankRef
+	ID  domain.OperationID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.OperationID
+		B   domain.BankRef
+		ID  domain.OperationID
 	}
 	mock.lockCancel.RLock()
 	calls = mock.calls.Cancel
@@ -179,14 +178,14 @@ func (mock *OperationControl) CancelCalls() []struct {
 }
 
 // Retry calls RetryFunc.
-func (mock *OperationControl) Retry(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+func (mock *OperationControl) Retry(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	if mock.RetryFunc == nil {
 		panic("OperationControl.RetryFunc: method is nil but OperationControl.Retry was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.OperationID
+		B   domain.BankRef
+		ID  domain.OperationID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -204,13 +203,13 @@ func (mock *OperationControl) Retry(ctx context.Context, b port.BankRef, id port
 //	len(mockedOperationControl.RetryCalls())
 func (mock *OperationControl) RetryCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.OperationID
+	B   domain.BankRef
+	ID  domain.OperationID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.OperationID
+		B   domain.BankRef
+		ID  domain.OperationID
 	}
 	mock.lockRetry.RLock()
 	calls = mock.calls.Retry

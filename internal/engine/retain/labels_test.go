@@ -2,7 +2,7 @@ package retain
 
 import (
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
@@ -17,9 +17,9 @@ func TestLabelResolverDropsEmptyValues(t *testing.T) {
 		{Key: "note", Value: "  "},
 		{Key: "note", Value: "kept"},
 	}
-	var ids []port.EntityID
+	var ids []domain.EntityID
 	var tags []string
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		ids, tags, err = NewLabelResolver().Resolve(e.ctx, tx, testBank, defs, labels)
 		return wrap(err)

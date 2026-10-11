@@ -6,8 +6,8 @@ package mockmentalmodel
 
 import (
 	"context"
+	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
-	"memd/internal/port"
 	"sync"
 )
 
@@ -21,7 +21,7 @@ var _ mentalmodel.PageSearcher = &PageSearcher{}
 //
 //		// make and configure a mocked mentalmodel.PageSearcher
 //		mockedPageSearcher := &PageSearcher{
-//			SearchFunc: func(ctx context.Context, req mentalmodel.SearchPagesRequest) ([]mentalmodel.PageHit, error) {
+//			SearchFunc: func(ctx context.Context, req mentalmodel.SearchPagesRequest) ([]domain.PageHit, error) {
 //				panic("mock out the Search method")
 //			},
 //		}
@@ -32,7 +32,7 @@ var _ mentalmodel.PageSearcher = &PageSearcher{}
 //	}
 type PageSearcher struct {
 	// SearchFunc mocks the Search method.
-	SearchFunc func(ctx context.Context, req mentalmodel.SearchPagesRequest) ([]mentalmodel.PageHit, error)
+	SearchFunc func(ctx context.Context, req mentalmodel.SearchPagesRequest) ([]domain.PageHit, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -48,7 +48,7 @@ type PageSearcher struct {
 }
 
 // Search calls SearchFunc.
-func (mock *PageSearcher) Search(ctx context.Context, req mentalmodel.SearchPagesRequest) ([]mentalmodel.PageHit, error) {
+func (mock *PageSearcher) Search(ctx context.Context, req mentalmodel.SearchPagesRequest) ([]domain.PageHit, error) {
 	if mock.SearchFunc == nil {
 		panic("PageSearcher.SearchFunc: method is nil but PageSearcher.Search was just called")
 	}
@@ -93,7 +93,7 @@ var _ mentalmodel.RefreshRunner = &RefreshRunner{}
 //
 //		// make and configure a mocked mentalmodel.RefreshRunner
 //		mockedRefreshRunner := &RefreshRunner{
-//			RunFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID, opts mentalmodel.RefreshOptions) (mentalmodel.RefreshOutcome, error) {
+//			RunFunc: func(ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts mentalmodel.RefreshOptions) (mentalmodel.RefreshOutcome, error) {
 //				panic("mock out the Run method")
 //			},
 //		}
@@ -104,7 +104,7 @@ var _ mentalmodel.RefreshRunner = &RefreshRunner{}
 //	}
 type RefreshRunner struct {
 	// RunFunc mocks the Run method.
-	RunFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID, opts mentalmodel.RefreshOptions) (mentalmodel.RefreshOutcome, error)
+	RunFunc func(ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts mentalmodel.RefreshOptions) (mentalmodel.RefreshOutcome, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -113,9 +113,9 @@ type RefreshRunner struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.MentalModelID
+			ID domain.MentalModelID
 			// Opts is the opts argument value.
 			Opts mentalmodel.RefreshOptions
 		}
@@ -124,14 +124,14 @@ type RefreshRunner struct {
 }
 
 // Run calls RunFunc.
-func (mock *RefreshRunner) Run(ctx context.Context, b port.BankRef, id port.MentalModelID, opts mentalmodel.RefreshOptions) (mentalmodel.RefreshOutcome, error) {
+func (mock *RefreshRunner) Run(ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts mentalmodel.RefreshOptions) (mentalmodel.RefreshOutcome, error) {
 	if mock.RunFunc == nil {
 		panic("RefreshRunner.RunFunc: method is nil but RefreshRunner.Run was just called")
 	}
 	callInfo := struct {
 		Ctx  context.Context
-		B    port.BankRef
-		ID   port.MentalModelID
+		B    domain.BankRef
+		ID   domain.MentalModelID
 		Opts mentalmodel.RefreshOptions
 	}{
 		Ctx:  ctx,
@@ -151,14 +151,14 @@ func (mock *RefreshRunner) Run(ctx context.Context, b port.BankRef, id port.Ment
 //	len(mockedRefreshRunner.RunCalls())
 func (mock *RefreshRunner) RunCalls() []struct {
 	Ctx  context.Context
-	B    port.BankRef
-	ID   port.MentalModelID
+	B    domain.BankRef
+	ID   domain.MentalModelID
 	Opts mentalmodel.RefreshOptions
 } {
 	var calls []struct {
 		Ctx  context.Context
-		B    port.BankRef
-		ID   port.MentalModelID
+		B    domain.BankRef
+		ID   domain.MentalModelID
 		Opts mentalmodel.RefreshOptions
 	}
 	mock.lockRun.RLock()

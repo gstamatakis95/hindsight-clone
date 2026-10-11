@@ -3,9 +3,10 @@ package retain
 import (
 	"encoding/json"
 	"errors"
+	"memd/internal/blob"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"testing"
 	"time"
 )
@@ -65,7 +66,7 @@ func TestIngestUnchangedMakesNoLLMCall(t *testing.T) {
 func TestIngestFanOutRejectionStoresNothing(t *testing.T) {
 	e := newEnv(t, 0)
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
-	e.inTx(func(port.Tx) error { return nil }) // creates the bank
+	e.inTx(func(store.Tx) error { return nil }) // creates the bank
 	seq, _ := e.store.Read().BankSeq(e.ctx, testBank)
 	limit := 7
 	for _, async := range []bool{false, true} {
@@ -86,7 +87,7 @@ func TestIngestFanOutRejectionStoresNothing(t *testing.T) {
 	if s, _ := e.store.Read().BankSeq(e.ctx, testBank); s != seq {
 		t.Errorf("bank seq moved %d -> %d", seq, s)
 	}
-	err := e.store.InTx(e.ctx, func(tx port.Tx) error {
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error {
 		_, err := tx.Documents().Get(e.ctx, testBank, "ok")
 		return err
 	})
@@ -108,8 +109,8 @@ func TestIngestFanOutRejectionStoresNothing(t *testing.T) {
 // ErrBankDeleting (FAILED_PRECONDITION) before the blob Put, so no blob lands under the bank's prefix.
 func TestIngestDeletingBankStoresNoBlob(t *testing.T) {
 	e := newEnv(t, 0)
-	e.inTx(func(port.Tx) error { return nil }) // creates the bank
-	e.inTx(func(tx port.Tx) error { return tx.Banks().MarkDeleting(e.ctx, testBank, time.Now()) })
+	e.inTx(func(store.Tx) error { return nil }) // creates the bank
+	e.inTx(func(tx store.Tx) error { return tx.Banks().MarkDeleting(e.ctx, testBank, time.Now()) })
 	for _, async := range []bool{false, true} {
 		_, err := e.ingestor.Ingest(e.ctx, IngestRequest{Bank: testBank, RunAsync: async, Items: []IngestItem{
 			{DocumentID: "d1", Content: "Alice likes tea."},
@@ -157,7 +158,7 @@ func TestIngestAsyncEnqueuesChildrenUnderBatch(t *testing.T) {
 }
 
 // checkFirstChild checks the first item's job: parent, serial key, merged overrides and pinned payload.
-func checkFirstChild(e *env, j port.Job, res IngestResult, ts time.Time) {
+func checkFirstChild(e *env, j store.Job, res IngestResult, ts time.Time) {
 	t := e.t
 	t.Helper()
 	if j.ParentID != res.ParentOperationID || j.SerialKey != DocumentSerialKey("d1") ||
@@ -175,7 +176,7 @@ func checkFirstChild(e *env, j port.Job, res IngestResult, ts time.Time) {
 }
 
 // checkPayload checks the first item's pinned payload.
-func checkPayload(e *env, j port.Job, ts time.Time) {
+func checkPayload(e *env, j store.Job, ts time.Time) {
 	t := e.t
 	t.Helper()
 	var p DocumentPayload
@@ -185,7 +186,7 @@ func checkPayload(e *env, j port.Job, ts time.Time) {
 	if p.Context != "chat" || len(p.Tags) != 2 || p.Tags[0] != "team" || p.Timestamp == nil || !p.Timestamp.Equal(ts) {
 		t.Errorf("payload = %+v", p)
 	}
-	if len(p.Entities) != 1 || p.BlobKey != domain.DocumentBlobKey(testBank, "d1", ContentHash("one")) {
+	if len(p.Entities) != 1 || p.BlobKey != blob.Key(testBank, "d1", ContentHash("one")) {
 		t.Errorf("payload hints / blob key = %+v", p)
 	}
 }

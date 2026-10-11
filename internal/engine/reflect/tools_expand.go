@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 )
 
 // expandTool is expand: the source facts behind observations and the source chunks behind facts.
 type expandTool struct {
-	r port.Reader
+	r store.Reader
 }
 
 var _ Tool = (*expandTool)(nil)
@@ -24,7 +24,7 @@ func (*expandTool) Schema() json.RawMessage { return schemaOf(ToolExpand) }
 
 // expandItem is one expand result.
 type expandItem struct {
-	MemoryID    port.UnitID    `json:"memory_id"`
+	MemoryID    domain.UnitID  `json:"memory_id"`
 	Memory      map[string]any `json:"memory,omitempty"`
 	SourceFacts []memoryOut    `json:"source_facts,omitempty"`
 	Chunk       map[string]any `json:"chunk,omitempty"`
@@ -44,9 +44,9 @@ func (t *expandTool) Call(ctx context.Context, st *agentState, args json.RawMess
 	if !ok || len(raw) == 0 {
 		return malformed("expand requires memory_ids"), nil
 	}
-	ids := make([]port.UnitID, 0, len(raw))
+	ids := make([]domain.UnitID, 0, len(raw))
 	for _, id := range raw {
-		ids = append(ids, port.UnitID(id))
+		ids = append(ids, domain.UnitID(id))
 	}
 	units, err := t.visibleUnits(ctx, st, ids)
 	if err != nil {
@@ -81,15 +81,15 @@ func (t *expandTool) Call(ctx context.Context, st *agentState, args json.RawMess
 
 // visibleUnits reads units and keeps those inside the request's fact types, tag filter and seq range, by id.
 func (t *expandTool) visibleUnits(
-	ctx context.Context, st *agentState, ids []port.UnitID,
-) (map[port.UnitID]domain.Unit, error) {
+	ctx context.Context, st *agentState, ids []domain.UnitID,
+) (map[domain.UnitID]domain.Unit, error) {
 	us, err := t.r.GetUnits(ctx, st.Request.Bank, ids)
 	if err != nil {
 		return nil, fmt.Errorf("get units: %w", err)
 	}
 	seq := st.Request.Seq
 	unbounded := seq.After == 0 && seq.UpTo == nil
-	out := make(map[port.UnitID]domain.Unit, len(us))
+	out := make(map[domain.UnitID]domain.Unit, len(us))
 	for _, u := range us {
 		typed := len(st.Request.Types) == 0 || slices.Contains(st.Request.Types, u.Type)
 		if typed && domain.MatchFilter(u.Tags, st.Request.Tags) && (unbounded || seq.Contains(u.Seq)) {
@@ -101,24 +101,24 @@ func (t *expandTool) visibleUnits(
 
 // context reads the observations' source facts and the facts' chunks (Reader.GetChunks).
 func (t *expandTool) context(
-	ctx context.Context, st *agentState, units map[port.UnitID]domain.Unit,
-) (map[port.UnitID]domain.Unit, map[port.ChunkID]domain.Chunk, error) {
-	var sourceIDs []port.UnitID
-	var chunkIDs []port.ChunkID
+	ctx context.Context, st *agentState, units map[domain.UnitID]domain.Unit,
+) (map[domain.UnitID]domain.Unit, map[domain.ChunkID]domain.Chunk, error) {
+	var sourceIDs []domain.UnitID
+	var chunkIDs []domain.ChunkID
 	for _, u := range units {
 		sourceIDs = append(sourceIDs, u.SourceIDs...)
 		if u.ChunkID != "" {
 			chunkIDs = append(chunkIDs, u.ChunkID)
 		}
 	}
-	sources := map[port.UnitID]domain.Unit{}
+	sources := map[domain.UnitID]domain.Unit{}
 	if len(sourceIDs) > 0 {
 		var err error
 		if sources, err = t.visibleUnits(ctx, st, sourceIDs); err != nil {
 			return nil, nil, err
 		}
 	}
-	chunks := map[port.ChunkID]domain.Chunk{}
+	chunks := map[domain.ChunkID]domain.Chunk{}
 	if len(chunkIDs) > 0 {
 		cs, err := t.r.GetChunks(ctx, st.Request.Bank, chunkIDs)
 		if err != nil {

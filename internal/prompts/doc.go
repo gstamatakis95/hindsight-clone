@@ -17,7 +17,7 @@
 //   - <system>.schema.json: the response JSON Schema of a structured call, named after its system
 //     template (extract_concise.schema.json, consolidate_system.schema.json, ...).
 //   - <name>.json: a JSON asset such as a tool list ([{name, description, parameters}], one entry per
-//     port.ToolSpec). Tool descriptions are prompt text too, so they live here.
+//     ai.ToolSpec). Tool descriptions are prompt text too, so they live here.
 //   - NOTICE: the MIT licence of Hindsight, whose prompts most templates port; each template's header
 //     comment names its Hindsight source or says "new in memd".
 //
@@ -34,7 +34,7 @@
 //	system, err := prompts.Render(prompts.DedupSystem, data)
 //	user, err := prompts.Render(prompts.DedupUser, data)
 //	schema, err := prompts.Schema(prompts.DedupSystem)
-//	req := port.StructuredRequest{Name: prompts.DedupSystem, System: system, User: user, Schema: schema, ...}
+//	req := ai.StructuredRequest{Name: prompts.DedupSystem, System: system, User: user, Schema: schema, ...}
 //
 // The functions:
 //
@@ -56,7 +56,7 @@
 // schema when one exists, followed by every tool file of its operation (templates/<op>_tool*.json and
 // <op>_tool*.tmpl, sorted, where <op> is the name up to the first underscore; so reflect_system's version
 // covers reflect_tools.json and the done variants). Callers put the system template's name in
-// port.StructuredRequest.Name or port.ChatRequest.Name, and the call records that version, so traces and
+// ai.StructuredRequest.Name or ai.ChatRequest.Name, and the call records that version, so traces and
 // scripted fakes can tell prompt revisions apart. Editing only a user template does not change the
 // recorded version (an accepted trade-off). An unknown name has version "".
 //

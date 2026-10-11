@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"slices"
 	"testing"
 )
@@ -23,29 +22,29 @@ func TestSelectDirectives(t *testing.T) {
 		filter   domain.TagFilter
 		applyAll bool
 		extra    []domain.Directive
-		want     []port.DirectiveID
+		want     []domain.DirectiveID
 	}{
-		{"untagged request: global only", domain.TagFilter{}, false, nil, []port.DirectiveID{"global"}},
-		{"any team-a", domain.TagFilter{Tags: []string{"Team-A"}}, false, nil, []port.DirectiveID{"global", "a", "ab"}},
+		{"untagged request: global only", domain.TagFilter{}, false, nil, []domain.DirectiveID{"global"}},
+		{"any team-a", domain.TagFilter{Tags: []string{"Team-A"}}, false, nil, []domain.DirectiveID{"global", "a", "ab"}},
 		{
 			"all team-a team-b",
 			domain.TagFilter{Tags: []string{"team-a", "team-b"}, Match: domain.TagsMatchAll},
 			false,
 			nil,
-			[]port.DirectiveID{"global", "ab"},
+			[]domain.DirectiveID{"global", "ab"},
 		},
 		{
 			"group team-b",
 			domain.TagFilter{Groups: []domain.TagGroup{group}},
 			false, nil,
-			[]port.DirectiveID{"global", "ab"},
+			[]domain.DirectiveID{"global", "ab"},
 		},
-		{"apply all", domain.TagFilter{}, true, nil, []port.DirectiveID{"global", "a", "ab"}},
-		{"extras added, stored kept", domain.TagFilter{}, false, extra, []port.DirectiveID{"global", ""}},
+		{"apply all", domain.TagFilter{}, true, nil, []domain.DirectiveID{"global", "a", "ab"}},
+		{"extras added, stored kept", domain.TagFilter{}, false, extra, []domain.DirectiveID{"global", ""}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var got []port.DirectiveID
+			var got []domain.DirectiveID
 			for _, d := range selectDirectives(stored, tc.filter, tc.applyAll, tc.extra) {
 				got = append(got, d.ID)
 			}
@@ -58,8 +57,8 @@ func TestSelectDirectives(t *testing.T) {
 
 func TestValidCitations(t *testing.T) {
 	st := &agentState{
-		RetrievedUnits:  map[port.UnitID]domain.Unit{"u1": {ID: "u1"}, "o1": {ID: "o1"}},
-		RetrievedModels: map[port.MentalModelID]struct{}{"mm": {}},
+		RetrievedUnits:  map[domain.UnitID]domain.Unit{"u1": {ID: "u1"}, "o1": {ID: "o1"}},
+		RetrievedModels: map[domain.MentalModelID]struct{}{"mm": {}},
 	}
 	got := validCitations(st, []string{"u1", "x", "mm", "u1", "o1", "mm-never"})
 	if !slices.Equal(got, []string{"u1", "mm", "o1"}) {

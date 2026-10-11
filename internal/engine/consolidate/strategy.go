@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 )
 
 // previewScopeLimit is how many existing scopes Preview examines; beyond it the preview is incomplete.
@@ -13,9 +12,9 @@ const previewScopeLimit = 1000
 // StrategyMatcher picks the first strategy whose patterns match a scope.
 type StrategyMatcher interface {
 	// Match returns the first strategy with a pattern matching s, and whether there is one.
-	Match(strategies []domain.ConsolidationStrategy, s port.ScopeKey) (*domain.ConsolidationStrategy, bool)
+	Match(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool)
 	// Preview evaluates draft strategies against existing scopes without saving.
-	Preview(ctx context.Context, b port.BankRef, draft []domain.ConsolidationStrategy) (StrategyPreview, error)
+	Preview(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (StrategyPreview, error)
 }
 
 // StrategyPreview mirrors memory.v1.PreviewConsolidationStrategiesResponse.
@@ -31,9 +30,9 @@ type StrategyMatch struct {
 	// Strategy is the strategy name.
 	Strategy string
 	// MatchedScopes are the scopes this strategy wins (first match).
-	MatchedScopes []port.ScopeKey
+	MatchedScopes []domain.ScopeKey
 	// ShadowedScopes are scopes its patterns match but an earlier strategy already wins.
-	ShadowedScopes []port.ScopeKey
+	ShadowedScopes []domain.ScopeKey
 }
 
 // strategyMatcher implements StrategyMatcher.
@@ -43,7 +42,7 @@ type strategyMatcher struct {
 
 var _ StrategyMatcher = (*strategyMatcher)(nil)
 
-// NewStrategyMatcher returns the StrategyMatcher. scopes (port.Reader) lists a bank's existing observation
+// NewStrategyMatcher returns the StrategyMatcher. scopes (store.Reader) lists a bank's existing observation
 // scopes for Preview; nil makes Preview fail with FAILED_PRECONDITION, while Match works without it.
 func NewStrategyMatcher(scopes ScopeLister) StrategyMatcher {
 	return &strategyMatcher{scopes: scopes}
@@ -52,7 +51,7 @@ func NewStrategyMatcher(scopes ScopeLister) StrategyMatcher {
 // Match returns the first strategy in list order with a pattern matching s; the winner applies whole
 // (a later strategy never fills its gaps).
 func (m *strategyMatcher) Match(
-	strategies []domain.ConsolidationStrategy, s port.ScopeKey,
+	strategies []domain.ConsolidationStrategy, s domain.ScopeKey,
 ) (*domain.ConsolidationStrategy, bool) {
 	for i := range strategies {
 		if strategyClaims(strategies[i], s.Tags) {
@@ -93,7 +92,7 @@ func patternMatches(p domain.ScopePattern, tags []string) bool {
 // Preview lists up to previewScopeLimit existing scopes and reports, per draft strategy, the scopes it
 // would win and those an earlier strategy shadows.
 func (m *strategyMatcher) Preview(
-	ctx context.Context, b port.BankRef, draft []domain.ConsolidationStrategy,
+	ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy,
 ) (StrategyPreview, error) {
 	if m.scopes == nil {
 		return StrategyPreview{}, fmt.Errorf("%w: consolidate: no scope lister wired", domain.ErrFailedPrecondition)
@@ -104,7 +103,7 @@ func (m *strategyMatcher) Preview(
 	}
 	complete := len(infos) <= previewScopeLimit
 	infos = infos[:min(len(infos), previewScopeLimit)]
-	scopes := make([]port.ScopeKey, len(infos))
+	scopes := make([]domain.ScopeKey, len(infos))
 	for i, in := range infos {
 		scopes[i] = domain.NewScopeKey(b, in.Scope.Tags)
 	}

@@ -3,10 +3,11 @@ package mentalmodel
 import (
 	"context"
 	"fmt"
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"strings"
 )
 
@@ -39,7 +40,7 @@ func (*singleShot) Strategy() domain.RefreshStrategy { return domain.RefreshStra
 func (s *singleShot) Full(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (draft, error) {
-	units, err := s.recall(ctx, m, cfg, port.SeqUpTo(0, upTo))
+	units, err := s.recall(ctx, m, cfg, store.SeqUpTo(0, upTo))
 	if err != nil {
 		return draft{}, err
 	}
@@ -54,10 +55,10 @@ func (s *singleShot) Full(
 	if err != nil {
 		return draft{}, err
 	}
-	resp, err := s.d.LLM.Chat(ctx, port.ChatRequest{
+	resp, err := s.d.LLM.Chat(ctx, ai.ChatRequest{
 		Slot: domain.ModelSlotSynthesize, Binding: binding, Name: prompts.SynthesizeSystem,
-		Messages: []port.ChatMessage{
-			{Role: port.ChatRoleSystem, Content: system}, {Role: port.ChatRoleUser, Content: user},
+		Messages: []ai.ChatMessage{
+			{Role: ai.ChatRoleSystem, Content: system}, {Role: ai.ChatRoleUser, Content: user},
 		},
 	})
 	if err != nil {
@@ -73,7 +74,7 @@ func (s *singleShot) Full(
 func (s *singleShot) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (deltaDraft, error) {
-	units, err := s.recall(ctx, m, cfg, port.SeqUpTo(m.LastSeqSeen, upTo))
+	units, err := s.recall(ctx, m, cfg, store.SeqUpTo(m.LastSeqSeen, upTo))
 	if err != nil {
 		return deltaDraft{}, err
 	}
@@ -85,7 +86,7 @@ func (s *singleShot) Delta(
 
 // recall runs one recall over m's scope and window; observations come back first.
 func (s *singleShot) recall(
-	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, window port.SeqRange,
+	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, window store.SeqRange,
 ) ([]domain.Unit, error) {
 	scope := resolveScope(m)
 	req := recall.RecallRequest{

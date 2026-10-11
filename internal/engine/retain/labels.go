@@ -3,7 +3,7 @@ package retain
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 )
 
@@ -14,8 +14,8 @@ type LabelResolver interface {
 	// "key:field"), upserts one label entity per (key, value) and returns their ids plus the "key:value"
 	// tags of labels declared with write_to_tags, to add to the unit's tags. Undeclared labels are dropped.
 	Resolve(
-		ctx context.Context, tx port.Tx, b port.BankRef, defs []domain.EntityLabel, labels []domain.Label,
-	) ([]port.EntityID, []string, error)
+		ctx context.Context, tx store.Tx, b domain.BankRef, defs []domain.EntityLabel, labels []domain.Label,
+	) ([]domain.EntityID, []string, error)
 }
 
 // labelResolver is the LabelResolver over EntityRepo.
@@ -28,9 +28,9 @@ func NewLabelResolver() LabelResolver { return &labelResolver{} }
 
 // Resolve implements LabelResolver.
 func (*labelResolver) Resolve(
-	ctx context.Context, tx port.Tx, b port.BankRef, defs []domain.EntityLabel, labels []domain.Label,
-) ([]port.EntityID, []string, error) {
-	var ids []port.EntityID
+	ctx context.Context, tx store.Tx, b domain.BankRef, defs []domain.EntityLabel, labels []domain.Label,
+) ([]domain.EntityID, []string, error) {
+	var ids []domain.EntityID
 	var tags []string
 	seen := map[string]bool{}
 	for _, l := range labels {

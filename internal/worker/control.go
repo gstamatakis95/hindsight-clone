@@ -4,38 +4,40 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // OperationControl implements cancel and retry on top of the operations table.
 type OperationControl interface {
 	// Cancel marks a pending or processing operation CANCELLED (a running handler stops at its next
 	// checkpoint); a terminal one, and any delete_bank, is domain.ErrFailedPrecondition.
-	Cancel(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
+	Cancel(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
 	// Retry re-queues a FAILED or CANCELLED operation as PENDING; any other status is
 	// domain.ErrFailedPrecondition, and so is an operation other than delete_bank on a bank being deleted
 	// (domain.ErrBankDeleting).
-	Retry(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
+	Retry(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
 }
 
 // operationControl implements OperationControl with one short transaction per call.
 type operationControl struct {
-	s port.Store
+	s store.DB
 }
 
 var _ OperationControl = (*operationControl)(nil)
 
 // NewOperationControl returns an OperationControl over s.
-func NewOperationControl(s port.Store) OperationControl {
+func NewOperationControl(s store.DB) OperationControl {
 	return &operationControl{s: s}
 }
 
 // Cancel cancels through Queue.Cancel: a pending row becomes CANCELLED at once; a processing row records
 // the request and becomes CANCELLED when its handler stops (decision 012, R8'). A delete_bank can't be
 // cancelled: the bank is already tombstoned, and a stopped delete would leave it so (decision 2001).
-func (o *operationControl) Cancel(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+func (o *operationControl) Cancel(
+	ctx context.Context, b domain.BankRef, id domain.OperationID,
+) (domain.Operation, error) {
 	var op domain.Operation
-	err := o.s.InTx(ctx, func(tx port.Tx) error {
+	err := o.s.InTx(ctx, func(tx store.Tx) error {
 		cur, err := tx.Queue().Get(ctx, b, id)
 		if err != nil {
 			return err
@@ -52,9 +54,11 @@ func (o *operationControl) Cancel(ctx context.Context, b port.BankRef, id port.O
 // Retry re-queues through Queue.Retry (PENDING, run_at = now, attempt reset). On a bank being deleted only
 // delete_bank may be retried (that resumes the delete); any other job would only be skipped by claims and
 // removed with the bank, so it is refused like every other write to a deleting bank.
-func (o *operationControl) Retry(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+func (o *operationControl) Retry(
+	ctx context.Context, b domain.BankRef, id domain.OperationID,
+) (domain.Operation, error) {
 	var op domain.Operation
-	err := o.s.InTx(ctx, func(tx port.Tx) error {
+	err := o.s.InTx(ctx, func(tx store.Tx) error {
 		cur, err := tx.Queue().Get(ctx, b, id)
 		if err != nil {
 			return err

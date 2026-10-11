@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 )
 
@@ -22,7 +22,7 @@ func (e *batchError) Unwrap() error { return e.err }
 
 // batch decides ids in scope i and applies the decision. A failed call halves the batch; a unit failing
 // alone is deferred, and the caller settles it once the top-level batch is done (decision 1002).
-func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []port.UnitID) error {
+func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []domain.UnitID) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -44,7 +44,7 @@ func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []por
 // attempt decides ids outside any transaction, then applies the decision and stamps the units whose last
 // scope this is in one short transaction. It returns the call's *batchError when CONSOLIDATE failed, and
 // any other error as err.
-func (r *run) attempt(ctx context.Context, i int, cfg domain.BankConfig, ids []port.UnitID) (*batchError, error) {
+func (r *run) attempt(ctx context.Context, i int, cfg domain.BankConfig, ids []domain.UnitID) (*batchError, error) {
 	w := r.scopes[i]
 	facts := make([]domain.Unit, 0, len(ids))
 	for _, id := range ids {
@@ -60,7 +60,7 @@ func (r *run) attempt(ctx context.Context, i int, cfg domain.BankConfig, ids []p
 		r.lastErr = be.err
 		return be, nil
 	}
-	var stamp []port.UnitID
+	var stamp []domain.UnitID
 	for _, id := range ids {
 		if r.last[id] == i {
 			stamp = append(stamp, id)
@@ -87,12 +87,12 @@ func (r *run) attempt(ctx context.Context, i int, cfg domain.BankConfig, ids []p
 
 // recordCited adds scope s to the cited scopes of each of ids, the facts an observation this run wrote in s
 // cites, so later stamps re-check that s still cites them (decision 1801).
-func (r *run) recordCited(s port.ScopeKey, ids []port.UnitID) {
+func (r *run) recordCited(s domain.ScopeKey, ids []domain.UnitID) {
 	for _, id := range ids {
 		if _, planned := r.units[id]; !planned {
 			continue
 		}
-		if !slices.ContainsFunc(r.cited[id], func(k port.ScopeKey) bool { return k.String() == s.String() }) {
+		if !slices.ContainsFunc(r.cited[id], func(k domain.ScopeKey) bool { return k.String() == s.String() }) {
 			r.cited[id] = append(r.cited[id], s)
 		}
 	}
@@ -122,9 +122,9 @@ func (r *run) settle(ctx context.Context, i int, cfg domain.BankConfig) error {
 			domain.ErrUnavailable, deferred, err, r.lastErr)
 	}
 	r.deferred = nil
-	var poison []port.UnitID
+	var poison []domain.UnitID
 	for _, id := range deferred {
-		be, err := r.attempt(ctx, i, cfg, []port.UnitID{id})
+		be, err := r.attempt(ctx, i, cfg, []domain.UnitID{id})
 		if err != nil {
 			return err
 		}
@@ -141,10 +141,10 @@ func (r *run) settle(ctx context.Context, i int, cfg domain.BankConfig) error {
 // park stamps consolidation_failed_at on those of ids still unchanged since the plan, so they no longer
 // block the bank. It takes tx.Seq first, like apply, so no edit can slip between the re-read and the
 // stamp; a unit edited or retagged meanwhile is left for the next run instead.
-func (r *run) park(ctx context.Context, ids []port.UnitID) error {
+func (r *run) park(ctx context.Context, ids []domain.UnitID) error {
 	at := r.c.d.Clock.Now()
-	var parked []port.UnitID
-	err := r.c.d.Store.InTx(ctx, func(tx port.Tx) error {
+	var parked []domain.UnitID
+	err := r.c.d.Store.InTx(ctx, func(tx store.Tx) error {
 		parked = nil
 		if _, err := tx.Seq(ctx, r.job.Bank); err != nil {
 			return fmt.Errorf("seq: %w", err)

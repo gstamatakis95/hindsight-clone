@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"strings"
 	"time"
 
@@ -95,15 +94,15 @@ func checkName(what, v string) error {
 }
 
 // bankRef builds the BankRef of a request from the context's tenant and the request's bank id.
-func bankRef(ctx context.Context, bankID string) (port.BankRef, error) {
+func bankRef(ctx context.Context, bankID string) (domain.BankRef, error) {
 	tenant := TenantFrom(ctx)
 	if err := checkName("tenant", tenant); err != nil {
-		return port.BankRef{}, err
+		return domain.BankRef{}, err
 	}
 	if err := checkName("bank_id", bankID); err != nil {
-		return port.BankRef{}, err
+		return domain.BankRef{}, err
 	}
-	return port.BankRef{Tenant: tenant, Bank: bankID}, nil
+	return domain.BankRef{Tenant: tenant, Bank: bankID}, nil
 }
 
 // requireID rejects an empty id field.

@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -59,14 +60,14 @@ type refreshDecision struct {
 // scheduler is the RefreshScheduler.
 type scheduler struct {
 	detect ChangeDetector
-	config port.ConfigResolver
+	config config.Resolver
 }
 
 var _ RefreshScheduler = (*scheduler)(nil)
 
 // NewRefreshScheduler returns the RefreshScheduler. Call Decide outside any transaction (it reads config
 // and the change detector).
-func NewRefreshScheduler(d ChangeDetector, c port.ConfigResolver) RefreshScheduler {
+func NewRefreshScheduler(d ChangeDetector, c config.Resolver) RefreshScheduler {
 	return &scheduler{detect: d, config: c}
 }
 
@@ -122,7 +123,7 @@ func dueAt(m domain.MentalModel, cfg domain.BankConfig, now time.Time) (time.Tim
 // Queue.Upgrade keeps a queued row's value unless a joiner sets it (force_full is OR-ed).
 type RefreshPayload struct {
 	// MentalModelID is the model refreshed.
-	MentalModelID port.MentalModelID `json:"mental_model_id"`
+	MentalModelID domain.MentalModelID `json:"mental_model_id"`
 	// ForceFull rewrites in full even when delta mode would apply.
 	ForceFull bool `json:"force_full,omitempty"`
 	// Strategy overrides the trigger's strategy for this refresh.
@@ -134,9 +135,9 @@ type RefreshPayload struct {
 // RefreshRequest asks for one refresh of a model.
 type RefreshRequest struct {
 	// Bank owns the model.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// ID is the model refreshed.
-	ID port.MentalModelID
+	ID domain.MentalModelID
 	// Manual marks a user request: it ignores the interval floor, releases a parked refresh and, on
 	// success, clears auto_refresh_paused.
 	Manual bool
@@ -151,15 +152,15 @@ type RefreshRequest struct {
 }
 
 // SerialKey is the refresh_mental_model serial key of model id: refreshes of one model never overlap.
-func SerialKey(id port.MentalModelID) string { return "mm:" + string(id) }
+func SerialKey(id domain.MentalModelID) string { return "mm:" + string(id) }
 
 // EnqueueRefresh queues req's refresh in tx, or joins the model's queued (PENDING) refresh and upgrades
 // it: force_full OR-ed, strategy and overrides replaced when given, manual set. A manual request also
 // releases a parked refresh (run_at = now). joined reports a join. The caller calls tx.Seq(req.Bank)
 // first (the Seq-before-Enqueue lock order).
 func EnqueueRefresh(
-	ctx context.Context, tx port.Tx, req RefreshRequest, now time.Time,
-) (id port.OperationID, joined bool, err error) {
+	ctx context.Context, tx store.Tx, req RefreshRequest, now time.Time,
+) (id domain.OperationID, joined bool, err error) {
 	payload, err := json.Marshal(RefreshPayload{
 		MentalModelID: req.ID, ForceFull: req.ForceFull, Strategy: req.Strategy, Manual: req.Manual,
 	})
@@ -170,9 +171,9 @@ func EnqueueRefresh(
 	if req.Manual || runAt.IsZero() {
 		runAt = now
 	}
-	id, joined, err = tx.Queue().Enqueue(ctx, port.Job{
+	id, joined, err = tx.Queue().Enqueue(ctx, store.Job{
 		Bank: req.Bank, Kind: domain.OperationKindRefreshMentalModel, SerialKey: SerialKey(req.ID),
-		Payload: payload, Overrides: req.Overrides, RunAt: runAt, Dedupe: port.DedupePending,
+		Payload: payload, Overrides: req.Overrides, RunAt: runAt, Dedupe: store.DedupePending,
 	})
 	if err != nil || !joined {
 		return id, joined, err

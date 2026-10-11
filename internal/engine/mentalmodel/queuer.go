@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // RefreshQueuer queues one model's automatic refresh inside the caller's transaction. It implements
@@ -16,23 +17,23 @@ type RefreshQueuer interface {
 	// tx.Seq(b). A paused model, or one that is gone (deleted meanwhile), is skipped and returns ("", nil).
 	// A model never refreshed yet (no last_refreshed_at) is due now and runs in full; otherwise the
 	// refresh is parked for the debounce or the interval floor.
-	QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
+	QueueRefresh(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID) (domain.OperationID, error)
 }
 
 // refreshQueuer is the RefreshQueuer. It reads only through tx: no config resolver (which opens its own
 // transaction) and no change detector, so the debounce and floor come from the model's overrides, then
 // the bank's own config, then the defaults (decision 1204).
-type refreshQueuer struct{ clock port.Clock }
+type refreshQueuer struct{ clock clock.Clock }
 
 var _ RefreshQueuer = (*refreshQueuer)(nil)
 
 // NewRefreshQueuer returns the in-transaction RefreshQueuer.
-func NewRefreshQueuer(clock port.Clock) RefreshQueuer { return &refreshQueuer{clock: clock} }
+func NewRefreshQueuer(clock clock.Clock) RefreshQueuer { return &refreshQueuer{clock: clock} }
 
 // QueueRefresh applies the pause rule, then parks or runs the refresh now.
 func (q *refreshQueuer) QueueRefresh(
-	ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID,
-) (port.OperationID, error) {
+	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID,
+) (domain.OperationID, error) {
 	m, err := tx.MentalModels().Get(ctx, b, id)
 	if errors.Is(err, domain.ErrNotFound) {
 		return "", nil
@@ -63,7 +64,7 @@ func (q *refreshQueuer) QueueRefresh(
 
 // txConfig is the bank's own config with the model's overrides on top, read in tx (tenant and server
 // levels are left out; dueAt falls back to the defaults).
-func txConfig(ctx context.Context, tx port.Tx, m domain.MentalModel) (domain.BankConfig, error) {
+func txConfig(ctx context.Context, tx store.Tx, m domain.MentalModel) (domain.BankConfig, error) {
 	bank, err := tx.Banks().Get(ctx, m.Bank)
 	if err != nil {
 		return domain.BankConfig{}, fmt.Errorf("mentalmodel: bank config: %w", err)

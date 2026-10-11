@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"memd/internal/adapter/postgres"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
 	"memd/internal/engine/retain"
-	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres"
+	"memd/internal/store/postgres/pgtest"
 	"memd/internal/worker"
 	"slices"
 	"testing"
@@ -24,25 +24,25 @@ import (
 )
 
 // hBank is the bank the handler tests use.
-var hBank = port.BankRef{Tenant: "t", Bank: "b"}
+var hBank = domain.BankRef{Tenant: "t", Bank: "b"}
 
 // capture is a worker.JobRunner that records the registered handlers.
-type capture map[port.JobKind]worker.Handler
+type capture map[domain.OperationKind]worker.Handler
 
-func (c capture) Handle(kind port.JobKind, h worker.Handler) { c[kind] = h }
-func (c capture) Run(context.Context) error                  { return nil }
+func (c capture) Handle(kind domain.OperationKind, h worker.Handler) { c[kind] = h }
+func (c capture) Run(context.Context) error                          { return nil }
 
 // handlerEnv is a store over the test's database with hBank created, and a clock frozen at the start.
 type handlerEnv struct {
-	store *postgres.Store
-	clock *fake.Clock
+	store *postgres.DB
+	clock *clock.Manual
 }
 
 func newHandlerEnv(t *testing.T) handlerEnv {
 	t.Helper()
-	clock := fake.NewClock(time.Now().UTC().Truncate(time.Microsecond))
+	clock := clock.NewManual(time.Now().UTC().Truncate(time.Microsecond))
 	s := pgtest.NewStore(t)
-	if err := s.InTx(t.Context(), func(tx port.Tx) error {
+	if err := s.InTx(t.Context(), func(tx store.Tx) error {
 		_, err := tx.Banks().Ensure(t.Context(), hBank)
 		return err
 	}); err != nil {
@@ -60,12 +60,12 @@ func (e handlerEnv) register(h worker.Handlers) capture {
 }
 
 // ops lists the bank's operations of kind, newest first.
-func (e handlerEnv) ops(t *testing.T, kind port.JobKind) []domain.Operation {
+func (e handlerEnv) ops(t *testing.T, kind domain.OperationKind) []domain.Operation {
 	t.Helper()
 	var out []domain.Operation
-	if err := e.store.InTx(t.Context(), func(tx port.Tx) error {
+	if err := e.store.InTx(t.Context(), func(tx store.Tx) error {
 		var err error
-		out, _, err = tx.Queue().List(t.Context(), hBank, port.OperationFilter{Kind: kind, PageSize: 100})
+		out, _, err = tx.Queue().List(t.Context(), hBank, store.OperationFilter{Kind: kind, PageSize: 100})
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func (e handlerEnv) ops(t *testing.T, kind port.JobKind) []domain.Operation {
 func TestRegisterEveryKindButRetainBatch(t *testing.T) {
 	e := newHandlerEnv(t)
 	c := e.register(worker.Handlers{})
-	for _, k := range []port.JobKind{
+	for _, k := range []domain.OperationKind{
 		domain.OperationKindRetainDocument, domain.OperationKindConsolidate, domain.OperationKindRefreshMentalModel,
 		domain.OperationKindDeleteBank, domain.OperationKindRederiveMemory, domain.OperationKindRetagDocument,
 		domain.OperationKindGraphMaintenance,
@@ -87,7 +87,7 @@ func TestRegisterEveryKindButRetainBatch(t *testing.T) {
 		if !ok {
 			t.Fatalf("no handler for %s", k)
 		}
-		if err := h(t.Context(), port.Job{Bank: hBank, Kind: k}); !errors.Is(err, worker.ErrPermanent) {
+		if err := h(t.Context(), store.Job{Bank: hBank, Kind: k}); !errors.Is(err, worker.ErrPermanent) {
 			t.Errorf("%s with no engine: %v, want ErrPermanent", k, err)
 		}
 	}
@@ -101,11 +101,11 @@ func TestRegisterEveryKindButRetainBatch(t *testing.T) {
 func TestConsolidateHandlerNeverReenqueuesOnMore(t *testing.T) {
 	e := newHandlerEnv(t)
 	c := e.register(worker.Handlers{Consolidator: &mockconsolidate.Consolidator{
-		RunFunc: func(context.Context, port.Job) (consolidate.ConsolidationResult, error) {
+		RunFunc: func(context.Context, store.Job) (consolidate.ConsolidationResult, error) {
 			return consolidate.ConsolidationResult{Processed: 100, More: true}, nil
 		},
 	}})
-	if err := c[domain.OperationKindConsolidate](t.Context(), port.Job{Bank: hBank}); err != nil {
+	if err := c[domain.OperationKindConsolidate](t.Context(), store.Job{Bank: hBank}); err != nil {
 		t.Fatal(err)
 	}
 	if ops := e.ops(t, domain.OperationKindConsolidate); len(ops) != 0 {
@@ -119,9 +119,9 @@ func TestDeleteBankReenqueuesUntilDone(t *testing.T) {
 	e := newHandlerEnv(t)
 	done := false
 	c := e.register(worker.Handlers{Deleter: &mockbank.BankDeleter{
-		RunFunc: func(context.Context, port.Job) (bool, error) { return done, nil },
+		RunFunc: func(context.Context, store.Job) (bool, error) { return done, nil },
 	}})
-	job := port.Job{Bank: hBank, Kind: domain.OperationKindDeleteBank, Payload: json.RawMessage(`{}`)}
+	job := store.Job{Bank: hBank, Kind: domain.OperationKindDeleteBank, Payload: json.RawMessage(`{}`)}
 	for range 2 {
 		if err := c[domain.OperationKindDeleteBank](t.Context(), job); err != nil {
 			t.Fatal(err)
@@ -157,9 +157,9 @@ func TestDeleteBankRetriesWithoutAttemptCap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newHandlerEnv(t)
 			c := e.register(worker.Handlers{Deleter: &mockbank.BankDeleter{
-				RunFunc: func(context.Context, port.Job) (bool, error) { return false, tc.err },
+				RunFunc: func(context.Context, store.Job) (bool, error) { return false, tc.err },
 			}})
-			job := port.Job{Bank: hBank, Kind: domain.OperationKindDeleteBank, Attempt: tc.attempt}
+			job := store.Job{Bank: hBank, Kind: domain.OperationKindDeleteBank, Attempt: tc.attempt}
 			err := c[domain.OperationKindDeleteBank](t.Context(), job)
 			if !errors.Is(err, tc.err) {
 				t.Fatalf("error %v, want %v", err, tc.err)
@@ -182,10 +182,10 @@ func TestGraphHandlerReenqueuesAndRechecks(t *testing.T) {
 	e := newHandlerEnv(t)
 	done := false
 	c := e.register(worker.Handlers{Graph: &mockmaintenance.GraphMaintainer{
-		RunFunc: func(context.Context, port.BankRef, time.Duration) (bool, error) { return done, nil },
+		RunFunc: func(context.Context, domain.BankRef, time.Duration) (bool, error) { return done, nil },
 	}})
 	h := c[domain.OperationKindGraphMaintenance]
-	job := port.Job{Bank: hBank, Kind: domain.OperationKindGraphMaintenance}
+	job := store.Job{Bank: hBank, Kind: domain.OperationKindGraphMaintenance}
 	if err := h(t.Context(), job); err != nil {
 		t.Fatal(err)
 	}
@@ -215,9 +215,9 @@ func pending(ops []domain.Operation) []domain.Operation {
 }
 
 // drain claims and completes every due job of kind.
-func (e handlerEnv) drain(t *testing.T, kind port.JobKind) {
+func (e handlerEnv) drain(t *testing.T, kind domain.OperationKind) {
 	t.Helper()
-	jobs, err := e.store.Claim(t.Context(), "w", []port.JobKind{kind}, 100)
+	jobs, err := e.store.Claim(t.Context(), "w", []domain.OperationKind{kind}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +242,7 @@ func (e handlerEnv) dirtyNeighbour(t *testing.T) {
 		ID: "22222222-2222-2222-2222-222222222222", Bank: hBank, Type: domain.FactTypeWorld,
 		Text: "b", Embedding: vec,
 	}
-	if err := e.store.InTx(ctx, func(tx port.Tx) error {
+	if err := e.store.InTx(ctx, func(tx store.Tx) error {
 		seq, err := tx.Seq(ctx, hBank)
 		if err != nil {
 			return err
@@ -258,7 +258,7 @@ func (e handlerEnv) dirtyNeighbour(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.store.InTx(ctx, func(tx port.Tx) error {
+	if err := e.store.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Seq(ctx, hBank); err != nil {
 			return err
 		}
@@ -268,8 +268,9 @@ func (e handlerEnv) dirtyNeighbour(t *testing.T) {
 	}
 }
 
-// strandedSource is a worker.StrandedFactSource returning fixed units.
+// strandedSource is a store.Maintenance whose StrandedFacts returns fixed units.
 type strandedSource struct {
+	store.Maintenance
 	units []domain.Unit
 	after time.Duration
 }
@@ -293,9 +294,9 @@ func TestMaintenanceRederivesStrandedFacts(t *testing.T) {
 			Claimer: e.store, Store: e.store, Clock: e.clock, Stranded: src, Interval: time.Hour,
 		})
 	}()
-	var jobs []port.Job
+	var jobs []store.Job
 	for deadline := time.Now().Add(5 * time.Second); len(jobs) < 2 && time.Now().Before(deadline); {
-		got, err := e.store.Claim(t.Context(), "w", []port.JobKind{domain.OperationKindRederiveMemory}, 10)
+		got, err := e.store.Claim(t.Context(), "w", []domain.OperationKind{domain.OperationKindRederiveMemory}, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -327,10 +328,10 @@ func TestMaintenanceRederivesStrandedFacts(t *testing.T) {
 // EXTRACT usage land on the operation row.
 func TestRetainHandlerReportsUsage(t *testing.T) {
 	e := newHandlerEnv(t)
-	var id port.OperationID
-	if err := e.store.InTx(t.Context(), func(tx port.Tx) error {
+	var id domain.OperationID
+	if err := e.store.InTx(t.Context(), func(tx store.Tx) error {
 		var err error
-		id, _, err = tx.Queue().Enqueue(t.Context(), port.Job{
+		id, _, err = tx.Queue().Enqueue(t.Context(), store.Job{
 			Bank: hBank, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:d", Payload: json.RawMessage(`{}`),
 		})
 		return err
@@ -340,7 +341,7 @@ func TestRetainHandlerReportsUsage(t *testing.T) {
 	usage := domain.Usage{Slot: domain.ModelSlotExtract, Model: "m", InputTokens: 10, OutputTokens: 5}
 	r := worker.NewRunner(e.store, worker.RunnerConfig{PollInterval: 10 * time.Millisecond})
 	worker.Register(r, worker.Handlers{Store: e.store, Retainer: &mockretain.Retainer{
-		ProcessDocumentFunc: func(context.Context, port.Job) (retain.RetainResult, error) {
+		ProcessDocumentFunc: func(context.Context, store.Job) (retain.RetainResult, error) {
 			return retain.RetainResult{DocumentID: "d", UnitsCreated: 3, Usage: []domain.Usage{usage}}, nil
 		},
 	}})
@@ -350,7 +351,7 @@ func TestRetainHandlerReportsUsage(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		var op domain.Operation
-		if err := e.store.InTx(t.Context(), func(tx port.Tx) error {
+		if err := e.store.InTx(t.Context(), func(tx store.Tx) error {
 			var err error
 			op, err = tx.Queue().Get(t.Context(), hBank, id)
 			return err

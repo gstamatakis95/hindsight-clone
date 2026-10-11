@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -27,7 +27,7 @@ type Recaller interface {
 // internal callers (the agentic mental-model refresh).
 type ReflectRequest struct { //nolint:revive // stutter: name fixed by the spec and the proto message it mirrors
 	// Bank is the bank reflected over.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Query is the question.
 	Query string
 	// Tags is the tag filter every retrieval tool applies; it also selects tagged directives.
@@ -44,18 +44,18 @@ type ReflectRequest struct { //nolint:revive // stutter: name fixed by the spec 
 	ExtraDirectives []domain.Directive
 	// Include selects what the result carries.
 	Include ReflectInclude
-	// QueryTime is the reference time for relative dates; nil = now (port.Clock).
+	// QueryTime is the reference time for relative dates; nil = now (clock.Clock).
 	QueryTime *time.Time
 	// Overrides are request-level config overrides; nil = none.
 	Overrides *domain.BankConfig
 	// Seq bounds the units every retrieval sees; zero = unbounded. Internal callers only.
-	Seq port.SeqRange
+	Seq store.SeqRange
 	// Types limits fact types for retrieval tools; empty = all. Internal callers only.
 	Types []domain.FactType
 	// ExcludeMentalModels hides every mental model from the page tools. Internal callers only.
 	ExcludeMentalModels bool
 	// ExcludeMentalModelIDs hides specific mental models from the page tools. Internal callers only.
-	ExcludeMentalModelIDs []port.MentalModelID
+	ExcludeMentalModelIDs []domain.MentalModelID
 	// RecallInclude is what the recall tool attaches (chunks, budgets). Internal callers only.
 	RecallInclude domain.RecallInclude
 	// AsDocument asks for a markdown document instead of a conversational answer. Internal callers only.
@@ -96,9 +96,9 @@ type BasedOn struct {
 	// Memories are the cited memory units.
 	Memories []domain.Unit
 	// MentalModelIDs are the cited mental models.
-	MentalModelIDs []port.MentalModelID
+	MentalModelIDs []domain.MentalModelID
 	// DirectiveIDs are the directives applied.
-	DirectiveIDs []port.DirectiveID
+	DirectiveIDs []domain.DirectiveID
 }
 
 // StopReason says why the loop ended.
@@ -125,7 +125,7 @@ type ReflectTrace struct { //nolint:revive // stutter: name fixed by the spec an
 	// StopReason is answered | max_iterations | context_full.
 	StopReason StopReason
 	// DirectiveIDs are the directives rendered into the prompt.
-	DirectiveIDs []port.DirectiveID
+	DirectiveIDs []domain.DirectiveID
 	// DurationMS is the reflect duration.
 	DurationMS int64
 }

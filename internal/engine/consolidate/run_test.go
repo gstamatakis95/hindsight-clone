@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"strings"
 	"testing"
 	"time"
@@ -36,12 +36,12 @@ func TestRunCreateAndUpdateWriteVersionsAndEvidence(t *testing.T) {
 		!strings.Contains(user, `"source_memories":[{"text":"Bob plays chess"}]`) {
 		t.Errorf("the related observation and its source are not shown: %s", user)
 	}
-	got := map[port.UnitID]string{}
+	got := map[domain.UnitID]string{}
 	for _, o := range e.observations() {
-		got[port.UnitID(pgtest.Name(o.ID))] = fmt.Sprintf("%s|v%d|proof %d|%v|%v|new seq %t",
+		got[domain.UnitID(pgtest.Name(o.ID))] = fmt.Sprintf("%s|v%d|proof %d|%v|%v|new seq %t",
 			o.Text, o.Version, o.ProofCount, sortedNames(o.SourceIDs), o.Tags, o.Seq > before)
 	}
-	want := map[port.UnitID]string{
+	want := map[domain.UnitID]string{
 		"obs-chess": "Bob plays chess every Sunday|v2|proof 2|[f0 f1]|[x]|new seq true",
 		"obs-01":    "Carol bakes bread|v1|proof 1|[f2]|[x]|new seq true",
 	}
@@ -52,7 +52,7 @@ func TestRunCreateAndUpdateWriteVersionsAndEvidence(t *testing.T) {
 		t.Fatalf("result %+v", res)
 	}
 	var events []domain.LifecycleEvent
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		var err error
 		events, _, err = tx.Events().List(t.Context(), bank, before, 10, []domain.EventType{
 			domain.EventTypeConsolidationCompleted,
@@ -62,7 +62,7 @@ func TestRunCreateAndUpdateWriteVersionsAndEvidence(t *testing.T) {
 	if len(events) != 1 || pgtest.Name(events[0].OperationID) != "op-1" {
 		t.Fatalf("events = %+v, want one CONSOLIDATION_COMPLETED for op-1", events)
 	}
-	want0 := port.Usage{Slot: domain.ModelSlotConsolidate, Model: "base-model", InputTokens: 10, OutputTokens: 2}
+	want0 := domain.Usage{Slot: domain.ModelSlotConsolidate, Model: "base-model", InputTokens: 10, OutputTokens: 2}
 	if len(res.Usage) != 1 || res.Usage[0] != want0 {
 		t.Fatalf("usage = %+v, want [%+v]", res.Usage, want0)
 	}
@@ -175,7 +175,7 @@ func TestRunManualScopes(t *testing.T) {
 	e.fact("f1", "Gina codes", "a", "b")
 	e.fact("f2", "Hank reads", "c")
 	j := NewJob(bank, []domain.TagSet{{Tags: []string{"A"}}}, nil)
-	if j.Dedupe != port.DedupeNone || string(j.Payload) != `{"scopes":[{"tags":["A"]}]}` {
+	if j.Dedupe != store.DedupeNone || string(j.Payload) != `{"scopes":[{"tags":["A"]}]}` {
 		t.Fatalf("manual job = %+v", j)
 	}
 	e.script(e.createEach("f1"))
@@ -195,14 +195,14 @@ func TestRunManualScopes(t *testing.T) {
 // bank default.
 func TestRunDocumentScopeMode(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
 			Overrides: &domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared}},
 		})
 	})
 	e.texts["f1"] = "Ivy hikes"
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		seq, err := tx.Seq(t.Context(), bank)
 		if err != nil {
 			return err
@@ -223,7 +223,7 @@ func TestRunDocumentScopeMode(t *testing.T) {
 // addModels stores mental models in the store; the run lists them with Reader.ListMentalModels.
 func (e *env) addModels(ms ...domain.MentalModel) {
 	e.t.Helper()
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		for _, m := range ms {
 			if err := tx.MentalModels().Create(e.t.Context(), m); err != nil {
 				return err
@@ -245,7 +245,7 @@ func TestRunTriggersRefreshes(t *testing.T) {
 	floor.MinRefreshIntervalSeconds = ptr(120)
 	model := func(id string, tags []string, tr domain.RefreshTrigger) domain.MentalModel {
 		return domain.MentalModel{
-			Spec: domain.MentalModelSpec{ID: port.MentalModelID(id), Tags: tags, Trigger: tr},
+			Spec: domain.MentalModelSpec{ID: domain.MentalModelID(id), Tags: tags, Trigger: tr},
 			Bank: bank, LastRefreshedAt: &last,
 		}
 	}
@@ -264,7 +264,7 @@ func TestRunTriggersRefreshes(t *testing.T) {
 	e.run(autoJob())
 	got := map[string]time.Time{}
 	e.clock.Advance(time.Hour)
-	jobs, err := e.store.Claim(t.Context(), "w", []port.JobKind{domain.OperationKindRefreshMentalModel}, 100)
+	jobs, err := e.store.Claim(t.Context(), "w", []domain.OperationKind{domain.OperationKindRefreshMentalModel}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

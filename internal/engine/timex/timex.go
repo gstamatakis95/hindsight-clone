@@ -5,8 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"strings"
 	"time"
@@ -21,9 +22,9 @@ const (
 
 // normalizer is the rules-first TimeNormalizer with the TIME_PARSE LLM fallback.
 type normalizer struct {
-	llm    port.LLM
-	router port.ModelRouter
-	clock  port.Clock
+	llm    ai.LLM
+	router *ai.Router
+	clock  clock.Clock
 }
 
 var _ TimeNormalizer = (*normalizer)(nil)
@@ -31,7 +32,7 @@ var _ TimeNormalizer = (*normalizer)(nil)
 // NewNormalizer returns a TimeNormalizer that runs the deterministic rules and falls back to the
 // TIME_PARSE slot (resolved through router per call, run through llm) only when they cannot resolve a
 // cue. clock supplies the reference time when a caller passes a zero ref.
-func NewNormalizer(llm port.LLM, router port.ModelRouter, clock port.Clock) TimeNormalizer {
+func NewNormalizer(llm ai.LLM, router *ai.Router, clock clock.Clock) TimeNormalizer {
 	return &normalizer{llm: llm, router: router, clock: clock}
 }
 
@@ -152,7 +153,7 @@ func (n *normalizer) fallback(ctx context.Context, cfg domain.BankConfig, text, 
 }
 
 // buildRequest renders the time_parse prompts into a structured request.
-func buildRequest(binding domain.ModelBinding, text, kind string, ref time.Time) (port.StructuredRequest, error) {
+func buildRequest(binding domain.ModelBinding, text, kind string, ref time.Time) (ai.StructuredRequest, error) {
 	data := promptData{
 		Reference: ref.Format(time.RFC3339),
 		Weekday:   ref.Weekday().String(),
@@ -162,17 +163,17 @@ func buildRequest(binding domain.ModelBinding, text, kind string, ref time.Time)
 	}
 	system, err := prompts.Render(timeParsePrompt, data)
 	if err != nil {
-		return port.StructuredRequest{}, fmt.Errorf("timex: render system prompt: %w", err)
+		return ai.StructuredRequest{}, fmt.Errorf("timex: render system prompt: %w", err)
 	}
 	user, err := prompts.Render(timeParseUserPrompt, data)
 	if err != nil {
-		return port.StructuredRequest{}, fmt.Errorf("timex: render user prompt: %w", err)
+		return ai.StructuredRequest{}, fmt.Errorf("timex: render user prompt: %w", err)
 	}
 	schema, err := prompts.Schema(timeParsePrompt)
 	if err != nil {
-		return port.StructuredRequest{}, fmt.Errorf("timex: time_parse schema: %w", err)
+		return ai.StructuredRequest{}, fmt.Errorf("timex: time_parse schema: %w", err)
 	}
-	return port.StructuredRequest{
+	return ai.StructuredRequest{
 		Slot:    domain.ModelSlotTimeParse,
 		Binding: binding,
 		Name:    timeParsePrompt,

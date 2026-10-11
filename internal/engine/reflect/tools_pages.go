@@ -5,33 +5,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"slices"
 	"time"
 )
 
 // pageOut is one mental-model page as the page tools show it to the model.
 type pageOut struct {
-	ID           port.MentalModelID `json:"id"`
-	Name         string             `json:"name"`
-	Content      string             `json:"content,omitempty"`
-	Snippet      string             `json:"snippet,omitempty"`
-	ContentChars int                `json:"content_chars,omitempty"`
-	Tags         []string           `json:"tags,omitempty"`
-	Relevance    *float64           `json:"relevance,omitempty"`
-	UpdatedAt    *time.Time         `json:"updated_at,omitempty"`
-	IsStale      bool               `json:"is_stale"`
+	ID           domain.MentalModelID `json:"id"`
+	Name         string               `json:"name"`
+	Content      string               `json:"content,omitempty"`
+	Snippet      string               `json:"snippet,omitempty"`
+	ContentChars int                  `json:"content_chars,omitempty"`
+	Tags         []string             `json:"tags,omitempty"`
+	Relevance    *float64             `json:"relevance,omitempty"`
+	UpdatedAt    *time.Time           `json:"updated_at,omitempty"`
+	IsStale      bool                 `json:"is_stale"`
 }
 
 // visiblePages reads pages by id and keeps those the request may see: not excluded and inside its tag filter.
 func visiblePages(
-	ctx context.Context, pages PageReader, st *agentState, ids []port.MentalModelID,
+	ctx context.Context, pages PageReader, st *agentState, ids []domain.MentalModelID,
 ) ([]domain.MentalModel, error) {
 	req := st.Request
 	if req.ExcludeMentalModels {
 		return nil, nil
 	}
-	ids = slices.DeleteFunc(slices.Clone(ids), func(id port.MentalModelID) bool {
+	ids = slices.DeleteFunc(slices.Clone(ids), func(id domain.MentalModelID) bool {
 		return slices.Contains(req.ExcludeMentalModelIDs, id)
 	})
 	if len(ids) == 0 {
@@ -49,7 +48,7 @@ func visiblePages(
 // rememberPages records retrieved pages in the agent state.
 func rememberPages(st *agentState, ms []domain.MentalModel) {
 	if st.RetrievedModels == nil {
-		st.RetrievedModels = map[port.MentalModelID]struct{}{}
+		st.RetrievedModels = map[domain.MentalModelID]struct{}{}
 	}
 	for _, m := range ms {
 		st.RetrievedModels[m.Spec.ID] = struct{}{}
@@ -94,7 +93,7 @@ func (t *searchPagesTool) Call(ctx context.Context, st *agentState, args json.Ra
 	if err != nil {
 		return retrievalError(ctx, ToolSearchMentalModels, err)
 	}
-	ids := make([]port.MentalModelID, 0, len(hits))
+	ids := make([]domain.MentalModelID, 0, len(hits))
 	for _, h := range hits {
 		ids = append(ids, h.MentalModelID)
 	}
@@ -120,7 +119,7 @@ func (t *searchPagesTool) Call(ctx context.Context, st *agentState, args json.Ra
 }
 
 // findHit returns the search hit for a page.
-func findHit(hits []domain.PageHit, id port.MentalModelID) (domain.PageHit, bool) {
+func findHit(hits []domain.PageHit, id domain.MentalModelID) (domain.PageHit, bool) {
 	for _, h := range hits {
 		if h.MentalModelID == id {
 			return h, true
@@ -181,9 +180,9 @@ func (t *readPagesTool) Call(ctx context.Context, st *agentState, args json.RawM
 	if !ok || len(raw) == 0 {
 		return malformed("read_mental_models requires mental_model_ids"), nil
 	}
-	ids := make([]port.MentalModelID, 0, len(raw))
+	ids := make([]domain.MentalModelID, 0, len(raw))
 	for _, id := range raw {
-		ids = append(ids, port.MentalModelID(id))
+		ids = append(ids, domain.MentalModelID(id))
 	}
 	ms, err := visiblePages(ctx, t.pages, st, ids)
 	if err != nil {
@@ -191,7 +190,7 @@ func (t *readPagesTool) Call(ctx context.Context, st *agentState, args json.RawM
 	}
 	budget := tokenArg(a.MaxTokens, defaultReadPagesMaxTokens)
 	var read []domain.MentalModel
-	var notRead []port.MentalModelID
+	var notRead []domain.MentalModelID
 	used := 0
 	for _, id := range ids {
 		i := slices.IndexFunc(ms, func(m domain.MentalModel) bool { return m.Spec.ID == id })

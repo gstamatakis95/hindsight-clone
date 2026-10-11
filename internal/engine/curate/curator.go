@@ -2,8 +2,10 @@ package curate
 
 import (
 	"context"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -11,16 +13,16 @@ import (
 type Curator interface {
 	// Update rejects observations; writes an audit row; returns the rederive operation id (empty for
 	// invalidate).
-	Update(ctx context.Context, req UpdateMemoryRequest) (domain.Unit, port.OperationID, error)
+	Update(ctx context.Context, req UpdateMemoryRequest) (domain.Unit, domain.OperationID, error)
 }
 
 // UpdateMemoryRequest mirrors memory.v1.UpdateMemoryRequest with domain types. Unset fields are left
 // unchanged; State = invalidated archives the unit and State = valid restores an archived one.
 type UpdateMemoryRequest struct {
 	// Bank owns the unit.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// ID is the unit to curate (a fact; observations are rejected).
-	ID port.UnitID
+	ID domain.UnitID
 	// Text replaces the unit text; nil = unchanged.
 	Text *string
 	// Context replaces the unit context; nil = unchanged.
@@ -45,12 +47,12 @@ type UpdateMemoryRequest struct {
 	Overrides *domain.BankConfig
 }
 
-// CitingModels finds the mental models whose source_ids cite units. It is the port.Reader method;
-// port.Reader satisfies it.
+// CitingModels finds the mental models whose source_ids cite units. It is the store.Reader method;
+// store.Reader satisfies it.
 type CitingModels interface {
 	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids, ordered by id.
 	// It is id-keyed: an unknown bank has none (empty, no error).
-	ModelsCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error)
+	ModelsCiting(ctx context.Context, b domain.BankRef, ids []domain.UnitID) ([]domain.MentalModelID, error)
 }
 
 // RefreshQueuer enqueues mental-model refreshes; the mental-model engine (WP-12) owns the refresh payload
@@ -58,23 +60,23 @@ type CitingModels interface {
 type RefreshQueuer interface {
 	// QueueRefresh enqueues (or joins) a refresh of model id of bank b inside tx and returns its operation
 	// id. The caller has already called tx.Seq(b).
-	QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
+	QueueRefresh(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID) (domain.OperationID, error)
 }
 
-// UnitGetter reads one unit, live or archived. It is UnitSource.GetUnit (a port.Reader method); for an
+// UnitGetter reads one unit, live or archived. It is UnitSource.GetUnit (a store.Reader method); for an
 // archived unit, Entities are the names in its archive snapshot, even when the entity
 // rows were pruned since.
 type UnitGetter interface {
 	// GetUnit returns one unit of b, live or archived; unknown = domain.ErrNotFound.
-	GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+	GetUnit(ctx context.Context, b domain.BankRef, id domain.UnitID) (domain.Unit, error)
 }
 
 // CuratorDeps are the Curator's dependencies.
 type CuratorDeps struct {
 	// Store opens the RPC's transaction.
-	Store port.Store
+	Store store.DB
 	// Clock stamps edited_at, audit rows and events.
-	Clock port.Clock
+	Clock clock.Clock
 	// Citing finds the models an invalidate must refresh.
 	Citing CitingModels
 	// Refresh enqueues those refreshes in the invalidate's transaction.
@@ -83,7 +85,7 @@ type CuratorDeps struct {
 	// nil rejects such requests with domain.ErrFailedPrecondition.
 	Resolver EntityResolver
 	// Config resolves the entity match threshold (with the request overrides) before the transaction.
-	Config port.ConfigResolver
+	Config config.Resolver
 	// Archived reads an archived unit's snapshot entity names before a restore, so the rederive re-creates
 	// entities graph maintenance pruned meanwhile; nil = rely on the entities Restore reattaches.
 	Archived UnitGetter

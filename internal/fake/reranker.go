@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"memd/internal/port"
+	"memd/internal/ai"
+	"memd/internal/domain"
 	"slices"
 	"sync"
 )
@@ -12,7 +13,7 @@ import (
 // RerankCall records one Reranker call.
 type RerankCall struct {
 	// Binding is the binding the caller passed.
-	Binding port.ModelBinding
+	Binding domain.ModelBinding
 	// Query is the query text.
 	Query string
 	// Docs are the documents, in order.
@@ -22,7 +23,7 @@ type RerankCall struct {
 // rerankPair keys a scripted (query, doc) score.
 type rerankPair struct{ query, doc string }
 
-// Reranker is a scriptable port.Reranker. Each doc's raw score is, in order of precedence: the SetScore
+// Reranker is a scriptable ai.Reranker. Each doc's raw score is, in order of precedence: the SetScore
 // score for the exact (query, doc); else the SetDocScore score for doc; else SetFunc's function; else the
 // default, the fraction of the query's distinct lowercase tokens (runs of letters and digits) that appear
 // in doc, in [0,1] (0 for a query with no tokens). Like the production adapter, if any raw score is
@@ -38,7 +39,7 @@ type Reranker struct {
 	calls []RerankCall
 }
 
-var _ port.Reranker = (*Reranker)(nil)
+var _ ai.Reranker = (*Reranker)(nil)
 
 // NewReranker returns a Reranker with no scripted scores, scoring by token overlap.
 func NewReranker() *Reranker {
@@ -87,7 +88,7 @@ func (r *Reranker) Calls() []RerankCall {
 }
 
 // Rerank scores each doc against query, one score per doc in order (see Reranker for the rules).
-func (r *Reranker) Rerank(ctx context.Context, b port.ModelBinding, query string, docs []string) ([]float32, error) {
+func (r *Reranker) Rerank(ctx context.Context, b domain.ModelBinding, query string, docs []string) ([]float32, error) {
 	scores, fn, err := r.scripted(ctx, RerankCall{Binding: b, Query: query, Docs: slices.Clone(docs)})
 	if err != nil {
 		return nil, err

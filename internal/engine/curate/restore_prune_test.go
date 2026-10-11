@@ -3,7 +3,7 @@ package curate
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
@@ -11,7 +11,7 @@ import (
 type archivedStub struct{ u domain.Unit }
 
 // GetUnit returns the snapshot for its id, else domain.ErrNotFound.
-func (s archivedStub) GetUnit(_ context.Context, _ port.BankRef, id port.UnitID) (domain.Unit, error) {
+func (s archivedStub) GetUnit(_ context.Context, _ domain.BankRef, id domain.UnitID) (domain.Unit, error) {
 	if id != s.u.ID {
 		return domain.Unit{}, domain.ErrNotFound
 	}
@@ -24,7 +24,7 @@ func (s archivedStub) GetUnit(_ context.Context, _ port.BankRef, id port.UnitID)
 func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 	e := newEnv(t)
 	e.invalidate(e.curator())
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		ids, err := tx.Entities().PendingMaintenance(e.ctx, testBank, 100)
 		if err != nil {
 			return err

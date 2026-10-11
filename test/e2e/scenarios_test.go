@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"memd/internal/blob"
 	"memd/internal/domain"
 	"memd/test/e2e/gatewayemu"
 	"strings"
@@ -420,7 +421,7 @@ func (e *env) bankDelete(t *testing.T) {
 	const bank = "sc-delete"
 	e.retain(t, bank, aliceDoc, aliceText)
 	e.idle(t, bank)
-	prefix := domain.BankBlobPrefix(domain.BankRef{Tenant: e2eTenant, Bank: bank})
+	prefix := blob.BankPrefix(domain.BankRef{Tenant: e2eTenant, Bank: bank})
 	if keys := e.blobKeys(t, prefix); len(keys) == 0 {
 		t.Fatalf("no blob under %q after a retain", prefix)
 	}

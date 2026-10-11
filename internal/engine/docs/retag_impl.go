@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // Serial keys and payloads of the jobs the retagger enqueues (decision 1301).
@@ -21,14 +21,14 @@ const (
 
 // retagger implements Retagger over the ports.
 type retagger struct {
-	s port.Store
+	s store.DB
 }
 
 var _ Retagger = (*retagger)(nil)
 
 // NewRetagger returns the Retagger: Retag is UpdateDocument's API side, Apply the retag_document job. It
 // uses the ports directly (UnitRepo.SetDocumentTags, EvidenceRepo.DeleteCiting), see decision 1307.
-func NewRetagger(s port.Store) Retagger {
+func NewRetagger(s store.DB) Retagger {
 	return &retagger{s: s}
 }
 
@@ -40,11 +40,11 @@ func NewRetagger(s port.Store) Retagger {
 // and only then writes: the document's tags and, in the same transaction, its units' document-derived tags
 // (old to new; their label tags stay, decision 1900).
 func (r *retagger) Retag(
-	ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string,
-) (port.OperationID, error) {
+	ctx context.Context, b domain.BankRef, doc domain.DocumentID, tags []string,
+) (domain.OperationID, error) {
 	want := domain.NormalizeTags(tags)
-	var id port.OperationID
-	err := r.s.InTx(ctx, func(tx port.Tx) error {
+	var id domain.OperationID
+	err := r.s.InTx(ctx, func(tx store.Tx) error {
 		id = ""
 		bank, err := tx.Banks().Get(ctx, b)
 		if err != nil {
@@ -82,7 +82,9 @@ func (r *retagger) Retag(
 
 // retryFailedRetag re-enqueues retag_document for doc (tags unchanged) when the document's newest retag
 // operation ended FAILED or CANCELLED, and returns its id; otherwise it is the no-op and returns "".
-func retryFailedRetag(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (port.OperationID, error) {
+func retryFailedRetag(
+	ctx context.Context, tx store.Tx, b domain.BankRef, doc domain.DocumentID,
+) (domain.OperationID, error) {
 	failed, err := lastRetagFailed(ctx, tx, b, doc)
 	if err != nil || !failed {
 		return "", err
@@ -95,9 +97,9 @@ func retryFailedRetag(ctx context.Context, tx port.Tx, b port.BankRef, doc port.
 
 // lastRetagFailed reports whether doc's newest retag_document operation ended FAILED or CANCELLED (false
 // when it has none). It pages the bank's retag operations newest first until it finds one of doc.
-func lastRetagFailed(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (bool, error) {
+func lastRetagFailed(ctx context.Context, tx store.Tx, b domain.BankRef, doc domain.DocumentID) (bool, error) {
 	key := docSerialPrefix + string(doc)
-	f := port.OperationFilter{Kind: domain.OperationKindRetagDocument, PageSize: 100}
+	f := store.OperationFilter{Kind: domain.OperationKindRetagDocument, PageSize: 100}
 	for {
 		ops, next, err := tx.Queue().List(ctx, b, f)
 		if err != nil {
@@ -118,8 +120,8 @@ func lastRetagFailed(ctx context.Context, tx port.Tx, b port.BankRef, doc port.D
 // enqueueRetag stores the document's new tags, replaces the document-derived tags of its units (oldTags,
 // read under tx.Seq, become newTags; label tags stay) and enqueues (or joins) its retag_document job.
 func enqueueRetag(
-	ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, oldTags, newTags []string, seq int64,
-) (port.OperationID, error) {
+	ctx context.Context, tx store.Tx, b domain.BankRef, doc domain.DocumentID, oldTags, newTags []string, seq int64,
+) (domain.OperationID, error) {
 	if err := tx.Documents().SetTags(ctx, b, doc, newTags); err != nil {
 		return "", err
 	}
@@ -130,14 +132,16 @@ func enqueueRetag(
 }
 
 // enqueueRetagJob enqueues (or joins, DedupePending) doc's retag_document job.
-func enqueueRetagJob(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) (port.OperationID, error) {
+func enqueueRetagJob(
+	ctx context.Context, tx store.Tx, b domain.BankRef, doc domain.DocumentID,
+) (domain.OperationID, error) {
 	payload, err := json.Marshal(RetagPayload{DocumentID: doc})
 	if err != nil {
 		return "", fmt.Errorf("retag payload: %w", err)
 	}
-	id, _, err := tx.Queue().Enqueue(ctx, port.Job{
+	id, _, err := tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindRetagDocument, SerialKey: docSerialPrefix + string(doc),
-		Payload: payload, Dedupe: port.DedupePending,
+		Payload: payload, Dedupe: store.DedupePending,
 	})
 	return id, err
 }
@@ -148,7 +152,7 @@ func enqueueRetagJob(ctx context.Context, tx port.Tx, b port.BankRef, doc port.D
 // when observations were deleted. A document that is gone is a
 // no-op; a gone bank (domain.ErrNotFound) or a tombstoned one (domain.ErrBankDeleting) fails from Tx.Seq,
 // and an error after ctx ended is domain.ErrCancelled. It never creates a bank.
-func (r *retagger) Apply(ctx context.Context, j port.Job) error {
+func (r *retagger) Apply(ctx context.Context, j store.Job) error {
 	var p RetagPayload
 	if err := json.Unmarshal(j.Payload, &p); err != nil {
 		return fmt.Errorf("%w: retag_document payload %s: %w", domain.ErrInvalidArgument, j.Payload, err)
@@ -156,7 +160,7 @@ func (r *retagger) Apply(ctx context.Context, j port.Job) error {
 	if p.DocumentID == "" {
 		return fmt.Errorf("%w: retag_document payload %s has no document_id", domain.ErrInvalidArgument, j.Payload)
 	}
-	err := r.s.InTx(ctx, func(tx port.Tx) error {
+	err := r.s.InTx(ctx, func(tx store.Tx) error {
 		return applyRetag(ctx, tx, j.Bank, p.DocumentID)
 	})
 	if errors.Is(err, errDocumentGone) {
@@ -173,7 +177,7 @@ func (r *retagger) Apply(ctx context.Context, j port.Job) error {
 var errDocumentGone = errors.New("retag: document gone")
 
 // applyRetag is the body of Apply's transaction.
-func applyRetag(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID) error {
+func applyRetag(ctx context.Context, tx store.Tx, b domain.BankRef, doc domain.DocumentID) error {
 	seq, err := tx.Seq(ctx, b)
 	if err != nil {
 		return err
@@ -201,19 +205,19 @@ func applyRetag(ctx context.Context, tx port.Tx, b port.BankRef, doc port.Docume
 			}
 		}
 	}
-	_, _, err = tx.Queue().Enqueue(ctx, port.Job{
+	_, _, err = tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: consolidateSerialKey,
-		Payload: json.RawMessage(`{}`), Dedupe: port.DedupePending,
+		Payload: json.RawMessage(`{}`), Dedupe: store.DedupePending,
 	})
 	return err
 }
 
 // enqueueGraph enqueues (or joins a pending or running) graph_maintenance: deleting observations removes
 // units, so their link neighbours and entities need maintenance.
-func enqueueGraph(ctx context.Context, tx port.Tx, b port.BankRef) error {
-	_, _, err := tx.Queue().Enqueue(ctx, port.Job{
+func enqueueGraph(ctx context.Context, tx store.Tx, b domain.BankRef) error {
+	_, _, err := tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindGraphMaintenance, SerialKey: graphSerialKey,
-		Payload: json.RawMessage(`{}`), Dedupe: port.DedupePendingOrRunning,
+		Payload: json.RawMessage(`{}`), Dedupe: store.DedupePendingOrRunning,
 	})
 	return err
 }

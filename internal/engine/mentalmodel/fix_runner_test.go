@@ -5,7 +5,7 @@ import (
 	"errors"
 	"memd/internal/domain"
 	"memd/internal/engine/reflect"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 	"testing"
 	"time"
@@ -68,8 +68,8 @@ func TestAgenticRefreshSetsContext(t *testing.T) {
 		t.Fatalf("%d reflect calls, want 2", len(e.rf.reqs))
 	}
 	m := e.model("status")
-	full, _ := refreshContext(m, port.SeqUpTo(0, 1))
-	delta, _ := refreshContext(m, port.SeqUpTo(1, 2))
+	full, _ := refreshContext(m, store.SeqUpTo(0, 1))
+	delta, _ := refreshContext(m, store.SeqUpTo(1, 2))
 	if got := e.rf.reqs[0].Context; got == "" || got != full {
 		t.Errorf("first build context = %q, want the full context %q", got, full)
 	}
@@ -84,7 +84,7 @@ func TestDeltaPreCheckReadsUntaggedUnits(t *testing.T) {
 	e := newEnv(t)
 	m, _ := builtModel(e, domain.RefreshStrategySingleShot)
 	m.Spec.Trigger.TagsMatch = domain.TagsMatchAny
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Carol reviews the project")
 	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Carol reviews."},
@@ -123,7 +123,7 @@ func TestAutomaticRunSkipsFreshOrFlooredModel(t *testing.T) {
 	floor, last := 3600, e.clock.Now()
 	m := e.model("status")
 	m.Spec.Trigger.MinRefreshIntervalSeconds, m.LastRefreshedAt = &floor, &last
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	e.clock.Advance(time.Minute)
 	assertSkipped("inside the interval floor")
@@ -144,9 +144,9 @@ func assertReparked(t *testing.T, e *env, end time.Time) {
 		t.Fatal("re-parked refresh due before the floor's end")
 	}
 	var ops []domain.Operation
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		var err error
-		ops, _, err = tx.Queue().List(e.ctx, e.bank, port.OperationFilter{
+		ops, _, err = tx.Queue().List(e.ctx, e.bank, store.OperationFilter{
 			Kind: domain.OperationKindRefreshMentalModel, Status: domain.OperationStatusPending, PageSize: 10,
 		})
 		return err
@@ -197,11 +197,11 @@ func TestAgenticAnswerWithoutCitationsFails(t *testing.T) {
 // and full versus delta advice by the window's lower bound.
 func TestRefreshContextRendersNameAndMode(t *testing.T) {
 	m := domain.MentalModel{Spec: domain.MentalModelSpec{Name: "Team roster"}}
-	full, err := refreshContext(m, port.SeqUpTo(0, 9))
+	full, err := refreshContext(m, store.SeqUpTo(0, 9))
 	if err != nil {
 		t.Fatal(err)
 	}
-	delta, err := refreshContext(m, port.SeqUpTo(4, 9))
+	delta, err := refreshContext(m, store.SeqUpTo(4, 9))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestFloorSkewTolerance(t *testing.T) {
 	floor, last := 60, e.clock.Now()
 	m := e.model("status")
 	m.Spec.Trigger.MinRefreshIntervalSeconds, m.LastRefreshedAt = &floor, &last
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	e.clock.Set(last.Add(time.Minute - 3*time.Second))
 	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{

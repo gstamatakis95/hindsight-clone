@@ -4,12 +4,11 @@
 //
 // # Where it sits
 //
-// worker sits beside the server, above the engines: it imports domain, port and the engines whose jobs it
-// runs (retain, consolidate, mentalmodel, bank, curate, docs, maintenance), never an adapter and never a
-// tracing vendor. Engines never import worker; they declare what they need from it (retain.Checkpoint,
-// consolidate.Checkpointer) and worker's types satisfy those. Reads the ports lack are declared here as small
-// interfaces the Postgres store implements ([ConsolidationCandidates], [StalledDeleteSource],
-// [GraphWorkSource], [StrandedFactSource], [BatchSettler]); cmd/memd/wire.go narrows the store to them. In its worker
+// worker sits beside the server, above the engines: it imports domain, store, clock, config and the engines
+// whose jobs it runs (retain, consolidate, mentalmodel, bank, curate, docs, maintenance), never an adapter and
+// never a tracing vendor. Engines never import worker; they declare what they need from it (retain.Checkpoint,
+// consolidate.Checkpointer) and worker's types satisfy those. The tick's cross-bank scans come from
+// store.Maintenance, which the Postgres store implements. In its worker
 // and all modes cmd/memd runs [Runner.Run] and [RunMaintenance]; the api side uses [OperationControl] for
 // CancelOperation and RetryOperation.
 //
@@ -24,7 +23,7 @@
 //	err := r.Run(ctx)
 //
 // Every PollInterval (default 500 ms, and after each finished job) the runner claims due jobs through
-// port.Claimer (FOR UPDATE SKIP LOCKED in Postgres; one PROCESSING job per serial key, so jobs of one
+// store.Claimer (FOR UPDATE SKIP LOCKED in Postgres; one PROCESSING job per serial key, so jobs of one
 // document, model or bank never overlap). It runs [DefaultSlots] (10) jobs at once, [DefaultReservedConsolidate]
 // (2) of them reserved for consolidate: consolidate may use any free slot, other kinds at most Slots minus the
 // reserve. Each job runs in its own goroutine under a context only the runner cancels; a panic becomes a
@@ -35,7 +34,7 @@
 //
 // A failed run is settled with Claimer.Fail:
 //
-//   - [ErrPermanent], domain.ErrInvalidArgument and domain.ErrCancelled never retry.
+//   - [ErrPermanent], domain.ErrModelUnbound, domain.ErrInvalidArgument and domain.ErrCancelled never retry.
 //   - Every kind except consolidate has 3 attempts (domain.DefaultMaxAttempts) and retries after
 //     [RetryStep] x attempt (60 s, 120 s); at the cap it fails for good.
 //   - consolidate retries without a cap, with exponential backoff from 60 s capped at

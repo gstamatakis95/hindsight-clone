@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"strings"
 	"testing"
 )
@@ -40,7 +39,7 @@ func TestPreview(t *testing.T) {
 	}
 	dirs := dirStub{{ID: "d1", Name: "polite", Rules: []string{"never swear"}, Active: true}}
 	p := NewPromptPreviewer(cfgStub{base: base}, dirs)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	cases := []struct {
 		op       domain.PromptOperation
 		o        domain.BankConfig
@@ -103,7 +102,7 @@ func TestPreview(t *testing.T) {
 // retain.extract_causal_links as retain does (on) and omits the causal section only when it is false.
 func TestPreviewRetainCausalLinksDefault(t *testing.T) {
 	p := NewPromptPreviewer(cfgStub{}, dirStub{})
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	off := false
 	for _, tc := range []struct {
 		name string
@@ -126,7 +125,7 @@ func TestPreviewRetainCausalLinksDefault(t *testing.T) {
 
 func TestPreviewChunksSkipsAndUnknownOp(t *testing.T) {
 	p := NewPromptPreviewer(cfgStub{}, dirStub{})
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	got, err := p.Preview(t.Context(), b, domain.PromptOperationRetain,
 		domain.BankConfig{ExtractionMode: domain.ExtractionModeChunks})
 	if err != nil || got.SkippedReason == "" || len(got.Messages) != 0 {

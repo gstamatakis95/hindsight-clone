@@ -1,7 +1,7 @@
-# mockery v3: mocks of the interfaces tests stub (the model and config ports, the engines' consumer interfaces,
-# the worker runtime and the server's consumer interfaces), written to internal/mocks/<path relative to
-# internal/>, one Go package per source package (package mock<name>). Store code is tested against real Postgres
-# (internal/adapter/postgres/pgtest), so the persistence ports have no mocks. Add an interface here when a test
+# mockery v3: mocks of the interfaces tests stub (the AI and blob boundaries, the config resolver, the engines'
+# consumer interfaces, the worker runtime and the server's consumer interfaces), written to internal/mocks/<path
+# relative to internal/>, one Go package per source package (package mock<name>). Store code is tested against real
+# Postgres (internal/store/postgres/pgtest), so the store package has no mocks. Add an interface here when a test
 # needs it. The matryer (moq-style) template needs only the standard library; testify is not an approved
 # dependency. Never hand-edit the output; run `make gen`.
 template: matryer
@@ -14,12 +14,17 @@ filename: mocks.go
 pkgname: 'mock{{ .SrcPackageName }}'
 structname: '{{ .InterfaceName }}'
 packages:
-  memd/internal/port:
+  memd/internal/ai:
     interfaces:
-      Clock: {}
-      ConfigResolver: {}
+      Embedder: {}
       LLM: {}
-      ModelRouter: {}
+      Reranker: {}
+  memd/internal/blob:
+    interfaces:
+      Store: {}
+  memd/internal/config:
+    interfaces:
+      Resolver: {}
   memd/internal/engine/bank:
     interfaces:
       BankDeleter: {}

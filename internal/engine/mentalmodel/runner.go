@@ -8,7 +8,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
 	"memd/internal/engine/reflect"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 	"time"
@@ -40,7 +40,7 @@ type refreshPlan struct {
 	mode      domain.RefreshMode
 	reason    string
 	upTo      int64
-	window    port.SeqRange
+	window    store.SeqRange
 	// automatic: neither manual, force_full nor a dry run; such a run re-checks staleness and the
 	// interval floor before drafting.
 	automatic bool
@@ -49,7 +49,7 @@ type refreshPlan struct {
 // drafted is a run's drafting result.
 type drafted struct {
 	content    string
-	sourceIDs  []port.UnitID
+	sourceIDs  []domain.UnitID
 	structured json.RawMessage
 	usage      []domain.Usage
 	toolCalls  []domain.ToolCallTrace
@@ -71,7 +71,7 @@ type drafted struct {
 // Run reads the model and BankSeq (the snapshot bound), plans the mode and strategy, drafts, and writes
 // the result in one short transaction (nothing for a dry run).
 func (r *runner) Run(
-	ctx context.Context, b port.BankRef, id port.MentalModelID, opts RefreshOptions,
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts RefreshOptions,
 ) (RefreshOutcome, error) {
 	start := r.d.Clock.Now()
 	p, err := r.plan(ctx, b, id, opts)
@@ -117,7 +117,7 @@ func (r *runner) Run(
 
 // plan loads the model, reads BankSeq, merges the config and picks the strategy, mode and window.
 func (r *runner) plan(
-	ctx context.Context, b port.BankRef, id port.MentalModelID, opts RefreshOptions,
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts RefreshOptions,
 ) (*refreshPlan, error) {
 	m, err := loadModel(ctx, r.d.Store, b, id)
 	if err != nil {
@@ -146,9 +146,9 @@ func (r *runner) plan(
 			p.mode = domain.RefreshModeFull
 		}
 	}
-	p.window = port.SeqUpTo(0, upTo)
+	p.window = store.SeqUpTo(0, upTo)
 	if p.mode == domain.RefreshModeDelta {
-		p.window = port.SeqUpTo(m.LastSeqSeen, upTo)
+		p.window = store.SeqUpTo(m.LastSeqSeen, upTo)
 	}
 	return p, nil
 }
@@ -231,7 +231,7 @@ func (r *runner) repark(ctx context.Context, p *refreshPlan) error {
 	if soonest := now.Add(floorSkew); end.Before(soonest) {
 		end = soonest
 	}
-	err := r.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := r.d.Store.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Seq(ctx, p.m.Bank); err != nil {
 			return err
 		}
@@ -287,7 +287,7 @@ func (r *runner) delta(ctx context.Context, p *refreshPlan) (drafted, error) {
 	}
 	if limit := maxDeltaRatio(p.cfg); limit > 0 && changedFraction(p.m.ContentMD, dr.content) > limit {
 		p.mode, p.reason = domain.RefreshModeFull, FallbackMaxDeltaRatio
-		p.window = port.SeqUpTo(0, p.upTo)
+		p.window = store.SeqUpTo(0, p.upTo)
 	}
 	return dr, nil
 }
@@ -372,7 +372,7 @@ func pageText(name, content string) string {
 }
 
 // mergeIDs returns a followed by the ids of b it lacks.
-func mergeIDs(a, b []port.UnitID) []port.UnitID {
+func mergeIDs(a, b []domain.UnitID) []domain.UnitID {
 	out := slices.Clone(a)
 	for _, id := range b {
 		if !slices.Contains(out, id) {
@@ -383,9 +383,9 @@ func mergeIDs(a, b []port.UnitID) []port.UnitID {
 }
 
 // loadModel reads one model in a short read-only transaction.
-func loadModel(ctx context.Context, s port.Store, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error) {
+func loadModel(ctx context.Context, s store.DB, b domain.BankRef, id domain.MentalModelID) (domain.MentalModel, error) {
 	var m domain.MentalModel
-	err := s.InTx(ctx, func(tx port.Tx) error {
+	err := s.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		m, err = tx.MentalModels().Get(ctx, b, id)
 		return err

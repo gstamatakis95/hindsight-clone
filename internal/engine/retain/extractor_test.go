@@ -2,8 +2,8 @@ package retain
 
 import (
 	"errors"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/engine/routing"
 	"memd/internal/fake"
 	"memd/internal/prompts"
 	"strings"
@@ -20,7 +20,7 @@ func extractCfg(mode domain.ExtractionMode) domain.BankConfig {
 
 func TestExtractorChunksModeNoCall(t *testing.T) {
 	llm := fake.NewLLM()
-	facts, usage, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), extractInput{
+	facts, usage, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{
 		Text: "raw chunk", Config: extractCfg(domain.ExtractionModeChunks),
 	})
 	if err != nil || len(facts) != 1 || facts[0].Text != "raw chunk" || facts[0].Type != domain.FactTypeWorld ||
@@ -40,7 +40,7 @@ func TestExtractorComposesDimensions(t *testing.T) {
 	f.Labels = []domain.Label{{Key: "topic", Value: "family"}}
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractVerbose, factsBody(t, f))
 	at := time.Date(2024, 7, 1, 0, 0, 0, 0, time.UTC)
-	facts, usage, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), extractInput{
+	facts, usage, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{
 		Text: "chunk", MentionedAt: &at, Context: "chat with user", Config: extractCfg(domain.ExtractionModeVerbose),
 		Hints: []domain.EntityHint{{Text: "Sarah"}},
 	})
@@ -51,7 +51,7 @@ func TestExtractorComposesDimensions(t *testing.T) {
 	if len(facts) != 1 || facts[0].Text != want {
 		t.Fatalf("facts = %+v, want text %q", facts, want)
 	}
-	if len(facts[0].Entities) != 1 || facts[0].Entities[0] != (Mention{Name: "Emily", Kind: "person"}) ||
+	if len(facts[0].Entities) != 1 || facts[0].Entities[0] != (domain.Mention{Name: "Emily", Kind: "person"}) ||
 		len(facts[0].Labels) != 1 {
 		t.Errorf("entities %+v labels %+v", facts[0].Entities, facts[0].Labels)
 	}
@@ -78,7 +78,7 @@ func TestExtractorFactTypeBySpeaker(t *testing.T) {
 		f := fact("I fixed the bug")
 		f.FactType, f.FactKind = tc.factType, tc.kind
 		llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, f))
-		facts, _, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), extractInput{
+		facts, _, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{
 			Text: "x", Config: extractCfg(""),
 		})
 		if err != nil || len(facts) != 1 || facts[0].Type != tc.want {
@@ -105,7 +105,7 @@ func TestExtractorEventDatesCausesAndDrops(t *testing.T) {
 	conv := fact("Alice talks a lot")
 	conv.OccurredStart, conv.TimeExpression = ptr("2024-01-01"), ptr("last year")
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, cause, empty, effect, conv))
-	facts, _, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), extractInput{
+	facts, _, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{
 		Text: "x", Config: extractCfg(domain.ExtractionModeConcise),
 	})
 	if err != nil || len(facts) != 3 {
@@ -130,7 +130,7 @@ func TestExtractorVerbatimUsesChunkText(t *testing.T) {
 		`"occurred_start":null,"occurred_end":null,"time_expression":null,` +
 		`"entities":[{"name":"Alice","kind":null}],"labels":[]}]}`
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractVerbatim, body)
-	facts, _, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), extractInput{
+	facts, _, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{
 		Text: "Alice said hi.", Config: extractCfg(domain.ExtractionModeVerbatim),
 	})
 	if err != nil || len(facts) != 1 || facts[0].Text != "Alice said hi." || len(facts[0].Entities) != 1 {
@@ -143,7 +143,7 @@ func TestExtractorCustomAndErrors(t *testing.T) {
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractCustom, factsBody(t, fact("x")))
 	cfg := extractCfg(domain.ExtractionModeCustom)
 	cfg.CustomExtractionPrompt = "Only extract recipes."
-	ex := NewExtractor(llm, routing.NewRouter())
+	ex := NewExtractor(llm, ai.NewRouter())
 	if _, _, err := ex.Extract(t.Context(), extractInput{Text: "x", Config: cfg}); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestExtractorCustomBlankPromptUsesConcise(t *testing.T) {
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
 	cfg := extractCfg(domain.ExtractionModeCustom)
 	cfg.CustomExtractionPrompt = "  \n\t "
-	facts, _, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), extractInput{Text: "x", Config: cfg})
+	facts, _, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{Text: "x", Config: cfg})
 	if err != nil || len(facts) != 1 {
 		t.Fatalf("facts = %+v, %v", facts, err)
 	}
@@ -181,7 +181,7 @@ func TestExtractorSpaceSeparatedDateAndDuplicateCauses(t *testing.T) {
 	effect := fact("The game was cancelled")
 	effect.CausedBy = []int{0, 0, 0}
 	llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, cause, effect))
-	facts, _, err := NewExtractor(llm, routing.NewRouter()).Extract(t.Context(), extractInput{
+	facts, _, err := NewExtractor(llm, ai.NewRouter()).Extract(t.Context(), extractInput{
 		Text: "x", Config: extractCfg(domain.ExtractionModeConcise),
 	})
 	if err != nil || len(facts) != 2 {

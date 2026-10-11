@@ -5,7 +5,6 @@ import (
 	"memd/internal/engine/recall"
 	reflecteng "memd/internal/engine/reflect"
 	"memd/internal/engine/retain"
-	"memd/internal/port"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -29,7 +28,7 @@ type retainResult struct {
 func retainRequestFromProto(r *pb.RetainRequest) (retain.IngestRequest, error) {
 	var d decoder
 	out := retain.IngestRequest{
-		Bank:              port.BankRef{Bank: r.GetBankId()},
+		Bank:              domain.BankRef{Bank: r.GetBankId()},
 		Items:             d.retainItems(r.GetItems()),
 		DocumentTags:      r.GetDocumentTags(),
 		Overrides:         d.configPtr(r.GetOverrides()),
@@ -58,7 +57,7 @@ func (d *decoder) retainItem(it *pb.RetainItem) retain.IngestItem {
 		Context:           it.GetContext(),
 		Timestamp:         d.tsPtr(it.GetTimestamp()),
 		Timeless:          it.GetTimeless(),
-		DocumentID:        port.DocumentID(it.GetDocumentId()),
+		DocumentID:        domain.DocumentID(it.GetDocumentId()),
 		Tags:              it.GetTags(),
 		ObservationScopes: d.scopes(it.GetObservationScopes()),
 		Metadata:          it.GetMetadata(),
@@ -114,8 +113,8 @@ func retainItemsToProto(in []retain.IngestItem) []*pb.RetainItem {
 // retainedDocFromProto converts a RetainedDocument.
 func retainedDocFromProto(x *pb.RetainedDocument) retain.RetainedDocument {
 	return retain.RetainedDocument{
-		DocumentID: port.DocumentID(x.GetDocumentId()), UnitsCreated: int(x.GetUnitsCreated()),
-		Unchanged: x.GetUnchanged(), OperationID: port.OperationID(x.GetOperationId()),
+		DocumentID: domain.DocumentID(x.GetDocumentId()), UnitsCreated: int(x.GetUnitsCreated()),
+		Unchanged: x.GetUnchanged(), OperationID: domain.OperationID(x.GetOperationId()),
 	}
 }
 
@@ -139,7 +138,7 @@ func retainResultFromProto(r *pb.RetainResponse) (retainResult, error) {
 	}
 	out := retainResult{
 		IngestResult: retain.IngestResult{
-			Documents: docs, ParentOperationID: port.OperationID(r.GetParentOperationId()),
+			Documents: docs, ParentOperationID: domain.OperationID(r.GetParentOperationId()),
 		},
 		Usage: d.usages(r.GetUsage()),
 	}
@@ -166,7 +165,7 @@ func retainResultToProto(r retainResult) *pb.RetainResponse {
 func recallRequestFromProto(r *pb.RecallRequest) (recall.RecallRequest, error) {
 	var d decoder
 	out := recall.RecallRequest{
-		Bank:               port.BankRef{Bank: r.GetBankId()},
+		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
 		Types:              fromEnums[domain.FactType](&d, r.GetTypes()),
 		Tags:               d.tagFilter(r.GetTags(), r.GetTagsMatch(), r.GetTagGroups()),
@@ -264,21 +263,21 @@ func recallResultFromProto(r *pb.RecallResponse) (recall.RecallResult, error) {
 		Trace:                d.recallTrace(r.GetTrace()),
 	}
 	if r.GetSourceFacts() != nil {
-		out.SourceFacts = make(map[port.UnitID]domain.Unit, len(r.GetSourceFacts()))
+		out.SourceFacts = make(map[domain.UnitID]domain.Unit, len(r.GetSourceFacts()))
 		for k, m := range r.GetSourceFacts() {
-			out.SourceFacts[port.UnitID(k)] = d.unit(m)
+			out.SourceFacts[domain.UnitID(k)] = d.unit(m)
 		}
 	}
 	if r.GetChunks() != nil {
-		out.Chunks = make(map[port.ChunkID]recall.Chunk, len(r.GetChunks()))
+		out.Chunks = make(map[domain.ChunkID]recall.Chunk, len(r.GetChunks()))
 		for k, c := range r.GetChunks() {
-			out.Chunks[port.ChunkID(k)] = chunkFromProto(c)
+			out.Chunks[domain.ChunkID(k)] = chunkFromProto(c)
 		}
 	}
 	if r.GetEntities() != nil {
-		out.Entities = make(map[port.EntityID]domain.EntityState, len(r.GetEntities()))
+		out.Entities = make(map[domain.EntityID]domain.EntityState, len(r.GetEntities()))
 		for k, e := range r.GetEntities() {
-			out.Entities[port.EntityID(k)] = entityStateFromProto(e)
+			out.Entities[domain.EntityID(k)] = entityStateFromProto(e)
 		}
 	}
 	return out, d.err
@@ -343,7 +342,7 @@ func memoriesToProto(in []recall.Memory) []*pb.Memory {
 func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.ReflectRequest, error) {
 	var d decoder
 	out := reflecteng.ReflectRequest{
-		Bank:               port.BankRef{Bank: r.GetBankId()},
+		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
 		Tags:               d.tagFilter(r.GetTags(), r.GetTagsMatch(), r.GetTagGroups()),
 		Budget:             fromEnum[domain.Budget](&d, r.GetBudget()),
@@ -399,8 +398,8 @@ func reflectIncludeToProto(x reflecteng.ReflectInclude) *pb.ReflectInclude {
 func (d *decoder) basedOn(b *pb.BasedOn) reflecteng.BasedOn {
 	return reflecteng.BasedOn{
 		Memories:       d.units(b.GetMemories()),
-		MentalModelIDs: strs[port.MentalModelID](b.GetMentalModelIds()),
-		DirectiveIDs:   strs[port.DirectiveID](b.GetDirectiveIds()),
+		MentalModelIDs: strs[domain.MentalModelID](b.GetMentalModelIds()),
+		DirectiveIDs:   strs[domain.DirectiveID](b.GetDirectiveIds()),
 	}
 }
 

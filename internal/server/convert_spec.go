@@ -2,7 +2,6 @@ package server
 
 import (
 	"memd/internal/domain"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -13,7 +12,7 @@ func (d *decoder) spec(s *pb.MentalModelSpec) domain.MentalModelSpec {
 		return domain.MentalModelSpec{}
 	}
 	return domain.MentalModelSpec{
-		ID:          port.MentalModelID(s.GetId()),
+		ID:          domain.MentalModelID(s.GetId()),
 		Name:        s.GetName(),
 		SourceQuery: s.GetSourceQuery(),
 		FolderPath:  s.GetFolderPath(),
@@ -77,7 +76,7 @@ func (d *decoder) trigger(t *pb.RefreshTrigger) domain.RefreshTrigger {
 		TagGroups:                         d.tagGroups(t.GetTagGroups()),
 		FactTypes:                         fromEnums[domain.FactType](d, t.GetFactTypes()),
 		ExcludeMentalModels:               t.GetExcludeMentalModels(),
-		ExcludeMentalModelIDs:             strs[port.MentalModelID](t.GetExcludeMentalModelIds()),
+		ExcludeMentalModelIDs:             strs[domain.MentalModelID](t.GetExcludeMentalModelIds()),
 		IncludeChunks:                     optCopy(t.IncludeChunks),
 		RecallMaxTokens:                   optInt(t.RecallMaxTokens),
 		RecallChunksMaxTokens:             optInt(t.RecallChunksMaxTokens),

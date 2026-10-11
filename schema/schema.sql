@@ -209,7 +209,7 @@ CREATE TABLE public.memory_audit (
     after jsonb,
     operation_id uuid,
     at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT memory_audit_action_check CHECK ((action = ANY (ARRAY['edit'::text, 'invalidate'::text, 'restore'::text, 'reprocess'::text])))
+    CONSTRAINT memory_audit_action_check CHECK ((action = ANY (ARRAY['edit'::text, 'invalidate'::text, 'restore'::text])))
 );
 
 --

@@ -3,14 +3,13 @@
 //
 // # Where it sits
 //
-// recall is an engine package: it imports domain, port and timex and must never import adapters, server,
-// worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Everything it reads goes through port.Reader
-// (the four searches, unit hydration, chunks, entity state, tag counts, stale scopes), port.Embedder,
-// port.Reranker and port.ConfigResolver. cmd/memd/wire.go builds one [Recaller] with [NewRecaller]; the
-// server's Recall RPC, reflect (its recall and search_observations tools) and the single-shot mental-model
-// synthesizer call [Recaller.Recall]; consolidation searches port.Reader directly and only shares
-// [TokenCounter]. The pipeline stages are exported interfaces
-// ([Retriever], [Fuser], [Scorer], [ScoreGate], [Packer], [ObservationPreference], [Includer],
+// recall is an engine package: it imports domain, the boundary packages and timex and must never import adapters,
+// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Everything it reads goes through store.Reader
+// (the four searches, unit hydration, chunks, entity state, tag counts, stale scopes), ai.Embedder, ai.Reranker and
+// config.Resolver. cmd/memd/wire.go builds one [Recaller] with [NewRecaller]; the server's Recall RPC, reflect (its
+// recall and search_observations tools) and the single-shot mental-model synthesizer call [Recaller.Recall];
+// consolidation searches store.Reader directly and only shares [TokenCounter]. The pipeline stages are exported
+// interfaces ([Retriever], [Fuser], [Scorer], [ScoreGate], [Packer], [ObservationPreference], [Includer],
 // [TagFilterCompiler]) so they can be tested one by one.
 //
 // # Usage
@@ -29,8 +28,8 @@
 //     request overrides. The resolver reads config in its own short transaction; an unknown or tombstoned
 //     bank is domain.ErrNotFound.
 //  2. Parse into a parsedQuery: the query cut to [MaxQueryTokens] (500) tokens; the reference time
-//     (query_time, else port.Clock); the per-arm limit from budgetLimit; the tag filter compiled once into
-//     a port.SQLPredicate shared by every arm (fuzzy leaves are expanded against the bank's tags, read with
+//     (query_time, else clock.Clock); the per-arm limit from budgetLimit; the tag filter compiled once into
+//     a store.SQLPredicate shared by every arm (fuzzy leaves are expanded against the bank's tags, read with
 //     Reader.TagCounts, by trigram similarity >= recall.fuzzy_tag_min_similarity); the time window (an
 //     explicit window is used as given with no time analysis, else timex derives one, calling TIME_PARSE
 //     only for a cue its rules cannot resolve); and the query embedding.
@@ -64,7 +63,7 @@
 //
 // A recall that finds nothing is not an error. A failing arm, embedder or reranker fails the call (the
 // server maps domain.ErrUnavailable to UNAVAILABLE). Recall never writes, so it must not be called inside an
-// open Store.InTx.
+// open DB.InTx.
 //
 // # Config knobs and defaults
 //

@@ -4,13 +4,12 @@
 //
 // # Where it sits
 //
-// consolidate is an engine package: it imports domain, port, prompts and recall (for recall.TokenCounter
-// only) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
-// (depguard). It declares what it consumes: [Checkpointer] (worker.Checkpoint) and [ScopeLister]
-// (port.Reader). It does not import mentalmodel: [RefreshPayload] mirrors the refresh job's payload shape.
-// cmd/memd/wire.go builds the [Consolidator] for the worker's consolidate handler, the [ScopeExpander] for
-// retain, the [StrategyMatcher] for config.NewResolver and the server's strategy preview, and the
-// [Invalidator] for curate's ClearObservations.
+// consolidate is an engine package: it imports domain, the boundary packages, prompts and recall (for
+// recall.TokenCounter only) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
+// (depguard). It declares what it consumes: [Checkpointer] (worker.Checkpoint) and [ScopeLister] (store.Reader). It
+// does not import mentalmodel: [RefreshPayload] mirrors the refresh job's payload shape. cmd/memd/wire.go builds the
+// [Consolidator] for the worker's consolidate handler, the [ScopeExpander] for retain, the [StrategyMatcher] for
+// config.NewResolver and the server's strategy preview, and the [Invalidator] for curate's ClearObservations.
 //
 // # Scopes
 //
@@ -37,7 +36,7 @@
 //  3. Per scope, resolve the scope's config with ForScope (the matching consolidation strategy sits between
 //     bank and request) and decide its facts in LLM batches of consolidation_llm_batch_size. For each batch,
 //     with no transaction open: find related observations of exactly that scope (per fact, the semantic and
-//     keyword arms over port.Reader, interleaved, 10 per fact), render the CONSOLIDATE prompt with those
+//     keyword arms over store.Reader, interleaved, 10 per fact), render the CONSOLIDATE prompt with those
 //     observations and some of their source facts (within consolidation_source_facts_max_tokens_per_observation
 //     and consolidation_source_facts_max_tokens), and call CONSOLIDATE with a per-call schema: source_fact_ids
 //     limited to the batch's ids with minItems 1, and creates.maxItems = the scope's remaining capacity
@@ -104,9 +103,9 @@
 //
 // # Invariants
 //
-// No model call or embedding runs inside Store.InTx; every write transaction takes tx.Seq(bank) first and
+// No model call or embedding runs inside DB.InTx; every write transaction takes tx.Seq(bank) first and
 // stamps the observations it writes with it. The job is idempotent: a replayed run skips scopes that already
-// cite a fact and never stamps a fact whose decision did not fully land. The Postgres Store.InTx re-runs a
+// cite a fact and never stamps a fact whose decision did not fully land. The Postgres DB.InTx re-runs a
 // transaction up to 3 times in all after a deadlock (40P01) or serialization failure (40001); each body
 // resets its outputs before running.
 //

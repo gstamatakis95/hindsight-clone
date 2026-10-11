@@ -3,17 +3,17 @@ package mentalmodel
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"testing"
 	"time"
 )
 
 // queue runs QueueRefresh in its own transaction (taking tx.Seq first, as callers must).
-func queue(e *env, q RefreshQueuer, id port.MentalModelID) port.OperationID {
+func queue(e *env, q RefreshQueuer, id domain.MentalModelID) domain.OperationID {
 	e.t.Helper()
-	var op port.OperationID
-	e.tx(func(tx port.Tx) error {
+	var op domain.OperationID
+	e.tx(func(tx store.Tx) error {
 		if _, err := tx.Seq(e.ctx, e.bank); err != nil {
 			return err
 		}
@@ -39,7 +39,7 @@ func TestRefreshQueuer(t *testing.T) {
 	m, _ := builtModel(e, domain.RefreshStrategySingleShot)
 	refreshed := e.clock.Now()
 	m.LastRefreshedAt = &refreshed
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	op1, op2 := queue(e, q, "status"), queue(e, q, "status")
 	if op1 == "" || op1 != op2 {
 		t.Fatalf("second queue did not join: %q %q", op1, op2)
@@ -54,7 +54,7 @@ func TestRefreshQueuer(t *testing.T) {
 
 	m = e.model("status")
 	m.AutoRefreshPaused = true
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	if op := queue(e, q, "status"); op != "" {
 		t.Fatalf("paused model queued %q", op)
 	}
@@ -107,7 +107,7 @@ func TestFullWithNothingDraftedKeepsLiveSources(t *testing.T) {
 	if _, err := runner.Run(e.ctx, e.bank, "status", RefreshOptions{ForceFull: true}); err != nil {
 		t.Fatal(err)
 	}
-	if m := e.model("status"); !slices.Equal(m.SourceIDs, []port.UnitID{u.ID}) || m.ContentMD == "" {
+	if m := e.model("status"); !slices.Equal(m.SourceIDs, []domain.UnitID{u.ID}) || m.ContentMD == "" {
 		t.Fatalf("live source dropped: %v %q", m.SourceIDs, m.ContentMD)
 	}
 	e.addUnit(domain.FactTypeWorld, "still in scope", "proj")
@@ -127,7 +127,7 @@ func TestFullWithNothingInScopeKeepsSourcesAndWatermark(t *testing.T) {
 	e := newEnv(t)
 	before, u := builtModel(e, domain.RefreshStrategySingleShot)
 	before.AutoRefreshPaused = true
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, before) })
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, before) })
 	e.archive(u.ID)
 	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true, ForceFull: true})
 	if err != nil || out.Trace.Outcome != domain.RefreshOutcomeNoNewFacts || e.llmCalls() != 0 {

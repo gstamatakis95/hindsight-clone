@@ -3,7 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
-	"memd/internal/port"
+	"memd/internal/domain"
 	"sync"
 )
 
@@ -14,13 +14,13 @@ type resultKey struct{}
 type recorder struct {
 	mu     sync.Mutex
 	result json.RawMessage
-	usage  []port.Usage
+	usage  []domain.Usage
 }
 
 // ReportResult records the job's result summary and per-slot usage; the runner stores them with
 // Claimer.Complete when the handler returns nil. A later call replaces the result and appends usage. It is
 // a no-op outside a job's context (for example in a handler unit test that calls it directly).
-func ReportResult(ctx context.Context, result json.RawMessage, usage ...port.Usage) {
+func ReportResult(ctx context.Context, result json.RawMessage, usage ...domain.Usage) {
 	r, ok := ctx.Value(resultKey{}).(*recorder)
 	if !ok {
 		return
@@ -40,7 +40,7 @@ func withRecorder(ctx context.Context) (context.Context, *recorder) {
 }
 
 // get returns the recorded result and usage.
-func (r *recorder) get() (json.RawMessage, []port.Usage) {
+func (r *recorder) get() (json.RawMessage, []domain.Usage) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.result, r.usage

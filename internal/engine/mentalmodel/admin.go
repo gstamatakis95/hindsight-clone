@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"reflect"
 	"regexp"
 	"slices"
@@ -28,7 +30,7 @@ var modelIDPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 // ListRequest mirrors server.ListMentalModelsRequest field for field, so WP-14 converts it directly.
 type ListRequest struct {
 	// Bank is the bank listed.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// FolderPrefix limits models to a folder subtree; empty = all.
 	FolderPrefix string
 	// Detail is how much of each model to load.
@@ -54,9 +56,9 @@ type ModelPage struct {
 // HistoryRequest mirrors server.HistoryRequest.
 type HistoryRequest struct {
 	// Bank owns the model.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// ID is the model.
-	ID port.MentalModelID
+	ID domain.MentalModelID
 	// Kind limits entries to one kind; unspecified = all.
 	Kind domain.HistoryKind
 	// PageSize caps the page; 0 = the RPC default.
@@ -83,42 +85,42 @@ type SpecPatch func(cur domain.MentalModelSpec) (domain.MentalModelSpec, error)
 type Admin interface {
 	// CreateMentalModel stores spec and queues its first build, returning the model and the build.
 	CreateMentalModel(
-		ctx context.Context, b port.BankRef, spec domain.MentalModelSpec,
+		ctx context.Context, b domain.BankRef, spec domain.MentalModelSpec,
 	) (domain.MentalModel, domain.Operation, error)
 	// GetMentalModel returns one model loaded to detail (unspecified = full); unknown = domain.ErrNotFound.
 	GetMentalModel(
-		ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail,
+		ctx context.Context, b domain.BankRef, id domain.MentalModelID, detail domain.Detail,
 	) (domain.MentalModel, error)
 	// ListMentalModels returns one page of models (detail unspecified = metadata).
 	ListMentalModels(ctx context.Context, req ListRequest) (ModelPage, error)
 	// UpdateMentalModel applies patch to the model's spec in one transaction and returns the model.
 	UpdateMentalModel(
-		ctx context.Context, b port.BankRef, id port.MentalModelID, patch SpecPatch,
+		ctx context.Context, b domain.BankRef, id domain.MentalModelID, patch SpecPatch,
 	) (domain.MentalModel, error)
 	// RefreshMentalModel queues a manual refresh, or joins and upgrades the queued one (joined = true).
 	RefreshMentalModel(ctx context.Context, req RefreshRequest) (op domain.Operation, joined bool, err error)
 	// ClearMentalModel empties the model's content so the next refresh is full, and returns the model.
-	ClearMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error)
+	ClearMentalModel(ctx context.Context, b domain.BankRef, id domain.MentalModelID) (domain.MentalModel, error)
 	// MentalModelHistory returns one page of the model's history.
 	MentalModelHistory(ctx context.Context, req HistoryRequest) (HistoryPage, error)
 	// DeleteMentalModel removes the model and its history; unknown = domain.ErrNotFound.
-	DeleteMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID) error
+	DeleteMentalModel(ctx context.Context, b domain.BankRef, id domain.MentalModelID) error
 	// DeleteFolder removes every model under folder path (recursive) and returns how many.
-	DeleteFolder(ctx context.Context, b port.BankRef, path string) (int, error)
+	DeleteFolder(ctx context.Context, b domain.BankRef, path string) (int, error)
 }
 
 // AdminDeps are the Admin's dependencies.
 type AdminDeps struct {
 	// Store reads and writes models and queues refreshes.
-	Store port.Store
-	// Models lists a bank's models (port.Reader).
+	Store store.DB
+	// Models lists a bank's models (store.Reader).
 	Models ModelLister
 	// Detector computes is_stale on reads; nil = never stale.
 	Detector ChangeDetector
 	// Clock dates enqueues.
-	Clock port.Clock
+	Clock clock.Clock
 	// Config reads history_max_entries for Clear; nil = the default (50).
-	Config port.ConfigResolver
+	Config config.Resolver
 }
 
 // admin is the Admin implementation.
@@ -132,10 +134,10 @@ func NewAdmin(d AdminDeps) Admin { return &admin{d: d} }
 // CreateMentalModel validates and stores spec (bank created on first write) and queues the first build as
 // a manual, full refresh, in one transaction.
 func (a *admin) CreateMentalModel(
-	ctx context.Context, b port.BankRef, spec domain.MentalModelSpec,
+	ctx context.Context, b domain.BankRef, spec domain.MentalModelSpec,
 ) (domain.MentalModel, domain.Operation, error) {
 	if spec.ID == "" {
-		spec.ID = port.MentalModelID(uuid.NewString())
+		spec.ID = domain.MentalModelID(uuid.NewString())
 	}
 	spec, err := normalizeSpec(spec)
 	if err != nil {
@@ -143,7 +145,7 @@ func (a *admin) CreateMentalModel(
 	}
 	var m domain.MentalModel
 	var op domain.Operation
-	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(ctx, b); err != nil {
 			return err
 		}
@@ -172,7 +174,7 @@ func (a *admin) CreateMentalModel(
 
 // GetMentalModel reads the model, computes is_stale and trims it to detail.
 func (a *admin) GetMentalModel(
-	ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail,
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID, detail domain.Detail,
 ) (domain.MentalModel, error) {
 	m, err := loadModel(ctx, a.d.Store, b, id)
 	if err != nil {
@@ -190,7 +192,7 @@ func (a *admin) ListMentalModels(ctx context.Context, req ListRequest) (ModelPag
 	if size <= 0 {
 		size = defaultPageSize
 	}
-	items, next, err := a.d.Models.ListMentalModels(ctx, ModelQuery{
+	items, next, err := a.d.Models.ListMentalModels(ctx, store.ModelQuery{
 		Bank: req.Bank, FolderPrefix: normalizeFolder(req.FolderPrefix), Tags: domain.NormalizeTags(req.Tags),
 		TagsMatch: req.TagsMatch, PageSize: min(size, maxPageSize), PageToken: req.PageToken,
 	})
@@ -212,10 +214,10 @@ func (a *admin) ListMentalModels(ctx context.Context, req ListRequest) (ModelPag
 // UpdateMentalModel applies patch in one transaction. A changed source query or scope resets
 // last_seq_seen, so the next refresh runs in full (mode_fallback_reason source_query_changed).
 func (a *admin) UpdateMentalModel(
-	ctx context.Context, b port.BankRef, id port.MentalModelID, patch SpecPatch,
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID, patch SpecPatch,
 ) (domain.MentalModel, error) {
 	var m domain.MentalModel
-	err := a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		cur, err := lockedModel(ctx, tx, b, id)
 		if err != nil {
 			return err
@@ -249,7 +251,7 @@ func (a *admin) RefreshMentalModel(ctx context.Context, req RefreshRequest) (dom
 	req.Manual = true
 	var op domain.Operation
 	var joined bool
-	err := a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.MentalModels().Get(ctx, req.Bank, req.ID); err != nil {
 			return err
 		}
@@ -273,11 +275,11 @@ func (a *admin) RefreshMentalModel(ctx context.Context, req RefreshRequest) (dom
 // ClearMentalModel empties content, structured output, sources and the watermark. The cleared content is
 // kept as a version history entry, so nothing is lost.
 func (a *admin) ClearMentalModel(
-	ctx context.Context, b port.BankRef, id port.MentalModelID,
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID,
 ) (domain.MentalModel, error) {
 	keep := a.historyKeep(ctx, b)
 	var m domain.MentalModel
-	err := a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		cur, err := lockedModel(ctx, tx, b, id)
 		if err != nil {
 			return err
@@ -321,7 +323,7 @@ func (a *admin) MentalModelHistory(ctx context.Context, req HistoryRequest) (His
 	}
 	size = min(size, maxPageSize)
 	var entries []domain.MentalModelHistoryEntry
-	err := a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.MentalModels().Get(ctx, req.Bank, req.ID); err != nil {
 			return err
 		}
@@ -343,8 +345,8 @@ func (a *admin) MentalModelHistory(ctx context.Context, req HistoryRequest) (His
 }
 
 // DeleteMentalModel removes the model and its history.
-func (a *admin) DeleteMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID) error {
-	err := a.d.Store.InTx(ctx, func(tx port.Tx) error { return tx.MentalModels().Delete(ctx, b, id) })
+func (a *admin) DeleteMentalModel(ctx context.Context, b domain.BankRef, id domain.MentalModelID) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error { return tx.MentalModels().Delete(ctx, b, id) })
 	if err != nil {
 		return fmt.Errorf("mentalmodel: delete %s: %w", id, err)
 	}
@@ -353,17 +355,17 @@ func (a *admin) DeleteMentalModel(ctx context.Context, b port.BankRef, id port.M
 
 // DeleteFolder deletes every model whose folder is path or lies under it. An empty path is rejected so a
 // typo can't delete every page.
-func (a *admin) DeleteFolder(ctx context.Context, b port.BankRef, path string) (int, error) {
+func (a *admin) DeleteFolder(ctx context.Context, b domain.BankRef, path string) (int, error) {
 	path = normalizeFolder(path)
 	if path == "" {
 		return 0, fmt.Errorf("%w: folder_path is required", domain.ErrInvalidArgument)
 	}
-	models, err := listAll(ctx, a.d.Models, ModelQuery{Bank: b, FolderPrefix: path})
+	models, err := listAll(ctx, a.d.Models, store.ModelQuery{Bank: b, FolderPrefix: path})
 	if err != nil {
 		return 0, err
 	}
 	n := 0
-	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		n = 0
 		for _, m := range models {
 			err := tx.MentalModels().Delete(ctx, b, m.Spec.ID)
@@ -405,7 +407,9 @@ func (a *admin) present(ctx context.Context, m domain.MentalModel, detail domain
 
 // lockedModel takes tx.Seq(b) first, which locks the bank row and so serializes every read-modify-write
 // of a model row (runner write, reconcile, update, clear), then reads the model.
-func lockedModel(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error) {
+func lockedModel(
+	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID,
+) (domain.MentalModel, error) {
 	if _, err := tx.Seq(ctx, b); err != nil {
 		return domain.MentalModel{}, err
 	}
@@ -413,7 +417,7 @@ func lockedModel(ctx context.Context, tx port.Tx, b port.BankRef, id port.Mental
 }
 
 // historyKeep reads history_max_entries for b (default on any error).
-func (a *admin) historyKeep(ctx context.Context, b port.BankRef) int {
+func (a *admin) historyKeep(ctx context.Context, b domain.BankRef) int {
 	if a.d.Config == nil {
 		return defaultHistoryMaxEntries
 	}

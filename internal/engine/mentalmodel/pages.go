@@ -5,8 +5,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 	"unicode"
@@ -19,19 +20,16 @@ const (
 	snippetRunes     = 200
 )
 
-// PageHit is one SearchPages result; an alias of domain.PageHit.
-type PageHit = domain.PageHit
-
 // PageSearcher ranks whole pages by fused full-text and semantic scores, no rerank.
 type PageSearcher interface {
 	// Search returns at most req.Limit pages, best first.
-	Search(ctx context.Context, req SearchPagesRequest) ([]PageHit, error)
+	Search(ctx context.Context, req SearchPagesRequest) ([]domain.PageHit, error)
 }
 
 // SearchPagesRequest mirrors memory.v1.SearchPagesRequest.
 type SearchPagesRequest struct {
 	// Bank is the bank searched.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Query is the search text.
 	Query string
 	// FolderPrefix limits pages to a folder subtree; empty = all.
@@ -44,13 +42,13 @@ type SearchPagesRequest struct {
 // in Go over one listing instead of adding page search queries to the ports (decision 1205).
 type pageSearcher struct {
 	models ModelLister
-	emb    port.Embedder
+	emb    ai.Embedder
 }
 
 var _ PageSearcher = (*pageSearcher)(nil)
 
 // NewPageSearcher returns the PageSearcher; emb nil = full-text ranking only.
-func NewPageSearcher(l ModelLister, emb port.Embedder) PageSearcher {
+func NewPageSearcher(l ModelLister, emb ai.Embedder) PageSearcher {
 	return &pageSearcher{models: l, emb: emb}
 }
 
@@ -66,12 +64,13 @@ type pageScore struct {
 // similarity to the query embedding, and fuses the two rankings with RRF (k = 60). A page that matches
 // neither (no shared term, similarity <= 0) is not a hit. When the embedder fails the search ranks by
 // terms only.
-func (s *pageSearcher) Search(ctx context.Context, req SearchPagesRequest) ([]PageHit, error) {
+func (s *pageSearcher) Search(ctx context.Context, req SearchPagesRequest) ([]domain.PageHit, error) {
 	terms := tokenize(req.Query)
 	if len(terms) == 0 {
 		return nil, fmt.Errorf("%w: query is empty", domain.ErrInvalidArgument)
 	}
-	models, err := listAll(ctx, s.models, ModelQuery{Bank: req.Bank, FolderPrefix: normalizeFolder(req.FolderPrefix)})
+	q := store.ModelQuery{Bank: req.Bank, FolderPrefix: normalizeFolder(req.FolderPrefix)}
+	models, err := listAll(ctx, s.models, q)
 	if err != nil {
 		return nil, err
 	}
@@ -90,12 +89,12 @@ func (s *pageSearcher) Search(ctx context.Context, req SearchPagesRequest) ([]Pa
 	if limit <= 0 {
 		limit = defaultPageLimit
 	}
-	var hits []PageHit
+	var hits []domain.PageHit
 	for _, sc := range scores {
 		if sc.fused <= 0 || len(hits) == limit {
 			continue
 		}
-		hits = append(hits, PageHit{
+		hits = append(hits, domain.PageHit{
 			MentalModelID: sc.m.Spec.ID, FolderPath: sc.m.Spec.FolderPath, Name: sc.m.Spec.Name,
 			Snippet: snippet(sc.m.ContentMD, terms), Score: sc.fused,
 		})

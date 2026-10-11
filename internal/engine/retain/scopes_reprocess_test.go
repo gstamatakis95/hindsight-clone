@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"testing"
 	"time"
 )
@@ -68,7 +68,7 @@ func TestRetainAsyncScopesNoop(t *testing.T) {
 }
 
 // reprocessJob claims the reprocess job and decodes its payload.
-func (e *env) reprocessJob() (port.Job, DocumentPayload) {
+func (e *env) reprocessJob() (store.Job, DocumentPayload) {
 	e.t.Helper()
 	j := e.claimRetain()
 	p, err := DecodePayload(j.Payload)
@@ -83,7 +83,7 @@ var reprocessAt = time.Date(2025, 3, 4, 5, 6, 7, 0, time.UTC)
 
 // checkReprocessPayload fails the test unless the reprocess job carries the item's scopes, context,
 // metadata, mention time and content hash, is forced, and replays the stored overrides.
-func checkReprocessPayload(t *testing.T, j port.Job, p DocumentPayload) {
+func checkReprocessPayload(t *testing.T, j store.Job, p DocumentPayload) {
 	t.Helper()
 	if p.ObservationScopes == nil || p.ObservationScopes.Mode != domain.ScopeModePerTag || !p.ForceReextract {
 		t.Errorf("payload scopes %+v, force %v; want per_tag and forced", p.ObservationScopes, p.ForceReextract)
@@ -129,7 +129,7 @@ func TestReprocessCarriesScopesAndOverrides(t *testing.T) {
 	if err != nil || res.Unchanged || e.extractCalls() != before+1 {
 		t.Fatalf("reprocess run = %+v, %v; %d extract calls, want 1 more", res, err, e.extractCalls()-before)
 	}
-	u := e.units([]port.UnitID{e.onlyUnit("d1")})[0]
+	u := e.units([]domain.UnitID{e.onlyUnit("d1")})[0]
 	if u.Context != "chat" || u.MentionedAt == nil || !u.MentionedAt.Equal(reprocessAt) {
 		t.Errorf("re-extracted unit %+v lost the item's context or mention time", u)
 	}
@@ -164,7 +164,7 @@ func TestReprocessUnknownDocumentAndDeletingBank(t *testing.T) {
 	if _, err := rp.Reprocess(e.ctx, testBank, "nope", nil); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("unknown document: %v, want NotFound", err)
 	}
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		return tx.Banks().MarkDeleting(e.ctx, testBank, e.clock.Now())
 	})
 	if _, err := rp.Reprocess(e.ctx, testBank, "d1", nil); !errors.Is(err, domain.ErrBankDeleting) {
@@ -188,12 +188,12 @@ func TestReprocessIgnoresCuratedUnit(t *testing.T) {
 	e.ingest(IngestRequest{Items: []IngestItem{{
 		DocumentID: "d1", Content: "some text", Context: "chat", Timestamp: &reprocessAt,
 	}}})
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		seq, err := tx.Seq(e.ctx, testBank)
 		if err != nil {
 			return err
 		}
-		us, err := tx.ListUnits(e.ctx, port.UnitQuery{Bank: testBank, DocumentID: "d1", Limit: 10})
+		us, err := tx.ListUnits(e.ctx, store.UnitQuery{Bank: testBank, DocumentID: "d1", Limit: 10})
 		if err != nil || len(us) != 2 {
 			return fmt.Errorf("units of d1: %d, %w", len(us), err)
 		}

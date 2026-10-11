@@ -352,7 +352,7 @@ CURATION = [
         tenant_id    text        NOT NULL,
         bank_id      text        NOT NULL,
         unit_id      uuid        NOT NULL,
-        action       text        NOT NULL CHECK (action IN ('edit', 'invalidate', 'restore', 'reprocess')),
+        action       text        NOT NULL CHECK (action IN ('edit', 'invalidate', 'restore')),
         reason       text        NOT NULL DEFAULT '',
         before       jsonb       NULL,
         after        jsonb       NULL,

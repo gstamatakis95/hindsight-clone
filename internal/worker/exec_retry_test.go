@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"testing"
 )
 
 // alwaysPending is a PendingChecker reporting an automatic consolidate due for every bank.
 type alwaysPending struct{ calls int }
 
-func (a *alwaysPending) HasPending(context.Context, port.BankRef, port.JobKind) (bool, error) {
+func (a *alwaysPending) HasPending(context.Context, domain.BankRef, domain.OperationKind) (bool, error) {
 	a.calls++
 	return true, nil
 }

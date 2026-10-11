@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // PendingChecker tells the runner whether a bank already has a due automatic consolidate, so a failed
@@ -14,13 +15,13 @@ import (
 type PendingChecker interface {
 	// HasPending reports whether b has a PENDING, joinable (automatic: no overrides, no scopes) operation
 	// of kind that is due now. Only consolidate is supported; other kinds are domain.ErrInvalidArgument.
-	HasPending(ctx context.Context, b port.BankRef, kind port.JobKind) (bool, error)
+	HasPending(ctx context.Context, b domain.BankRef, kind domain.OperationKind) (bool, error)
 }
 
 // pendingChecker implements PendingChecker with a probe transaction that is always rolled back.
 type pendingChecker struct {
-	s port.Store
-	c port.Clock
+	s store.DB
+	c clock.Clock
 }
 
 var _ PendingChecker = (*pendingChecker)(nil)
@@ -30,7 +31,7 @@ var errProbeRollback = errors.New("pending probe: roll back")
 
 // NewPendingChecker returns a PendingChecker reading the operations table through s, judging due-ness
 // with c.
-func NewPendingChecker(s port.Store, c port.Clock) PendingChecker {
+func NewPendingChecker(s store.DB, c clock.Clock) PendingChecker {
 	return &pendingChecker{s: s, c: c}
 }
 
@@ -39,16 +40,16 @@ func NewPendingChecker(s port.Store, c port.Clock) PendingChecker {
 // apart (it carries neither joinability nor scopes). A joined row counts when it is due (Queue.Get's
 // NextRunAt not after now). The transaction is always rolled back, so a probe that inserted leaves nothing
 // behind. A tombstoned bank has nothing pending.
-func (p *pendingChecker) HasPending(ctx context.Context, b port.BankRef, kind port.JobKind) (bool, error) {
+func (p *pendingChecker) HasPending(ctx context.Context, b domain.BankRef, kind domain.OperationKind) (bool, error) {
 	if kind != domain.OperationKindConsolidate {
 		return false, fmt.Errorf("%w: pending probe supports consolidate only, not %s", domain.ErrInvalidArgument, kind)
 	}
 	var due bool
 	var probeErr error
-	err := p.s.InTx(ctx, func(tx port.Tx) error {
-		id, joined, err := tx.Queue().Enqueue(ctx, port.Job{
+	err := p.s.InTx(ctx, func(tx store.Tx) error {
+		id, joined, err := tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: kind, SerialKey: consolidateSerialKey, Payload: json.RawMessage(`{}`),
-			Dedupe: port.DedupePending,
+			Dedupe: store.DedupePending,
 		})
 		if err != nil || !joined {
 			probeErr = err

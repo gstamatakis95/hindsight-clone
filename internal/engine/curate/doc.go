@@ -3,10 +3,10 @@
 //
 // # Where it sits
 //
-// curate is an engine package: it imports domain, port and retain (for retain.ResolveInput and
+// curate is an engine package: it imports domain, the boundary packages and retain (for retain.ResolveInput and
 // retain.CauseMap) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
 // (depguard). It declares what it consumes: [UnitSource], [UnitGetter], [CitingModels] and [ScopeSource]
-// (port.Reader methods), [EntityResolver] and [Linker] (retain.EntityResolver and retain.Linker),
+// (store.Reader methods), [EntityResolver] and [Linker] (retain.EntityResolver and retain.Linker),
 // [RefreshQueuer] (mentalmodel.RefreshQueuer, which owns the refresh payload) and [ObservationClearer]
 // (consolidate.Invalidator). cmd/memd/wire.go builds [NewMemoryLister], [NewCurator], [NewObservationAdmin]
 // and [NewRederiver]; the server's MemoryUnitService and ObservationService call the first three, and the
@@ -33,7 +33,7 @@
 // reads what the transaction will need: for a restore, the archived unit's snapshot entity names (graph
 // maintenance may have pruned those entities while the unit was archived); for an entity change, the
 // effective retain.entity_match_threshold with the request overrides (default 0.6); for an invalidate, the
-// mental models citing the unit or an observation citing it. Then one Store.InTx:
+// mental models citing the unit or an observation citing it. Then one DB.InTx:
 //
 // Invalidate (state invalidated):
 //
@@ -103,14 +103,14 @@
 //
 // Every curation transaction calls tx.Seq(bank) first and stamps what it writes with that seq, so in-scope
 // mental models go stale through the normal check. No transaction here calls a model; the Postgres
-// Store.InTx re-runs a transaction up to 3 times in all after a deadlock (40P01), a serialization failure
+// DB.InTx re-runs a transaction up to 3 times in all after a deadlock (40P01), a serialization failure
 // (40001) or an Attach of an entity that graph maintenance pruned meanwhile (a conflict), and the re-run
 // resolves the names afresh. If every attempt loses that race, domain.ErrConflict surfaces (ABORTED).
 // Every transaction body resets its outputs, so a re-run is safe.
 //
 // # Tests
 //
-// Tests run on a pgtest database, fake.Embedder and fake.Clock: paging, invalidate (citing observations removed,
+// Tests run on a pgtest database, fake.Embedder and clock.Manual: paging, invalidate (citing observations removed,
 // refreshes queued), restore round trip and restore after an entity prune, edits (embedding cleared,
 // rederive queued, entities cleared, Timeless cleared, unit kept out of consolidation until the rederive),
 // rederive skips (unit gone, text changed), a retried older rederive keeping newer entities, cancellation,

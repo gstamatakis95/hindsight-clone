@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"strings"
 )
@@ -27,17 +28,17 @@ type answer struct {
 
 // run is one reflect loop.
 type run struct {
-	llm         port.LLM
-	clock       port.Clock
-	binding     port.ModelBinding
+	llm         ai.LLM
+	clock       clock.Clock
+	binding     domain.ModelBinding
 	st          *agentState
 	tools       map[string]Tool
-	specs       []port.ToolSpec
+	specs       []ai.ToolSpec
 	data        prompts.ReflectData
 	maxIter     int
 	maxTotal    *int64
 	requireEv   bool
-	messages    []port.ChatMessage
+	messages    []ai.ChatMessage
 	outputs     []prompts.ToolOutput
 	sawToolCall bool
 	retried     bool
@@ -100,7 +101,7 @@ func (r *run) loop(ctx context.Context) (answer, error) {
 
 // turn makes one loop turn. Until the model's first tool call the turn requires a tool call, and a prose reply
 // is retried once (per run) before reflect concludes the model can't drive tools.
-func (r *run) turn(ctx context.Context) (port.ChatResponse, error) {
+func (r *run) turn(ctx context.Context) (ai.ChatResponse, error) {
 	if r.sawToolCall {
 		return r.chat(ctx, prompts.ReflectSystem, r.specs, "auto")
 	}
@@ -113,16 +114,16 @@ func (r *run) turn(ctx context.Context) (port.ChatResponse, error) {
 }
 
 // chat makes one REFLECT chat call over the conversation and charges its usage.
-func (r *run) chat(ctx context.Context, name string, tools []port.ToolSpec, choice string) (port.ChatResponse, error) {
-	resp, err := r.llm.Chat(ctx, port.ChatRequest{
+func (r *run) chat(ctx context.Context, name string, tools []ai.ToolSpec, choice string) (ai.ChatResponse, error) {
+	resp, err := r.llm.Chat(ctx, ai.ChatRequest{
 		Slot: domain.ModelSlotReflect, Binding: r.binding, Name: name, Messages: r.messages, Tools: tools,
 		ToolChoice: choice,
 	})
 	if uerr := addUsage(r.st, resp.Usage, r.maxTotal); uerr != nil {
-		return port.ChatResponse{}, uerr
+		return ai.ChatResponse{}, uerr
 	}
 	if err != nil {
-		return port.ChatResponse{}, fmt.Errorf("reflect: chat: %w", err)
+		return ai.ChatResponse{}, fmt.Errorf("reflect: chat: %w", err)
 	}
 	return resp, nil
 }
@@ -138,8 +139,8 @@ func normalizeName(name string) string {
 }
 
 // uniqueCalls gives every call a non-empty id unique within the run (gateways may send blank or repeated ids).
-func (r *run) uniqueCalls(calls []port.ToolCall) []port.ToolCall {
-	out := make([]port.ToolCall, len(calls))
+func (r *run) uniqueCalls(calls []ai.ToolCall) []ai.ToolCall {
+	out := make([]ai.ToolCall, len(calls))
 	for i, c := range calls {
 		c.Name = normalizeName(c.Name)
 		c.ID = strings.TrimSpace(c.ID)
@@ -153,14 +154,14 @@ func (r *run) uniqueCalls(calls []port.ToolCall) []port.ToolCall {
 }
 
 // handle runs one turn's tool calls. A done call wins: the turn's other calls are dropped.
-func (r *run) handle(ctx context.Context, calls []port.ToolCall) (answer, bool, error) {
+func (r *run) handle(ctx context.Context, calls []ai.ToolCall) (answer, bool, error) {
 	calls = r.uniqueCalls(calls)
 	for _, c := range calls {
 		if c.Name == ToolDone {
 			return r.handleDone(c)
 		}
 	}
-	r.messages = append(r.messages, port.ChatMessage{Role: port.ChatRoleAssistant, ToolCalls: calls})
+	r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleAssistant, ToolCalls: calls})
 	for _, c := range calls {
 		if err := r.callTool(ctx, c); err != nil {
 			return answer{}, false, err
@@ -171,8 +172,8 @@ func (r *run) handle(ctx context.Context, calls []port.ToolCall) (answer, bool, 
 
 // handleDone accepts a done call, or sends it back: before any retrieval (require_evidence) and when its
 // arguments are malformed. A present but blank answer fails reflect.
-func (r *run) handleDone(c port.ToolCall) (answer, bool, error) {
-	r.messages = append(r.messages, port.ChatMessage{Role: port.ChatRoleAssistant, ToolCalls: []port.ToolCall{c}})
+func (r *run) handleDone(c ai.ToolCall) (answer, bool, error) {
+	r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleAssistant, ToolCalls: []ai.ToolCall{c}})
 	if r.requireEv && !r.st.Searched {
 		r.toolMessage(c.ID, malformed("%s", r.instructions.searchFirst).Output)
 		return answer{}, false, nil
@@ -220,7 +221,7 @@ func parseDone(raw json.RawMessage, asDocument bool) (text string, cited []strin
 
 // callTool runs one retrieval call and appends its tool message; unknown tools and malformed calls go back
 // to the model, a retrieval failure ends reflect.
-func (r *run) callTool(ctx context.Context, c port.ToolCall) error {
+func (r *run) callTool(ctx context.Context, c ai.ToolCall) error {
 	start := r.clock.Now()
 	tool, ok := r.tools[c.Name]
 	var res toolResult
@@ -245,7 +246,7 @@ func (r *run) callTool(ctx context.Context, c port.ToolCall) error {
 
 // toolMessage appends the tool message answering call id.
 func (r *run) toolMessage(id string, out json.RawMessage) {
-	r.messages = append(r.messages, port.ChatMessage{Role: port.ChatRoleTool, ToolCallID: id, Content: string(out)})
+	r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleTool, ToolCallID: id, Content: string(out)})
 }
 
 // finish asks for the answer as a done call when the conversation ends on tool results; otherwise, or if
@@ -258,14 +259,14 @@ func (r *run) finish(ctx context.Context, stop StopReason) (answer, error) {
 			return ans, err
 		}
 	}
-	if n := len(r.messages); n == 0 || r.messages[n-1].Role != port.ChatRoleTool {
+	if n := len(r.messages); n == 0 || r.messages[n-1].Role != ai.ChatRoleTool {
 		return r.synthesize(ctx, stop)
 	}
 	prompt, err := prompts.Render(prompts.ReflectDoneRequest, &r.data)
 	if err != nil {
 		return answer{}, fmt.Errorf("reflect: %w", err)
 	}
-	r.messages = append(r.messages, port.ChatMessage{Role: port.ChatRoleUser, Content: prompt})
+	r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleUser, Content: prompt})
 	resp, err := r.chat(ctx, prompts.ReflectDoneRequest, r.specs, ToolDone)
 	switch {
 	case err == nil:
@@ -328,7 +329,7 @@ func (r *run) forceRetrieval(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var calls []port.ToolCall
+	var calls []ai.ToolCall
 	for _, c := range resp.Message.ToolCalls {
 		if normalizeName(c.Name) != ToolDone {
 			calls = append(calls, c)
@@ -355,8 +356,8 @@ func (r *run) synthesize(ctx context.Context, stop StopReason) (answer, error) {
 		if err != nil {
 			return answer{}, fmt.Errorf("reflect: %w", err)
 		}
-		r.messages = []port.ChatMessage{
-			{Role: port.ChatRoleSystem, Content: system}, {Role: port.ChatRoleUser, Content: user},
+		r.messages = []ai.ChatMessage{
+			{Role: ai.ChatRoleSystem, Content: system}, {Role: ai.ChatRoleUser, Content: user},
 		}
 		resp, err := r.chat(ctx, prompts.ReflectFinal, nil, "")
 		switch {

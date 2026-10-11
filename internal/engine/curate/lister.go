@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -13,45 +13,39 @@ type MemoryLister interface {
 	// List returns one page of units matching req; no total is computed.
 	List(ctx context.Context, req ListMemoriesRequest) (ListMemoriesPage, error)
 	// Get returns one unit, live or archived; unknown = domain.ErrNotFound.
-	Get(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+	Get(ctx context.Context, b domain.BankRef, id domain.UnitID) (domain.Unit, error)
 	// ObservationHistory returns an observation's versions, newest first.
-	ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
+	ObservationHistory(ctx context.Context, b domain.BankRef, id domain.UnitID) ([]domain.ObservationVersion, error)
 }
 
-// UnitSource is the read side of MemoryLister. Its methods are port.Reader methods; port.Reader satisfies
+// UnitSource is the read side of MemoryLister. Its methods are store.Reader methods; store.Reader satisfies
 // it.
 type UnitSource interface {
 	// GetUnit returns one unit of b, live (State valid) or archived (State invalidated), with Entities,
 	// SourceIDs and, for observations, Stale filled; unknown = domain.ErrNotFound. An unknown or
 	// tombstoned bank is domain.ErrNotFound.
-	GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+	GetUnit(ctx context.Context, b domain.BankRef, id domain.UnitID) (domain.Unit, error)
 	// ListUnits returns up to q.Limit units matching q, newest first (created_at, then id, both
 	// descending), starting strictly after q.After. Units are filled like GetUnit. An unknown or tombstoned
 	// bank is domain.ErrNotFound.
-	ListUnits(ctx context.Context, q UnitQuery) ([]domain.Unit, error)
+	ListUnits(ctx context.Context, q store.UnitQuery) ([]domain.Unit, error)
 	// ObservationHistory returns the observation_versions rows of observation id, newest first; an
 	// unknown id is domain.ErrNotFound. An unknown or tombstoned bank is domain.ErrNotFound.
-	ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
+	ObservationHistory(ctx context.Context, b domain.BankRef, id domain.UnitID) ([]domain.ObservationVersion, error)
 }
-
-// UnitQuery filters UnitSource.ListUnits (port.UnitQuery). Zero fields do not filter.
-type UnitQuery = port.UnitQuery
-
-// UnitCursor is a keyset position in a unit listing (port.UnitCursor).
-type UnitCursor = port.UnitCursor
 
 // ListMemoriesRequest mirrors memory.v1.ListMemoriesRequest with domain types.
 type ListMemoriesRequest struct {
 	// Bank is the bank listed.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Types limits fact types; empty = all.
 	Types []domain.FactType
 	// Q is a case-insensitive text filter; empty = none.
 	Q string
 	// DocumentID limits units to one document; empty = all.
-	DocumentID port.DocumentID
+	DocumentID domain.DocumentID
 	// EntityID limits units to those attached to an entity (live units only); empty = all.
-	EntityID port.EntityID
+	EntityID domain.EntityID
 	// State selects live (valid), archived (invalidated) or both (unspecified) units.
 	State domain.MemoryState
 	// Start is the inclusive lower bound on TimeField; nil = unbounded.
@@ -114,7 +108,7 @@ func (l *lister) List(ctx context.Context, req ListMemoriesRequest) (ListMemorie
 	if len(units) > size {
 		page.Items = units[:size]
 		last := page.Items[size-1]
-		page.NextPageToken, err = encodeToken(UnitCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+		page.NextPageToken, err = encodeToken(store.UnitCursor{CreatedAt: last.CreatedAt, ID: last.ID})
 		if err != nil {
 			return ListMemoriesPage{}, err
 		}
@@ -123,26 +117,26 @@ func (l *lister) List(ctx context.Context, req ListMemoriesRequest) (ListMemorie
 }
 
 // unitQuery turns a request into a UnitQuery, validating enums and decoding the page token.
-func unitQuery(req ListMemoriesRequest) (UnitQuery, error) {
+func unitQuery(req ListMemoriesRequest) (store.UnitQuery, error) {
 	for _, t := range req.Types {
 		if !knownFactType(t) {
-			return UnitQuery{}, fmt.Errorf("%w: unknown fact type %q", domain.ErrInvalidArgument, t)
+			return store.UnitQuery{}, fmt.Errorf("%w: unknown fact type %q", domain.ErrInvalidArgument, t)
 		}
 	}
 	switch req.State {
 	case domain.MemoryStateUnspecified, domain.MemoryStateValid, domain.MemoryStateInvalidated:
 	default:
-		return UnitQuery{}, fmt.Errorf("%w: unknown memory state %q", domain.ErrInvalidArgument, req.State)
+		return store.UnitQuery{}, fmt.Errorf("%w: unknown memory state %q", domain.ErrInvalidArgument, req.State)
 	}
-	q := UnitQuery{
+	q := store.UnitQuery{
 		Bank: req.Bank, Types: req.Types, Q: req.Q, DocumentID: req.DocumentID, EntityID: req.EntityID,
 		State: req.State, Start: req.Start, End: req.End, TimeField: req.TimeField,
 		Tags: domain.NormalizeTags(req.Tags), TagsMatch: req.TagsMatch, Limit: pageSize(req.PageSize),
 	}
 	if req.PageToken != "" {
-		var c UnitCursor
+		var c store.UnitCursor
 		if err := decodeToken(req.PageToken, &c); err != nil {
-			return UnitQuery{}, err
+			return store.UnitQuery{}, err
 		}
 		q.After = &c
 	}
@@ -155,7 +149,7 @@ func knownFactType(t domain.FactType) bool {
 }
 
 // Get returns one unit, live or archived.
-func (l *lister) Get(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+func (l *lister) Get(ctx context.Context, b domain.BankRef, id domain.UnitID) (domain.Unit, error) {
 	u, err := l.src.GetUnit(ctx, b, id)
 	if err != nil {
 		return domain.Unit{}, fmt.Errorf("get memory %s: %w", id, err)
@@ -165,7 +159,7 @@ func (l *lister) Get(ctx context.Context, b port.BankRef, id port.UnitID) (domai
 
 // ObservationHistory returns an observation's versions, newest first.
 func (l *lister) ObservationHistory(
-	ctx context.Context, b port.BankRef, id port.UnitID,
+	ctx context.Context, b domain.BankRef, id domain.UnitID,
 ) ([]domain.ObservationVersion, error) {
 	vs, err := l.src.ObservationHistory(ctx, b, id)
 	if err != nil {

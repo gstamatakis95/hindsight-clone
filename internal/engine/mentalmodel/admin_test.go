@@ -3,7 +3,7 @@ package mentalmodel
 import (
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
@@ -110,7 +110,7 @@ func TestFoldersListAndDelete(t *testing.T) {
 	e := newEnv(t)
 	_, adm := newTriggers(e)
 	for id, folder := range map[string]string{"a": "eng", "b": "eng/backend", "c": "engineering", "d": ""} {
-		e.addModel(domain.MentalModelSpec{ID: port.MentalModelID(id), FolderPath: folder})
+		e.addModel(domain.MentalModelSpec{ID: domain.MentalModelID(id), FolderPath: folder})
 	}
 	page, err := adm.ListMentalModels(e.ctx, ListRequest{Bank: e.bank, FolderPrefix: "eng/"})
 	if err != nil || len(page.Items) != 2 || page.Items[0].Spec.ID != "a" || page.Items[1].Spec.ID != "b" {
@@ -140,10 +140,10 @@ func TestSearchPages(t *testing.T) {
 	e := newEnv(t)
 	add := func(id, folder, name, content string) {
 		vec, _ := e.emb.EmbedQuery(e.ctx, name+"\n\n"+content)
-		e.addModel(domain.MentalModelSpec{ID: port.MentalModelID(id), Name: name, FolderPath: folder})
-		m := e.model(port.MentalModelID(id))
+		e.addModel(domain.MentalModelSpec{ID: domain.MentalModelID(id), Name: name, FolderPath: folder})
+		m := e.model(domain.MentalModelID(id))
 		m.ContentMD, m.Embedding = content, vec
-		e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+		e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	}
 	add("deploy", "ops", "Deploy process", "# Deploy\n\nWe deploy with Argo every Tuesday.")
 	add("hiring", "people", "Hiring", "# Hiring\n\nInterviews take two rounds.")

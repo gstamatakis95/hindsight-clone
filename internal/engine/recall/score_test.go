@@ -2,9 +2,9 @@ package recall
 
 import (
 	"math"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"testing"
 	"time"
@@ -52,7 +52,7 @@ func TestBoostTemporalIsolated(t *testing.T) {
 	mid := time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)
 	sem := arm(ArmSemantic, "far", "centre", "span", "undated", "outside")
 	// The adapter's own scores order the arm (buckets) but must not reach the boost.
-	tmp := &stubArm{name: ArmTemporal, hits: []port.Hit{
+	tmp := &stubArm{name: ArmTemporal, hits: []store.Hit{
 		{ID: uid("far"), Score: 1},
 		{ID: uid("centre"), Score: 0.01},
 		{ID: uid("span"), Score: 0.5},

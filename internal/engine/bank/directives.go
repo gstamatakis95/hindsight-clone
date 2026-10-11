@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 )
 
@@ -12,7 +12,7 @@ import (
 type DirectiveSelector interface {
 	// Select returns bank b's active directives that are global or match tags; all = every active
 	// directive regardless of tags (apply_all_directives).
-	Select(ctx context.Context, b port.BankRef, tags []string, all bool) ([]domain.Directive, error)
+	Select(ctx context.Context, b domain.BankRef, tags []string, all bool) ([]domain.Directive, error)
 }
 
 // DirectiveAdmin manages a bank's directives. Its method set is identical to server.DirectiveAdmin, so
@@ -23,16 +23,16 @@ type DirectiveAdmin interface {
 	UpsertDirective(ctx context.Context, d domain.Directive) (domain.Directive, error)
 	// ListDirectives returns the bank's directives whose tags overlap tags (all when tags is empty), only
 	// active ones when activeOnly; an unknown or tombstoned bank is domain.ErrNotFound.
-	ListDirectives(ctx context.Context, b port.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error)
+	ListDirectives(ctx context.Context, b domain.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error)
 	// DeleteDirective removes one directive; unknown = domain.ErrNotFound.
-	DeleteDirective(ctx context.Context, b port.BankRef, id port.DirectiveID) error
+	DeleteDirective(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error
 }
 
 // readDirectives lists bank b's directives in a short transaction (only active ones when activeOnly); an
 // unknown or tombstoned bank is domain.ErrNotFound.
-func readDirectives(ctx context.Context, s port.Store, b port.BankRef, activeOnly bool) ([]domain.Directive, error) {
+func readDirectives(ctx context.Context, s store.DB, b domain.BankRef, activeOnly bool) ([]domain.Directive, error) {
 	var out []domain.Directive
-	err := s.InTx(ctx, func(tx port.Tx) error {
+	err := s.InTx(ctx, func(tx store.Tx) error {
 		out = nil
 		if _, err := liveBank(ctx, tx, b); err != nil {
 			return err
@@ -57,19 +57,19 @@ func overlaps(a, b []string) bool {
 	return false
 }
 
-// directiveSelector implements DirectiveSelector over port.Store.
-type directiveSelector struct{ s port.Store }
+// directiveSelector implements DirectiveSelector over store.DB.
+type directiveSelector struct{ s store.DB }
 
 var _ DirectiveSelector = (*directiveSelector)(nil)
 
 // NewDirectiveSelector returns the DirectiveSelector over s. Directives are read in a short transaction
-// (port.Reader has no directive read; decision 1306).
-func NewDirectiveSelector(s port.Store) DirectiveSelector { return &directiveSelector{s: s} }
+// (store.Reader has no directive read; decision 1306).
+func NewDirectiveSelector(s store.DB) DirectiveSelector { return &directiveSelector{s: s} }
 
 // Select keeps the active directives that are untagged (global) or share a tag with the request; with no
 // request tags only global ones apply (Hindsight's isolation mode), and all keeps every active one.
 func (d *directiveSelector) Select(
-	ctx context.Context, b port.BankRef, tags []string, all bool,
+	ctx context.Context, b domain.BankRef, tags []string, all bool,
 ) ([]domain.Directive, error) {
 	active, err := readDirectives(ctx, d.s, b, true)
 	if err != nil {
@@ -86,19 +86,19 @@ func (d *directiveSelector) Select(
 	return out, nil
 }
 
-// directiveAdmin implements DirectiveAdmin over port.Store.
-type directiveAdmin struct{ s port.Store }
+// directiveAdmin implements DirectiveAdmin over store.DB.
+type directiveAdmin struct{ s store.DB }
 
 var _ DirectiveAdmin = (*directiveAdmin)(nil)
 
 // NewDirectiveAdmin returns the DirectiveAdmin over s.
-func NewDirectiveAdmin(s port.Store) DirectiveAdmin { return &directiveAdmin{s: s} }
+func NewDirectiveAdmin(s store.DB) DirectiveAdmin { return &directiveAdmin{s: s} }
 
 // UpsertDirective ensures the bank, normalizes the tags and stores d, returning the stored directive.
 func (a *directiveAdmin) UpsertDirective(ctx context.Context, d domain.Directive) (domain.Directive, error) {
 	d.Tags = domain.NormalizeTags(d.Tags)
 	var out domain.Directive
-	err := a.s.InTx(ctx, func(tx port.Tx) error {
+	err := a.s.InTx(ctx, func(tx store.Tx) error {
 		out = domain.Directive{}
 		if _, err := tx.Banks().Ensure(ctx, d.Bank); err != nil {
 			return err
@@ -126,7 +126,7 @@ func (a *directiveAdmin) UpsertDirective(ctx context.Context, d domain.Directive
 
 // ListDirectives returns the bank's directives sharing a tag with tags (every one when tags is empty).
 func (a *directiveAdmin) ListDirectives(
-	ctx context.Context, b port.BankRef, tags []string, activeOnly bool,
+	ctx context.Context, b domain.BankRef, tags []string, activeOnly bool,
 ) ([]domain.Directive, error) {
 	dirs, err := readDirectives(ctx, a.s, b, activeOnly)
 	if err != nil {
@@ -147,8 +147,8 @@ func (a *directiveAdmin) ListDirectives(
 
 // DeleteDirective removes one directive. It is a write: an unknown bank or directive is
 // domain.ErrNotFound and a tombstoned bank domain.ErrBankDeleting.
-func (a *directiveAdmin) DeleteDirective(ctx context.Context, b port.BankRef, id port.DirectiveID) error {
-	return a.s.InTx(ctx, func(tx port.Tx) error {
+func (a *directiveAdmin) DeleteDirective(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error {
+	return a.s.InTx(ctx, func(tx store.Tx) error {
 		if _, err := writableBank(ctx, tx, b); err != nil {
 			return err
 		}

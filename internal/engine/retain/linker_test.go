@@ -2,9 +2,9 @@ package retain
 
 import (
 	"fmt"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"testing"
 	"time"
 )
@@ -17,11 +17,11 @@ func (e *env) seedUnits(prefix string, n int, at time.Time) []domain.Unit {
 		text := fmt.Sprintf("alice likes green tea %s%d", prefix, i)
 		when := at.Add(time.Duration(i) * time.Minute)
 		us[i] = domain.Unit{
-			ID: pgtest.ID[port.UnitID](fmt.Sprintf("%s%d", prefix, i)), Bank: testBank, Type: domain.FactTypeWorld,
+			ID: pgtest.ID[domain.UnitID](fmt.Sprintf("%s%d", prefix, i)), Bank: testBank, Type: domain.FactTypeWorld,
 			Text: text, Embedding: e.emb.Vector(text), MentionedAt: &when,
 		}
 	}
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		seq, err := tx.Seq(e.ctx, testBank)
 		if err != nil {
 			return err
@@ -35,14 +35,14 @@ func (e *env) seedUnits(prefix string, n int, at time.Time) []domain.Unit {
 }
 
 // linkCounts returns how many links of kind touch each unit (by id or fixture name), keyed by fixture name.
-func (e *env) linkCounts(ids []port.UnitID, kind domain.LinkKind) map[port.UnitID]int {
+func (e *env) linkCounts(ids []domain.UnitID, kind domain.LinkKind) map[domain.UnitID]int {
 	e.t.Helper()
-	out := map[port.UnitID]int{}
-	e.inTx(func(tx port.Tx) error {
+	out := map[domain.UnitID]int{}
+	e.inTx(func(tx store.Tx) error {
 		for _, id := range ids {
-			name := port.UnitID(pgtest.Name(id))
+			name := domain.UnitID(pgtest.Name(id))
 			if name == id {
-				id = pgtest.ID[port.UnitID](string(name))
+				id = pgtest.ID[domain.UnitID](string(name))
 			}
 			n, err := tx.Links().Count(e.ctx, id, kind)
 			if err != nil {
@@ -68,8 +68,8 @@ func TestLinkerCapsHold(t *testing.T) {
 	kinds := []domain.LinkKind{domain.LinkSemantic, domain.LinkTemporal}
 	us := e.seedUnits("a", 30, at)
 	causes := CauseMap{us[1].ID: {us[0].ID}}
-	e.inTx(func(tx port.Tx) error { return NewLinker().LinkWith(e.ctx, tx, testBank, us, causes, cfg) })
-	ids := make([]port.UnitID, 0, len(us))
+	e.inTx(func(tx store.Tx) error { return NewLinker().LinkWith(e.ctx, tx, testBank, us, causes, cfg) })
+	ids := make([]domain.UnitID, 0, len(us))
 	for _, u := range us {
 		ids = append(ids, u.ID)
 	}
@@ -81,18 +81,18 @@ func TestLinkerCapsHold(t *testing.T) {
 		}
 	}
 	late := e.seedUnits("z", 1, at)
-	e.inTx(func(tx port.Tx) error { return NewLinker().LinkWith(e.ctx, tx, testBank, late, nil, cfg) })
+	e.inTx(func(tx store.Tx) error { return NewLinker().LinkWith(e.ctx, tx, testBank, late, nil, cfg) })
 	for _, kind := range kinds {
-		if n := e.linkCounts([]port.UnitID{"z0"}, kind)["z0"]; n != 2*capN {
+		if n := e.linkCounts([]domain.UnitID{"z0"}, kind)["z0"]; n != 2*capN {
 			t.Errorf("z0 has %d %s links, want exactly %d pairs from its own pass", n, kind, capN)
 		}
 	}
-	n := e.linkCounts([]port.UnitID{"a0", "a1", "a2"}, domain.LinkCausal)
+	n := e.linkCounts([]domain.UnitID{"a0", "a1", "a2"}, domain.LinkCausal)
 	if n["a0"] != 1 || n["a1"] != 1 || n["a2"] != 0 {
 		t.Errorf("causal counts = %v, want a0 -> a1 only", n)
 	}
-	hits, err := e.store.Read().ExpandGraph(e.ctx, port.GraphQuery{
-		Bank: testBank, Seeds: pgtest.IDs[port.UnitID]("a1"), MaxHops: 1,
+	hits, err := e.store.Read().ExpandGraph(e.ctx, store.GraphQuery{
+		Bank: testBank, Seeds: pgtest.IDs[domain.UnitID]("a1"), MaxHops: 1,
 		Kinds: []domain.LinkKind{domain.LinkCausal}, Limit: 10,
 	})
 	if err != nil || len(hits) != 0 {
@@ -104,27 +104,27 @@ func TestLinkerCapsHold(t *testing.T) {
 func TestLinkerTimelessAndBankConfig(t *testing.T) {
 	e := newEnv(t, 0)
 	one := 1
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		return tx.Banks().SetConfig(e.ctx, testBank, domain.BankConfig{Retain: &domain.RetainTuning{TemporalLinkCap: &one}})
 	})
 	us := e.seedUnits("t", 4, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
-	e.inTx(func(tx port.Tx) error { return NewLinker().Link(e.ctx, tx, testBank, us, nil) })
-	for id, n := range e.linkCounts([]port.UnitID{"t0", "t1", "t2", "t3"}, domain.LinkTemporal) {
+	e.inTx(func(tx store.Tx) error { return NewLinker().Link(e.ctx, tx, testBank, us, nil) })
+	for id, n := range e.linkCounts([]domain.UnitID{"t0", "t1", "t2", "t3"}, domain.LinkTemporal) {
 		if n < 2 || n > 4 {
 			t.Errorf("%s has %d temporal links, want 1-2 neighbours (bank cap 1 per unit's own pass)", id, n)
 		}
 	}
-	if n := e.linkCounts([]port.UnitID{"t0"}, domain.LinkTemporal)["t0"]; n != 2 {
+	if n := e.linkCounts([]domain.UnitID{"t0"}, domain.LinkTemporal)["t0"]; n != 2 {
 		t.Errorf("t0 (linked first, alone in its pass) has %d temporal links, want exactly the bank cap of 1 pair", n)
 	}
 	timeless := e.seedUnits("x", 2, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	for i := range timeless {
 		timeless[i].Timeless = true
 	}
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		return NewLinker().LinkWith(e.ctx, tx, testBank, timeless, nil, domain.BankConfig{})
 	})
-	if n := e.linkCounts([]port.UnitID{"x0", "x1"}, domain.LinkTemporal); n["x0"] != 0 || n["x1"] != 0 {
+	if n := e.linkCounts([]domain.UnitID{"x0", "x1"}, domain.LinkTemporal); n["x0"] != 0 || n["x1"] != 0 {
 		t.Errorf("timeless units got temporal links: %v", n)
 	}
 }

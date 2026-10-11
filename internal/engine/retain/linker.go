@@ -5,7 +5,7 @@ import (
 	"context"
 	"math"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"time"
 )
@@ -15,17 +15,17 @@ type Linker interface {
 	// Link adds temporal + semantic (kNN >= threshold) + causal edges for freshly inserted units, within
 	// the per-unit caps (temporal_link_cap, semantic_link_k). It runs in the caller's transaction and reads
 	// the tuning from the bank's stored config (tenant < bank; per-request overrides need LinkWith).
-	Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes CauseMap) error
+	Link(ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes CauseMap) error
 	// LinkWith is Link with the caller's effective config (a retain's request and item overrides).
 	LinkWith(
-		ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes CauseMap, cfg domain.BankConfig,
+		ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes CauseMap, cfg domain.BankConfig,
 	) error
 }
 
 // CauseMap maps an effect unit to the units that caused it, from the batch-local
 // domain.ExtractedFact.Causes indexes once the units have ids. Nil = no causal edges. It is an alias of
 // the plain map type so consumers (maintenance) can declare Linker without importing retain.
-type CauseMap = map[port.UnitID][]port.UnitID
+type CauseMap = map[domain.UnitID][]domain.UnitID
 
 // factTypes are the unit types links join: facts, never observations.
 var factTypes = []domain.FactType{domain.FactTypeWorld, domain.FactTypeExperience}
@@ -45,7 +45,7 @@ var _ Linker = (*linker)(nil)
 func NewLinker() Linker { return &linker{} }
 
 // Link implements Linker.
-func (l *linker) Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes CauseMap) error {
+func (l *linker) Link(ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes CauseMap) error {
 	tenant, err := tx.Banks().TenantConfig(ctx, b.Tenant)
 	if err != nil {
 		return err
@@ -60,7 +60,7 @@ func (l *linker) Link(ctx context.Context, tx port.Tx, b port.BankRef, units []d
 
 // LinkWith implements Linker.
 func (l *linker) LinkWith(
-	ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes CauseMap, cfg domain.BankConfig,
+	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes CauseMap, cfg domain.BankConfig,
 ) error {
 	run := &linkRun{tx: tx, b: b, t: tuningOf(cfg), counts: map[countKey]int{}, done: map[pairKey]bool{}}
 	for _, u := range units {
@@ -87,18 +87,18 @@ func (l *linker) LinkWith(
 
 // countKey caches one unit's link count of one kind.
 type countKey struct {
-	unit port.UnitID
+	unit domain.UnitID
 	kind domain.LinkKind
 }
 
 // pairKey is an unordered unit pair of one kind.
 type pairKey struct {
-	a, b port.UnitID
+	a, b domain.UnitID
 	kind domain.LinkKind
 }
 
 // newPairKey orders the pair.
-func newPairKey(x, y port.UnitID, kind domain.LinkKind) pairKey {
+func newPairKey(x, y domain.UnitID, kind domain.LinkKind) pairKey {
 	if y < x {
 		x, y = y, x
 	}
@@ -107,15 +107,15 @@ func newPairKey(x, y port.UnitID, kind domain.LinkKind) pairKey {
 
 // linkRun is one Link call: the tuning plus cached link counts.
 type linkRun struct {
-	tx     port.Tx
-	b      port.BankRef
+	tx     store.Tx
+	b      domain.BankRef
 	t      tuning
 	counts map[countKey]int
 	done   map[pairKey]bool
 }
 
 // neighbours returns how many symmetric links of kind u has (links touching it / 2, rounded up).
-func (r *linkRun) neighbours(ctx context.Context, u port.UnitID, kind domain.LinkKind) (int, error) {
+func (r *linkRun) neighbours(ctx context.Context, u domain.UnitID, kind domain.LinkKind) (int, error) {
 	k := countKey{u, kind}
 	n, ok := r.counts[k]
 	if !ok {
@@ -132,7 +132,7 @@ func (r *linkRun) neighbours(ctx context.Context, u port.UnitID, kind domain.Lin
 // whether u still has room. Only u's side is capped, as in Hindsight's _cap_links_per_unit: a neighbour at
 // its cap still takes the pair, so later units in a dense cluster are not starved of links.
 func (r *linkRun) connect(
-	ctx context.Context, u, v port.UnitID, kind domain.LinkKind, w float64, capLimit int,
+	ctx context.Context, u, v domain.UnitID, kind domain.LinkKind, w float64, capLimit int,
 ) (bool, error) {
 	pk := newPairKey(u, v, kind)
 	if u == v || r.done[pk] {
@@ -162,7 +162,7 @@ func (r *linkRun) semantic(ctx context.Context, u domain.Unit) error {
 	if k <= 0 || len(u.Embedding) == 0 {
 		return nil
 	}
-	hits, err := r.tx.SearchVector(ctx, port.VectorQuery{
+	hits, err := r.tx.SearchVector(ctx, store.VectorQuery{
 		Bank: r.b, Embedding: u.Embedding, Types: factTypes, MinSimilarity: r.t.semanticMinSim, Limit: 2*k + 1,
 	})
 	if err != nil {
@@ -188,13 +188,13 @@ func (r *linkRun) temporal(ctx context.Context, u domain.Unit) error {
 	if at == nil || capLimit <= 0 {
 		return nil
 	}
-	hits, err := r.tx.SearchTemporal(ctx, port.TemporalQuery{
+	hits, err := r.tx.SearchTemporal(ctx, store.TemporalQuery{
 		Bank: r.b, Window: domain.TimeWindow{Start: at.Add(-w), End: at.Add(w)}, Types: factTypes, Limit: 2*capLimit + 1,
 	})
 	if err != nil {
 		return err
 	}
-	ids := make([]port.UnitID, 0, len(hits))
+	ids := make([]domain.UnitID, 0, len(hits))
 	for _, h := range hits {
 		ids = append(ids, h.ID)
 	}
@@ -203,7 +203,7 @@ func (r *linkRun) temporal(ctx context.Context, u domain.Unit) error {
 		return err
 	}
 	type cand struct {
-		id  port.UnitID
+		id  domain.UnitID
 		gap time.Duration
 	}
 	cands := make([]cand, 0, len(near))

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 )
 
@@ -18,15 +18,15 @@ type ChangeDetector interface {
 
 // changeDetector is the ChangeDetector over the bank's change sequence.
 type changeDetector struct {
-	r     port.Reader
+	r     store.Reader
 	scope ScopeReader
 }
 
 var _ ChangeDetector = (*changeDetector)(nil)
 
-// NewChangeDetector returns the ChangeDetector. r reads BankSeq and the cited sources; s (port.Reader) finds the
+// NewChangeDetector returns the ChangeDetector. r reads BankSeq and the cited sources; s (store.Reader) finds the
 // newest in-scope unit and resolves fuzzy scope tags.
-func NewChangeDetector(r port.Reader, s ScopeReader) ChangeDetector {
+func NewChangeDetector(r store.Reader, s ScopeReader) ChangeDetector {
 	return &changeDetector{r: r, scope: s}
 }
 
@@ -37,7 +37,7 @@ func (d *changeDetector) NeedsRefresh(ctx context.Context, m domain.MentalModel)
 	if err != nil {
 		return false, 0, fmt.Errorf("mentalmodel: bank seq: %w", err)
 	}
-	q, err := scopeQuery(ctx, d.scope, m, port.SeqUpTo(m.LastSeqSeen, upTo), true,
+	q, err := scopeQuery(ctx, d.scope, m, store.SeqUpTo(m.LastSeqSeen, upTo), true,
 		recall.FuzzyTagMinSimilarity(domain.BankConfig{}))
 	if err != nil {
 		return false, 0, err
@@ -63,7 +63,7 @@ func isStale(m domain.MentalModel, newestInScopeSeq int64, retracted bool) bool 
 
 // retractedSources reports whether any of m's source_ids is no longer a live unit (invalidated, or
 // replaced by a reprocess or upsert).
-func retractedSources(ctx context.Context, r port.Reader, m domain.MentalModel) (bool, error) {
+func retractedSources(ctx context.Context, r store.Reader, m domain.MentalModel) (bool, error) {
 	ids := slices.Clone(m.SourceIDs)
 	slices.Sort(ids)
 	ids = slices.Compact(ids)

@@ -4,20 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"testing"
 )
 
-// adminEnv is an ObservationAdmin over the seeded env, with the store's port.Reader as ScopeSource and the
+// adminEnv is an ObservationAdmin over the seeded env, with the store's store.Reader as ScopeSource and the
 // real consolidate.Invalidator as ObservationClearer. On top of the seed (o1 in scope team) it stores 2
 // observations in scope a, 3 in b, 4 in c and 1 in the shared scope.
 func adminEnv(t *testing.T) (*env, ObservationAdmin) {
 	e := newEnv(t)
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		seq, err := tx.Seq(e.ctx, testBank)
 		if err != nil {
 			return err
@@ -29,7 +29,7 @@ func adminEnv(t *testing.T) (*env, ObservationAdmin) {
 			for i := range s.n {
 				text := fmt.Sprintf("observation %v %d", s.tags, i)
 				o := domain.Unit{
-					ID: pgtest.ID[port.UnitID](fmt.Sprintf("obs-%v-%d", s.tags, i)), Bank: testBank,
+					ID: pgtest.ID[domain.UnitID](fmt.Sprintf("obs-%v-%d", s.tags, i)), Bank: testBank,
 					Type: domain.FactTypeObservation, Text: text, Tags: s.tags, Embedding: e.emb.Vector(text), Seq: seq,
 				}
 				if err := tx.Units().UpsertObservation(e.ctx, o); err != nil {
@@ -46,7 +46,7 @@ func adminEnv(t *testing.T) (*env, ObservationAdmin) {
 
 // consolidatePayload claims (and completes) consolidate jobs one at a time, as their serial key allows,
 // until it finds id, and returns its payload.
-func (e *env) consolidatePayload(id port.OperationID) ConsolidatePayload {
+func (e *env) consolidatePayload(id domain.OperationID) ConsolidatePayload {
 	e.t.Helper()
 	for range 10 {
 		jobs := e.claim(domain.OperationKindConsolidate)
@@ -90,7 +90,7 @@ func TestObservationAdminConsolidate(t *testing.T) {
 	if len(payload.Scopes) != 1 || !slices.Equal(payload.Scopes[0].Tags, []string{"a", "b"}) {
 		t.Errorf("scoped payload = %+v", payload)
 	}
-	fresh := port.BankRef{Tenant: "acme", Bank: "new"}
+	fresh := domain.BankRef{Tenant: "acme", Bank: "new"}
 	if _, err := a.Consolidate(e.ctx, fresh, nil, nil); err != nil {
 		t.Errorf("consolidate on an unknown bank should create it: %v", err)
 	}

@@ -7,13 +7,15 @@
 //
 // # Where it sits
 //
-// cmd/memd is the composition root (domain -> port -> engine -> server/worker -> cmd/memd). wire.go is the
-// only place concrete types meet: it opens the adapters (Postgres pool and store, S3 blob store, AI gateway
-// client), narrows each to the ports the engines consume, builds every engine once, and hands them to the
-// gRPC server (internal/server) and to the job handlers and maintenance tick (internal/worker). glue.go holds
-// the small adapters no engine provides: the system clock, slotRouter, the worker id, the worker's health
-// server, the operation reader, the reflect page reader and the readiness probes. Engines never import this
-// package; nothing here holds business logic.
+// cmd/memd is the composition root, the only place concrete types meet. wire.go opens the infrastructure (the
+// Postgres pool and postgres.DB, the blob store MEMD_BLOB_PROVIDER selects, the AI gateway client), narrows each to
+// its boundary (store, blob, ai), builds the shared libraries once (config resolver, ai.Router, ai.Tokenizer,
+// timex, retain's shared pieces, recall, reflect) and runs the two modes. Each wire_<area>.go (memory, document,
+// observation, mentalmodel, bank, config, operation, maintenance) builds one area's engines and fills its part of
+// the gRPC server's dependencies (internal/server), the job handlers and the maintenance tick (internal/worker).
+// probes.go holds the readiness probes and the worker's health server, workerid.go the worker id, and glue.go the
+// small adapters no engine provides yet: the operation reader and the reflect page reader. Engines never import
+// this package; nothing here holds business logic.
 //
 // # Startup
 //
@@ -23,9 +25,9 @@
 //     bad deployment fails before anything connects. A missing or unknown mode prints the usage and exits 2;
 //     a bad flag or value, extra arguments or a failed validation prints the error and exits 1.
 //  2. Optional Datadog instrumentation starts (internal/observability); disabled, it installs nothing.
-//  3. The adapters open: Postgres (pinged within 30 s), S3 and the gateway. The gateway's embedding model
+//  3. The adapters open: Postgres (pinged within 30 s), blob storage and the gateway. The gateway's embedding model
 //     must return 768 dimensions (memory_units.embedding is vector(768)), else startup fails.
-//  4. The token counter (tiktoken cl100k_base, embedded) and the server-level config (config.ServerDefaults)
+//  4. The tokenizer (tiktoken cl100k_base, embedded) and the server-level config (config.ServerDefaults)
 //     are built, then every engine.
 //  5. The mode runs until SIGINT or SIGTERM. The api stops gracefully within 20 s; the worker stops claiming,
 //     lets running jobs finish within the runner's shutdown grace and releases the rest. In mode all an error
@@ -48,6 +50,7 @@
 //	MEMD_EMBED_MODEL                    "nomic-embed-text-v1.5"   server-wide embedding model (768 dims)
 //	MEMD_GATEWAY_MAX_CONCURRENT         32         in-flight gateway calls in this process
 //	MEMD_GATEWAY_TIMEOUT                120s       one gateway HTTP attempt, when the binding sets none
+//	MEMD_BLOB_PROVIDER                  "s3"       blob storage for original texts; s3 is the only provider
 //	MEMD_S3_ENDPOINT                    ""         S3 API URL; empty = AWS for the region
 //	MEMD_S3_BUCKET                      bucket for original document texts; required
 //	MEMD_S3_ACCESS_KEY                  static access key; required (no AWS credential chain)
@@ -85,25 +88,23 @@
 //
 // # Wiring details
 //
-//   - slotRouter wraps the engine router: a slot with no model bound is FAILED_PRECONDITION (the deployment
-//     or bank config lacks a binding, the request is fine) and a permanent job failure, naming the variables
-//     to set; EMBED and the unspecified slot keep the router's INVALID_ARGUMENT.
 //   - operationReader serves GetOperation, ListOperations and ListEvents in short read-only transactions; an
 //     unknown or tombstoned bank is NOT_FOUND. ListEvents with limit 0 returns at most 100 events, and any
 //     limit is capped at 1000 (the store's own List treats 0 as unlimited).
 //   - Readiness probes: Postgres is pinged; the gateway is reachable when a GET of its base URL gets any HTTP
 //     response (no model call; the result is cached for 10 s).
-//   - The worker's maintenance reads (unconsolidated banks, stalled deletes, banks with graph work, stranded
-//     facts, retain_batch settlement) are Postgres store methods narrowed to the worker's interfaces.
+//   - The maintenance tick's cross-bank scans (unconsolidated banks, stalled deletes, banks with graph work,
+//     stranded facts, retain_batch settlement, cron models, failed refreshes) are store.Maintenance, which
+//     postgres.DB implements.
 //   - With Datadog on, the pgx pool, S3 client, gateway client, gRPC server, job runs (worker TraceJob) and
 //     maintenance ticks (TraceTick) are traced; gRPC and job spans carry the tenant as a tag.
 //
 // # Tests
 //
-// config_test.go covers settings from the environment and flags, validation, required slots, the unbound-slot
-// router, per-slot concurrency, S3 keys, the worker id and health server, and the embedding and tokenizer
-// checks; wire_test.go runs the fully wired stack over a pgtest database and the model fakes and checks that no model
-// call happens inside a store transaction; glue_test.go checks ListEvents' default and cap; and
+// config_test.go covers settings from the environment and flags, validation (the blob provider and S3 keys
+// included), required slots, per-slot concurrency, the worker id and health server, and the embedding check;
+// wire_test.go runs the fully wired stack over a pgtest database and the model fakes and checks that no model call
+// happens inside a store transaction; glue_test.go checks ListEvents' default and cap; and
 // observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest, an unreachable agent
 // still serves). End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a gateway
 // emulator using these variable names. SPEC "Process model", "Model routing" and "File structure".

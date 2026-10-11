@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"slices"
 	"strings"
 	"sync"
@@ -43,7 +43,7 @@ type EmbedCall struct {
 	Texts []string
 }
 
-// Embedder is a deterministic port.Embedder. Vectors are domain.EmbeddingDim float32 values of unit L2
+// Embedder is a deterministic ai.Embedder. Vectors are domain.EmbeddingDim float32 values of unit L2
 // length, identical across processes, never NaN. No nomic task prefix is applied, so EmbedQuery(x) equals
 // EmbedDocuments([x])[0] equals Vector(x). Every call is recorded (see Calls), including calls that fail
 // because of FailWith or a done ctx. It is safe for concurrent use.
@@ -54,7 +54,7 @@ type Embedder struct {
 	calls []EmbedCall
 }
 
-var _ port.Embedder = (*Embedder)(nil)
+var _ ai.Embedder = (*Embedder)(nil)
 
 // NewEmbedder returns an Embedder using mode.
 func NewEmbedder(mode EmbedMode) *Embedder {

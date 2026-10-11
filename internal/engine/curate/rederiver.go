@@ -2,9 +2,10 @@ package curate
 
 import (
 	"context"
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/engine/retain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // Rederiver is the rederive_memory job: re-embed, re-link, enqueue consolidation.
@@ -15,13 +16,13 @@ type Rederiver interface {
 	// older rederive retried after a newer edit can never re-apply stale names (decision 1305). A unit that
 	// is gone (archived or replaced) or whose text changed after the embedding was computed is left alone:
 	// the job succeeds and the newer edit's rederive does the work. Running it twice is harmless.
-	Rederive(ctx context.Context, j port.Job) error
+	Rederive(ctx context.Context, j store.Job) error
 }
 
 // RederivePayload is the rederive_memory job payload (decision 1301).
 type RederivePayload struct {
 	// UnitID is the edited or restored unit. The payload carries no entity names: the RPC committed them.
-	UnitID port.UnitID `json:"unit_id"`
+	UnitID domain.UnitID `json:"unit_id"`
 }
 
 // EntityResolver is the part of retain.EntityResolver the curator consumes (no model call, so it runs
@@ -29,21 +30,21 @@ type RederivePayload struct {
 // satisfies it.
 type EntityResolver interface {
 	// Resolve maps the mentions of one fact to existing or new entities inside tx.
-	Resolve(ctx context.Context, tx port.Tx, b port.BankRef, in retain.ResolveInput) ([]port.EntityID, error)
+	Resolve(ctx context.Context, tx store.Tx, b domain.BankRef, in retain.ResolveInput) ([]domain.EntityID, error)
 }
 
 // Linker is the part of retain.Linker the rederiver consumes; retain.Linker satisfies it.
 type Linker interface {
 	// Link adds temporal + semantic (+ causal) edges for units within the per-unit caps, in tx.
-	Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes retain.CauseMap) error
+	Link(ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes retain.CauseMap) error
 }
 
 // RederiverDeps are the Rederiver's dependencies.
 type RederiverDeps struct {
 	// Store opens the job's short write transaction.
-	Store port.Store
+	Store store.DB
 	// Embedder re-embeds the unit text, outside any transaction.
-	Embedder port.Embedder
+	Embedder ai.Embedder
 	// Linker rebuilds the unit's temporal and semantic links.
 	Linker Linker
 }

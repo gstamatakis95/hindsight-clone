@@ -3,6 +3,7 @@ package server_test
 import (
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/engine/mentalmodel"
 	"memd/internal/server"
 	"testing"
 
@@ -85,6 +86,6 @@ func TestRealValidatorAcceptsServerRPCNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, _ := h.calls.args("MentalModelAdmin.UpdateMentalModel")
-	_, err = args[2].(server.SpecPatch)(domain.MentalModelSpec{ID: "m"})
+	_, err = args[2].(mentalmodel.SpecPatch)(domain.MentalModelSpec{ID: "m"})
 	wantOK(t, "UpdateMentalModel (patch)", err)
 }

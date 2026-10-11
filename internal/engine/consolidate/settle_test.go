@@ -4,21 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
 // hookLLM decorates an LLM: fn sees every Structured request first and may fail it.
 type hookLLM struct {
-	port.LLM
-	fn func(req port.StructuredRequest) error
+	ai.LLM
+	fn func(req ai.StructuredRequest) error
 }
 
 // Structured runs the hook, then the decorated call.
-func (h hookLLM) Structured(ctx context.Context, req port.StructuredRequest, out any) (port.Usage, error) {
+func (h hookLLM) Structured(ctx context.Context, req ai.StructuredRequest, out any) (domain.Usage, error) {
 	if err := h.fn(req); err != nil {
-		return port.Usage{}, fmt.Errorf("%w: hook: %w", domain.ErrUnavailable, err)
+		return domain.Usage{}, fmt.Errorf("%w: hook: %w", domain.ErrUnavailable, err)
 	}
 	return h.LLM.Structured(ctx, req, out)
 }
@@ -58,7 +59,7 @@ func TestSettleProbesTheScopeBinding(t *testing.T) {
 	e.fact("f1", "Fact one", "x")
 	e.script(ok(reply(nil, nil)))
 	var models []string
-	e.deps.LLM = hookLLM{LLM: e.llm, fn: func(req port.StructuredRequest) error {
+	e.deps.LLM = hookLLM{LLM: e.llm, fn: func(req ai.StructuredRequest) error {
 		models = append(models, req.Binding.Model)
 		if req.Binding.Model == "broken" {
 			return errors.New("model down")
@@ -103,9 +104,9 @@ func TestParkSkipsChangedUnits(t *testing.T) {
 	e.fact("p", "Poison fact", "x")
 	e.script(fail(), ok(reply(nil, nil)), fail())
 	calls := 0
-	e.deps.LLM = hookLLM{LLM: e.llm, fn: func(port.StructuredRequest) error {
+	e.deps.LLM = hookLLM{LLM: e.llm, fn: func(ai.StructuredRequest) error {
 		if calls++; calls == 3 { // the retry alone: edit p while it runs
-			e.tx(func(tx port.Tx) error {
+			e.tx(func(tx store.Tx) error {
 				u := e.unit("p")
 				seq, err := tx.Seq(t.Context(), bank)
 				if err != nil {

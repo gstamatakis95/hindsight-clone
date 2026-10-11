@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 )
@@ -15,7 +15,7 @@ type TagFilterCompiler interface {
 	// Compile validates f, resolves fuzzy leaves against the bank's tags by trigram similarity (at or above
 	// minSimilarity) and compiles the result. Leaves always carry normalized tags and an explicit match
 	// mode. An empty filter compiles to an empty PredicateAnd, which matches every unit.
-	Compile(ctx context.Context, b port.BankRef, f domain.TagFilter, minSimilarity float64) (port.SQLPredicate, error)
+	Compile(ctx context.Context, b domain.BankRef, f domain.TagFilter, minSimilarity float64) (store.SQLPredicate, error)
 }
 
 // maxExactCombinations caps the branches a fuzzy exact leaf may expand into (Hindsight's
@@ -38,12 +38,12 @@ func NewTagFilterCompiler(v TagVocabulary) TagFilterCompiler {
 // Compile implements TagFilterCompiler. The flat leaf (if it filters anything) and every top-level group
 // are AND-ed under one PredicateAnd.
 func (c *tagCompiler) Compile(
-	ctx context.Context, b port.BankRef, f domain.TagFilter, minSimilarity float64,
-) (port.SQLPredicate, error) {
+	ctx context.Context, b domain.BankRef, f domain.TagFilter, minSimilarity float64,
+) (store.SQLPredicate, error) {
 	if err := f.Validate(); err != nil {
-		return port.SQLPredicate{}, fmt.Errorf("recall: tag filter: %w", err)
+		return store.SQLPredicate{}, fmt.Errorf("recall: tag filter: %w", err)
 	}
-	out := port.SQLPredicate{Op: port.PredicateAnd}
+	out := store.SQLPredicate{Op: store.PredicateAnd}
 	if leaf, ok := flatLeaf(f); ok {
 		out.Args = append(out.Args, leaf)
 	}
@@ -52,12 +52,12 @@ func (c *tagCompiler) Compile(
 	}
 	resolved, err := c.resolveFuzzy(ctx, b, f.Groups, minSimilarity)
 	if err != nil {
-		return port.SQLPredicate{}, err
+		return store.SQLPredicate{}, err
 	}
 	for _, g := range f.Groups {
 		p, err := compileGroup(g, resolved)
 		if err != nil {
-			return port.SQLPredicate{}, err
+			return store.SQLPredicate{}, err
 		}
 		out.Args = append(out.Args, p)
 	}
@@ -66,27 +66,27 @@ func (c *tagCompiler) Compile(
 
 // flatLeaf compiles f's flat tags into one leaf, defaulting an unspecified match to any. It reports false
 // when the flat part filters nothing (no tags under a non-exact mode).
-func flatLeaf(f domain.TagFilter) (port.SQLPredicate, bool) {
+func flatLeaf(f domain.TagFilter) (store.SQLPredicate, bool) {
 	mode := f.Match
 	if mode == domain.TagsMatchUnspecified {
 		mode = domain.TagsMatchAny
 	}
 	tags := domain.NormalizeTags(f.Tags)
 	if len(tags) == 0 && mode != domain.TagsMatchExact {
-		return port.SQLPredicate{}, false
+		return store.SQLPredicate{}, false
 	}
 	return tagsLeaf(tags, mode), true
 }
 
 // tagsLeaf builds a PredicateTags leaf over already-normalized tags.
-func tagsLeaf(tags []string, mode domain.TagsMatch) port.SQLPredicate {
-	return port.SQLPredicate{Op: port.PredicateTags, Tags: tags, Match: mode}
+func tagsLeaf(tags []string, mode domain.TagsMatch) store.SQLPredicate {
+	return store.SQLPredicate{Op: store.PredicateTags, Tags: tags, Match: mode}
 }
 
 // resolveFuzzy expands every fuzzy token in groups against the bank's tag vocabulary, keyed by the
 // normalized token. It reads the vocabulary only when at least one leaf is fuzzy and returns nil otherwise.
 func (c *tagCompiler) resolveFuzzy(
-	ctx context.Context, b port.BankRef, groups []domain.TagGroup, minSimilarity float64,
+	ctx context.Context, b domain.BankRef, groups []domain.TagGroup, minSimilarity float64,
 ) (map[string][]string, error) {
 	var tokens []string
 	for _, g := range groups {
@@ -147,7 +147,7 @@ func normalizeOrdered(tags []string) []string {
 
 // compileGroup compiles one tag group. Exact leaves compile verbatim (normalized tags, unset match =
 // any_strict); fuzzy leaves are rewritten over their expansions in resolved, keyed by normalized token.
-func compileGroup(g domain.TagGroup, resolved map[string][]string) (port.SQLPredicate, error) {
+func compileGroup(g domain.TagGroup, resolved map[string][]string) (store.SQLPredicate, error) {
 	switch g.Kind {
 	case domain.TagGroupLeaf:
 		if g.Leaf == nil {
@@ -155,15 +155,15 @@ func compileGroup(g domain.TagGroup, resolved map[string][]string) (port.SQLPred
 		}
 		return compileLeaf(*g.Leaf, resolved)
 	case domain.TagGroupAllOf, domain.TagGroupAnyOf:
-		op := port.PredicateAnd
+		op := store.PredicateAnd
 		if g.Kind == domain.TagGroupAnyOf {
-			op = port.PredicateOr
+			op = store.PredicateOr
 		}
-		out := port.SQLPredicate{Op: op, Args: make([]port.SQLPredicate, 0, len(g.Groups))}
+		out := store.SQLPredicate{Op: op, Args: make([]store.SQLPredicate, 0, len(g.Groups))}
 		for _, c := range g.Groups {
 			p, err := compileGroup(c, resolved)
 			if err != nil {
-				return port.SQLPredicate{}, err
+				return store.SQLPredicate{}, err
 			}
 			out.Args = append(out.Args, p)
 		}
@@ -174,15 +174,15 @@ func compileGroup(g domain.TagGroup, resolved map[string][]string) (port.SQLPred
 		}
 		p, err := compileGroup(*g.Not, resolved)
 		if err != nil {
-			return port.SQLPredicate{}, err
+			return store.SQLPredicate{}, err
 		}
-		return port.SQLPredicate{Op: port.PredicateNot, Args: []port.SQLPredicate{p}}, nil
+		return store.SQLPredicate{Op: store.PredicateNot, Args: []store.SQLPredicate{p}}, nil
 	}
-	return port.SQLPredicate{}, fmt.Errorf("%w: malformed tag group %q", domain.ErrInvalidArgument, g.Kind)
+	return store.SQLPredicate{}, fmt.Errorf("%w: malformed tag group %q", domain.ErrInvalidArgument, g.Kind)
 }
 
 // compileLeaf compiles one leaf; a fuzzy leaf with tokens is rewritten per Hindsight's _resolve_leaf.
-func compileLeaf(l domain.TagLeaf, resolved map[string][]string) (port.SQLPredicate, error) {
+func compileLeaf(l domain.TagLeaf, resolved map[string][]string) (store.SQLPredicate, error) {
 	mode := l.Match
 	if mode == domain.TagsMatchUnspecified {
 		mode = domain.TagsMatchAnyStrict
@@ -210,7 +210,7 @@ func compileLeaf(l domain.TagLeaf, resolved map[string][]string) (port.SQLPredic
 }
 
 // fuzzyAny rewrites an any / any_strict fuzzy leaf: one leaf over the union of every token's expansions.
-func fuzzyAny(expanded [][]string, mode domain.TagsMatch) port.SQLPredicate {
+func fuzzyAny(expanded [][]string, mode domain.TagsMatch) store.SQLPredicate {
 	var union []string
 	for _, e := range expanded {
 		union = append(union, e...)
@@ -220,7 +220,7 @@ func fuzzyAny(expanded [][]string, mode domain.TagsMatch) port.SQLPredicate {
 
 // fuzzyAll rewrites an all / all_strict fuzzy leaf: an AND of one any (all) or any_strict (all_strict) leaf
 // per token, so each token needs some spelling present. A single token is just its leaf.
-func fuzzyAll(expanded [][]string, mode domain.TagsMatch) port.SQLPredicate {
+func fuzzyAll(expanded [][]string, mode domain.TagsMatch) store.SQLPredicate {
 	inner := domain.TagsMatchAny
 	if mode == domain.TagsMatchAllStrict {
 		inner = domain.TagsMatchAnyStrict
@@ -228,7 +228,7 @@ func fuzzyAll(expanded [][]string, mode domain.TagsMatch) port.SQLPredicate {
 	if len(expanded) == 1 {
 		return tagsLeaf(domain.NormalizeTags(expanded[0]), inner)
 	}
-	out := port.SQLPredicate{Op: port.PredicateAnd, Args: make([]port.SQLPredicate, 0, len(expanded))}
+	out := store.SQLPredicate{Op: store.PredicateAnd, Args: make([]store.SQLPredicate, 0, len(expanded))}
 	for _, e := range expanded {
 		out.Args = append(out.Args, tagsLeaf(domain.NormalizeTags(e), inner))
 	}
@@ -238,12 +238,12 @@ func fuzzyAll(expanded [][]string, mode domain.TagsMatch) port.SQLPredicate {
 // fuzzyExact rewrites an exact fuzzy leaf: an OR over the cross product of the expansions, one exact leaf
 // per combination of distinct tags. More than maxExactCombinations candidate combinations is
 // domain.ErrInvalidArgument; when every combination is degenerate the leaf stays exact over the tokens.
-func fuzzyExact(tokens []string, expanded [][]string) (port.SQLPredicate, error) {
+func fuzzyExact(tokens []string, expanded [][]string) (store.SQLPredicate, error) {
 	n := 1
 	for _, e := range expanded {
 		n *= len(e)
 		if n > maxExactCombinations {
-			return port.SQLPredicate{}, fmt.Errorf(
+			return store.SQLPredicate{}, fmt.Errorf(
 				"%w: fuzzy resolution of an exact tag leaf expands to more than %d candidate scopes; "+
 					"narrow the tags or resolve them exactly", domain.ErrInvalidArgument, maxExactCombinations)
 		}
@@ -266,7 +266,7 @@ func fuzzyExact(tokens []string, expanded [][]string) (port.SQLPredicate, error)
 	case 1:
 		return tagsLeaf(combos[0], domain.TagsMatchExact), nil
 	}
-	out := port.SQLPredicate{Op: port.PredicateOr, Args: make([]port.SQLPredicate, 0, len(combos))}
+	out := store.SQLPredicate{Op: store.PredicateOr, Args: make([]store.SQLPredicate, 0, len(combos))}
 	for _, c := range combos {
 		out.Args = append(out.Args, tagsLeaf(c, domain.TagsMatchExact))
 	}

@@ -242,7 +242,7 @@ type ReflectData struct {
 	Budget string `json:"budget"`
 	// AnswerAsDocument has done take a structured document (pair with ReflectToolDoneDocument).
 	AnswerAsDocument bool `json:"answer_as_document"`
-	// Now is the current time from port.Clock, rendered at minute precision in UTC.
+	// Now is the current time from clock.Clock, rendered at minute precision in UTC.
 	Now time.Time `json:"now"`
 	// Query is the question.
 	Query string `json:"query"`
@@ -300,7 +300,7 @@ type SynthesizeData struct {
 	Facts []SourceFact `json:"facts"`
 	// MaxTokens is the target page length; 0 = none.
 	MaxTokens int `json:"max_tokens"`
-	// Now is the current time from port.Clock.
+	// Now is the current time from clock.Clock.
 	Now time.Time `json:"now"`
 }
 

@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/jsonschema"
-	"memd/internal/port"
 	"slices"
 	"sync"
 )
@@ -32,10 +32,10 @@ type Reply struct {
 	// Chat is the turn Chat returns. Message.Role defaults to assistant; FinishReason defaults to
 	// "tool_calls" when Message.ToolCalls is non-empty and "stop" otherwise; Usage gets the same defaults
 	// as the Usage field. ToolCalls (including malformed Arguments) are returned unchanged.
-	Chat port.ChatResponse
+	Chat ai.ChatResponse
 	// Usage is the usage Structured reports; Slot defaults to the request's slot and Model to the
 	// request's Binding.Model. Chat ignores it and reports Chat.Usage.
-	Usage port.Usage
+	Usage domain.Usage
 	// Err, when set, makes the call return an error wrapping Err (no decoding, zero usage).
 	Err error
 }
@@ -43,18 +43,18 @@ type Reply struct {
 // LLMCall records one LLM call. Exactly one of Structured and Chat is set.
 type LLMCall struct {
 	// Slot is the request's slot.
-	Slot port.ModelSlot
+	Slot domain.ModelSlot
 	// Name is the request's prompt name.
 	Name string
 	// Structured is a copy of the request of a Structured call; nil for a Chat call.
-	Structured *port.StructuredRequest
+	Structured *ai.StructuredRequest
 	// Chat is a copy of the request of a Chat call; nil for a Structured call.
-	Chat *port.ChatRequest
+	Chat *ai.ChatRequest
 }
 
 // llmKey keys a reply script.
 type llmKey struct {
-	slot port.ModelSlot
+	slot domain.ModelSlot
 	name string
 }
 
@@ -64,7 +64,7 @@ type llmScript struct {
 	next    int
 }
 
-// LLM is a port.LLM scripted per (slot, prompt name). Script appends replies to the key's FIFO; each call
+// LLM is a ai.LLM scripted per (slot, prompt name). Script appends replies to the key's FIFO; each call
 // serves the next unserved reply, and once the FIFO is exhausted the last reply repeats forever (it is
 // sticky). Replies scripted after the FIFO ran dry are served next, in order. A call uses the script of
 // its exact (slot, name) if one exists, else the (slot, "") fallback script, else it fails with
@@ -78,7 +78,7 @@ type LLM struct {
 	calls   []LLMCall
 }
 
-var _ port.LLM = (*LLM)(nil)
+var _ ai.LLM = (*LLM)(nil)
 
 // NewLLM returns an LLM with no scripts.
 func NewLLM() *LLM {
@@ -87,7 +87,7 @@ func NewLLM() *LLM {
 
 // Script appends replies to the FIFO of (slot, name); name "" scripts the fallback for every prompt name
 // of slot that has no script of its own.
-func (l *LLM) Script(slot port.ModelSlot, name string, replies ...Reply) {
+func (l *LLM) Script(slot domain.ModelSlot, name string, replies ...Reply) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	k := llmKey{slot, name}
@@ -100,29 +100,29 @@ func (l *LLM) Script(slot port.ModelSlot, name string, replies ...Reply) {
 }
 
 // RespondJSON scripts a Structured reply with body: Script(slot, name, Reply{JSON: body}).
-func (l *LLM) RespondJSON(slot port.ModelSlot, name, body string) {
+func (l *LLM) RespondJSON(slot domain.ModelSlot, name, body string) {
 	l.Script(slot, name, Reply{JSON: body})
 }
 
 // RespondChat scripts a Chat reply: Script(slot, name, Reply{Chat: resp}).
-func (l *LLM) RespondChat(slot port.ModelSlot, name string, resp port.ChatResponse) {
+func (l *LLM) RespondChat(slot domain.ModelSlot, name string, resp ai.ChatResponse) {
 	l.Script(slot, name, Reply{Chat: resp})
 }
 
 // Fail scripts a reply that fails with an error wrapping err.
-func (l *LLM) Fail(slot port.ModelSlot, name string, err error) {
+func (l *LLM) Fail(slot domain.ModelSlot, name string, err error) {
 	l.Script(slot, name, Reply{Err: err})
 }
 
 // Timeout scripts a reply that fails with ErrTimeout at once; it never blocks.
-func (l *LLM) Timeout(slot port.ModelSlot, name string) {
+func (l *LLM) Timeout(slot domain.ModelSlot, name string) {
 	l.Script(slot, name, Reply{Err: ErrTimeout})
 }
 
 // InvalidJSON scripts a Structured reply whose body is not JSON. Structured then fails with an error
 // wrapping domain.ErrUnavailable that includes the raw body, as the production adapter does once it has
 // retried invalid output max_retries times.
-func (l *LLM) InvalidJSON(slot port.ModelSlot, name string) {
+func (l *LLM) InvalidJSON(slot domain.ModelSlot, name string) {
 	l.Script(slot, name, Reply{JSON: invalidJSONBody})
 }
 
@@ -146,7 +146,7 @@ func (l *LLM) Calls() []LLMCall {
 }
 
 // CallsFor returns copies of the recorded calls whose request had exactly this slot and name, in order.
-func (l *LLM) CallsFor(slot port.ModelSlot, name string) []LLMCall {
+func (l *LLM) CallsFor(slot domain.ModelSlot, name string) []LLMCall {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	var out []LLMCall
@@ -163,34 +163,34 @@ func (l *LLM) CallsFor(slot port.ModelSlot, name string) []LLMCall {
 // reply of (req.Slot, req.Name), validates its JSON against req.Schema and decodes it into out (a nil out
 // skips decoding). Output that is not JSON, doesn't match the schema or doesn't decode into out is
 // domain.ErrUnavailable, as the gateway reports output still invalid after its retries.
-func (l *LLM) Structured(ctx context.Context, req port.StructuredRequest, out any) (port.Usage, error) {
+func (l *LLM) Structured(ctx context.Context, req ai.StructuredRequest, out any) (domain.Usage, error) {
 	sch, err := jsonschema.Compile(req.Schema)
 	if err != nil {
-		return port.Usage{}, fmt.Errorf("fake llm %s/%s: %w", req.Slot, req.Name, err)
+		return domain.Usage{}, fmt.Errorf("fake llm %s/%s: %w", req.Slot, req.Name, err)
 	}
 	cp := copyStructuredRequest(req)
 	r, err := l.serve(ctx, LLMCall{Slot: req.Slot, Name: req.Name, Structured: &cp})
 	if err != nil {
-		return port.Usage{}, err
+		return domain.Usage{}, err
 	}
 	if err := decodeReply(sch, r.JSON, out); err != nil {
-		return port.Usage{}, fmt.Errorf("%w: fake llm %s/%s: invalid structured output %q: %w",
+		return domain.Usage{}, fmt.Errorf("%w: fake llm %s/%s: invalid structured output %q: %w",
 			domain.ErrUnavailable, req.Slot, req.Name, r.JSON, err)
 	}
 	return defaultUsage(r.Usage, req.Slot, req.Binding), nil
 }
 
 // Chat serves the next scripted reply of (req.Slot, req.Name) and returns a copy of its Chat turn.
-func (l *LLM) Chat(ctx context.Context, req port.ChatRequest) (port.ChatResponse, error) {
+func (l *LLM) Chat(ctx context.Context, req ai.ChatRequest) (ai.ChatResponse, error) {
 	cp := copyChatRequest(req)
 	r, err := l.serve(ctx, LLMCall{Slot: req.Slot, Name: req.Name, Chat: &cp})
 	if err != nil {
-		return port.ChatResponse{}, err
+		return ai.ChatResponse{}, err
 	}
 	resp := r.Chat
 	resp.Message = copyChatMessage(resp.Message)
 	if resp.Message.Role == "" {
-		resp.Message.Role = port.ChatRoleAssistant
+		resp.Message.Role = ai.ChatRoleAssistant
 	}
 	if resp.FinishReason == "" {
 		resp.FinishReason = "stop"
@@ -243,7 +243,7 @@ func decodeReply(sch *jsonschema.Schema, body string, out any) error {
 }
 
 // defaultUsage fills u's empty Slot and Model from the request.
-func defaultUsage(u port.Usage, slot port.ModelSlot, b port.ModelBinding) port.Usage {
+func defaultUsage(u domain.Usage, slot domain.ModelSlot, b domain.ModelBinding) domain.Usage {
 	if u.Slot == "" {
 		u.Slot = slot
 	}
@@ -267,13 +267,13 @@ func copyLLMCall(c LLMCall) LLMCall {
 }
 
 // copyStructuredRequest copies req so later changes to the caller's Schema bytes don't leak in.
-func copyStructuredRequest(req port.StructuredRequest) port.StructuredRequest {
+func copyStructuredRequest(req ai.StructuredRequest) ai.StructuredRequest {
 	req.Schema = bytes.Clone(req.Schema)
 	return req
 }
 
 // copyChatRequest copies req's messages and tools.
-func copyChatRequest(req port.ChatRequest) port.ChatRequest {
+func copyChatRequest(req ai.ChatRequest) ai.ChatRequest {
 	msgs := slices.Clone(req.Messages)
 	for i, m := range msgs {
 		msgs[i] = copyChatMessage(m)
@@ -288,7 +288,7 @@ func copyChatRequest(req port.ChatRequest) port.ChatRequest {
 }
 
 // copyChatMessage copies m's tool calls byte for byte (malformed arguments included).
-func copyChatMessage(m port.ChatMessage) port.ChatMessage {
+func copyChatMessage(m ai.ChatMessage) ai.ChatMessage {
 	calls := slices.Clone(m.ToolCalls)
 	for i := range calls {
 		calls[i].Arguments = bytes.Clone(calls[i].Arguments)

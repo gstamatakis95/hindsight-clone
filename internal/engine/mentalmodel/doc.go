@@ -5,11 +5,11 @@
 //
 // # Where it sits
 //
-// mentalmodel is an engine package: it imports domain, port, prompts, recall and reflect (for their request
-// types) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
-// (depguard); recall and reflect never import it. It declares the small interfaces it consumes: [Reflector],
-// [Recaller], [Projector], [DirectiveSelector] (bank.DirectiveSelector) and the port.Reader subsets in
-// reads.go ([ScopeReader], [ModelLister], [CronSource], [FailureSource]). cmd/memd/wire.go builds:
+// mentalmodel is an engine package: it imports domain, the boundary packages, prompts, recall and reflect (for their
+// request types) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard);
+// recall and reflect never import it. It declares the small interfaces it consumes: [Reflector], [Recaller],
+// [Projector], [DirectiveSelector] (bank.DirectiveSelector) and the store.Reader subsets in reads.go ([ScopeReader],
+// [ModelLister], [CronSource], [FailureSource]). cmd/memd/wire.go builds:
 //
 //   - [NewRefreshRunner] with both synthesizers, for the worker's refresh_mental_model handler ([RunJob])
 //     and the DryRunRefresh RPC;
@@ -123,14 +123,14 @@
 //
 // # Invariants
 //
-// No model call or embedding runs inside Store.InTx; every model-row write takes tx.Seq(bank) first and
-// re-reads the row. The Postgres Store.InTx re-runs a transaction up to 3 times in all after a deadlock
+// No model call or embedding runs inside DB.InTx; every model-row write takes tx.Seq(bank) first and
+// re-reads the row. The Postgres DB.InTx re-runs a transaction up to 3 times in all after a deadlock
 // (40P01) or serialization failure (40001); every body resets its outputs. A refresh job that runs twice
 // after a reclaim either finds the model fresh or rewrites the same state.
 //
 // # Tests
 //
-// Tests run on a pgtest database with fake.LLM, fake.Embedder and fake.Clock: the runner (modes, fallbacks,
+// Tests run on a pgtest database with fake.LLM, fake.Embedder and clock.Manual: the runner (modes, fallbacks,
 // snapshot bound, no-LLM pre-checks, floor re-park, conflicts, dry runs), the planner (delta retry and
 // rejection), markdown splitting and edit application, diffs, scheduling and queuing, cron, failure
 // reconciliation, admin RPCs and page search. SPEC "Behavioural rules" (Mental models), "Engines" (mental

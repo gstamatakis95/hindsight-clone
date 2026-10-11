@@ -4,33 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"memd/internal/adapter/postgres"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/routing"
 	"memd/internal/engine/timex"
 	"memd/internal/fake"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
+	"memd/internal/store/postgres"
+	"memd/internal/store/postgres/pgtest"
 	"strings"
 	"testing"
 	"time"
 )
 
 // testBank is the bank every retain test writes to.
-var testBank = port.BankRef{Tenant: "acme", Bank: "notes"}
+var testBank = domain.BankRef{Tenant: "acme", Bank: "notes"}
 
 // env is a retain engine over the in-memory fakes.
 type env struct {
 	t        *testing.T
 	ctx      context.Context
-	clock    *fake.Clock
-	store    *postgres.Store
+	clock    *clock.Manual
+	store    *postgres.DB
 	llm      *fake.LLM
 	emb      *fake.Embedder
 	blob     *fake.Blob
-	cfg      port.ConfigResolver
+	cfg      config.Resolver
 	retainer Retainer
 	ingestor Ingestor
 }
@@ -39,7 +40,7 @@ type env struct {
 func newEnv(t *testing.T, batch int) *env {
 	t.Helper()
 	server, err := config.ServerDefaults(func(k string) string {
-		if k == config.EnvModel {
+		if k == ai.EnvModel {
 			return "test-model"
 		}
 		return ""
@@ -48,12 +49,12 @@ func newEnv(t *testing.T, batch int) *env {
 		t.Fatal(err)
 	}
 	e := &env{
-		t: t, ctx: context.Background(), clock: fake.NewClock(time.Time{}), llm: fake.NewLLM(),
+		t: t, ctx: context.Background(), clock: clock.NewManual(time.Time{}), llm: fake.NewLLM(),
 		emb: fake.NewEmbedder(fake.EmbedSimilar), blob: fake.NewBlob(),
 	}
 	e.store = pgtest.NewStore(t)
 	e.cfg = config.NewResolver(e.store, nil, server)
-	router := routing.NewRouter()
+	router := ai.NewRouter()
 	e.retainer = NewRetainer(RetainerDeps{
 		Store: e.store, Blob: e.blob, Config: e.cfg, Extractor: NewExtractor(e.llm, router),
 		Dates: timex.NewNormalizer(e.llm, router, e.clock), Embedder: e.emb,
@@ -156,9 +157,9 @@ func (e *env) ingest(req IngestRequest) IngestResult {
 }
 
 // claimRetain claims the next retain_document job.
-func (e *env) claimRetain() port.Job {
+func (e *env) claimRetain() store.Job {
 	e.t.Helper()
-	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{domain.OperationKindRetainDocument}, 1)
+	jobs, err := e.store.Claim(e.ctx, "w1", []domain.OperationKind{domain.OperationKindRetainDocument}, 1)
 	if err != nil || len(jobs) != 1 {
 		e.t.Fatalf("Claim retain_document: %v, %d jobs", err, len(jobs))
 	}
@@ -166,10 +167,10 @@ func (e *env) claimRetain() port.Job {
 }
 
 // document reads a document (with UnitCount filled).
-func (e *env) document(id port.DocumentID) domain.Document {
+func (e *env) document(id domain.DocumentID) domain.Document {
 	e.t.Helper()
 	var d domain.Document
-	err := e.store.InTx(e.ctx, func(tx port.Tx) error {
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error {
 		var err error
 		d, err = tx.Documents().Get(e.ctx, testBank, id)
 		return err
@@ -181,12 +182,12 @@ func (e *env) document(id port.DocumentID) domain.Document {
 }
 
 // operations lists the bank's operations of kind.
-func (e *env) operations(kind port.JobKind) []domain.Operation {
+func (e *env) operations(kind domain.OperationKind) []domain.Operation {
 	e.t.Helper()
 	var ops []domain.Operation
-	err := e.store.InTx(e.ctx, func(tx port.Tx) error {
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error {
 		var err error
-		ops, _, err = tx.Queue().List(e.ctx, testBank, port.OperationFilter{Kind: kind, PageSize: 1000})
+		ops, _, err = tx.Queue().List(e.ctx, testBank, store.OperationFilter{Kind: kind, PageSize: 1000})
 		return err
 	})
 	if err != nil && !errors.Is(err, domain.ErrNotFound) {
@@ -196,7 +197,7 @@ func (e *env) operations(kind port.JobKind) []domain.Operation {
 }
 
 // units reads live units by id.
-func (e *env) units(ids []port.UnitID) []domain.Unit {
+func (e *env) units(ids []domain.UnitID) []domain.Unit {
 	e.t.Helper()
 	us, err := e.store.Read().GetUnits(e.ctx, testBank, ids)
 	if err != nil {

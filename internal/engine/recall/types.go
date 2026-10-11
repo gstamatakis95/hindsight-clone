@@ -3,7 +3,7 @@ package recall
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -31,8 +31,8 @@ type Retriever interface {
 // Candidate is one unit moving through the recall pipeline with every score it has collected.
 type Candidate struct {
 	// ID is the unit.
-	ID port.UnitID
-	// Unit is the hydrated unit; nil until hydrated (port.Reader.GetUnits).
+	ID domain.UnitID
+	// Unit is the hydrated unit; nil until hydrated (store.Reader.GetUnits).
 	Unit *domain.Unit
 	// Arms holds the candidate's rank and raw score per arm name; an absent arm did not return it.
 	Arms map[string]armScore
@@ -59,7 +59,7 @@ type armScore struct {
 // RecallRequest mirrors memory.v1.RecallRequest with domain types.
 type RecallRequest struct { //nolint:revive // stutter: name fixed by the spec and the proto message it mirrors
 	// Bank is the bank searched.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Query is the query text (max 500 tokens).
 	Query string
 	// Types limits fact types; empty = all.
@@ -70,7 +70,7 @@ type RecallRequest struct { //nolint:revive // stutter: name fixed by the spec a
 	Budget domain.Budget
 	// MaxTokens caps the packed results.
 	MaxTokens int
-	// QueryTime is the reference time for relative dates and recency; nil = now (port.Clock).
+	// QueryTime is the reference time for relative dates and recency; nil = now (clock.Clock).
 	QueryTime *time.Time
 	// Window is an explicit time window (time_window_start / end); nil = derived from the query by timex.
 	Window *domain.TimeWindow
@@ -86,7 +86,7 @@ type RecallRequest struct { //nolint:revive // stutter: name fixed by the spec a
 	Overrides *domain.BankConfig
 	// Seq bounds the units' seq; zero = unbounded. Internal callers only (mental-model refreshes read a
 	// stable snapshot); not on the wire.
-	Seq port.SeqRange
+	Seq store.SeqRange
 }
 
 // RecallResult mirrors memory.v1.RecallResponse with domain types.
@@ -94,13 +94,13 @@ type RecallResult struct { //nolint:revive // stutter: name fixed by the spec an
 	// Results are the packed memories, best first.
 	Results []Memory
 	// SourceFacts are the facts behind returned observations, by id (include.source_facts).
-	SourceFacts map[port.UnitID]domain.Unit
+	SourceFacts map[domain.UnitID]domain.Unit
 	// SourceFactsTruncated reports that the source-fact budget cut some off.
 	SourceFactsTruncated bool
 	// Chunks are the source chunks of returned memories, by id (include.chunks).
-	Chunks map[port.ChunkID]Chunk
+	Chunks map[domain.ChunkID]Chunk
 	// Entities is the entity state of returned memories, by id (include.entities).
-	Entities map[port.EntityID]domain.EntityState
+	Entities map[domain.EntityID]domain.EntityState
 	// Trace explains the run; nil unless requested.
 	Trace *RecallTrace
 }
@@ -156,5 +156,5 @@ type ArmTrace struct {
 	// DurationMS is the arm's duration.
 	DurationMS int64
 	// TopIDs are the arm's best few unit ids.
-	TopIDs []port.UnitID
+	TopIDs []domain.UnitID
 }

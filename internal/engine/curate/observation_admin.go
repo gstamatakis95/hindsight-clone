@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // observationAdmin implements ObservationAdmin.
@@ -31,26 +31,26 @@ func normalizeScopes(scopes []domain.TagSet) []domain.TagSet {
 
 // consolidateJob builds a consolidate job: {} with DedupePending when automatic, the scopes payload with
 // DedupeNone when it carries scopes or overrides (decision 1301).
-func consolidateJob(b port.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (port.Job, error) {
-	j := port.Job{
+func consolidateJob(b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (store.Job, error) {
+	j := store.Job{
 		Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: consolidateKey, Payload: emptyPayload,
-		Overrides: overrides, Dedupe: port.DedupePending,
+		Overrides: overrides, Dedupe: store.DedupePending,
 	}
 	if len(scopes) > 0 {
 		raw, err := json.Marshal(ConsolidatePayload{Scopes: scopes})
 		if err != nil {
-			return port.Job{}, fmt.Errorf("encode consolidate payload: %w", err)
+			return store.Job{}, fmt.Errorf("encode consolidate payload: %w", err)
 		}
 		j.Payload = raw
 	}
 	if len(scopes) > 0 || overrides != nil {
-		j.Dedupe = port.DedupeNone
+		j.Dedupe = store.DedupeNone
 	}
 	return j, nil
 }
 
 // enqueueAndGet enqueues j in tx and returns its operation row.
-func enqueueAndGet(ctx context.Context, tx port.Tx, j port.Job) (domain.Operation, error) {
+func enqueueAndGet(ctx context.Context, tx store.Tx, j store.Job) (domain.Operation, error) {
 	id, _, err := tx.Queue().Enqueue(ctx, j)
 	if err != nil {
 		return domain.Operation{}, err
@@ -60,14 +60,14 @@ func enqueueAndGet(ctx context.Context, tx port.Tx, j port.Job) (domain.Operatio
 
 // Consolidate queues a manual consolidation; it is a write, so an unknown bank is created.
 func (a *observationAdmin) Consolidate(
-	ctx context.Context, b port.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig,
+	ctx context.Context, b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig,
 ) (domain.Operation, error) {
 	j, err := consolidateJob(b, normalizeScopes(scopes), overrides)
 	if err != nil {
 		return domain.Operation{}, err
 	}
 	var op domain.Operation
-	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		op = domain.Operation{}
 		if _, err := tx.Banks().Ensure(ctx, b); err != nil {
 			return err
@@ -87,7 +87,7 @@ func (a *observationAdmin) Consolidate(
 
 // ListScopes returns one page of scopes, keyed by the last scope's canonical string.
 func (a *observationAdmin) ListScopes(
-	ctx context.Context, b port.BankRef, size int, token string,
+	ctx context.Context, b domain.BankRef, size int, token string,
 ) (ScopePage, error) {
 	var after string
 	if token != "" {
@@ -112,7 +112,7 @@ func (a *observationAdmin) ListScopes(
 
 // scopeCursor is the keyset cursor after scope s: its canonical key, except that the shared scope's key ""
 // would restart the listing, so it maps to "0", which sorts before every tagged key (decision 1560).
-func scopeCursor(b port.BankRef, s domain.ScopeInfo) string {
+func scopeCursor(b domain.BankRef, s domain.ScopeInfo) string {
 	if key := domain.NewScopeKey(b, s.Scope.Tags).String(); key != "" {
 		return key
 	}
@@ -122,10 +122,10 @@ func scopeCursor(b port.BankRef, s domain.ScopeInfo) string {
 // ClearObservations deletes the observations of scopes (all when empty), resets their sources and, when
 // reconsolidate, queues consolidation of the same scopes.
 func (a *observationAdmin) ClearObservations(
-	ctx context.Context, b port.BankRef, scopes []domain.TagSet, reconsolidate bool,
+	ctx context.Context, b domain.BankRef, scopes []domain.TagSet, reconsolidate bool,
 ) (ClearResult, error) {
 	scopes = normalizeScopes(scopes)
-	keys := make([]port.ScopeKey, len(scopes))
+	keys := make([]domain.ScopeKey, len(scopes))
 	for i, s := range scopes {
 		keys[i] = domain.NewScopeKey(b, s.Tags)
 	}
@@ -134,7 +134,7 @@ func (a *observationAdmin) ClearObservations(
 		return ClearResult{}, err
 	}
 	var res ClearResult
-	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		res = ClearResult{}
 		if _, err := tx.Seq(ctx, b); err != nil {
 			return err
@@ -156,7 +156,7 @@ func (a *observationAdmin) ClearObservations(
 }
 
 // reconsolidateInto enqueues j and records its operation on res when reconsolidate is set.
-func reconsolidateInto(ctx context.Context, tx port.Tx, j port.Job, reconsolidate bool, res *ClearResult) error {
+func reconsolidateInto(ctx context.Context, tx store.Tx, j store.Job, reconsolidate bool, res *ClearResult) error {
 	if !reconsolidate {
 		return nil
 	}
@@ -170,27 +170,27 @@ func reconsolidateInto(ctx context.Context, tx port.Tx, j port.Job, reconsolidat
 
 // ClearMemoryObservations deletes the observations citing one live memory and resets their co-sources.
 func (a *observationAdmin) ClearMemoryObservations(
-	ctx context.Context, b port.BankRef, id port.UnitID, reconsolidate bool,
+	ctx context.Context, b domain.BankRef, id domain.UnitID, reconsolidate bool,
 ) (ClearResult, error) {
 	j, err := consolidateJob(b, nil, nil)
 	if err != nil {
 		return ClearResult{}, err
 	}
 	var res ClearResult
-	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		res = ClearResult{}
 		seq, err := tx.Seq(ctx, b)
 		if err != nil {
 			return err
 		}
-		us, err := tx.GetUnits(ctx, b, []port.UnitID{id})
+		us, err := tx.GetUnits(ctx, b, []domain.UnitID{id})
 		if err != nil {
 			return err
 		}
 		if len(us) == 0 {
 			return fmt.Errorf("%w: memory %s", domain.ErrNotFound, id)
 		}
-		deleted, _, err := tx.Evidence().DeleteCiting(ctx, b, []port.UnitID{id})
+		deleted, _, err := tx.Evidence().DeleteCiting(ctx, b, []domain.UnitID{id})
 		if err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func (a *observationAdmin) ClearMemoryObservations(
 // have no consolidation stamps and are left alone. A fact without an embedding is waiting for its rederive,
 // which clears the stamps when it writes the embedding, so it is left alone too: resetting it now would let
 // consolidation decide on a NULL embedding (decision 1305).
-func resetOwnConsolidation(ctx context.Context, tx port.Tx, u domain.Unit, seq int64) error {
+func resetOwnConsolidation(ctx context.Context, tx store.Tx, u domain.Unit, seq int64) error {
 	if u.Type == domain.FactTypeObservation || u.Embedding == nil {
 		return nil
 	}

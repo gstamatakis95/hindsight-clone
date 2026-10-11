@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"time"
 )
@@ -25,7 +25,7 @@ func NewCurator(d CuratorDeps) Curator {
 }
 
 // Update validates req and commits it in one transaction: invalidate, or restore and/or edit.
-func (c *curator) Update(ctx context.Context, req UpdateMemoryRequest) (domain.Unit, port.OperationID, error) {
+func (c *curator) Update(ctx context.Context, req UpdateMemoryRequest) (domain.Unit, domain.OperationID, error) {
 	if err := validateUpdate(req); err != nil {
 		return domain.Unit{}, "", err
 	}
@@ -43,9 +43,9 @@ func (c *curator) Update(ctx context.Context, req UpdateMemoryRequest) (domain.U
 	}
 	var (
 		out domain.Unit
-		op  port.OperationID
+		op  domain.OperationID
 	)
-	err = c.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = c.d.Store.InTx(ctx, func(tx store.Tx) error {
 		out, op = domain.Unit{}, ""
 		var err error
 		if req.State == domain.MemoryStateInvalidated {
@@ -99,8 +99,8 @@ func validateFields(req UpdateMemoryRequest) error {
 }
 
 // liveFact reads a live fact in tx; an absent unit is domain.ErrNotFound, an observation is rejected.
-func liveFact(ctx context.Context, tx port.Tx, b port.BankRef, id port.UnitID) (domain.Unit, error) {
-	us, err := tx.GetUnits(ctx, b, []port.UnitID{id})
+func liveFact(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.UnitID) (domain.Unit, error) {
+	us, err := tx.GetUnits(ctx, b, []domain.UnitID{id})
 	if err != nil {
 		return domain.Unit{}, err
 	}
@@ -119,7 +119,7 @@ func liveFact(ctx context.Context, tx port.Tx, b port.BankRef, id port.UnitID) (
 // event, consolidate, graph_maintenance and refreshes of models, the models citing the unit or an
 // observation citing it (read before the transaction).
 func (c *curator) invalidate(
-	ctx context.Context, tx port.Tx, req UpdateMemoryRequest, models []port.MentalModelID,
+	ctx context.Context, tx store.Tx, req UpdateMemoryRequest, models []domain.MentalModelID,
 ) (domain.Unit, error) {
 	seq, err := tx.Seq(ctx, req.Bank)
 	if err != nil {
@@ -129,7 +129,7 @@ func (c *curator) invalidate(
 	if err != nil {
 		return domain.Unit{}, err
 	}
-	if _, _, err := tx.Evidence().DeleteCiting(ctx, req.Bank, []port.UnitID{u.ID}); err != nil {
+	if _, _, err := tx.Evidence().DeleteCiting(ctx, req.Bank, []domain.UnitID{u.ID}); err != nil {
 		return domain.Unit{}, err
 	}
 	if err := tx.Units().Archive(ctx, req.Bank, u.ID, req.Reason); err != nil {
@@ -156,11 +156,11 @@ func (c *curator) invalidate(
 
 // citingModels reads, before the invalidate's transaction (so no pool read runs while the transaction holds
 // a connection), the models citing the unit or an observation citing it. Other requests read nothing.
-func (c *curator) citingModels(ctx context.Context, req UpdateMemoryRequest) ([]port.MentalModelID, error) {
+func (c *curator) citingModels(ctx context.Context, req UpdateMemoryRequest) ([]domain.MentalModelID, error) {
 	if req.State != domain.MemoryStateInvalidated || c.d.Citing == nil || c.d.Refresh == nil {
 		return nil, nil
 	}
-	models, err := c.d.Citing.ModelsCiting(ctx, req.Bank, []port.UnitID{req.ID})
+	models, err := c.d.Citing.ModelsCiting(ctx, req.Bank, []domain.UnitID{req.ID})
 	if err != nil {
 		return nil, fmt.Errorf("find models citing %s: %w", req.ID, err)
 	}
@@ -168,8 +168,10 @@ func (c *curator) citingModels(ctx context.Context, req UpdateMemoryRequest) ([]
 }
 
 // queueRefreshes queues one refresh per distinct model in tx.
-func (c *curator) queueRefreshes(ctx context.Context, tx port.Tx, b port.BankRef, models []port.MentalModelID) error {
-	seen := map[port.MentalModelID]bool{}
+func (c *curator) queueRefreshes(
+	ctx context.Context, tx store.Tx, b domain.BankRef, models []domain.MentalModelID,
+) error {
+	seen := map[domain.MentalModelID]bool{}
 	for _, m := range models {
 		if seen[m] {
 			continue
@@ -186,8 +188,8 @@ func (c *curator) queueRefreshes(ctx context.Context, tx port.Tx, b port.BankRef
 // changes (an edit's names, or a restore's snapshot names) and enqueues the rederive, which only re-embeds
 // and relinks. State valid on a live unit is no state change; with no edits either, nothing is written.
 func (c *curator) restoreOrEdit(
-	ctx context.Context, tx port.Tx, req UpdateMemoryRequest, change *entityChange,
-) (domain.Unit, port.OperationID, error) {
+	ctx context.Context, tx store.Tx, req UpdateMemoryRequest, change *entityChange,
+) (domain.Unit, domain.OperationID, error) {
 	seq, err := tx.Seq(ctx, req.Bank)
 	if err != nil {
 		return domain.Unit{}, "", err
@@ -251,11 +253,13 @@ func (c *curator) snapshotNames(ctx context.Context, req UpdateMemoryRequest) ([
 // restoreIfArchived moves an archived unit back; a unit that is not archived reports false (the caller
 // then finds it live or not at all). The restored unit is stamped consolidated so consolidation never
 // decides on it while its embedding is empty; the rederive's write clears the stamp (decision 1305).
-func (c *curator) restoreIfArchived(ctx context.Context, tx port.Tx, b port.BankRef, id port.UnitID) (bool, error) {
+func (c *curator) restoreIfArchived(
+	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.UnitID,
+) (bool, error) {
 	err := tx.Units().Restore(ctx, b, id)
 	switch {
 	case err == nil:
-		return true, tx.Units().MarkConsolidated(ctx, []port.UnitID{id}, c.d.Clock.Now())
+		return true, tx.Units().MarkConsolidated(ctx, []domain.UnitID{id}, c.d.Clock.Now())
 	case errors.Is(err, domain.ErrNotFound):
 		return false, nil
 	default:
@@ -267,7 +271,7 @@ func (c *curator) restoreIfArchived(ctx context.Context, tx port.Tx, b port.Bank
 // consolidated until the rederive writes its new embedding (decision 1305), deletes the observations citing
 // the unit, resetting their co-sources, and queues graph maintenance for the removed observations.
 func (c *curator) applyEdit(
-	ctx context.Context, tx port.Tx, u domain.Unit, req UpdateMemoryRequest, seq int64,
+	ctx context.Context, tx store.Tx, u domain.Unit, req UpdateMemoryRequest, seq int64,
 ) (domain.Unit, error) {
 	if req.Text != nil {
 		u.Text = *req.Text
@@ -292,10 +296,10 @@ func (c *curator) applyEdit(
 	if err := tx.Units().Update(ctx, u); err != nil {
 		return domain.Unit{}, err
 	}
-	if err := tx.Units().MarkConsolidated(ctx, []port.UnitID{u.ID}, now); err != nil {
+	if err := tx.Units().MarkConsolidated(ctx, []domain.UnitID{u.ID}, now); err != nil {
 		return domain.Unit{}, err
 	}
-	if _, _, err := tx.Evidence().DeleteCiting(ctx, u.Bank, []port.UnitID{u.ID}); err != nil {
+	if _, _, err := tx.Evidence().DeleteCiting(ctx, u.Bank, []domain.UnitID{u.ID}); err != nil {
 		return domain.Unit{}, err
 	}
 	if err := enqueueGraph(ctx, tx, u.Bank); err != nil {
@@ -310,8 +314,8 @@ func (c *curator) applyEdit(
 
 // auditRestoreEdit writes the restore and/or edit audit rows of one Update.
 func (c *curator) auditRestoreEdit(
-	ctx context.Context, tx port.Tx, u domain.Unit, req UpdateMemoryRequest, restored bool, before *curated,
-	op port.OperationID,
+	ctx context.Context, tx store.Tx, u domain.Unit, req UpdateMemoryRequest, restored bool, before *curated,
+	op domain.OperationID,
 ) error {
 	if restored {
 		if err := c.audit(ctx, tx, u, domain.CurationRestore, req.Reason, nil, nil, op); err != nil {
@@ -350,8 +354,8 @@ func snapshotOf(u domain.Unit) *curated {
 
 // audit appends one memory_audit row with the given snapshots (nil = none).
 func (c *curator) audit(
-	ctx context.Context, tx port.Tx, u domain.Unit, action domain.CurationAction, reason string,
-	before, after *curated, op port.OperationID,
+	ctx context.Context, tx store.Tx, u domain.Unit, action domain.CurationAction, reason string,
+	before, after *curated, op domain.OperationID,
 ) error {
 	e := domain.AuditEntry{
 		Bank: u.Bank, UnitID: u.ID, Action: action, Reason: reason, OperationID: op, At: c.d.Clock.Now(),
@@ -380,7 +384,7 @@ func encodeSnapshot(s *curated) (json.RawMessage, error) {
 
 // event appends the memory_curated lifecycle event under the transaction's seq.
 func (c *curator) event(
-	ctx context.Context, tx port.Tx, b port.BankRef, seq int64, id port.UnitID, op port.OperationID,
+	ctx context.Context, tx store.Tx, b domain.BankRef, seq int64, id domain.UnitID, op domain.OperationID,
 ) error {
 	return tx.Events().Append(ctx, domain.LifecycleEvent{
 		Seq: seq, Type: domain.EventTypeMemoryCurated, Bank: b, At: c.d.Clock.Now(), OperationID: op,

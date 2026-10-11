@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -23,22 +23,22 @@ const (
 // mentalmodel, so the shape is mirrored here rather than shared.
 type RefreshPayload struct {
 	// ModelID is the mental model to refresh.
-	ModelID port.MentalModelID `json:"mental_model_id"`
+	ModelID domain.MentalModelID `json:"mental_model_id"`
 }
 
 // finish runs the final transaction: stamps the planned units that had no scope left to decide (still
 // unchanged and still cited), checks whether unconsolidated units remain and if so enqueues the
 // continuation, and appends CONSOLIDATION_COMPLETED.
 func (r *run) finish(ctx context.Context) error {
-	var want []port.UnitID
+	var want []domain.UnitID
 	for _, id := range r.done {
 		if !r.parked[id] && !r.unsettled[id] {
 			want = append(want, id)
 		}
 	}
 	var more bool
-	var stamped []port.UnitID
-	err := r.c.d.Store.InTx(ctx, func(tx port.Tx) error {
+	var stamped []domain.UnitID
+	err := r.c.d.Store.InTx(ctx, func(tx store.Tx) error {
 		now := r.c.d.Clock.Now()
 		seq, err := tx.Seq(ctx, r.job.Bank)
 		if err != nil {
@@ -80,7 +80,7 @@ func (r *run) finish(ctx context.Context) error {
 // refreshCandidates lists, once per run and outside any transaction, the bank's models with
 // refresh_after_consolidation that are not paused (Reader.ListMentalModels, every page).
 func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, error) {
-	all, _, err := r.c.d.Store.Read().ListMentalModels(ctx, port.ModelQuery{
+	all, _, err := r.c.d.Store.Read().ListMentalModels(ctx, store.ModelQuery{
 		Bank: r.job.Bank, RefreshAfterConsolidation: true,
 	})
 	if err != nil {
@@ -96,7 +96,7 @@ func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, erro
 }
 
 // reaching returns the run's refresh candidates that scope s reaches.
-func (r *run) reaching(s port.ScopeKey) []domain.MentalModel {
+func (r *run) reaching(s domain.ScopeKey) []domain.MentalModel {
 	var out []domain.MentalModel
 	for _, m := range r.models {
 		if modelReaches(m, s.Tags) {
@@ -137,7 +137,7 @@ func modelReaches(m domain.MentalModel, tags []string) bool {
 // refresh_debounce_seconds or at the end of the model's interval floor, whichever is later. A model with
 // a queued refresh joins it (refresh_mental_model always dedupes as pending).
 func enqueueRefreshes(
-	ctx context.Context, tx port.Tx, b port.BankRef, mm *domain.MentalModelConfig, models []domain.MentalModel,
+	ctx context.Context, tx store.Tx, b domain.BankRef, mm *domain.MentalModelConfig, models []domain.MentalModel,
 	now time.Time,
 ) error {
 	if mm == nil {
@@ -159,10 +159,10 @@ func enqueueRefreshes(
 		if err != nil {
 			return fmt.Errorf("refresh payload: %w", err)
 		}
-		_, _, err = tx.Queue().Enqueue(ctx, port.Job{
+		_, _, err = tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindRefreshMentalModel,
 			SerialKey: refreshSerialPrefix + string(m.Spec.ID), Payload: payload, RunAt: runAt,
-			Dedupe: port.DedupePending,
+			Dedupe: store.DedupePending,
 		})
 		if err != nil {
 			return fmt.Errorf("enqueue refresh of %s: %w", m.Spec.ID, err)

@@ -3,11 +3,11 @@ package retain
 import (
 	"errors"
 	"fmt"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/fake"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +28,7 @@ func (e *env) scriptChunks(okCalls int, fail bool) {
 }
 
 // asyncRetain enqueues one document and claims its job.
-func (e *env) asyncRetain(doc port.DocumentID, content string, force bool) port.Job {
+func (e *env) asyncRetain(doc domain.DocumentID, content string, force bool) store.Job {
 	e.t.Helper()
 	e.ingest(IngestRequest{RunAsync: true, Items: []IngestItem{{
 		DocumentID: doc, Content: content, Overrides: chunkTokens(12), ForceReextract: force,
@@ -166,8 +166,8 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 		t.Fatalf("setup: %+v %+v", a, b)
 	}
 	aUnit, bUnit := e.docUnit("a"), e.docUnit("b")
-	obs1 := pgtest.ID[port.UnitID]("obs1")
-	err := e.store.InTx(e.ctx, func(tx port.Tx) error {
+	obs1 := pgtest.ID[domain.UnitID]("obs1")
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error {
 		seq, err := tx.Seq(e.ctx, testBank)
 		if err != nil {
 			return err
@@ -179,7 +179,7 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 		if err := tx.Evidence().Add(e.ctx, obs1, []domain.Evidence{{Unit: aUnit}, {Unit: bUnit}}); err != nil {
 			return err
 		}
-		return tx.Units().MarkConsolidated(e.ctx, []port.UnitID{aUnit, bUnit}, e.clock.Now())
+		return tx.Units().MarkConsolidated(e.ctx, []domain.UnitID{aUnit, bUnit}, e.clock.Now())
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -188,10 +188,10 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("Alice likes coffee")))
 	e.ingest(IngestRequest{SkipConsolidation: true, Items: []IngestItem{{DocumentID: "a", Content: "Alice coffee"}}})
 
-	if got := e.units([]port.UnitID{obs1, aUnit}); len(got) != 0 {
+	if got := e.units([]domain.UnitID{obs1, aUnit}); len(got) != 0 {
 		t.Errorf("observation or old unit still live: %+v", got)
 	}
-	got := e.units([]port.UnitID{bUnit})
+	got := e.units([]domain.UnitID{bUnit})
 	if len(got) != 1 || got[0].ConsolidatedAt != nil {
 		t.Errorf("co-source b = %+v, want live with consolidated_at reset", got)
 	}
@@ -204,14 +204,14 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 }
 
 // docUnit returns the one live unit of a document, found through its retain's committed chunk.
-func (e *env) docUnit(doc port.DocumentID) port.UnitID {
+func (e *env) docUnit(doc domain.DocumentID) domain.UnitID {
 	e.t.Helper()
-	hits, err := e.store.Read().SearchText(e.ctx, port.TextQuery{Bank: testBank, Text: "likes", Limit: 100})
+	hits, err := e.store.Read().SearchText(e.ctx, store.TextQuery{Bank: testBank, Text: "likes", Limit: 100})
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	for _, h := range hits {
-		if us := e.units([]port.UnitID{h.ID}); len(us) == 1 && us[0].DocumentID == doc {
+		if us := e.units([]domain.UnitID{h.ID}); len(us) == 1 && us[0].DocumentID == doc {
 			return h.ID
 		}
 	}
@@ -257,9 +257,9 @@ func TestRetainTimelessAndTimestamp(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e.llm.Reset()
 			e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, tc.facts...))
-			tc.item.DocumentID, tc.item.Content = port.DocumentID(fmt.Sprintf("t%d", i)), "content "+tc.name
+			tc.item.DocumentID, tc.item.Content = domain.DocumentID(fmt.Sprintf("t%d", i)), "content "+tc.name
 			e.ingest(IngestRequest{Items: []IngestItem{tc.item}})
-			u := e.units([]port.UnitID{e.onlyUnit(tc.item.DocumentID)})[0]
+			u := e.units([]domain.UnitID{e.onlyUnit(tc.item.DocumentID)})[0]
 			if u.Timeless != tc.item.Timeless || !sameTime(u.MentionedAt, tc.mentioned) || !sameTime(u.OccurredStart, tc.start) {
 				t.Errorf("unit timeless %v mentioned %v start %v; want %v %v %v", u.Timeless, u.MentionedAt,
 					u.OccurredStart, tc.item.Timeless, tc.mentioned, tc.start)
@@ -272,19 +272,19 @@ func TestRetainTimelessAndTimestamp(t *testing.T) {
 }
 
 // onlyUnit returns the single unit of a document via the vector arm (every unit has an embedding).
-func (e *env) onlyUnit(doc port.DocumentID) port.UnitID {
+func (e *env) onlyUnit(doc domain.DocumentID) domain.UnitID {
 	e.t.Helper()
-	hits, err := e.store.Read().SearchVector(e.ctx, port.VectorQuery{
+	hits, err := e.store.Read().SearchVector(e.ctx, store.VectorQuery{
 		Bank: testBank, Embedding: e.emb.Vector("x"), MinSimilarity: -2, Limit: 1000,
 	})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	var ids []port.UnitID
+	var ids []domain.UnitID
 	for _, h := range hits {
 		ids = append(ids, h.ID)
 	}
-	var found []port.UnitID
+	var found []domain.UnitID
 	for _, u := range e.units(ids) {
 		if u.DocumentID == doc {
 			found = append(found, u.ID)
@@ -313,9 +313,9 @@ func TestRetainStampsSeqAndEnqueuesConsolidate(t *testing.T) {
 	if res.Documents[0].UnitsCreated != 1 || len(res.Usage) != 1 || res.Usage[0].Slot != domain.ModelSlotExtract {
 		t.Fatalf("result = %+v", res)
 	}
-	u := e.units([]port.UnitID{e.onlyUnit("d1")})[0]
+	u := e.units([]domain.UnitID{e.onlyUnit("d1")})[0]
 	var evs []domain.LifecycleEvent
-	if err := e.store.InTx(e.ctx, func(tx port.Tx) error {
+	if err := e.store.InTx(e.ctx, func(tx store.Tx) error {
 		var err error
 		evs, _, err = tx.Events().List(e.ctx, testBank, 0, 100, nil)
 		return err
@@ -340,7 +340,7 @@ func TestRetainStampsSeqAndEnqueuesConsolidate(t *testing.T) {
 		t.Errorf("%d consolidate jobs with skip_consolidation, want 0", len(ops))
 	}
 	off := false
-	if err := e2.store.InTx(e2.ctx, func(tx port.Tx) error {
+	if err := e2.store.InTx(e2.ctx, func(tx store.Tx) error {
 		return tx.Banks().SetConfig(e2.ctx, testBank, domain.BankConfig{EnableObservations: &off})
 	}); err != nil {
 		t.Fatal(err)

@@ -3,7 +3,7 @@ package worker
 import (
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -20,7 +20,7 @@ const (
 // cap (domain.OperationKind.MaxAttempts > 0) fails for good once attempt+1 reaches it, the same rule
 // ReclaimStale applies; below the cap it retries after RetryStep × (attempt+1). An uncapped kind
 // (consolidate) retries forever with capped exponential backoff.
-func nextRun(j port.Job, err error, now time.Time) (at time.Time, ok bool) {
+func nextRun(j store.Job, err error, now time.Time) (at time.Time, ok bool) {
 	if permanent(err) {
 		return time.Time{}, false
 	}
@@ -36,8 +36,13 @@ func nextRun(j port.Job, err error, now time.Time) (at time.Time, ok bool) {
 
 // permanent reports whether err must not be retried.
 func permanent(err error) bool {
-	return errors.Is(err, ErrPermanent) || errors.Is(err, domain.ErrCancelled) ||
-		errors.Is(err, domain.ErrInvalidArgument)
+	return deterministic(err) || errors.Is(err, domain.ErrCancelled) || errors.Is(err, domain.ErrInvalidArgument)
+}
+
+// deterministic reports whether err fails the same way on every run: ErrPermanent, or a model slot with no binding
+// (domain.ErrModelUnbound). Such a job fails at once, even when the worker is shutting down.
+func deterministic(err error) bool {
+	return errors.Is(err, ErrPermanent) || errors.Is(err, domain.ErrModelUnbound)
 }
 
 // expBackoff is RetryStep × 2^attempt, capped at ConsolidateBackoffCap.

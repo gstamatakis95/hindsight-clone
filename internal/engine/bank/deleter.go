@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/blob"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -20,11 +22,11 @@ type BankDeleter interface { //nolint:revive // stutter: name fixed by the spec
 	// (or a new one when the previous delete_bank failed or was cancelled: re-issuing DeleteBank resumes a
 	// half-deleted bank). The returned operation can reach COMPLETED, or vanish with the bank row, while a
 	// continuation still runs; the completion signal for clients is GetBank returning NOT_FOUND.
-	Tombstone(ctx context.Context, b port.BankRef) (domain.Operation, error)
+	Tombstone(ctx context.Context, b domain.BankRef) (domain.Operation, error)
 	// Run is the delete_bank job: it removes rows with BankRepo.DeleteBatch in committed batches and
 	// reports done=false when its budget runs out (the handler re-enqueues with DedupePending). It
 	// re-checks the tombstone (deleting_at) and that the job is still alive before deleting blobs, and
-	// again between blob pages when a BlobLister is configured. While another job of the bank is still
+	// again between blob pages. While another job of the bank is still
 	// PROCESSING (a handler winding down after the tombstone), it deletes neither blobs nor the bank row:
 	// it enqueues its own continuation DeleteBlockedDelay later and reports done=false, both before the
 	// blob delete and in the transaction of the final BankRepo.Delete, so no job outlives its bank and
@@ -32,13 +34,13 @@ type BankDeleter interface { //nolint:revive // stutter: name fixed by the spec
 	// BankRepo.Delete removes the bank row with its remaining events and operations, so a later write
 	// creates a clean bank. A run that finds the bank gone (or no longer tombstoned) is done and deletes
 	// no blobs.
-	Run(ctx context.Context, j port.Job) (done bool, err error)
+	Run(ctx context.Context, j store.Job) (done bool, err error)
 }
 
-// JobFence tells a running job whether it still holds its operation; port.Claimer satisfies it.
+// JobFence tells a running job whether it still holds its operation; store.Claimer satisfies it.
 type JobFence interface {
 	// Alive reports whether the job should keep running.
-	Alive(ctx context.Context, id port.OperationID) (bool, error)
+	Alive(ctx context.Context, id domain.OperationID) (bool, error)
 }
 
 // DeleterConfig bounds one delete_bank run.
@@ -48,18 +50,9 @@ type DeleterConfig struct {
 	// MaxBatches is how many batches one run commits before it yields (done=false); 0 =
 	// DefaultDeleteMaxBatches.
 	MaxBatches int
-	// Blobs lists the bank's blob keys so they are deleted page by page with a fence check between pages;
-	// nil = one Blob.DeletePrefix after the checks. port.Blob satisfies it.
-	Blobs BlobLister
-	// BlobPageSize is the keys per listed page; 0 = DefaultDeleteBlobPageSize.
+	// BlobPageSize is the blob keys per listed page (deleted with a fence check between pages); 0 =
+	// DefaultDeleteBlobPageSize.
 	BlobPageSize int
-}
-
-// BlobLister lists blob keys. It is the port.Blob method (CCR WP-13-2); port.Blob satisfies it.
-type BlobLister interface {
-	// List returns up to limit keys starting with prefix and sorting strictly after after ("" = from the
-	// start), in key order.
-	List(ctx context.Context, prefix, after string, limit int) ([]string, error)
 }
 
 // Delete budget defaults.
@@ -78,20 +71,20 @@ const (
 // DeleteBankSerialKey is the delete_bank serial key (decision 1301).
 const DeleteBankSerialKey = "bank"
 
-// bankDeleter implements BankDeleter over port.Store and port.Blob.
+// bankDeleter implements BankDeleter over store.DB and blob.Store.
 type bankDeleter struct {
-	s     port.Store
-	blob  port.Blob
+	s     store.DB
+	blob  blob.Store
 	fence JobFence
-	clock port.Clock
+	clock clock.Clock
 	cfg   DeleterConfig
 }
 
 var _ BankDeleter = (*bankDeleter)(nil)
 
-// NewBankDeleter returns the BankDeleter. fence (port.Claimer in production) is checked right before the
+// NewBankDeleter returns the BankDeleter. fence (store.Claimer in production) is checked right before the
 // blob prefix is deleted; clock stamps deleting_at.
-func NewBankDeleter(s port.Store, blob port.Blob, fence JobFence, clock port.Clock, cfg DeleterConfig) BankDeleter {
+func NewBankDeleter(s store.DB, blob blob.Store, fence JobFence, clock clock.Clock, cfg DeleterConfig) BankDeleter {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = DefaultDeleteBatchSize
 	}
@@ -107,10 +100,10 @@ func NewBankDeleter(s port.Store, blob port.Blob, fence JobFence, clock port.Clo
 // Tombstone marks the bank deleting, cancels its pending jobs and enqueues (or joins) delete_bank, in one
 // transaction. It takes no change seq: Tx.Seq refuses a tombstoned bank, and nothing here is memory
 // content. MarkDeleting runs first, so the bank row is locked before the queue touches it.
-func (d *bankDeleter) Tombstone(ctx context.Context, b port.BankRef) (domain.Operation, error) {
+func (d *bankDeleter) Tombstone(ctx context.Context, b domain.BankRef) (domain.Operation, error) {
 	now := d.clock.Now()
 	var op domain.Operation
-	err := d.s.InTx(ctx, func(tx port.Tx) error {
+	err := d.s.InTx(ctx, func(tx store.Tx) error {
 		op = domain.Operation{}
 		if _, err := tx.Banks().Get(ctx, b); err != nil {
 			return err
@@ -121,9 +114,9 @@ func (d *bankDeleter) Tombstone(ctx context.Context, b port.BankRef) (domain.Ope
 		if _, err := tx.Queue().CancelBank(ctx, b); err != nil {
 			return err
 		}
-		id, _, err := tx.Queue().Enqueue(ctx, port.Job{
+		id, _, err := tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: DeleteBankSerialKey,
-			Payload: json.RawMessage(`{}`), Dedupe: port.DedupePendingOrRunning,
+			Payload: json.RawMessage(`{}`), Dedupe: store.DedupePendingOrRunning,
 		})
 		if err != nil {
 			return err
@@ -146,13 +139,13 @@ func bankGone(err error) bool {
 
 // Run deletes up to MaxBatches batches, each in its own transaction, and finishes the bank once a batch
 // finds nothing left.
-func (d *bankDeleter) Run(ctx context.Context, j port.Job) (bool, error) {
+func (d *bankDeleter) Run(ctx context.Context, j store.Job) (bool, error) {
 	for range d.cfg.MaxBatches {
 		if err := ctx.Err(); err != nil {
 			return false, fmt.Errorf("%w: delete_bank %s: %w", domain.ErrCancelled, j.ID, err)
 		}
 		var n int
-		err := d.s.InTx(ctx, func(tx port.Tx) error {
+		err := d.s.InTx(ctx, func(tx store.Tx) error {
 			var err error
 			n, err = tx.Banks().DeleteBatch(ctx, j.Bank, d.cfg.BatchSize)
 			return err
@@ -174,13 +167,13 @@ func (d *bankDeleter) Run(ctx context.Context, j port.Job) (bool, error) {
 // holds its operation and the bank is still tombstoned, so a stale duplicate run never deletes the blobs of
 // a fresh bank) and that no other job of the bank is still processing; the processing check repeats in the
 // transaction that deletes the bank row.
-func (d *bankDeleter) finish(ctx context.Context, j port.Job) (bool, error) {
+func (d *bankDeleter) finish(ctx context.Context, j store.Job) (bool, error) {
 	ok, err := d.fenced(ctx, j)
 	if err != nil || !ok {
 		return err == nil, err
 	}
 	var blocked bool
-	err = d.s.InTx(ctx, func(tx port.Tx) error {
+	err = d.s.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		blocked, err = d.blockIfBusy(ctx, tx, j.Bank)
 		return err
@@ -191,7 +184,7 @@ func (d *bankDeleter) finish(ctx context.Context, j port.Job) (bool, error) {
 	if ok, err = d.deleteBlobs(ctx, j); err != nil || !ok {
 		return err == nil, err
 	}
-	err = d.s.InTx(ctx, func(tx port.Tx) error {
+	err = d.s.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		if blocked, err = d.blockIfBusy(ctx, tx, j.Bank); err != nil || blocked {
 			return err
@@ -206,7 +199,7 @@ func (d *bankDeleter) finish(ctx context.Context, j port.Job) (bool, error) {
 
 // fenced reports whether the delete may go on: the job is alive (else domain.ErrCancelled) and the bank
 // still exists and is tombstoned (else false: nothing left to do).
-func (d *bankDeleter) fenced(ctx context.Context, j port.Job) (bool, error) {
+func (d *bankDeleter) fenced(ctx context.Context, j store.Job) (bool, error) {
 	alive, err := d.fence.Alive(ctx, j.ID)
 	if err != nil {
 		return false, fmt.Errorf("delete_bank %s: alive check: %w", j.ID, err)
@@ -220,21 +213,21 @@ func (d *bankDeleter) fenced(ctx context.Context, j port.Job) (bool, error) {
 // blockIfBusy reports whether a job of b other than delete_bank is still processing; if so it enqueues the
 // delete's continuation DeleteBlockedDelay from now in tx (the handler's own DedupePending re-enqueue then
 // joins it).
-func (d *bankDeleter) blockIfBusy(ctx context.Context, tx port.Tx, b port.BankRef) (bool, error) {
+func (d *bankDeleter) blockIfBusy(ctx context.Context, tx store.Tx, b domain.BankRef) (bool, error) {
 	busy, err := otherJobsProcessing(ctx, tx, b)
 	if err != nil || !busy {
 		return false, err
 	}
-	_, _, err = tx.Queue().Enqueue(ctx, port.Job{
+	_, _, err = tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: DeleteBankSerialKey,
-		Payload: json.RawMessage(`{}`), Dedupe: port.DedupePending, RunAt: d.clock.Now().Add(DeleteBlockedDelay),
+		Payload: json.RawMessage(`{}`), Dedupe: store.DedupePending, RunAt: d.clock.Now().Add(DeleteBlockedDelay),
 	})
 	return true, err
 }
 
 // otherJobsProcessing reports whether b has a PROCESSING operation of a kind other than delete_bank.
-func otherJobsProcessing(ctx context.Context, tx port.Tx, b port.BankRef) (bool, error) {
-	f := port.OperationFilter{Status: domain.OperationStatusProcessing, PageSize: 100}
+func otherJobsProcessing(ctx context.Context, tx store.Tx, b domain.BankRef) (bool, error) {
+	f := store.OperationFilter{Status: domain.OperationStatusProcessing, PageSize: 100}
 	for {
 		ops, next, err := tx.Queue().List(ctx, b, f)
 		if err != nil {
@@ -252,15 +245,12 @@ func otherJobsProcessing(ctx context.Context, tx port.Tx, b port.BankRef) (bool,
 	}
 }
 
-// deleteBlobs deletes the bank's blobs: page by page with a fence check between pages when a BlobLister is
-// configured, else with one DeletePrefix. ok=false means a fence check found the bank gone or no longer
+// deleteBlobs deletes the bank's blobs page by page: it lists one page under the bank prefix, deletes each listed key
+// (DeletePrefix of the full key: every listed key lies under the bank prefix being emptied, so nothing outside it is
+// touched) and checks the fence before the next page. ok=false means a fence check found the bank gone or no longer
 // tombstoned, so the delete stops there with nothing left to do.
-func (d *bankDeleter) deleteBlobs(ctx context.Context, j port.Job) (bool, error) {
-	prefix := domain.BankBlobPrefix(j.Bank)
-	if d.cfg.Blobs == nil {
-		_, err := d.blob.DeletePrefix(ctx, prefix)
-		return err == nil, err
-	}
+func (d *bankDeleter) deleteBlobs(ctx context.Context, j store.Job) (bool, error) {
+	prefix := blob.BankPrefix(j.Bank)
 	after := ""
 	for page := 0; ; page++ {
 		if page > 0 {
@@ -268,7 +258,7 @@ func (d *bankDeleter) deleteBlobs(ctx context.Context, j port.Job) (bool, error)
 				return false, err
 			}
 		}
-		keys, err := d.cfg.Blobs.List(ctx, prefix, after, d.cfg.BlobPageSize)
+		keys, err := d.blob.List(ctx, prefix, after, d.cfg.BlobPageSize)
 		if err != nil {
 			return false, fmt.Errorf("list blobs under %s: %w", prefix, err)
 		}
@@ -276,8 +266,8 @@ func (d *bankDeleter) deleteBlobs(ctx context.Context, j port.Job) (bool, error)
 			return true, nil
 		}
 		for _, k := range keys {
-			if err := d.blob.Delete(ctx, k); err != nil {
-				return false, err
+			if _, err := d.blob.DeletePrefix(ctx, k); err != nil {
+				return false, fmt.Errorf("delete blob %s: %w", k, err)
 			}
 		}
 		after = keys[len(keys)-1]
@@ -285,9 +275,9 @@ func (d *bankDeleter) deleteBlobs(ctx context.Context, j port.Job) (bool, error)
 }
 
 // stillDeleting reports whether bank b still exists and is tombstoned.
-func (d *bankDeleter) stillDeleting(ctx context.Context, b port.BankRef) (bool, error) {
+func (d *bankDeleter) stillDeleting(ctx context.Context, b domain.BankRef) (bool, error) {
 	var deleting bool
-	err := d.s.InTx(ctx, func(tx port.Tx) error {
+	err := d.s.InTx(ctx, func(tx store.Tx) error {
 		bank, err := tx.Banks().Get(ctx, b)
 		if err != nil {
 			return err

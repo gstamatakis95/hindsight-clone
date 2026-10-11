@@ -3,7 +3,7 @@ package recall
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
@@ -26,7 +26,7 @@ func TestIncludeChunksTruncated(t *testing.T) {
 	results := []Candidate{unit("u1", "c1"), unit("u2", "c2"), unit("u3", "c1"), unit("u4", "c3"), unit("u5", "")}
 	inc := domain.RecallInclude{Chunks: ptr(true), ChunksMaxTokens: ptr(5)}
 	in := newIncluder(env.store.Read(), wordCounter{})
-	e, err := in.Enrich(context.Background(), testBank, port.SeqRange{}, results, inc)
+	e, err := in.Enrich(context.Background(), testBank, store.SeqRange{}, results, inc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestIncludeChunksTruncated(t *testing.T) {
 		t.Fatalf("chunks = %+v, want the walk to stop at the budget", e.Chunks)
 	}
 	// Not asked: nothing attached.
-	e, _ = in.Enrich(context.Background(), testBank, port.SeqRange{}, results, domain.RecallInclude{})
+	e, _ = in.Enrich(context.Background(), testBank, store.SeqRange{}, results, domain.RecallInclude{})
 	if e.Chunks != nil {
 		t.Fatalf("chunks not asked for = %+v", e.Chunks)
 	}
@@ -60,7 +60,7 @@ func TestIncludeSourceFactsTruncated(t *testing.T) {
 	results := []Candidate{{ID: "o1", Unit: &units[0]}, {ID: "o2", Unit: &units[1]}}
 	inc := domain.RecallInclude{SourceFacts: ptr(true), SourceFactsMaxTokens: ptr(4)}
 	enr, err := newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
-		port.SeqRange{}, results, inc)
+		store.SeqRange{}, results, inc)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,13 +74,13 @@ func TestIncludeSourceFactsTruncated(t *testing.T) {
 	// and the later f2 and f3 skipped.
 	inc.SourceFactsMaxTokens = ptr(6)
 	enr, _ = newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
-		port.SeqRange{}, results, inc)
+		store.SeqRange{}, results, inc)
 	if _, ok := enr.SourceFacts[uid("f1")]; !ok || len(enr.SourceFacts) != 1 || !enr.SourceFactsTruncated {
 		t.Fatalf("citation order: %v", enr.SourceFacts)
 	}
 	inc.SourceFactsMaxTokens = nil // default 4096
 	enr, _ = newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
-		port.SeqRange{}, results, inc)
+		store.SeqRange{}, results, inc)
 	if enr.SourceFactsTruncated || len(enr.SourceFacts) != 3 {
 		t.Fatalf("default budget: %v truncated=%v", enr.SourceFacts, enr.SourceFactsTruncated)
 	}
@@ -100,7 +100,7 @@ func TestIncludeSourceFactsBoundedBySeq(t *testing.T) {
 	results := []Candidate{{ID: "o1", Unit: &units[0]}}
 	inc := domain.RecallInclude{SourceFacts: ptr(true)}
 	enr, err := newIncluder(e.store.Read(), wordCounter{}).Enrich(context.Background(), testBank,
-		port.SeqUpTo(0, snapshot), results, inc)
+		store.SeqUpTo(0, snapshot), results, inc)
 	if err != nil {
 		t.Fatal(err)
 	}

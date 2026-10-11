@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 )
 
@@ -37,16 +39,16 @@ type RefreshFailureReconciler interface {
 // reconciler is the RefreshFailureReconciler.
 type reconciler struct {
 	src    FailureSource
-	store  port.Store
-	config port.ConfigResolver
-	clock  port.Clock
+	store  store.DB
+	config config.Resolver
+	clock  clock.Clock
 }
 
 var _ RefreshFailureReconciler = (*reconciler)(nil)
 
-// NewRefreshFailureReconciler returns the reconciler over the failed-refresh read (port.Reader.FailedRefreshes).
+// NewRefreshFailureReconciler returns the reconciler over the failed-refresh read (store.Maintenance.FailedRefreshes).
 func NewRefreshFailureReconciler(
-	src FailureSource, s port.Store, c port.ConfigResolver, clock port.Clock,
+	src FailureSource, s store.DB, c config.Resolver, clock clock.Clock,
 ) RefreshFailureReconciler {
 	return &reconciler{src: src, store: s, config: c, clock: clock}
 }
@@ -75,13 +77,13 @@ func (r *reconciler) ReconcileFailedRefreshes(ctx context.Context) (int, error) 
 // first skips without taking the bank lock (so a paused model doesn't bump the seq every tick); then
 // tx.Seq locks the bank row, which serializes this with every other model-row write, and the check is
 // repeated on a fresh read.
-func (r *reconciler) record(ctx context.Context, f FailedRefresh) (bool, error) {
+func (r *reconciler) record(ctx context.Context, f store.FailedRefresh) (bool, error) {
 	keep := defaultHistoryMaxEntries
 	if cfg, err := r.config.Effective(ctx, f.Bank); err == nil {
 		keep = historyKeep(cfg)
 	}
 	paused := false
-	err := r.store.InTx(ctx, func(tx port.Tx) error {
+	err := r.store.InTx(ctx, func(tx store.Tx) error {
 		paused = false
 		m, err := tx.MentalModels().Get(ctx, f.Bank, f.ModelID)
 		if err != nil || skipFailure(m, f) {
@@ -117,7 +119,7 @@ func (r *reconciler) record(ctx context.Context, f FailedRefresh) (bool, error) 
 
 // skipFailure reports whether f is not to be recorded on m: it predates the model (a model recreated with
 // the same id), a later refresh succeeded, or it is already recorded.
-func skipFailure(m domain.MentalModel, f FailedRefresh) bool {
+func skipFailure(m domain.MentalModel, f store.FailedRefresh) bool {
 	return f.FailedAt.Before(m.CreatedAt) ||
 		(m.LastRefreshedAt != nil && !m.LastRefreshedAt.Before(f.FailedAt)) ||
 		(m.LastRefreshFailedAt != nil && !m.LastRefreshFailedAt.Before(f.FailedAt))
@@ -141,7 +143,7 @@ func failureReason(msg string) string {
 // RunJob runs one refresh_mental_model job through r: it decodes the payload and passes the job's
 // overrides and operation id. A model (or bank) deleted before the job ran is done, not failed, so a job
 // that runs twice or after a delete is harmless. A malformed payload is domain.ErrInvalidArgument.
-func RunJob(ctx context.Context, r RefreshRunner, j port.Job) (RefreshOutcome, error) {
+func RunJob(ctx context.Context, r RefreshRunner, j store.Job) (RefreshOutcome, error) {
 	p, err := decodeRefreshPayload(j.Payload)
 	if err != nil {
 		return RefreshOutcome{}, err
@@ -165,7 +167,7 @@ func decodeRefreshPayload(raw []byte) (RefreshPayload, error) {
 	var p struct {
 		RefreshPayload
 		// LegacyModelID is the pre-1800 consolidation key.
-		LegacyModelID port.MentalModelID `json:"model_id"`
+		LegacyModelID domain.MentalModelID `json:"model_id"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)

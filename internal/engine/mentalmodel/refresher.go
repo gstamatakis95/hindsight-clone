@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"memd/internal/ai"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/reflect"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // ErrNoNewFacts is returned by a Synthesizer that retrieved nothing to write from. The runner turns it
@@ -35,7 +38,7 @@ type RefreshRunner interface {
 	// nothing and returns the error with Trace.Outcome = failed; the document stays as it was. Pausing and
 	// the REFRESH_FAILED history entry happen once the operation fails for good, in the maintenance
 	// reconcile (RefreshFailureReconciler), so job retries are not recorded as failures.
-	Run(ctx context.Context, b port.BankRef, id port.MentalModelID, opts RefreshOptions) (RefreshOutcome, error)
+	Run(ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts RefreshOptions) (RefreshOutcome, error)
 }
 
 // RefreshOptions are the knobs of one refresh run.
@@ -52,7 +55,7 @@ type RefreshOptions struct {
 	// Overrides are per-call config overrides, above the model's stored overrides; nil = none.
 	Overrides *domain.BankConfig
 	// OperationID is the refresh_mental_model operation, for events and checkpoints; empty for a dry run.
-	OperationID port.OperationID
+	OperationID domain.OperationID
 }
 
 // RefreshOutcome is the result of one refresh run (the struct; domain.RefreshOutcome is the enum held in
@@ -117,7 +120,7 @@ type draft struct {
 	// ContentMD is the drafted markdown document.
 	ContentMD string
 	// SourceIDs are the units the document is based on.
-	SourceIDs []port.UnitID
+	SourceIDs []domain.UnitID
 	// StructuredOutputJSON is the projection onto the trigger's response schema; nil = none.
 	StructuredOutputJSON json.RawMessage
 	// Usage is per-slot token usage.
@@ -135,7 +138,7 @@ type deltaDraft struct {
 	// ContentMD is m.ContentMD with the applied ops (unchanged when none applied).
 	ContentMD string
 	// SourceIDs are the new units the edits are based on; the runner adds them to the model's.
-	SourceIDs []port.UnitID
+	SourceIDs []domain.UnitID
 	// Usage is per-slot token usage.
 	Usage []domain.Usage
 	// ToolCalls are the agentic loop's tool calls (agentic only).
@@ -154,9 +157,9 @@ type Projector interface {
 // RefreshRunnerDeps are the RefreshRunner's dependencies.
 type RefreshRunnerDeps struct {
 	// Store reads the model and writes the version.
-	Store port.Store
+	Store store.DB
 	// Config merges server < tenant < bank < model overrides < trigger < call overrides.
-	Config port.ConfigResolver
+	Config config.Resolver
 	// Scope answers the no-LLM "anything in scope / in the window?" check.
 	Scope ScopeReader
 	// Synthesizers holds one Synthesizer per strategy.
@@ -164,7 +167,7 @@ type RefreshRunnerDeps struct {
 	// Projector projects the page onto trigger.response_schema_json; nil = a model with a schema fails.
 	Projector Projector
 	// Embedder embeds the page for SearchPages; nil = pages are stored without an embedding.
-	Embedder port.Embedder
+	Embedder ai.Embedder
 	// Clock stamps last_refreshed_at, history and traces.
-	Clock port.Clock
+	Clock clock.Clock
 }

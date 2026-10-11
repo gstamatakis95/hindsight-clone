@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"memd/internal/port"
+	"memd/internal/domain"
 
 	pb "memd/gen/memory/v1"
 )
@@ -92,7 +92,7 @@ func (s *observationServer) ClearMemoryObservations(
 	if err := requireID("memory_id", req.GetMemoryId()); err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := s.d.Observations.ClearMemoryObservations(ctx, b, port.UnitID(req.GetMemoryId()), req.GetReconsolidate())
+	out, err := s.d.Observations.ClearMemoryObservations(ctx, b, domain.UnitID(req.GetMemoryId()), req.GetReconsolidate())
 	if err != nil {
 		return nil, toStatus(err)
 	}

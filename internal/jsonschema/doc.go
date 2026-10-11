@@ -6,7 +6,7 @@
 // jsonschema is a leaf utility package: it imports only the standard library and domain (for
 // domain.ErrInvalidArgument), so adapters, fakes and engines may all use it. Three places do:
 //
-//   - the gateway adapter (internal/adapter/gateway) compiles the schema of every port.LLM.Structured call
+//   - the gateway adapter (internal/ai/gateway) compiles the schema of every ai.LLM.Structured call
 //     and validates the model's reply before decoding it; the mismatch text is what its retry sends back to
 //     the model;
 //   - the LLM fake (internal/fake) validates scripted replies the same way, so a mismatch between an
@@ -58,5 +58,5 @@
 // jsonschema_test.go covers each keyword, bad schemas and the bounded $ref loop. The subset is hand-written
 // rather than a third-party validator because it is small and fully tested, and it lives outside the
 // gateway adapter so the gateway, the fake and reflect share one implementation. SPEC "Ports"
-// (port.LLM.Structured).
+// (ai.LLM.Structured).
 package jsonschema

@@ -1,0 +1,58 @@
+package gateway_test
+
+import (
+	"errors"
+	"memd/internal/ai"
+	"memd/internal/ai/gateway"
+	"memd/internal/domain"
+	"net/http"
+	"strings"
+	"testing"
+)
+
+// TestContextOverflowClassified checks CCR WP-11-1: a non-retryable 400 or 413 whose body carries an
+// overflow marker is both ErrContextOverflow and ErrUnavailable; any other 4xx is only ErrUnavailable.
+func TestContextOverflowClassified(t *testing.T) {
+	cases := []struct {
+		name     string
+		code     int
+		body     any
+		overflow bool
+	}{
+		{"openai code", http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"code": "context_length_exceeded", "message": "too long",
+		}}, true},
+		{"max context", http.StatusBadRequest, map[string]any{"error": "This model's Maximum Context Length is 8192"}, true},
+		{"anthropic", http.StatusBadRequest, map[string]any{"error": "prompt is too long: 210000 tokens"}, true},
+		{"413 input", http.StatusRequestEntityTooLarge, map[string]any{"error": "input is too long"}, true},
+		{"spaced marker", http.StatusBadRequest, map[string]any{"error": "Context length exceeded (9000 > 8192)"}, true},
+		{"prompt_too_long code", http.StatusBadRequest, map[string]any{"error": map[string]any{
+			"type": "invalid_request_error", "code": "prompt_too_long",
+		}}, true},
+		{"context window", http.StatusBadRequest, map[string]any{"error": "Input exceeds the Context Window"}, true},
+		{"other 400", http.StatusBadRequest, map[string]any{"error": "bad request"}, false},
+		{"marker on 404", http.StatusNotFound, map[string]any{"error": "prompt is too long"}, false},
+		{"marker past the 512-byte snippet", http.StatusBadRequest, map[string]any{
+			"detail": strings.Repeat("x", 600), "error": map[string]any{"code": "context_length_exceeded"},
+		}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			g := newFakeGateway(t)
+			g.chat = func(int, map[string]any) (int, any) { return c.code, c.body }
+			b := binding("m")
+			b.MaxRetries = ptr(2)
+			req := ai.ChatRequest{Slot: domain.ModelSlotReflect, Binding: b}
+			_, err := g.client(gateway.Config{}).Chat(t.Context(), req)
+			if !errors.Is(err, domain.ErrUnavailable) {
+				t.Fatalf("err = %v, want ErrUnavailable", err)
+			}
+			if got := errors.Is(err, domain.ErrContextOverflow); got != c.overflow {
+				t.Errorf("errors.Is(err, ErrContextOverflow) = %v, want %v (err %v)", got, c.overflow, err)
+			}
+			if n := len(g.bodies("chat")); n != 1 {
+				t.Errorf("got %d attempts, want 1 (not retried)", n)
+			}
+		})
+	}
+}

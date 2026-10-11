@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 	"time"
 )
@@ -50,12 +50,12 @@ func TestCronFiresOnScheduleWithinGrace(t *testing.T) {
 				e.addUnit(domain.FactTypeWorld, "new", "proj")
 			}
 			fire := e.clock.Now().Truncate(time.Hour).Add(time.Hour)
-			cm := CronModel{Model: m}
+			cm := store.CronModel{Model: m}
 			cm.Model.CreatedAt, cm.Model.AutoRefreshPaused = fire.Add(c.created), c.paused
 			if !c.unsrv {
 				cm.LastRefreshEnqueuedAt = fire.Add(c.served)
 			}
-			e.reads.cron = []CronModel{cm}
+			e.reads.cron = []store.CronModel{cm}
 			now := fire.Add(c.tick)
 			e.clock.Set(now)
 			if n, err := tr.EnqueueDueCronRefreshes(e.ctx, now); err != nil || n != c.want {
@@ -121,14 +121,14 @@ type recordingRunner struct {
 
 // runCall is one recorded RefreshRunner.Run call.
 type runCall struct {
-	b    port.BankRef
-	id   port.MentalModelID
+	b    domain.BankRef
+	id   domain.MentalModelID
 	opts RefreshOptions
 }
 
 // Run implements RefreshRunner.
 func (r *recordingRunner) Run(
-	_ context.Context, b port.BankRef, id port.MentalModelID, opts RefreshOptions,
+	_ context.Context, b domain.BankRef, id domain.MentalModelID, opts RefreshOptions,
 ) (RefreshOutcome, error) {
 	r.calls = append(r.calls, runCall{b: b, id: id, opts: opts})
 	return RefreshOutcome{}, nil
@@ -140,7 +140,7 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 	e := newEnv(t)
 	r := &recordingRunner{}
 	for _, raw := range []string{`not json`, `{}`, `{"mental_model_id":""}`} {
-		_, err := RunJob(e.ctx, r, port.Job{Bank: e.bank, Payload: json.RawMessage(raw)})
+		_, err := RunJob(e.ctx, r, store.Job{Bank: e.bank, Payload: json.RawMessage(raw)})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Fatalf("payload %s: %v", raw, err)
 		}
@@ -152,7 +152,7 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 		MentalModelID: "status", ForceFull: true, Manual: true, Strategy: domain.RefreshStrategyAgentic,
 	})
 	over := &domain.BankConfig{ReflectMission: "be brief"}
-	job := port.Job{ID: opID("op7"), Bank: e.bank, Payload: payload, Overrides: over}
+	job := store.Job{ID: opID("op7"), Bank: e.bank, Payload: payload, Overrides: over}
 	if _, err := RunJob(e.ctx, r, job); err != nil {
 		t.Fatal(err)
 	}
@@ -167,15 +167,15 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 	}
 }
 
-// downEmbedder is a port.Embedder that always fails.
+// downEmbedder is a ai.Embedder that always fails.
 type downEmbedder struct{}
 
-// EmbedDocuments implements port.Embedder.
+// EmbedDocuments implements ai.Embedder.
 func (downEmbedder) EmbedDocuments(context.Context, []string) ([][]float32, error) {
 	return nil, errors.New("embedder down")
 }
 
-// EmbedQuery implements port.Embedder.
+// EmbedQuery implements ai.Embedder.
 func (downEmbedder) EmbedQuery(context.Context, string) ([]float32, error) {
 	return nil, errors.New("embedder down")
 }
@@ -183,14 +183,14 @@ func (downEmbedder) EmbedQuery(context.Context, string) ([]float32, error) {
 // TestSearchPagesEmbedderDown checks that SearchPages ranks by terms only when the embedder fails.
 func TestSearchPagesEmbedderDown(t *testing.T) {
 	e := newEnv(t)
-	for id, content := range map[port.MentalModelID]string{
+	for id, content := range map[domain.MentalModelID]string{
 		"deploy": "# Deploy\n\nWe deploy with Argo every Tuesday.",
 		"hiring": "# Hiring\n\nInterviews take two rounds.",
 	} {
 		e.addModel(domain.MentalModelSpec{ID: id, Name: string(id)})
 		m := e.model(id)
 		m.ContentMD = content
-		e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+		e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	}
 	hits, err := NewPageSearcher(e.reads, downEmbedder{}).Search(e.ctx, SearchPagesRequest{
 		Bank: e.bank, Query: "how do we deploy?",

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // rederiver implements Rederiver: read and embed outside any transaction, then one short write.
@@ -21,7 +21,7 @@ func NewRederiver(d RederiverDeps) Rederiver {
 }
 
 // Rederive re-embeds and re-links the job's unit and enqueues consolidation.
-func (r *rederiver) Rederive(ctx context.Context, j port.Job) error {
+func (r *rederiver) Rederive(ctx context.Context, j store.Job) error {
 	var p RederivePayload
 	if err := json.Unmarshal(j.Payload, &p); err != nil {
 		return fmt.Errorf("%w: rederive_memory payload %s: %w", domain.ErrInvalidArgument, j.Payload, err)
@@ -29,7 +29,7 @@ func (r *rederiver) Rederive(ctx context.Context, j port.Job) error {
 	if p.UnitID == "" {
 		return fmt.Errorf("%w: rederive_memory payload %s has no unit_id", domain.ErrInvalidArgument, j.Payload)
 	}
-	us, err := r.d.Store.Read().GetUnits(ctx, j.Bank, []port.UnitID{p.UnitID})
+	us, err := r.d.Store.Read().GetUnits(ctx, j.Bank, []domain.UnitID{p.UnitID})
 	if err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func (r *rederiver) Rederive(ctx context.Context, j port.Job) error {
 	if len(vecs) != 1 {
 		return fmt.Errorf("%w: embedder returned %d vectors for 1 text", domain.ErrUnavailable, len(vecs))
 	}
-	err = r.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = r.d.Store.InTx(ctx, func(tx store.Tx) error {
 		return r.write(ctx, tx, j.Bank, u.ID, u.Text, vecs[0])
 	})
 	if err != nil && ctx.Err() != nil {
@@ -58,13 +58,13 @@ func (r *rederiver) Rederive(ctx context.Context, j port.Job) error {
 // the unit's consolidation stamps (UnitRepo.Update), so consolidation sees the unit again only once it has
 // an embedding (decision 1305). Entity attachments stay as the RPC committed them.
 func (r *rederiver) write(
-	ctx context.Context, tx port.Tx, b port.BankRef, id port.UnitID, text string, vec []float32,
+	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.UnitID, text string, vec []float32,
 ) error {
 	seq, err := tx.Seq(ctx, b)
 	if err != nil {
 		return err
 	}
-	us, err := tx.GetUnits(ctx, b, []port.UnitID{id})
+	us, err := tx.GetUnits(ctx, b, []domain.UnitID{id})
 	if err != nil {
 		return err
 	}

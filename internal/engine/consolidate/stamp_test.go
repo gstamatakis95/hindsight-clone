@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
@@ -28,7 +28,7 @@ func (h *hookAtStage) Report(_ context.Context, p domain.Progress) error {
 // beforeScope installs a checkpoint hook that runs fn right before the run's first batch in scope tags.
 func (e *env) beforeScope(fn func(), tags ...string) *hookAtStage {
 	h := &hookAtStage{stage: "scope " + scopeOf(tags...).String(), fn: fn}
-	e.deps.Checkpoint = func(port.Job) Checkpointer { return h }
+	e.deps.Checkpoint = func(store.Job) Checkpointer { return h }
 	return h
 }
 
@@ -42,7 +42,7 @@ func (e *env) cite(text string, ids ...string) fake.Reply {
 func (e *env) continuation() ConsolidationResult {
 	e.t.Helper()
 	e.wantPending(domain.OperationKindConsolidate, 1)
-	jobs, err := e.store.Claim(e.t.Context(), "w", []port.JobKind{domain.OperationKindConsolidate}, 1)
+	jobs, err := e.store.Claim(e.t.Context(), "w", []domain.OperationKind{domain.OperationKindConsolidate}, 1)
 	if err != nil || len(jobs) != 1 {
 		e.t.Fatalf("claim continuation: %d jobs, %v", len(jobs), err)
 	}
@@ -96,8 +96,8 @@ func TestRunClearedEarlierScopeIsNotStamped(t *testing.T) {
 	e.fact("f2", "Carol likes tea", "a", "b")
 	e.script(e.cite("Alice and Carol like tea", "f1", "f2"))
 	h := e.beforeScope(func() {
-		e.tx(func(tx port.Tx) error {
-			if _, err := NewInvalidator().ClearScopes(t.Context(), tx, bank, []port.ScopeKey{scopeOf("a")}); err != nil {
+		e.tx(func(tx store.Tx) error {
+			if _, err := NewInvalidator().ClearScopes(t.Context(), tx, bank, []domain.ScopeKey{scopeOf("a")}); err != nil {
 				return fmt.Errorf("clear scope a: %w", err)
 			}
 			return nil
@@ -136,11 +136,11 @@ func TestRunCoSourceInvalidatedIsNotStamped(t *testing.T) {
 	e.fact("f3", "Dan likes tea", "a")
 	e.script(e.cite("Alice and Dan like tea", "f1", "f3"), e.cite("Alice likes tea", "f1"))
 	e.beforeScope(func() {
-		e.tx(func(tx port.Tx) error {
+		e.tx(func(tx store.Tx) error {
 			if _, err := tx.Seq(t.Context(), bank); err != nil {
 				return err
 			}
-			if _, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, []port.UnitID{uid("f3")}); err != nil {
+			if _, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, []domain.UnitID{uid("f3")}); err != nil {
 				return fmt.Errorf("clear for f3: %w", err)
 			}
 			return tx.Units().Archive(t.Context(), bank, uid("f3"), "wrong")
@@ -171,7 +171,7 @@ func TestRunCoSourceRetaggedIsNotStamped(t *testing.T) {
 		e.cite("Alice likes tea", "f1"), e.cite("Dan likes tea", "f3"),
 	)
 	e.beforeScope(func() {
-		e.tx(func(tx port.Tx) error {
+		e.tx(func(tx store.Tx) error {
 			seq, err := tx.Seq(t.Context(), bank)
 			if err != nil {
 				return err
@@ -202,11 +202,11 @@ func TestRunCoSourceRetaggedIsNotStamped(t *testing.T) {
 }
 
 // docFact inserts a world fact of document doc (created with the fact's tags).
-func (e *env) docFact(doc port.DocumentID, id, text string, tags ...string) {
+func (e *env) docFact(doc domain.DocumentID, id, text string, tags ...string) {
 	e.t.Helper()
-	e.texts[port.UnitID(id)] = text
+	e.texts[domain.UnitID(id)] = text
 	tags = domain.NormalizeTags(tags)
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		if err := tx.Documents().Upsert(e.t.Context(), domain.Document{ID: doc, Bank: bank, Tags: tags}); err != nil {
 			return err
 		}

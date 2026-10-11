@@ -3,7 +3,6 @@ package bank
 import (
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"testing"
 )
 
@@ -12,7 +11,7 @@ func TestTagsPaging(t *testing.T) {
 		{Tag: "a", Count: 1}, {Tag: "team:x", Count: 2}, {Tag: "team:y", Count: 3}, {Tag: "team:z", Count: 4},
 	}}
 	r := NewStatsReader(src)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	var got []string
 	tok := ""
 	for pages := 0; ; pages++ {

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,7 +17,7 @@ import (
 type stubVocab []string
 
 func (v stubVocab) TagCounts(
-	context.Context, port.BankRef, domain.TagSource, string, string, int,
+	context.Context, domain.BankRef, domain.TagSource, string, string, int,
 ) ([]domain.TagCount, error) {
 	out := make([]domain.TagCount, len(v))
 	for i, t := range v {
@@ -35,7 +35,7 @@ type countingVocab struct {
 }
 
 func (v *countingVocab) TagCounts(
-	ctx context.Context, b port.BankRef, s domain.TagSource, prefix, after string, limit int,
+	ctx context.Context, b domain.BankRef, s domain.TagSource, prefix, after string, limit int,
 ) ([]domain.TagCount, error) {
 	v.calls++
 	if v.err != nil {
@@ -44,7 +44,7 @@ func (v *countingVocab) TagCounts(
 	return stubVocab(v.tags).TagCounts(ctx, b, s, prefix, after, limit)
 }
 
-var tagsBank = port.BankRef{Tenant: "t", Bank: "b"}
+var tagsBank = domain.BankRef{Tenant: "t", Bank: "b"}
 
 // unitTagSets covers untagged, overlapping, containing, exact, disjoint and un-normalized units against
 // filters over {a, b}.
@@ -60,7 +60,7 @@ var unitTagSets = [][]string{
 	{"x", "y"},
 }
 
-func mustCompile(t *testing.T, v TagVocabulary, f domain.TagFilter, minSim float64) port.SQLPredicate {
+func mustCompile(t *testing.T, v TagVocabulary, f domain.TagFilter, minSim float64) store.SQLPredicate {
 	t.Helper()
 	p, err := NewTagFilterCompiler(v).Compile(context.Background(), tagsBank, f, minSim)
 	if err != nil {
@@ -70,9 +70,9 @@ func mustCompile(t *testing.T, v TagVocabulary, f domain.TagFilter, minSim float
 }
 
 // checkLeaves fails when any leaf has no explicit match or carries un-normalized tags.
-func checkLeaves(t *testing.T, p port.SQLPredicate) {
+func checkLeaves(t *testing.T, p store.SQLPredicate) {
 	t.Helper()
-	if p.Op == port.PredicateTags {
+	if p.Op == store.PredicateTags {
 		if p.Match == domain.TagsMatchUnspecified {
 			t.Fatalf("leaf %+v has no explicit match", p)
 		}
@@ -114,8 +114,8 @@ func TestCompileFlatTags(t *testing.T) {
 	t.Run("unspecified compiles to explicit any", func(t *testing.T) {
 		t.Parallel()
 		p := mustCompile(t, nil, domain.TagFilter{Tags: []string{"  Foo ", "bar", "foo"}}, 0.45)
-		want := port.SQLPredicate{Op: port.PredicateAnd, Args: []port.SQLPredicate{
-			{Op: port.PredicateTags, Tags: []string{"bar", "foo"}, Match: domain.TagsMatchAny},
+		want := store.SQLPredicate{Op: store.PredicateAnd, Args: []store.SQLPredicate{
+			{Op: store.PredicateTags, Tags: []string{"bar", "foo"}, Match: domain.TagsMatchAny},
 		}}
 		if !reflect.DeepEqual(p, want) {
 			t.Fatalf("got %+v, want %+v", p, want)
@@ -185,7 +185,7 @@ func TestCompileGroups(t *testing.T) {
 			v := &countingVocab{tags: []string{"a"}}
 			p := mustCompile(t, v, domain.TagFilter{Groups: tc.groups}, 0.45)
 			checkLeaves(t, p)
-			if p.Op != port.PredicateAnd || len(p.Args) != len(tc.groups) {
+			if p.Op != store.PredicateAnd || len(p.Args) != len(tc.groups) {
 				t.Fatalf("top level %+v, want And over %d groups", p, len(tc.groups))
 			}
 			if v.calls != 0 {
@@ -224,7 +224,7 @@ func TestCompileGroups(t *testing.T) {
 	t.Run("empty filter", func(t *testing.T) {
 		t.Parallel()
 		p := mustCompile(t, nil, domain.TagFilter{}, 0.45)
-		if p.Op != port.PredicateAnd || len(p.Args) != 0 {
+		if p.Op != store.PredicateAnd || len(p.Args) != 0 {
 			t.Fatalf("empty filter compiled to %+v", p)
 		}
 		if !p.Eval(nil) || !p.Eval([]string{"a"}) {

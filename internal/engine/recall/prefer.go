@@ -2,7 +2,6 @@ package recall
 
 import (
 	"memd/internal/domain"
-	"memd/internal/port"
 )
 
 // ObservationPreference drops raw facts covered by an observation and backfills.
@@ -29,7 +28,7 @@ func (preference) Apply(ranked []Candidate, window, maxTokens int, count TokenCo
 	if window > 0 && len(head) > window {
 		head = head[:window]
 	}
-	superseded := map[port.UnitID]bool{}
+	superseded := map[domain.UnitID]bool{}
 	for _, c := range head {
 		if c.Unit != nil && c.Unit.Type == domain.FactTypeObservation {
 			for _, src := range c.Unit.SourceIDs {

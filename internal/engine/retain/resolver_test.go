@@ -3,9 +3,9 @@ package retain
 import (
 	"fmt"
 	"math"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"testing"
 	"time"
@@ -20,9 +20,9 @@ func wrap(err error) error {
 }
 
 // inTx runs fn in a transaction on a bank that exists, failing the test on error.
-func (e *env) inTx(fn func(tx port.Tx) error) {
+func (e *env) inTx(fn func(tx store.Tx) error) {
 	e.t.Helper()
-	err := e.store.InTx(e.ctx, func(tx port.Tx) error {
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(e.ctx, testBank); err != nil {
 			return err
 		}
@@ -34,10 +34,10 @@ func (e *env) inTx(fn func(tx port.Tx) error) {
 }
 
 // seedEntity creates an entity last seen at seen; with partner set, a unit mentions both so they co-occur.
-func (e *env) seedEntity(name, partner string, seen time.Time) (port.EntityID, port.EntityID) {
+func (e *env) seedEntity(name, partner string, seen time.Time) (domain.EntityID, domain.EntityID) {
 	e.t.Helper()
-	var id, pid port.EntityID
-	e.inTx(func(tx port.Tx) error {
+	var id, pid domain.EntityID
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		id, err = tx.Entities().Upsert(e.ctx, domain.Entity{Bank: testBank, CanonicalName: name, LastSeen: &seen})
 		if err != nil {
@@ -50,11 +50,11 @@ func (e *env) seedEntity(name, partner string, seen time.Time) (port.EntityID, p
 		if err != nil {
 			return err
 		}
-		u := domain.Unit{ID: pgtest.ID[port.UnitID]("seed-" + name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
+		u := domain.Unit{ID: pgtest.ID[domain.UnitID]("seed-" + name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
 		if err := tx.Units().Insert(e.ctx, []domain.Unit{u}); err != nil {
 			return err
 		}
-		return tx.Entities().Attach(e.ctx, u.ID, []port.EntityID{id, pid})
+		return tx.Entities().Attach(e.ctx, u.ID, []domain.EntityID{id, pid})
 	})
 	return id, pid
 }
@@ -69,16 +69,16 @@ func TestEntityResolverMergeVersusSplit(t *testing.T) {
 		in      ResolveInput // Threshold 0.6 unless set
 		merge   bool         // the first id is the seeded Alice Chen
 	}{
-		{"identical name merges", false, ResolveInput{Mentions: []Mention{{Name: "Alice Chen"}}}, true},
-		{"case-insensitive identical merges", false, ResolveInput{Mentions: []Mention{{Name: "alice  chen"}}}, true},
-		{"similar name alone splits", false, ResolveInput{Mentions: []Mention{{Name: "Alicia Chen"}}}, false},
+		{"identical name merges", false, ResolveInput{Mentions: []domain.Mention{{Name: "Alice Chen"}}}, true},
+		{"case-insensitive identical merges", false, ResolveInput{Mentions: []domain.Mention{{Name: "alice  chen"}}}, true},
+		{"similar name alone splits", false, ResolveInput{Mentions: []domain.Mention{{Name: "Alicia Chen"}}}, false},
 		{"similar name, recent, co-occurring merges", true, ResolveInput{
-			Mentions: []Mention{{Name: "Alicia Chen"}, {Name: "Bob Stone"}}, At: seen.Add(24 * time.Hour),
+			Mentions: []domain.Mention{{Name: "Alicia Chen"}, {Name: "Bob Stone"}}, At: seen.Add(24 * time.Hour),
 		}, true},
 		{"similar name, recent but no co-occurrence splits", false, ResolveInput{
-			Mentions: []Mention{{Name: "Alicia Chen"}, {Name: "Bob Stone"}}, At: seen.Add(24 * time.Hour),
+			Mentions: []domain.Mention{{Name: "Alicia Chen"}, {Name: "Bob Stone"}}, At: seen.Add(24 * time.Hour),
 		}, false},
-		{"unrelated name splits", false, ResolveInput{Mentions: []Mention{{Name: "Zed Quark"}}}, false},
+		{"unrelated name splits", false, ResolveInput{Mentions: []domain.Mention{{Name: "Zed Quark"}}}, false},
 		{"literal hint matches exact name", false, ResolveInput{
 			Hints: []domain.EntityHint{{Text: "ALICE CHEN"}}, Literal: true,
 		}, true},
@@ -97,8 +97,8 @@ func TestEntityResolverMergeVersusSplit(t *testing.T) {
 			if tc.in.Threshold == 0 {
 				tc.in.Threshold = DefaultEntityMatchThreshold
 			}
-			var ids []port.EntityID
-			e.inTx(func(tx port.Tx) error {
+			var ids []domain.EntityID
+			e.inTx(func(tx store.Tx) error {
 				var err error
 				ids, err = NewEntityResolver(ResolverConfig{}).Resolve(e.ctx, tx, testBank, tc.in)
 				return wrap(err)
@@ -116,19 +116,19 @@ func TestEntityResolverMergeVersusSplit(t *testing.T) {
 func TestEntityResolverMergesHintsAndCreatesOnce(t *testing.T) {
 	e := newEnv(t, 0)
 	at := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
-	var first, second []port.EntityID
+	var first, second []domain.EntityID
 	in := ResolveInput{
-		Mentions:  []Mention{{Name: "Paris", Kind: "Place"}, {Name: "paris"}, {Name: "  "}},
+		Mentions:  []domain.Mention{{Name: "Paris", Kind: "Place"}, {Name: "paris"}, {Name: "  "}},
 		Hints:     []domain.EntityHint{{Text: "Eiffel Tower", Type: "landmark"}, {Text: "PARIS"}},
 		At:        at,
 		Threshold: DefaultEntityMatchThreshold,
 	}
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		first, err = NewEntityResolver(ResolverConfig{}).Resolve(e.ctx, tx, testBank, in)
 		return wrap(err)
 	})
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		second, err = NewEntityResolver(ResolverConfig{}).Resolve(e.ctx, tx, testBank, in)
 		return wrap(err)
@@ -140,11 +140,11 @@ func TestEntityResolverMergesHintsAndCreatesOnce(t *testing.T) {
 
 // seedKindEntity creates an entity of the given kind last seen at seen; with partner set, a unit mentions
 // both so they co-occur.
-func (e *env) seedKindEntity(name, kind, partner string, seen time.Time) port.EntityID {
+func (e *env) seedKindEntity(name, kind, partner string, seen time.Time) domain.EntityID {
 	e.t.Helper()
-	var id port.EntityID
-	e.inTx(func(tx port.Tx) error {
-		ents := []port.EntityID{}
+	var id domain.EntityID
+	e.inTx(func(tx store.Tx) error {
+		ents := []domain.EntityID{}
 		for _, n := range []string{name, partner} {
 			if n == "" {
 				continue
@@ -163,7 +163,7 @@ func (e *env) seedKindEntity(name, kind, partner string, seen time.Time) port.En
 		if partner == "" {
 			return nil
 		}
-		u := domain.Unit{ID: pgtest.ID[port.UnitID]("seed-" + name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
+		u := domain.Unit{ID: pgtest.ID[domain.UnitID]("seed-" + name), Bank: testBank, Type: domain.FactTypeWorld, Text: name}
 		if err := tx.Units().Insert(e.ctx, []domain.Unit{u}); err != nil {
 			return err
 		}
@@ -180,42 +180,42 @@ func TestEntityResolverMergeGates(t *testing.T) {
 	tests := []struct {
 		name                string
 		seed, kind, partner string
-		mentions            []Mention
+		mentions            []domain.Mention
 		merge               bool
 	}{
 		{
 			"different first name splits despite co-occurrence and recency", "John Smith", "", "Acme",
-			[]Mention{{Name: "Jane Smith"}, {Name: "Acme"}},
+			[]domain.Mention{{Name: "Jane Smith"}, {Name: "Acme"}},
 			false,
 		},
 		{
 			"different number splits despite co-occurrence and recency", "Room 101", "", "Acme",
-			[]Mention{{Name: "Room 102"}, {Name: "Acme"}},
+			[]domain.Mention{{Name: "Room 102"}, {Name: "Acme"}},
 			false,
 		},
 		{
 			"abbreviated word merges with co-occurrence and recency", "Acme Corporation", "", "Bob Stone",
-			[]Mention{{Name: "Acme Corp"}, {Name: "Bob Stone"}},
+			[]domain.Mention{{Name: "Acme Corp"}, {Name: "Bob Stone"}},
 			true,
 		},
 		{
 			"identical name of another kind merges", "Kubernetes", "technology", "",
-			[]Mention{{Name: "Kubernetes", Kind: "concept"}},
+			[]domain.Mention{{Name: "Kubernetes", Kind: "concept"}},
 			true,
 		},
 		{
 			"similar name of another kind splits", "Alice Chen", "person", "Bob Stone",
-			[]Mention{{Name: "Alicia Chen", Kind: "organization"}, {Name: "Bob Stone"}},
+			[]domain.Mention{{Name: "Alicia Chen", Kind: "organization"}, {Name: "Bob Stone"}},
 			false,
 		},
 		{
 			"identical name of the same kind merges (case-insensitive)", "Alice Chen", "person", "",
-			[]Mention{{Name: "Alice Chen", Kind: "Person"}},
+			[]domain.Mention{{Name: "Alice Chen", Kind: "Person"}},
 			true,
 		},
 		{
 			"unknown mention kind merges", "Alice Chen", "person", "Bob Stone",
-			[]Mention{{Name: "Alicia Chen"}, {Name: "Bob Stone"}},
+			[]domain.Mention{{Name: "Alicia Chen"}, {Name: "Bob Stone"}},
 			true,
 		},
 	}
@@ -224,8 +224,8 @@ func TestEntityResolverMergeGates(t *testing.T) {
 			e := newEnv(t, 0)
 			seeded := e.seedKindEntity(tc.seed, tc.kind, tc.partner, seen)
 			in := ResolveInput{Mentions: tc.mentions, At: at, Threshold: DefaultEntityMatchThreshold}
-			var ids []port.EntityID
-			e.inTx(func(tx port.Tx) error {
+			var ids []domain.EntityID
+			e.inTx(func(tx store.Tx) error {
 				var err error
 				ids, err = NewEntityResolver(ResolverConfig{}).Resolve(e.ctx, tx, testBank, in)
 				return wrap(err)
@@ -247,11 +247,11 @@ func TestEntityResolverNearbyNeedsIdenticalName(t *testing.T) {
 	e := newEnv(t, 0)
 	alice := e.seedKindEntity("Alice Chen", "", "Acme Labs", seen)
 	in := ResolveInput{
-		Mentions: []Mention{{Name: "Alicia Chen"}, {Name: "Acme"}}, At: seen.Add(24 * time.Hour),
+		Mentions: []domain.Mention{{Name: "Alicia Chen"}, {Name: "Acme"}}, At: seen.Add(24 * time.Hour),
 		Threshold: DefaultEntityMatchThreshold,
 	}
-	var ids []port.EntityID
-	e.inTx(func(tx port.Tx) error {
+	var ids []domain.EntityID
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		ids, err = NewEntityResolver(ResolverConfig{}).Resolve(e.ctx, tx, testBank, in)
 		return wrap(err)
@@ -348,9 +348,9 @@ func TestLabelResolver(t *testing.T) {
 		{Key: "person:age", Value: "3"},
 		{Key: "priority", Value: "HIGH"},
 	}
-	var ids []port.EntityID
+	var ids []domain.EntityID
 	var tags []string
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		ids, tags, err = NewLabelResolver().Resolve(e.ctx, tx, testBank, defs, labels)
 		return wrap(err)
@@ -361,8 +361,8 @@ func TestLabelResolver(t *testing.T) {
 	if !slices.Equal(tags, []string{"priority:High", "person:role:engineer"}) {
 		t.Errorf("tags = %v", tags)
 	}
-	var again []port.EntityID
-	e.inTx(func(tx port.Tx) error {
+	var again []domain.EntityID
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		again, _, err = NewLabelResolver().Resolve(e.ctx, tx, testBank, defs, labels[:1])
 		return wrap(err)

@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"slices"
 )
@@ -20,7 +21,7 @@ type StructuredProjector interface {
 // ProjectRequest is one structured-output projection.
 type ProjectRequest struct {
 	// Bank owns the document (config resolution and usage accounting).
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Schema is the JSON Schema to project onto.
 	Schema json.RawMessage
 	// Document is the finished answer or mental-model content.
@@ -31,16 +32,16 @@ type ProjectRequest struct {
 
 // projector is the LLM-backed StructuredProjector.
 type projector struct {
-	llm    port.LLM
-	router port.ModelRouter
-	config port.ConfigResolver
+	llm    ai.LLM
+	router *ai.Router
+	config config.Resolver
 }
 
 var _ StructuredProjector = (*projector)(nil)
 
 // NewStructuredProjector returns the StructuredProjector: it resolves the bank's effective config (with the
 // request overrides) for the STRUCTURED_OUTPUT binding, then makes one Structured call.
-func NewStructuredProjector(llm port.LLM, router port.ModelRouter, config port.ConfigResolver) StructuredProjector {
+func NewStructuredProjector(llm ai.LLM, router *ai.Router, config config.Resolver) StructuredProjector {
 	return &projector{llm: llm, router: router, config: config}
 }
 
@@ -52,7 +53,7 @@ func (p *projector) Project(ctx context.Context, req ProjectRequest) (json.RawMe
 	}
 	cfg, err := p.config.Effective(ctx, req.Bank, overrides...)
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
 	}
 	out, _, err := project(ctx, p.llm, p.router, cfg, req.Schema, req.Document)
 	return out, err
@@ -61,7 +62,7 @@ func (p *projector) Project(ctx context.Context, req ProjectRequest) (json.RawMe
 // project makes the STRUCTURED_OUTPUT call for document under cfg and returns the JSON with the call's usage
 // (spent tokens are reported even when the call fails).
 func project(
-	ctx context.Context, llm port.LLM, router port.ModelRouter, cfg domain.BankConfig,
+	ctx context.Context, llm ai.LLM, router *ai.Router, cfg domain.BankConfig,
 	schema json.RawMessage, document string,
 ) (json.RawMessage, domain.Usage, error) {
 	binding, err := router.Resolve(cfg, domain.ModelSlotStructuredOutput)
@@ -81,7 +82,7 @@ func project(
 		return nil, domain.Usage{}, fmt.Errorf("reflect: %w", err)
 	}
 	var out json.RawMessage
-	usage, err := llm.Structured(ctx, port.StructuredRequest{
+	usage, err := llm.Structured(ctx, ai.StructuredRequest{
 		Slot: domain.ModelSlotStructuredOutput, Binding: binding, Name: prompts.StructuredOutputSystem,
 		System: system, User: user, Schema: schema,
 	}, &out)

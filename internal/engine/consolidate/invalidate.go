@@ -3,7 +3,8 @@ package consolidate
 import (
 	"context"
 	"fmt"
-	"memd/internal/port"
+	"memd/internal/domain"
+	"memd/internal/store"
 )
 
 // Invalidator clears derived observations and resets their sources for re-consolidation. It runs in the
@@ -13,7 +14,7 @@ type Invalidator interface {
 	// "empty = all", mapped to EvidenceRepo.DeleteAllObservations), resets their sources and returns the
 	// deleted observations. It enqueues nothing. Callers must pass only scopes the client named, never a
 	// list derived from data, which could be empty.
-	ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, error)
+	ClearScopes(ctx context.Context, tx store.Tx, b domain.BankRef, scopes []domain.ScopeKey) ([]domain.UnitID, error)
 }
 
 // invalidator implements Invalidator over the transaction's repositories.
@@ -31,12 +32,12 @@ func NewInvalidator() Invalidator {
 // with or without reconsolidate) owns the consolidate job. An empty scopes list is the RPC's "every scope"
 // and maps explicitly to DeleteAllObservations; DeleteScopes itself deletes nothing for an empty list.
 func (v *invalidator) ClearScopes(
-	ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey,
-) ([]port.UnitID, error) {
+	ctx context.Context, tx store.Tx, b domain.BankRef, scopes []domain.ScopeKey,
+) ([]domain.UnitID, error) {
 	if _, err := tx.Seq(ctx, b); err != nil {
 		return nil, fmt.Errorf("consolidate: clear scopes: %w", err)
 	}
-	var deleted []port.UnitID
+	var deleted []domain.UnitID
 	var err error
 	if len(scopes) == 0 {
 		deleted, _, err = tx.Evidence().DeleteAllObservations(ctx, b)

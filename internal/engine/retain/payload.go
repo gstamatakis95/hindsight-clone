@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"time"
 )
 
@@ -14,10 +13,10 @@ import (
 // ReprocessDocument (WP-13) enqueues the same payload.
 type DocumentPayload struct {
 	// DocumentID is the document to process.
-	DocumentID port.DocumentID `json:"document_id"`
+	DocumentID domain.DocumentID `json:"document_id"`
 	// ContentHash is the hex SHA-256 of the original text (ContentHash).
 	ContentHash string `json:"content_hash"`
-	// BlobKey is where the original text is stored (domain.DocumentBlobKey).
+	// BlobKey is where the original text is stored (blob.Key).
 	BlobKey string `json:"blob_key"`
 	// Tags are the document's normalized tags, written on every unit.
 	Tags []string `json:"tags,omitempty"`
@@ -143,7 +142,7 @@ func NoopHash(o *domain.BankConfig, scopes *domain.ObservationScopes) (string, e
 }
 
 // DocumentSerialKey is the serial key of a document's jobs (retain_document, rederive, retag): "doc:{id}".
-func DocumentSerialKey(doc port.DocumentID) string { return "doc:" + string(doc) }
+func DocumentSerialKey(doc domain.DocumentID) string { return "doc:" + string(doc) }
 
 // Serial keys of the jobs retain enqueues (SPEC Jobs table).
 const (

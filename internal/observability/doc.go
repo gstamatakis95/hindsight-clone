@@ -4,11 +4,11 @@
 // # Architecture
 //
 // It is the only package that imports github.com/DataDog. depguard keeps Datadog out of internal/engine,
-// internal/domain and internal/port, and only cmd/memd (main.go and wire.go) imports this package. The worker and the
-// gateway and S3 adapters expose vendor-free hooks, each nil by default (worker.RunnerConfig.TraceJob,
-// worker.MaintenanceDeps.TraceTick, gateway.Config.TraceCall, s3.Config.APIOptions), and cmd/memd/wire.go fills them
-// from a [Telemetry]. The package imports internal/domain and internal/port only for the hook signatures and the error
-// classes.
+// internal/domain and the boundary packages (store, ai, blob, clock), and only cmd/memd (main.go and wire.go) imports
+// this package. The worker and the gateway and S3 adapters expose vendor-free hooks, each nil by default
+// (worker.RunnerConfig.TraceJob, worker.MaintenanceDeps.TraceTick, gateway.Config.TraceCall, s3.Config.APIOptions), and
+// cmd/memd/wire.go fills them from a [Telemetry]. The package imports internal/domain and internal/store only for the
+// hook signatures and the error classes.
 //
 //	tel, stop := observability.Start(observability.Config{Enabled: on, Profiler: prof, Logger: base})
 //	defer stop()

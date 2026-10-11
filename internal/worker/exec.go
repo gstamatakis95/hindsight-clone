@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/port"
+	"memd/internal/store"
 	"runtime/debug"
 	"time"
 )
@@ -25,7 +25,7 @@ const (
 // With a TraceJob hook the run is wrapped in its span: the handler runs under the span's context and the
 // settle under the same values without the run's cancellation, so their Postgres and gateway spans nest
 // under the job's and their logs carry its trace id.
-func (r *Runner) execute(hctx, base context.Context, j port.Job, a *active) {
+func (r *Runner) execute(hctx, base context.Context, j store.Job, a *active) {
 	defer r.wg.Done()
 	defer r.release(j.ID, a)
 	var finish func(string, error)
@@ -42,7 +42,7 @@ func (r *Runner) execute(hctx, base context.Context, j port.Job, a *active) {
 }
 
 // invoke calls j's handler, turning a panic into an error (retried like any transient failure).
-func (r *Runner) invoke(ctx context.Context, j port.Job) (err error) {
+func (r *Runner) invoke(ctx context.Context, j store.Job) (err error) {
 	h := r.handlers[j.Kind]
 	if h == nil {
 		return fmt.Errorf("%w: no handler for kind %q", ErrPermanent, j.Kind)
@@ -66,7 +66,7 @@ func (r *Runner) invoke(ctx context.Context, j port.Job) (err error) {
 //   - otherwise: Fail with the retry policy's time, or nil once the policy gives up.
 //
 // It returns the run's outcome (one of the Outcome* values) for the job's trace span.
-func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec *recorder) string {
+func (r *Runner) settle(base context.Context, j store.Job, err, cause error, rec *recorder) string {
 	ctx, cancel := context.WithTimeout(base, settleTimeout)
 	defer cancel()
 	switch {
@@ -76,7 +76,7 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 	case err == nil:
 		r.complete(ctx, j, rec)
 		return OutcomeCompleted
-	case errors.Is(cause, errShutdown) && !errors.Is(err, ErrPermanent):
+	case errors.Is(cause, errShutdown) && !deterministic(err):
 		now := r.cfg.Clock.Now()
 		cause := fmt.Errorf("%w: %w", errShutdown, err)
 		r.fail(ctx, j, "release (shutdown)", cause, &now)
@@ -101,7 +101,7 @@ func (r *Runner) settle(base context.Context, j port.Job, err, cause error, rec 
 // repeated Fail would reset that worker's PROCESSING row to PENDING (a double run). Left unwritten, the row
 // stays PROCESSING without heartbeats and ReclaimStale re-queues it. Later retry times (and terminal
 // fails, which a repeat can only hit fenced) are retried through persist.
-func (r *Runner) fail(ctx context.Context, j port.Job, what string, cause error, at *time.Time) {
+func (r *Runner) fail(ctx context.Context, j store.Job, what string, cause error, at *time.Time) {
 	call := func(c context.Context) error { return r.c.Fail(c, j.ID, cause, at) }
 	if at != nil && !at.After(r.cfg.Clock.Now().Add(settleTimeout)) {
 		r.report(ctx, j, what, call(ctx))
@@ -111,7 +111,7 @@ func (r *Runner) fail(ctx context.Context, j port.Job, what string, cause error,
 }
 
 // complete writes Complete with the run's reported result and usage.
-func (r *Runner) complete(ctx context.Context, j port.Job, rec *recorder) {
+func (r *Runner) complete(ctx context.Context, j store.Job, rec *recorder) {
 	result, usage := rec.get()
 	r.persist(ctx, j, "complete", func(c context.Context) error { return r.c.Complete(c, j.ID, result, usage) })
 }
@@ -123,7 +123,7 @@ func (r *Runner) complete(ctx context.Context, j port.Job, rec *recorder) {
 // and pending, finished, bank gone) a successful run is completed and a failed one failed with no retry:
 // a cancel-requested row ends CANCELLED and the rest are fenced. A lost run is never requeued, so a job
 // can't get a second concurrent run.
-func (r *Runner) settleLost(ctx context.Context, j port.Job, err error, rec *recorder) {
+func (r *Runner) settleLost(ctx context.Context, j store.Job, err error, rec *recorder) {
 	alive, aerr := r.c.Alive(ctx, j.ID)
 	switch {
 	case aerr != nil:
@@ -142,7 +142,7 @@ func (r *Runner) settleLost(ctx context.Context, j port.Job, err error, rec *rec
 // instead when another automatic consolidate is already due for its bank (that one picks up the same units
 // with the same settings). A manual one (scopes or overrides) always keeps its retry: the automatic run
 // would use bank defaults, so its overrides would never be applied (decision 2003).
-func (r *Runner) retryAt(ctx context.Context, j port.Job, err error) *time.Time {
+func (r *Runner) retryAt(ctx context.Context, j store.Job, err error) *time.Time {
 	at, ok := nextRun(j, err, r.cfg.Clock.Now())
 	if !ok {
 		return nil
@@ -162,7 +162,7 @@ func (r *Runner) retryAt(ctx context.Context, j port.Job, err error) *time.Time 
 
 // automaticConsolidate reports whether consolidate job j is the automatic kind: no overrides and no scopes in
 // its payload. An undecodable payload counts as manual, so its retry is never skipped.
-func automaticConsolidate(j port.Job) bool {
+func automaticConsolidate(j store.Job) bool {
 	if j.Overrides != nil {
 		return false
 	}
@@ -177,7 +177,7 @@ func automaticConsolidate(j port.Job) bool {
 
 // persist runs a terminal Complete or Fail, retrying transient errors with backoff until ctx (the settle
 // timeout) runs out. Fencing outcomes end it at once (see report).
-func (r *Runner) persist(ctx context.Context, j port.Job, what string, call func(context.Context) error) {
+func (r *Runner) persist(ctx context.Context, j store.Job, what string, call func(context.Context) error) {
 	wait := settleRetryBase
 	for {
 		err := call(ctx)
@@ -208,7 +208,7 @@ func fenced(err error) bool {
 // row was cancel-requested and is now CANCELLED), ErrNotFound for delete_bank (its own row went with the
 // bank) and ErrFailedPrecondition/ErrNotFound (the worker no longer held the row). Any other error leaves
 // the row PROCESSING; it stops being heartbeated, so ReclaimStale re-queues it.
-func (r *Runner) report(ctx context.Context, j port.Job, what string, err error) {
+func (r *Runner) report(ctx context.Context, j store.Job, what string, err error) {
 	switch {
 	case err == nil:
 	case errors.Is(err, domain.ErrCancelled):
@@ -243,7 +243,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 // StaleAfter: by then another worker may reclaim it, so the runner fences itself first.
 func (r *Runner) heartbeat(ctx context.Context) {
 	r.mu.Lock()
-	ids := make([]port.OperationID, 0, len(r.running))
+	ids := make([]domain.OperationID, 0, len(r.running))
 	for id := range r.running {
 		ids = append(ids, id)
 	}
@@ -254,7 +254,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 	hctx, cancel := context.WithTimeout(ctx, r.cfg.HeartbeatInterval)
 	err := r.c.Heartbeat(hctx, r.cfg.WorkerID, ids)
 	cancel()
-	lost := port.LostJobs(err)
+	lost := store.LostJobs(err)
 	ok := err == nil || lost != nil
 	if !ok {
 		r.log.Warn("heartbeat failed", "jobs", len(ids), "err", err)

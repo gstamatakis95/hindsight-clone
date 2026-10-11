@@ -3,7 +3,6 @@ package server
 import (
 	"memd/internal/domain"
 	"memd/internal/engine/curate"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -15,11 +14,11 @@ import (
 func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (curate.ListMemoriesRequest, error) {
 	var d decoder
 	out := curate.ListMemoriesRequest{
-		Bank:       port.BankRef{Bank: r.GetBankId()},
+		Bank:       domain.BankRef{Bank: r.GetBankId()},
 		Types:      fromEnums[domain.FactType](&d, r.GetTypes()),
 		Q:          r.GetQ(),
-		DocumentID: port.DocumentID(r.GetDocumentId()),
-		EntityID:   port.EntityID(r.GetEntityId()),
+		DocumentID: domain.DocumentID(r.GetDocumentId()),
+		EntityID:   domain.EntityID(r.GetEntityId()),
 		State:      fromEnum[domain.MemoryState](&d, r.GetState()),
 		Start:      d.tsPtr(r.GetStart()),
 		End:        d.tsPtr(r.GetEnd()),
@@ -125,8 +124,8 @@ func entityListToProto(names []string) *pb.EntityList {
 func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (curate.UpdateMemoryRequest, error) {
 	var d decoder
 	out := curate.UpdateMemoryRequest{
-		Bank:            port.BankRef{Bank: r.GetBankId()},
-		ID:              port.UnitID(r.GetMemoryId()),
+		Bank:            domain.BankRef{Bank: r.GetBankId()},
+		ID:              domain.UnitID(r.GetMemoryId()),
 		Text:            optCopy(r.Text),
 		Context:         optCopy(r.Context),
 		OccurredStart:   d.tsPtr(r.GetOccurredStart()),
@@ -166,13 +165,13 @@ type updateResult struct {
 	// Unit is the unit after the change.
 	Unit domain.Unit
 	// OperationID is the rederive_memory operation; empty for invalidate.
-	OperationID port.OperationID
+	OperationID domain.OperationID
 }
 
 // updateResultFromProto converts an UpdateMemoryResponse; the memory is a plain unit (scores dropped).
 func updateResultFromProto(r *pb.UpdateMemoryResponse) (updateResult, error) {
 	var d decoder
-	out := updateResult{Unit: d.unit(r.GetMemory()), OperationID: port.OperationID(r.GetOperationId())}
+	out := updateResult{Unit: d.unit(r.GetMemory()), OperationID: domain.OperationID(r.GetOperationId())}
 	return out, d.err
 }
 

@@ -38,7 +38,7 @@ gen-proto:
 	buf generate
 
 gen-sqlc:
-	cd internal/adapter/postgres && sqlc generate
+	cd internal/store/postgres && sqlc generate
 
 gen-mocks: $(MOCKERY)
 	rm -rf internal/mocks
@@ -76,7 +76,7 @@ fmt: ## apply gofumpt + goimports and ruff format
 
 # ---------- tests ----------
 
-# Store tests run on real Postgres (internal/adapter/postgres/pgtest): one container for the whole run, or the
+# Store tests run on real Postgres (internal/store/postgres/pgtest): one container for the whole run, or the
 # server at MEMD_TEST_DATABASE_URL. The venv provides alembic, which migrates the template database.
 test: venv ## go test -race ./... (needs Docker or MEMD_TEST_DATABASE_URL)
 	go test -race ./...

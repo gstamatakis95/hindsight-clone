@@ -5,8 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"memd/internal/blob"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"sort"
 	"strings"
 	"sync"
@@ -18,12 +18,12 @@ type blobObject struct {
 	contentType string
 }
 
-// Blob is an in-memory port.Blob keyed by the full object key. It stores copies, so callers may reuse
+// Blob is an in-memory blob.Store keyed by the full object key. It stores copies, so callers may reuse
 // their buffers, and it is safe for concurrent use.
 //
 // Put reads r to the end; when size >= 0 and the byte count differs from size it stores nothing and
 // returns an error wrapping domain.ErrInvalidArgument (size < 0 means unknown). Get of a missing key
-// returns an error wrapping domain.ErrNotFound; Delete of a missing key succeeds. Every method returns
+// returns an error wrapping domain.ErrNotFound. Every method returns
 // ctx.Err() (wrapped) when ctx is already done, and the FailWith error while one is set.
 type Blob struct {
 	mu   sync.Mutex
@@ -31,7 +31,7 @@ type Blob struct {
 	fail error
 }
 
-var _ port.Blob = (*Blob)(nil)
+var _ blob.Store = (*Blob)(nil)
 
 // NewBlob returns an empty Blob.
 func NewBlob() *Blob {
@@ -90,17 +90,6 @@ func (b *Blob) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("%w: fake blob %q", domain.ErrNotFound, key)
 	}
 	return io.NopCloser(bytes.NewReader(bytes.Clone(obj.data))), nil
-}
-
-// Delete removes the object under key; a missing key is not an error.
-func (b *Blob) Delete(ctx context.Context, key string) error {
-	if err := b.gate(ctx, "delete", key); err != nil {
-		return err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.objs, key)
-	return nil
 }
 
 // DeletePrefix removes every object whose key starts with prefix and returns how many it removed.

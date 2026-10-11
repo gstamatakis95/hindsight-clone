@@ -1,9 +1,6 @@
 package domain
 
-import (
-	"strings"
-	"time"
-)
+import "time"
 
 // Bank is one memory bank. Its Config holds only the bank's own overrides; the effective view comes
 // from merging server < tenant < bank.
@@ -72,15 +69,4 @@ type TagCount struct {
 	Tag string
 	// Count is the number of items carrying it.
 	Count int64
-}
-
-// BankBlobPrefix is the blob prefix holding every object of a bank: "{tenant}/{bank}/".
-func BankBlobPrefix(b BankRef) string {
-	return b.Tenant + "/" + b.Bank + "/"
-}
-
-// DocumentBlobKey is where a document's original text is stored:
-// "{tenant}/{bank}/docs/{document_id}/{content_hash}".
-func DocumentBlobKey(b BankRef, doc DocumentID, contentHash string) string {
-	return strings.Join([]string{b.Tenant, b.Bank, "docs", string(doc), contentHash}, "/")
 }

@@ -3,7 +3,6 @@ package server
 import (
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
-	"memd/internal/port"
 	"time"
 
 	pb "memd/gen/memory/v1"
@@ -29,7 +28,7 @@ func (d *decoder) bank(m *pb.Bank) domain.Bank {
 		deleting = &time.Time{}
 	}
 	return domain.Bank{
-		Ref:        port.BankRef{Bank: m.GetId()},
+		Ref:        domain.BankRef{Bank: m.GetId()},
 		Name:       m.GetName(),
 		Config:     d.config(m.GetConfig()),
 		CreatedAt:  d.ts(m.GetCreatedAt()),
@@ -41,7 +40,7 @@ func (d *decoder) bank(m *pb.Bank) domain.Bank {
 func createBankFromProto(r *pb.CreateBankRequest) (domain.Bank, error) {
 	var d decoder
 	out := domain.Bank{
-		Ref:    port.BankRef{Bank: r.GetBankId()},
+		Ref:    domain.BankRef{Bank: r.GetBankId()},
 		Name:   r.GetName(),
 		Config: d.config(r.GetConfig()),
 	}
@@ -89,7 +88,7 @@ func (d *decoder) bankStats(m *pb.BankStats) domain.BankStats {
 func listTagsFromProto(r *pb.ListTagsRequest) (bank.ListTagsRequest, error) {
 	var d decoder
 	out := bank.ListTagsRequest{
-		Bank:      port.BankRef{Bank: r.GetBankId()},
+		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		Source:    fromEnum[domain.TagSource](&d, r.GetSource()),
 		Prefix:    r.GetPrefix(),
 		PageSize:  int(r.GetPageSize()),
@@ -251,7 +250,7 @@ func (d *decoder) bankTemplate(m *pb.BankTemplate) domain.BankTemplate {
 // by the caller.
 func upsertDirectiveFromProto(r *pb.UpsertDirectiveRequest) domain.Directive {
 	out := directiveFromProto(r.GetDirective())
-	out.Bank = port.BankRef{Bank: r.GetBankId()}
+	out.Bank = domain.BankRef{Bank: r.GetBankId()}
 	return out
 }
 

@@ -3,18 +3,19 @@ package curate
 import (
 	"context"
 	"errors"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"testing"
 	"time"
 )
 
 // unconsolidated reports whether id is among the bank's units waiting for consolidation.
-func (e *env) unconsolidated(id port.UnitID) bool {
+func (e *env) unconsolidated(id domain.UnitID) bool {
 	e.t.Helper()
 	var found bool
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		us, err := tx.Units().Unconsolidated(e.ctx, testBank, nil, 100)
 		found = slices.ContainsFunc(us, func(u domain.Unit) bool { return u.ID == id })
 		return err
@@ -41,8 +42,8 @@ func (e *env) rederiveNext() {
 // memory itself consolidate again, with its embedding intact.
 func TestClearMemoryResetsOwnConsolidation(t *testing.T) {
 	e, a := adminEnv(t)
-	e.inTx(func(tx port.Tx) error {
-		return tx.Units().MarkConsolidated(e.ctx, []port.UnitID{idF1}, e.clock.Now())
+	e.inTx(func(tx store.Tx) error {
+		return tx.Units().MarkConsolidated(e.ctx, []domain.UnitID{idF1}, e.clock.Now())
 	})
 	if f1, _ := e.unit(idF1); f1.ConsolidatedAt == nil {
 		t.Fatal("seed: f1 not consolidated")
@@ -58,7 +59,7 @@ func TestClearMemoryResetsOwnConsolidation(t *testing.T) {
 }
 
 // failingEmbedder fails every call, standing in for a transient embedder outage.
-type failingEmbedder struct{ port.Embedder }
+type failingEmbedder struct{ ai.Embedder }
 
 // EmbedDocuments fails with domain.ErrUnavailable.
 func (failingEmbedder) EmbedDocuments(context.Context, []string) ([][]float32, error) {
@@ -66,7 +67,7 @@ func (failingEmbedder) EmbedDocuments(context.Context, []string) ([][]float32, e
 }
 
 // entitiesOf returns f1's attached entity names, sorted.
-func (e *env) entitiesOf(id port.UnitID) []string {
+func (e *env) entitiesOf(id domain.UnitID) []string {
 	e.t.Helper()
 	u, _ := e.unit(id)
 	return slices.Sorted(slices.Values(u.Entities))
@@ -185,7 +186,7 @@ func TestEditKeepsUnitOutOfConsolidationUntilRederive(t *testing.T) {
 // TestEditDateClearsTimeless: setting an occurrence date clears timeless.
 func TestEditDateClearsTimeless(t *testing.T) {
 	e := newEnv(t)
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		u, _ := e.unit(idF1)
 		u.Timeless = true
 		return tx.Units().Update(e.ctx, u)
@@ -202,7 +203,7 @@ func TestEditDateClearsTimeless(t *testing.T) {
 
 // cancellingEmbedder embeds, then cancels the job's context, like a cancel arriving mid-job.
 type cancellingEmbedder struct {
-	port.Embedder
+	ai.Embedder
 	cancel context.CancelFunc
 }
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -330,7 +329,7 @@ func (s *bankServer) DeleteDirective(
 	if err := requireID("directive_id", req.GetDirectiveId()); err != nil {
 		return nil, toStatus(err)
 	}
-	if err := s.d.Directives.DeleteDirective(ctx, b, port.DirectiveID(req.GetDirectiveId())); err != nil {
+	if err := s.d.Directives.DeleteDirective(ctx, b, domain.DirectiveID(req.GetDirectiveId())); err != nil {
 		return nil, toStatus(err)
 	}
 	return &pb.DeleteDirectiveResponse{}, nil

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"time"
 )
@@ -26,7 +26,7 @@ func (r *runner) write(
 ) (int64, error) {
 	now := r.d.Clock.Now()
 	var version int64
-	err := r.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := r.d.Store.InTx(ctx, func(tx store.Tx) error {
 		version = 0
 		seq, err := tx.Seq(ctx, p.m.Bank)
 		if err != nil {
@@ -94,7 +94,7 @@ func ranModel(
 
 // prunedSources is a full refresh's source_ids: the draft's, or, when it drafted nothing (the content
 // stays), the model's sources that are still live, so provenance of kept content survives and dead ids go.
-func prunedSources(ctx context.Context, tx port.Tx, cur domain.MentalModel, dr drafted) ([]port.UnitID, error) {
+func prunedSources(ctx context.Context, tx store.Tx, cur domain.MentalModel, dr drafted) ([]domain.UnitID, error) {
 	if !dr.noNewFacts {
 		return slices.Clone(dr.sourceIDs), nil
 	}
@@ -112,7 +112,7 @@ func prunedSources(ctx context.Context, tx port.Tx, cur domain.MentalModel, dr d
 // and the time.
 type versionMeta struct {
 	cfg domain.BankConfig
-	op  port.OperationID
+	op  domain.OperationID
 	now time.Time
 }
 
@@ -120,7 +120,7 @@ type versionMeta struct {
 // Clear, which recorded the content itself, add no entry) and puts the draft into next, stamping the event
 // with the transaction's change seq.
 func writeVersion(
-	ctx context.Context, tx port.Tx, seq int64, cur domain.MentalModel, next *domain.MentalModel, dr drafted,
+	ctx context.Context, tx store.Tx, seq int64, cur domain.MentalModel, next *domain.MentalModel, dr drafted,
 	meta versionMeta,
 ) (int64, error) {
 	if cur.ContentMD != "" {

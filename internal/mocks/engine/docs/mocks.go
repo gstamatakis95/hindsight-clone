@@ -6,8 +6,9 @@ package mockdocs
 
 import (
 	"context"
+	"memd/internal/domain"
 	"memd/internal/engine/docs"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sync"
 )
 
@@ -21,10 +22,10 @@ var _ docs.Retagger = &Retagger{}
 //
 //		// make and configure a mocked docs.Retagger
 //		mockedRetagger := &Retagger{
-//			ApplyFunc: func(ctx context.Context, j port.Job) error {
+//			ApplyFunc: func(ctx context.Context, j store.Job) error {
 //				panic("mock out the Apply method")
 //			},
-//			RetagFunc: func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string) (port.OperationID, error) {
+//			RetagFunc: func(ctx context.Context, b domain.BankRef, doc domain.DocumentID, tags []string) (domain.OperationID, error) {
 //				panic("mock out the Retag method")
 //			},
 //		}
@@ -35,10 +36,10 @@ var _ docs.Retagger = &Retagger{}
 //	}
 type Retagger struct {
 	// ApplyFunc mocks the Apply method.
-	ApplyFunc func(ctx context.Context, j port.Job) error
+	ApplyFunc func(ctx context.Context, j store.Job) error
 
 	// RetagFunc mocks the Retag method.
-	RetagFunc func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string) (port.OperationID, error)
+	RetagFunc func(ctx context.Context, b domain.BankRef, doc domain.DocumentID, tags []string) (domain.OperationID, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -47,16 +48,16 @@ type Retagger struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// J is the j argument value.
-			J port.Job
+			J store.Job
 		}
 		// Retag holds details about calls to the Retag method.
 		Retag []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Doc is the doc argument value.
-			Doc port.DocumentID
+			Doc domain.DocumentID
 			// Tags is the tags argument value.
 			Tags []string
 		}
@@ -66,13 +67,13 @@ type Retagger struct {
 }
 
 // Apply calls ApplyFunc.
-func (mock *Retagger) Apply(ctx context.Context, j port.Job) error {
+func (mock *Retagger) Apply(ctx context.Context, j store.Job) error {
 	if mock.ApplyFunc == nil {
 		panic("Retagger.ApplyFunc: method is nil but Retagger.Apply was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}{
 		Ctx: ctx,
 		J:   j,
@@ -89,11 +90,11 @@ func (mock *Retagger) Apply(ctx context.Context, j port.Job) error {
 //	len(mockedRetagger.ApplyCalls())
 func (mock *Retagger) ApplyCalls() []struct {
 	Ctx context.Context
-	J   port.Job
+	J   store.Job
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}
 	mock.lockApply.RLock()
 	calls = mock.calls.Apply
@@ -102,14 +103,14 @@ func (mock *Retagger) ApplyCalls() []struct {
 }
 
 // Retag calls RetagFunc.
-func (mock *Retagger) Retag(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string) (port.OperationID, error) {
+func (mock *Retagger) Retag(ctx context.Context, b domain.BankRef, doc domain.DocumentID, tags []string) (domain.OperationID, error) {
 	if mock.RetagFunc == nil {
 		panic("Retagger.RetagFunc: method is nil but Retagger.Retag was just called")
 	}
 	callInfo := struct {
 		Ctx  context.Context
-		B    port.BankRef
-		Doc  port.DocumentID
+		B    domain.BankRef
+		Doc  domain.DocumentID
 		Tags []string
 	}{
 		Ctx:  ctx,
@@ -129,14 +130,14 @@ func (mock *Retagger) Retag(ctx context.Context, b port.BankRef, doc port.Docume
 //	len(mockedRetagger.RetagCalls())
 func (mock *Retagger) RetagCalls() []struct {
 	Ctx  context.Context
-	B    port.BankRef
-	Doc  port.DocumentID
+	B    domain.BankRef
+	Doc  domain.DocumentID
 	Tags []string
 } {
 	var calls []struct {
 		Ctx  context.Context
-		B    port.BankRef
-		Doc  port.DocumentID
+		B    domain.BankRef
+		Doc  domain.DocumentID
 		Tags []string
 	}
 	mock.lockRetag.RLock()

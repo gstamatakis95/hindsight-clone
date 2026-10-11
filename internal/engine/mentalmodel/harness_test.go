@@ -2,15 +2,16 @@ package mentalmodel
 
 import (
 	"context"
-	"memd/internal/adapter/postgres"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
 	"memd/internal/engine/reflect"
-	"memd/internal/engine/routing"
 	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
 	"sync"
@@ -26,14 +27,14 @@ import (
 type env struct {
 	t      *testing.T
 	ctx    context.Context
-	bank   port.BankRef
-	clock  *fake.Clock
-	store  *postgres.Store
+	bank   domain.BankRef
+	clock  *clock.Manual
+	store  *postgres.DB
 	pool   *pgxpool.Pool
 	llm    *fake.LLM
 	emb    *fake.Embedder
 	reads  *stubReads
-	config port.ConfigResolver
+	config config.Resolver
 	rc     *stubRecaller
 	rf     *stubReflector
 	runner RefreshRunner
@@ -44,11 +45,11 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	// The test clock runs an hour ahead of the database, so every run_at the engines park is in the
 	// database's future until claimDue releases the ones the test clock says are due.
-	clock := fake.NewClock(time.Now().Add(time.Hour).UTC().Truncate(time.Second))
+	clock := clock.NewManual(time.Now().Add(time.Hour).UTC().Truncate(time.Second))
 	db := pgtest.New(t)
-	store := db.Store()
+	pg := db.Store()
 	server, err := config.ServerDefaults(func(k string) string {
-		if k == config.EnvModel {
+		if k == ai.EnvModel {
 			return "test-model"
 		}
 		return ""
@@ -57,19 +58,19 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e := &env{
-		t: t, ctx: context.Background(), bank: port.BankRef{Tenant: "t1", Bank: "b1"}, clock: clock,
-		store: store, pool: db.Pool, llm: fake.NewLLM(), emb: fake.NewEmbedder(fake.EmbedSimilar),
-		config: config.NewResolver(store, nil, server),
+		t: t, ctx: context.Background(), bank: domain.BankRef{Tenant: "t1", Bank: "b1"}, clock: clock,
+		store: pg, pool: db.Pool, llm: fake.NewLLM(), emb: fake.NewEmbedder(fake.EmbedSimilar),
+		config: config.NewResolver(pg, nil, server),
 	}
-	e.reads = &stubReads{Reader: store.Read(), store: store}
+	e.reads = &stubReads{Reader: pg.Read(), store: pg}
 	e.rc = &stubRecaller{reads: e.reads}
 	e.rf = &stubReflector{reads: e.reads}
-	md := ModelDeps{LLM: e.llm, Router: routing.NewRouter(), Clock: clock}
+	md := ModelDeps{LLM: e.llm, Router: ai.NewRouter(), Clock: clock}
 	e.runner = NewRefreshRunner(RefreshRunnerDeps{
-		Store: store, Config: e.config, Scope: e.reads, Clock: clock, Embedder: e.emb,
+		Store: pg, Config: e.config, Scope: e.reads, Clock: clock, Embedder: e.emb,
 		Synthesizers: []Synthesizer{NewAgenticSynthesizer(e.rf, md), NewSingleShotSynthesizer(e.rc, md)},
 	})
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		_, err := tx.Banks().Ensure(e.ctx, e.bank)
 		return err
 	})
@@ -78,13 +79,13 @@ func newEnv(t *testing.T) *env {
 
 // claimDue claims up to 10 jobs of kind that are due by the test clock: the database decides due-ness by
 // its own clock, so pending jobs whose run_at the test clock has reached are made due first.
-func (e *env) claimDue(kind port.JobKind) []port.Job {
+func (e *env) claimDue(kind domain.OperationKind) []store.Job {
 	e.t.Helper()
 	if _, err := e.pool.Exec(e.ctx, `UPDATE operations SET run_at = now()
 		WHERE status = 'pending' AND run_at > now() AND run_at <= $1`, e.clock.Now()); err != nil {
 		e.t.Fatal(err)
 	}
-	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{kind}, 10)
+	jobs, err := e.store.Claim(e.ctx, "w1", []domain.OperationKind{kind}, 10)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -92,10 +93,10 @@ func (e *env) claimDue(kind port.JobKind) []port.Job {
 }
 
 // opID is the operation id of a readable name (Postgres stores operation ids as uuid).
-func opID(name string) port.OperationID { return pgtest.ID[port.OperationID](name) }
+func opID(name string) domain.OperationID { return pgtest.ID[domain.OperationID](name) }
 
 // tx runs fn in a transaction and fails the test on error.
-func (e *env) tx(fn func(port.Tx) error) {
+func (e *env) tx(fn func(store.Tx) error) {
 	e.t.Helper()
 	if err := e.store.InTx(e.ctx, fn); err != nil {
 		e.t.Fatal(err)
@@ -106,9 +107,9 @@ func (e *env) tx(fn func(port.Tx) error) {
 func (e *env) addUnit(typ domain.FactType, text string, tags ...string) domain.Unit {
 	e.t.Helper()
 	u := domain.Unit{
-		ID: port.UnitID(uuid.NewString()), Bank: e.bank, Type: typ, Text: text, Tags: domain.NormalizeTags(tags),
+		ID: domain.UnitID(uuid.NewString()), Bank: e.bank, Type: typ, Text: text, Tags: domain.NormalizeTags(tags),
 	}
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		seq, err := tx.Seq(e.ctx, e.bank)
 		if err != nil {
 			return err
@@ -121,9 +122,9 @@ func (e *env) addUnit(typ domain.FactType, text string, tags ...string) domain.U
 }
 
 // archive invalidates a unit.
-func (e *env) archive(id port.UnitID) {
+func (e *env) archive(id domain.UnitID) {
 	e.t.Helper()
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		if _, err := tx.Seq(e.ctx, e.bank); err != nil {
 			return err
 		}
@@ -134,7 +135,7 @@ func (e *env) archive(id port.UnitID) {
 // addModel stores a model directly (no build enqueued) and tracks it for listing.
 func (e *env) addModel(spec domain.MentalModelSpec) domain.MentalModel {
 	e.t.Helper()
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		return tx.MentalModels().Create(e.ctx, domain.MentalModel{Spec: spec, Bank: e.bank})
 	})
 	e.reads.trackModel(e.bank, spec.ID)
@@ -142,10 +143,10 @@ func (e *env) addModel(spec domain.MentalModelSpec) domain.MentalModel {
 }
 
 // model reads a model back.
-func (e *env) model(id port.MentalModelID) domain.MentalModel {
+func (e *env) model(id domain.MentalModelID) domain.MentalModel {
 	e.t.Helper()
 	var m domain.MentalModel
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		var err error
 		m, err = tx.MentalModels().Get(e.ctx, e.bank, id)
 		return err
@@ -154,10 +155,10 @@ func (e *env) model(id port.MentalModelID) domain.MentalModel {
 }
 
 // history reads a model's history, newest first.
-func (e *env) history(id port.MentalModelID, kind domain.HistoryKind) []domain.MentalModelHistoryEntry {
+func (e *env) history(id domain.MentalModelID, kind domain.HistoryKind) []domain.MentalModelHistoryEntry {
 	e.t.Helper()
 	var h []domain.MentalModelHistoryEntry
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		var err error
 		h, err = tx.MentalModels().History(e.ctx, e.bank, id, kind, 0)
 		return err
@@ -171,42 +172,42 @@ func (e *env) llmCalls() int { return len(e.llm.Calls()) }
 // scriptSynthesize scripts the SYNTHESIZE reply.
 func (e *env) scriptSynthesize(content string) {
 	e.llm.RespondChat(domain.ModelSlotSynthesize, "synthesize_system",
-		port.ChatResponse{Message: port.ChatMessage{Content: content}})
+		ai.ChatResponse{Message: ai.ChatMessage{Content: content}})
 }
 
-// stubReads is the store's port.Reader (so NewestSeqInScope, TagCounts and ListMentalModels are the
+// stubReads is the store's store.Reader (so NewestSeqInScope, TagCounts and ListMentalModels are the
 // real reads) with test-only CronModels and FailedRefreshes lists, and it tracks the units a test
 // created for the stub recall and reflect engines.
 type stubReads struct {
-	port.Reader
-	store  *postgres.Store
+	store.Reader
+	store  *postgres.DB
 	mu     sync.Mutex
-	units  []port.UnitID
+	units  []domain.UnitID
 	models []modelRef
-	cron   []CronModel
-	failed []FailedRefresh
+	cron   []store.CronModel
+	failed []store.FailedRefresh
 }
 
 // modelRef names a tracked model.
 type modelRef struct {
-	b  port.BankRef
-	id port.MentalModelID
+	b  domain.BankRef
+	id domain.MentalModelID
 }
 
-func (s *stubReads) track(id port.UnitID) {
+func (s *stubReads) track(id domain.UnitID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.units = append(s.units, id)
 }
 
-func (s *stubReads) trackModel(b port.BankRef, id port.MentalModelID) {
+func (s *stubReads) trackModel(b domain.BankRef, id domain.MentalModelID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.models = append(s.models, modelRef{b, id})
 }
 
 // liveUnits returns the tracked units of b that are still live.
-func (s *stubReads) liveUnits(ctx context.Context, b port.BankRef) []domain.Unit {
+func (s *stubReads) liveUnits(ctx context.Context, b domain.BankRef) []domain.Unit {
 	s.mu.Lock()
 	ids := slices.Clone(s.units)
 	s.mu.Unlock()
@@ -218,10 +219,12 @@ func (s *stubReads) liveUnits(ctx context.Context, b port.BankRef) []domain.Unit
 }
 
 // CronModels implements CronSource.
-func (s *stubReads) CronModels(context.Context) ([]CronModel, error) { return s.cron, nil }
+func (s *stubReads) CronModels(context.Context) ([]store.CronModel, error) { return s.cron, nil }
 
 // FailedRefreshes implements FailureSource.
-func (s *stubReads) FailedRefreshes(context.Context) ([]FailedRefresh, error) { return s.failed, nil }
+func (s *stubReads) FailedRefreshes(context.Context) ([]store.FailedRefresh, error) {
+	return s.failed, nil
+}
 
 // stubRecaller returns the live in-scope units of the request's window (observations and facts).
 type stubRecaller struct {
@@ -280,4 +283,4 @@ func (r *stubReflector) Reflect(ctx context.Context, req reflect.ReflectRequest)
 func fakeJSON(body string) fake.Reply { return fake.Reply{JSON: body} }
 
 // routingRouter is the production model router.
-func routingRouter() port.ModelRouter { return routing.NewRouter() }
+func routingRouter() *ai.Router { return ai.NewRouter() }

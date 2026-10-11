@@ -1,15 +1,16 @@
 package config
 
 import (
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"testing"
 )
 
 func TestServerDefaults(t *testing.T) {
 	env := map[string]string{
-		EnvModel:                   "gpt-default",
-		EnvModelPrefix + "REFLECT": "gpt-reflect",
-		EnvModelPrefix + "RERANK":  "reranker",
+		ai.EnvModel:                   "gpt-default",
+		ai.EnvModelPrefix + "REFLECT": "gpt-reflect",
+		ai.EnvModelPrefix + "RERANK":  "reranker",
 	}
 	cfg, err := ServerDefaults(func(k string) string { return env[k] })
 	if err != nil {

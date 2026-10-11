@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"strings"
 )
 
@@ -20,7 +21,7 @@ const maxSourcesPerObservation = 20
 // decision is what one CONSOLIDATE call decided for a batch, ready to apply.
 type decision struct {
 	actions []ConsolidationAction
-	usage   []port.Usage
+	usage   []domain.Usage
 	// incomplete reports that part of the decision was dropped, so the batch's facts are not stamped.
 	incomplete bool
 }
@@ -41,7 +42,7 @@ type consolidateResponse struct {
 // decide runs everything slow for one batch with no transaction open: the related-observation lookup,
 // the CONSOLIDATE call (a failure is a *batchError), embeddings of the new texts and the dedup checks.
 func (c *consolidator) decide(
-	ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, facts []domain.Unit,
+	ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig, facts []domain.Unit,
 ) (decision, error) {
 	shown, err := c.related(ctx, s, facts)
 	if err != nil {
@@ -57,7 +58,7 @@ func (c *consolidator) decide(
 	}
 	var out consolidateResponse
 	usage, err := c.d.LLM.Structured(ctx, req, &out)
-	dec := decision{usage: []port.Usage{usage}}
+	dec := decision{usage: []domain.Usage{usage}}
 	if err != nil {
 		return dec, &batchError{err: err}
 	}
@@ -77,10 +78,10 @@ func (c *consolidator) decide(
 // probe is the health probe: one CONSOLIDATE call with no facts and no observations (the empty enum
 // allows no action), made with the failing scope's config and so its binding; its only signal is whether
 // that model answers.
-func (c *consolidator) probe(ctx context.Context, s port.ScopeKey, cfg domain.BankConfig) (port.Usage, error) {
+func (c *consolidator) probe(ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig) (domain.Usage, error) {
 	req, err := c.consolidateRequest(ctx, s, cfg, nil, nil, nil)
 	if err != nil {
-		return port.Usage{}, err
+		return domain.Usage{}, err
 	}
 	var out consolidateResponse
 	usage, err := c.d.LLM.Structured(ctx, req, &out)
@@ -93,15 +94,15 @@ func (c *consolidator) probe(ctx context.Context, s port.ScopeKey, cfg domain.Ba
 // related returns the scope's existing observations near the batch's facts: per fact, the semantic and
 // keyword arms over observations of exactly this scope, interleaved (no rerank, as in Hindsight), then the
 // union over the batch in first-seen order.
-func (c *consolidator) related(ctx context.Context, s port.ScopeKey, facts []domain.Unit) ([]domain.Unit, error) {
+func (c *consolidator) related(ctx context.Context, s domain.ScopeKey, facts []domain.Unit) ([]domain.Unit, error) {
 	read := c.d.Store.Read()
 	types := []domain.FactType{domain.FactTypeObservation}
-	var ids []port.UnitID
-	seen := map[port.UnitID]bool{}
+	var ids []domain.UnitID
+	seen := map[domain.UnitID]bool{}
 	for _, f := range facts {
-		var vec []port.Hit
+		var vec []store.Hit
 		if len(f.Embedding) == domain.EmbeddingDim {
-			hits, err := read.SearchVector(ctx, port.VectorQuery{
+			hits, err := read.SearchVector(ctx, store.VectorQuery{
 				Bank: s.BankRef, Embedding: f.Embedding, Types: types, Tags: scopePredicate(s), Limit: relatedPerFact,
 			})
 			if err != nil {
@@ -109,7 +110,7 @@ func (c *consolidator) related(ctx context.Context, s port.ScopeKey, facts []dom
 			}
 			vec = hits
 		}
-		kw, err := read.SearchText(ctx, port.TextQuery{
+		kw, err := read.SearchText(ctx, store.TextQuery{
 			Bank: s.BankRef, Text: f.Text, Types: types, Tags: scopePredicate(s), Limit: relatedPerFact,
 		})
 		if err != nil {
@@ -133,11 +134,11 @@ func (c *consolidator) related(ctx context.Context, s port.ScopeKey, facts []dom
 }
 
 // interleave alternates the two hit lists (deduplicated) up to limit ids.
-func interleave(a, b []port.Hit, limit int) []port.UnitID {
-	var out []port.UnitID
-	seen := map[port.UnitID]bool{}
+func interleave(a, b []store.Hit, limit int) []domain.UnitID {
+	var out []domain.UnitID
+	seen := map[domain.UnitID]bool{}
 	for i := 0; len(out) < limit && (i < len(a) || i < len(b)); i++ {
-		for _, hs := range [][]port.Hit{a, b} {
+		for _, hs := range [][]store.Hit{a, b} {
 			if i < len(hs) && !seen[hs[i].ID] && len(out) < limit {
 				seen[hs[i].ID] = true
 				out = append(out, hs[i].ID)
@@ -148,7 +149,7 @@ func interleave(a, b []port.Hit, limit int) []port.UnitID {
 }
 
 // capacity returns how many observations scope s may still create, or nil when uncapped.
-func (c *consolidator) capacity(ctx context.Context, s port.ScopeKey, cfg domain.BankConfig) (*int, error) {
+func (c *consolidator) capacity(ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig) (*int, error) {
 	if cfg.MaxObservationsPerScope == nil || *cfg.MaxObservationsPerScope < 0 {
 		return nil, nil
 	}
@@ -166,11 +167,11 @@ func (c *consolidator) capacity(ctx context.Context, s port.ScopeKey, cfg domain
 
 // consolidateRequest renders the CONSOLIDATE call with the per-call schema.
 func (c *consolidator) consolidateRequest(
-	ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, facts, shown []domain.Unit, remaining *int,
-) (port.StructuredRequest, error) {
+	ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig, facts, shown []domain.Unit, remaining *int,
+) (ai.StructuredRequest, error) {
 	observations, err := c.promptObservations(ctx, s, cfg, shown)
 	if err != nil {
-		return port.StructuredRequest{}, err
+		return ai.StructuredRequest{}, err
 	}
 	data := prompts.ConsolidateData{Mission: cfg.ObservationsMission, Observations: observations}
 	if remaining != nil {
@@ -186,21 +187,21 @@ func (c *consolidator) consolidateRequest(
 	}
 	binding, err := c.d.Router.Resolve(cfg, domain.ModelSlotConsolidate)
 	if err != nil {
-		return port.StructuredRequest{}, fmt.Errorf("consolidate: binding: %w", err)
+		return ai.StructuredRequest{}, fmt.Errorf("consolidate: binding: %w", err)
 	}
 	system, err := prompts.Render(prompts.ConsolidateSystem, data)
 	if err != nil {
-		return port.StructuredRequest{}, fmt.Errorf("consolidate: render system: %w", err)
+		return ai.StructuredRequest{}, fmt.Errorf("consolidate: render system: %w", err)
 	}
 	user, err := prompts.Render(prompts.ConsolidateUser, data)
 	if err != nil {
-		return port.StructuredRequest{}, fmt.Errorf("consolidate: render user: %w", err)
+		return ai.StructuredRequest{}, fmt.Errorf("consolidate: render user: %w", err)
 	}
 	schema, err := consolidateSchema(ids, remaining)
 	if err != nil {
-		return port.StructuredRequest{}, err
+		return ai.StructuredRequest{}, err
 	}
-	return port.StructuredRequest{
+	return ai.StructuredRequest{
 		Slot: domain.ModelSlotConsolidate, Binding: binding, Name: prompts.ConsolidateSystem,
 		System: system, User: user, Schema: schema,
 	}, nil
@@ -209,13 +210,13 @@ func (c *consolidator) consolidateRequest(
 // promptObservations renders the shown observations with some of their source facts, within the
 // per-observation token cap (default 256) and the call's source-fact cap (unset = none).
 func (c *consolidator) promptObservations(
-	ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, shown []domain.Unit,
+	ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig, shown []domain.Unit,
 ) ([]prompts.ConsolidateObservation, error) {
-	var srcIDs []port.UnitID
+	var srcIDs []domain.UnitID
 	for _, o := range shown {
 		srcIDs = append(srcIDs, o.SourceIDs[:min(len(o.SourceIDs), maxSourcesPerObservation)]...)
 	}
-	sources := map[port.UnitID]domain.Unit{}
+	sources := map[domain.UnitID]domain.Unit{}
 	if len(srcIDs) > 0 {
 		us, err := c.d.Store.Read().GetUnits(ctx, s.BankRef, srcIDs)
 		if err != nil {
@@ -316,7 +317,7 @@ func parseActions(out consolidateResponse, facts, shown []domain.Unit, remaining
 	for _, f := range facts {
 		byID[string(f.ID)] = f
 	}
-	shownByID, shownByText := map[string]bool{}, map[string]port.UnitID{}
+	shownByID, shownByText := map[string]bool{}, map[string]domain.UnitID{}
 	for _, o := range shown {
 		shownByID[string(o.ID)] = true
 		shownByText[normText(o.Text)] = o.ID
@@ -329,7 +330,7 @@ func parseActions(out consolidateResponse, facts, shown []domain.Unit, remaining
 			continue
 		}
 		actions = append(actions, ConsolidationAction{
-			Kind: ActionUpdate, ObservationID: port.UnitID(u.ObservationID), Text: text, Evidence: ev,
+			Kind: ActionUpdate, ObservationID: domain.UnitID(u.ObservationID), Text: text, Evidence: ev,
 		})
 	}
 	creates := 0

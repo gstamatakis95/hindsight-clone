@@ -2,8 +2,9 @@ package docs
 
 import (
 	"context"
+	"memd/internal/blob"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -14,20 +15,20 @@ type DocumentAdmin interface {
 	ListDocuments(ctx context.Context, req ListDocumentsRequest) (DocumentPage, error)
 	// GetDocument returns one document, with its original text when includeText; unknown =
 	// domain.ErrNotFound.
-	GetDocument(ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool) (DocumentView, error)
+	GetDocument(ctx context.Context, b domain.BankRef, id domain.DocumentID, includeText bool) (DocumentView, error)
 	// ReprocessDocument re-extracts the document from its stored text (resetting curation), replacing its
 	// stored overrides when overrides is non-nil, and returns the retain operation.
 	ReprocessDocument(
-		ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig,
+		ctx context.Context, b domain.BankRef, id domain.DocumentID, overrides *domain.BankConfig,
 	) (domain.Operation, error)
 }
 
-// DocumentSource lists documents. It is the port.Reader method; port.Reader satisfies it.
+// DocumentSource lists documents. It is the store.Reader method; store.Reader satisfies it.
 type DocumentSource interface {
 	// ListDocuments returns up to q.Limit documents matching q, newest first (created_at, then id, both
 	// descending), starting strictly after q.After, with UnitCount and UnitsByFactType filled. An unknown
 	// or tombstoned bank is domain.ErrNotFound.
-	ListDocuments(ctx context.Context, q DocumentQuery) ([]domain.Document, error)
+	ListDocuments(ctx context.Context, q store.DocumentQuery) ([]domain.Document, error)
 }
 
 // Reprocessor re-runs retain over a stored document; the retain engine (WP-08) owns the retain_document
@@ -37,21 +38,15 @@ type Reprocessor interface {
 	// replacing its stored overrides when overrides is non-nil, and returns the operation id. An unknown
 	// document is domain.ErrNotFound; a tombstoned bank is domain.ErrBankDeleting.
 	Reprocess(
-		ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig,
-	) (port.OperationID, error)
+		ctx context.Context, b domain.BankRef, id domain.DocumentID, overrides *domain.BankConfig,
+	) (domain.OperationID, error)
 }
-
-// DocumentQuery filters DocumentSource.ListDocuments (port.DocumentQuery). Zero fields do not filter.
-type DocumentQuery = port.DocumentQuery
-
-// DocumentCursor is a keyset position in a document listing (port.DocumentCursor).
-type DocumentCursor = port.DocumentCursor
 
 // ListDocumentsRequest mirrors memory.v1.ListDocumentsRequest; server.ListDocumentsRequest becomes an alias
 // of it (decision 1302).
 type ListDocumentsRequest struct {
 	// Bank is the bank listed.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Q is a case-insensitive substring filter on the document id; empty = none.
 	Q string
 	// Tags filters by document tags; empty = none.
@@ -90,9 +85,9 @@ type DocumentView struct {
 // DocumentAdminDeps are the DocumentAdmin's dependencies.
 type DocumentAdminDeps struct {
 	// Store reads documents and operations.
-	Store port.Store
+	Store store.DB
 	// Blob reads original texts.
-	Blob port.Blob
+	Blob blob.Store
 	// Source lists documents.
 	Source DocumentSource
 	// Reprocessor enqueues reprocessing.

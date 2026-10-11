@@ -269,7 +269,7 @@ func checkStrict(t *testing.T, file, at string, node map[string]any) {
 	}
 }
 
-// toolSpec is the port.ToolSpec shape the reflect tool assets use.
+// toolSpec is the ai.ToolSpec shape the reflect tool assets use.
 type toolSpec struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`

@@ -3,7 +3,7 @@ package maintenance
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -13,14 +13,16 @@ type GraphMaintainer interface {
 	// measured on the injected clock between batches, runs out with work left (done=false; the handler
 	// re-enqueues with DedupePending). Every batch is idempotent, so a run that repeats after a reclaim
 	// only redoes uncleared rows. A tombstoned or deleted bank stops the run with domain.ErrCancelled.
-	Run(ctx context.Context, b port.BankRef, budget time.Duration) (done bool, err error)
+	Run(ctx context.Context, b domain.BankRef, budget time.Duration) (done bool, err error)
 }
 
 // Linker is the part of retain.Linker the maintainer consumes to top up links; retain.Linker satisfies
 // it.
 type Linker interface {
 	// Link adds temporal + semantic (+ causal) edges for units within the per-unit caps, in tx.
-	Link(ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, causes map[port.UnitID][]port.UnitID) error
+	Link(
+		ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes map[domain.UnitID][]domain.UnitID,
+	) error
 }
 
 // DefaultGraphBudget is graph_maintenance's time budget per run (SPEC "Jobs": 240 s).

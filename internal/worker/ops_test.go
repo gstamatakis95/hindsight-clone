@@ -9,11 +9,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"memd/internal/adapter/postgres"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"sync"
 	"testing"
@@ -23,13 +23,13 @@ import (
 )
 
 // newClock returns a manual clock a day behind the database clock, at whole seconds.
-func newClock() *fake.Clock {
-	return fake.NewClock(time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second))
+func newClock() *clock.Manual {
+	return clock.NewManual(time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second))
 }
 
 // failCall records one Fail.
 type failCall struct {
-	id      port.OperationID
+	id      domain.OperationID
 	attempt int
 	retryAt *time.Time
 	cause   error
@@ -37,8 +37,8 @@ type failCall struct {
 
 // opRow is one operations row as the tests inspect it.
 type opRow struct {
-	bank     port.BankRef
-	kind     port.JobKind
+	bank     domain.BankRef
+	kind     domain.OperationKind
 	key      string
 	status   domain.OperationStatus
 	worker   string
@@ -51,7 +51,7 @@ type opRow struct {
 
 // opsDB is the production Store and Claimer over the test's database, recording Fail calls.
 type opsDB struct {
-	*postgres.Store
+	*postgres.DB
 	t     testing.TB
 	pool  *pgxpool.Pool
 	mu    sync.Mutex
@@ -59,17 +59,17 @@ type opsDB struct {
 }
 
 var (
-	_ port.Claimer = (*opsDB)(nil)
-	_ port.Store   = (*opsDB)(nil)
+	_ store.Claimer = (*opsDB)(nil)
+	_ store.DB      = (*opsDB)(nil)
 )
 
 // newOps returns an opsDB over a fresh database holding bankA, bankB and bankC.
 func newOps(t testing.TB) *opsDB {
 	t.Helper()
 	d := pgtest.New(t)
-	o := &opsDB{Store: d.Store(), t: t, pool: d.Pool}
-	if err := o.InTx(t.Context(), func(tx port.Tx) error {
-		for _, b := range []port.BankRef{bankA, bankB, bankC} {
+	o := &opsDB{DB: d.Store(), t: t, pool: d.Pool}
+	if err := o.InTx(t.Context(), func(tx store.Tx) error {
+		for _, b := range []domain.BankRef{bankA, bankB, bankC} {
 			if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
 				return err
 			}
@@ -82,10 +82,10 @@ func newOps(t testing.TB) *opsDB {
 }
 
 // Fail records the call (with the row's attempt before it) and delegates.
-func (o *opsDB) Fail(ctx context.Context, id port.OperationID, cause error, retryAt *time.Time) error {
+func (o *opsDB) Fail(ctx context.Context, id domain.OperationID, cause error, retryAt *time.Time) error {
 	var attempt int
 	_ = o.pool.QueryRow(ctx, `SELECT attempts FROM operations WHERE id = $1`, string(id)).Scan(&attempt)
-	err := o.Store.Fail(ctx, id, cause, retryAt)
+	err := o.DB.Fail(ctx, id, cause, retryAt)
 	o.mu.Lock()
 	o.fails = append(o.fails, failCall{id: id, attempt: attempt, retryAt: retryAt, cause: cause})
 	o.mu.Unlock()
@@ -104,13 +104,13 @@ func (o *opsDB) failCalls() []failCall {
 
 // add enqueues j (Payload {} when empty) in its own transaction. Safe from any goroutine: it reports
 // errors with Errorf.
-func (o *opsDB) add(j port.Job) port.OperationID {
+func (o *opsDB) add(j store.Job) domain.OperationID {
 	if len(j.Payload) == 0 {
 		j.Payload = json.RawMessage(`{}`)
 	}
-	var id port.OperationID
+	var id domain.OperationID
 	ctx := context.WithoutCancel(o.t.Context())
-	err := o.InTx(ctx, func(tx port.Tx) error {
+	err := o.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		id, _, err = tx.Queue().Enqueue(ctx, j)
 		return err
@@ -122,7 +122,7 @@ func (o *opsDB) add(j port.Job) port.OperationID {
 }
 
 // row reads one operations row.
-func (o *opsDB) row(id port.OperationID) opRow {
+func (o *opsDB) row(id domain.OperationID) opRow {
 	o.t.Helper()
 	var r opRow
 	var tenant, bank, kind, key, status, worker string
@@ -132,10 +132,10 @@ func (o *opsDB) row(id port.OperationID) opRow {
 	if err != nil {
 		o.t.Fatalf("row %s: %v", id, err)
 	}
-	r.bank, r.kind, r.key = port.BankRef{Tenant: tenant, Bank: bank}, port.JobKind(kind), key
+	r.bank, r.kind, r.key = domain.BankRef{Tenant: tenant, Bank: bank}, domain.OperationKind(kind), key
 	r.status, r.worker = domain.OperationStatus(status), worker
 	var op domain.Operation
-	if err := o.InTx(o.t.Context(), func(tx port.Tx) error {
+	if err := o.InTx(o.t.Context(), func(tx store.Tx) error {
 		var err error
 		op, err = tx.Queue().Get(o.t.Context(), r.bank, id)
 		return err
@@ -159,7 +159,7 @@ func (o *opsDB) count(where string, args ...any) int {
 
 // countBank counts bank b's operations of kind, with an extra SQL condition when where is not empty; its
 // placeholders start at $4.
-func (o *opsDB) countBank(b port.BankRef, kind port.JobKind, where string, args ...any) int {
+func (o *opsDB) countBank(b domain.BankRef, kind domain.OperationKind, where string, args ...any) int {
 	o.t.Helper()
 	cond := `tenant_id = $1 AND bank_id = $2 AND kind = $3`
 	if where != "" {
@@ -185,10 +185,10 @@ func (o *opsDB) ageHeartbeats(d time.Duration) {
 }
 
 // cancel cancels operation id of bank b in its own transaction.
-func (o *opsDB) cancel(b port.BankRef, id port.OperationID) (domain.Operation, error) {
+func (o *opsDB) cancel(b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	var op domain.Operation
 	ctx := o.t.Context()
-	err := o.InTx(ctx, func(tx port.Tx) error {
+	err := o.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		op, err = tx.Queue().Cancel(ctx, b, id)
 		return err
@@ -200,7 +200,7 @@ func (o *opsDB) cancel(b port.BankRef, id port.OperationID) (domain.Operation, e
 }
 
 // markDeleting tombstones bank b, creating it if needed.
-func (o *opsDB) markDeleting(b port.BankRef) {
+func (o *opsDB) markDeleting(b domain.BankRef) {
 	o.t.Helper()
 	o.exec(`INSERT INTO banks (tenant_id, id, deleting_at) VALUES ($1, $2, now())
 		ON CONFLICT (tenant_id, id) DO UPDATE SET deleting_at = now()`, b.Tenant, b.Bank)
@@ -208,35 +208,35 @@ func (o *opsDB) markDeleting(b port.BankRef) {
 
 // ---------- recording store ----------
 
-// pruneStore is a port.Store recording the cut-offs of Queue.Prune and EventRepo.Prune, optionally failing
+// pruneStore is a store.DB recording the cut-offs of Queue.Prune and EventRepo.Prune, optionally failing
 // every InTx with txErr.
 type pruneStore struct {
-	port.Store
+	store.DB
 	txErr error
 	mu    sync.Mutex
 	ops   []time.Time
 	evts  []time.Time
 }
 
-func (s *pruneStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
+func (s *pruneStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
 	if s.txErr != nil {
 		return s.txErr
 	}
-	return s.Store.InTx(ctx, func(tx port.Tx) error { return fn(recTx{Tx: tx, s: s}) })
+	return s.DB.InTx(ctx, func(tx store.Tx) error { return fn(recTx{Tx: tx, s: s}) })
 }
 
 // recTx hands out recording Queue and EventRepo wrappers.
 type recTx struct {
-	port.Tx
+	store.Tx
 	s *pruneStore
 }
 
-func (t recTx) Queue() port.Queue { return recQueue{Queue: t.Tx.Queue(), s: t.s} }
+func (t recTx) Queue() store.Queue { return recQueue{Queue: t.Tx.Queue(), s: t.s} }
 
-func (t recTx) Events() port.EventRepo { return recEvents{EventRepo: t.Tx.Events(), s: t.s} }
+func (t recTx) Events() store.EventRepo { return recEvents{EventRepo: t.Tx.Events(), s: t.s} }
 
 type recQueue struct {
-	port.Queue
+	store.Queue
 	s *pruneStore
 }
 
@@ -248,7 +248,7 @@ func (q recQueue) Prune(ctx context.Context, before time.Time) (int, error) {
 }
 
 type recEvents struct {
-	port.EventRepo
+	store.EventRepo
 	s *pruneStore
 }
 
@@ -262,21 +262,21 @@ func (e recEvents) Prune(ctx context.Context, before time.Time) (int, error) {
 // ---------- helpers ----------
 
 var (
-	bankA = port.BankRef{Tenant: "t1", Bank: "a"}
-	bankB = port.BankRef{Tenant: "t1", Bank: "b"}
-	bankC = port.BankRef{Tenant: "t2", Bank: "c"}
+	bankA = domain.BankRef{Tenant: "t1", Bank: "a"}
+	bankB = domain.BankRef{Tenant: "t1", Bank: "b"}
+	bankC = domain.BankRef{Tenant: "t2", Bank: "c"}
 )
 
 // retainJob is a retain_document job for document doc of bankA.
-func retainJob(doc string) port.Job {
-	return port.Job{Bank: bankA, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:" + doc}
+func retainJob(doc string) store.Job {
+	return store.Job{Bank: bankA, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:" + doc}
 }
 
 // consolidateJob is bank b's consolidate job.
-func consolidateJob(b port.BankRef) port.Job {
-	return port.Job{
+func consolidateJob(b domain.BankRef) store.Job {
+	return store.Job{
 		Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: consolidateSerialKey,
-		Dedupe: port.DedupePending,
+		Dedupe: store.DedupePending,
 	}
 }
 
@@ -312,7 +312,7 @@ func startRunner(t *testing.T, r *Runner) (stop func()) {
 }
 
 // testRunner builds a fast-polling runner over c.
-func testRunner(c port.Claimer, clock port.Clock, cfg RunnerConfig) *Runner {
+func testRunner(c store.Claimer, clock clock.Clock, cfg RunnerConfig) *Runner {
 	cfg.Clock = clock
 	if cfg.WorkerID == "" {
 		cfg.WorkerID = "w1"

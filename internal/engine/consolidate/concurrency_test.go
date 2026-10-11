@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
 	"testing"
@@ -23,9 +23,9 @@ func TestRunEditBetweenScopesIsNotStamped(t *testing.T) {
 	e := newEnv(t, perTag())
 	e.fact("f1", "Alice lives in Paris", "a", "b")
 	e.script(e.createEach("f1"))
-	e.deps.Checkpoint = func(port.Job) Checkpointer {
+	e.deps.Checkpoint = func(store.Job) Checkpointer {
 		return &hookAt{n: 2, fn: func() {
-			e.tx(func(tx port.Tx) error {
+			e.tx(func(tx store.Tx) error {
 				u := e.unit("f1")
 				seq, err := tx.Seq(t.Context(), bank)
 				if err != nil {
@@ -51,11 +51,11 @@ func TestRunEditBetweenScopesIsNotStamped(t *testing.T) {
 // its old scopes.
 func TestRunRetagMidRunIsNotStamped(t *testing.T) {
 	e := newEnv(t, perTag())
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{ID: "d1", Bank: bank, Tags: []string{"alice", "x"}})
 	})
 	e.texts["f1"] = "Alice paints"
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		seq, err := tx.Seq(t.Context(), bank)
 		if err != nil {
 			return err
@@ -66,9 +66,9 @@ func TestRunRetagMidRunIsNotStamped(t *testing.T) {
 		}})
 	})
 	e.script(e.createEach("f1"))
-	e.deps.Checkpoint = func(port.Job) Checkpointer {
+	e.deps.Checkpoint = func(store.Job) Checkpointer {
 		return &hookAt{n: 2, fn: func() {
-			e.tx(func(tx port.Tx) error {
+			e.tx(func(tx store.Tx) error {
 				seq, err := tx.Seq(t.Context(), bank)
 				if err != nil {
 					return err
@@ -98,7 +98,7 @@ func TestRunGoneTargetIsNotResurrected(t *testing.T) {
 		ObservationID: "obs-chess", Text: "Bob plays chess on Sunday", SourceFactIDs: []string{"f1"},
 	}})))
 	e.deps.Embedder = &hookEmbedder{Embedder: e.emb, fn: func() {
-		e.tx(func(tx port.Tx) error {
+		e.tx(func(tx store.Tx) error {
 			_, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, uids("f0"))
 			return err
 		})
@@ -120,7 +120,7 @@ func TestRunArchivedEvidenceSkipsAction(t *testing.T) {
 	e.fact("f2", "Carol bakes rye", "x")
 	e.script(ok(reply([]create{{Text: "Carol bakes bread and rye", SourceFactIDs: []string{"f1", "f2"}}}, nil)))
 	e.deps.Embedder = &hookEmbedder{Embedder: e.emb, fn: func() {
-		e.tx(func(tx port.Tx) error { return tx.Units().Archive(t.Context(), bank, uid("f2"), "wrong") })
+		e.tx(func(tx store.Tx) error { return tx.Units().Archive(t.Context(), bank, uid("f2"), "wrong") })
 	}}
 	e.run(autoJob())
 	if obs := e.observations(); len(obs) != 0 {
@@ -157,9 +157,9 @@ func TestRunRecheckCitedScopesBeforeStamp(t *testing.T) {
 	e.fact("f1", "Max surfs", "a", "b")
 	e.seedObservation("obs-a", "Max surfs", []string{"a"}, false, "f1")
 	e.script(e.createEach("f1"))
-	e.deps.Checkpoint = func(port.Job) Checkpointer {
+	e.deps.Checkpoint = func(store.Job) Checkpointer {
 		return &hookAt{n: 1, fn: func() {
-			e.tx(func(tx port.Tx) error {
+			e.tx(func(tx store.Tx) error {
 				_, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, uids("f1"))
 				return err
 			})
@@ -178,7 +178,7 @@ func TestRunScopedContinuationNeverJoins(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{ConsolidationMaxUnitsPerRun: ptr(1)})
 	e.fact("f1", "One", "a")
 	e.fact("f2", "Two", "a")
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		if _, err := tx.Seq(t.Context(), bank); err != nil {
 			return err
 		}
@@ -187,7 +187,7 @@ func TestRunScopedContinuationNeverJoins(t *testing.T) {
 	})
 	e.script(e.createEach("f1"))
 	j := NewJob(bank, []domain.TagSet{{Tags: []string{"a"}}}, nil)
-	j.ID = pgtest.ID[port.OperationID]("op-manual")
+	j.ID = pgtest.ID[domain.OperationID]("op-manual")
 	if res := e.run(j); !res.More {
 		t.Fatalf("result %+v, want More", res)
 	}
@@ -199,7 +199,7 @@ func TestRunScopedContinuationNeverJoins(t *testing.T) {
 
 // TestFirstUpdatesKeepsFirst: a second update of one observation in a batch is dropped, not merged.
 func TestFirstUpdatesKeepsFirst(t *testing.T) {
-	ev := func(id port.UnitID) []domain.Evidence { return []domain.Evidence{{Unit: id, Quote: string(id)}} }
+	ev := func(id domain.UnitID) []domain.Evidence { return []domain.Evidence{{Unit: id, Quote: string(id)}} }
 	in := []ConsolidationAction{
 		{Kind: ActionUpdate, ObservationID: "o1", Text: "first", Evidence: ev("f1")},
 		{Kind: ActionCreate, Text: "new", Evidence: ev("f3")},
@@ -241,7 +241,7 @@ func TestRunDoubleUpdateLeavesBatchUnstamped(t *testing.T) {
 // stored by DocumentRepo.Upsert) beat its overrides' default.
 func TestRunItemScopesBeatOverrides(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
 			Overrides: &domain.BankConfig{
@@ -251,7 +251,7 @@ func TestRunItemScopesBeatOverrides(t *testing.T) {
 		})
 	})
 	e.texts["f1"] = "Ivy hikes"
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		seq, err := tx.Seq(t.Context(), bank)
 		if err != nil {
 			return err
@@ -277,7 +277,7 @@ func TestRunVersionsAndQuotesRecorded(t *testing.T) {
 	e.fact("f1", "Bob plays chess every Sunday", "x")
 	e.fact("f2", "Carol bakes bread", "x")
 	rec := &recorder{}
-	e.deps.Store = recStore{Store: e.store, rec: rec}
+	e.deps.Store = recStore{DB: e.store, rec: rec}
 	e.script(ok(reply(
 		[]create{{Text: "Carol bakes bread", SourceFactIDs: []string{"f2"}}},
 		[]update{{ObservationID: "obs-chess", Text: "Bob plays chess every Sunday", SourceFactIDs: []string{"f1"}}},
@@ -293,7 +293,7 @@ func TestRunVersionsAndQuotesRecorded(t *testing.T) {
 	}
 	for obs, evs := range rec.evidence {
 		for _, ev := range evs {
-			if name := port.UnitID(pgtest.Name(ev.Unit)); ev.Quote != e.texts[name] {
+			if name := domain.UnitID(pgtest.Name(ev.Unit)); ev.Quote != e.texts[name] {
 				t.Errorf("%s cites %s with %q, want its exact text %q", obs, name, ev.Quote, e.texts[name])
 			}
 		}
@@ -316,7 +316,7 @@ func TestScopeExpanderRejectsNonPositiveCap(t *testing.T) {
 }
 
 // idsString joins unit ids with commas.
-func idsString(ids []port.UnitID) string {
+func idsString(ids []domain.UnitID) string {
 	b, _ := json.Marshal(sortedNames(ids))
 	return strings.NewReplacer(`"`, "", "[", "", "]", "").Replace(string(b))
 }

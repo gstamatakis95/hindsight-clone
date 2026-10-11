@@ -4,14 +4,13 @@
 //
 // # Where it sits
 //
-// retain is an engine package: it imports domain, port and prompts and must never import adapters, server,
-// worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares what it consumes from other
-// engines: [DateNormalizer] (timex.TimeNormalizer), [ScopeExpander] (consolidate.ScopeExpander),
-// [Checkpoint] (worker.Checkpoint), [ConfigMerger] (config.Merge) and [TokenCounter]. Other engines reuse
-// its pieces: curate (EntityResolver, Linker), maintenance (Linker) and docs (Reprocessor). cmd/memd/wire.go
-// builds everything; the server's Retain RPC calls [Ingestor.Ingest], the worker's retain_document handler
-// calls [Retainer.ProcessDocument], and DocumentService.ReprocessDocument reaches [Reprocessor.Reprocess]
-// through docs.
+// retain is an engine package: it imports domain, the boundary packages and prompts and must never import adapters,
+// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares what it consumes from other
+// engines: [DateNormalizer] (timex.TimeNormalizer), [ScopeExpander] (consolidate.ScopeExpander), [Checkpoint]
+// (worker.Checkpoint), [ConfigMerger] (config.Merge) and [TokenCounter]. Other engines reuse its pieces: curate
+// (EntityResolver, Linker), maintenance (Linker) and docs (Reprocessor). cmd/memd/wire.go builds everything; the
+// server's Retain RPC calls [Ingestor.Ingest], the worker's retain_document handler calls [Retainer.ProcessDocument],
+// and DocumentService.ReprocessDocument reaches [Reprocessor.Reprocess] through docs.
 //
 // # Ingest: the Retain RPC
 //
@@ -24,7 +23,7 @@
 //     has a custom_extraction_prompt, normalizes document + item tags, checks the observation-scope fan-out
 //     (ALL_COMBINATIONS over max_combinations is domain.ErrTooManyScopes, before anything is stored),
 //     generates a document id when the item has none, and pins the content hash, blob key, timestamp (now
-//     from port.Clock when unset; none when timeless) and the resolved chunk sizes in a [DocumentPayload].
+//     from clock.Clock when unset; none when timeless) and the resolved chunk sizes in a [DocumentPayload].
 //     A document id that appears twice in one request is domain.ErrInvalidArgument.
 //  3. In one read transaction, rejects a tombstoned bank (domain.ErrBankDeleting, so no blob is written for
 //     a deleting bank) and marks an item Unchanged when its document's last completed retain had the same
@@ -80,7 +79,7 @@
 //
 // # Extraction, entities and links
 //
-// [Extractor] makes one EXTRACT call per chunk through port.ModelRouter and port.LLM.Structured, with the
+// [Extractor] makes one EXTRACT call per chunk through ai.Router and ai.LLM.Structured, with the
 // prompt of the mode's [ExtractionStrategy]: concise (default), verbose, verbatim (the chunk text is
 // the fact; the call adds dates, entities and labels), custom (custom_extraction_prompt as guidelines;
 // a blank prompt falls back to concise) and chunks (each chunk is one fact, no call). A fact's text is
@@ -136,14 +135,14 @@
 //
 // # Invariants
 //
-//   - No model call (extract, time parse, embed) ever runs inside Store.InTx; each batch is prepared first
+//   - No model call (extract, time parse, embed) ever runs inside DB.InTx; each batch is prepared first
 //     and committed in one short transaction.
 //   - Every write transaction calls tx.Seq(bank) first and stamps the units it writes with that seq; Seq also
 //     row-locks the bank, which serializes ownership checks against other retains and retags.
 //   - Idempotent jobs: a retried job resumes after the chunks it committed itself, and replaying a completed
 //     job is a no-op. Overlapping runs of one document never leave stale units: a superseded run stops, and
 //     a document whose units are being replaced is in flight until a run completes it.
-//   - The Postgres Store.InTx re-runs a batch transaction up to 3 times in all after a deadlock (40P01), a
+//   - The Postgres DB.InTx re-runs a batch transaction up to 3 times in all after a deadlock (40P01), a
 //     serialization failure (40001), or an Attach of an entity that graph maintenance pruned after the
 //     resolver read it (a conflict); the re-run resolves the mentions afresh. If every attempt loses,
 //     domain.ErrConflict surfaces: a job retries it, a sync Retain returns ABORTED.

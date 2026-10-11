@@ -3,16 +3,16 @@ package bank
 import (
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"testing"
 )
 
 // seedTemplateSource creates src with a config and two directives.
-func seedTemplateSource(t *testing.T, e env, src port.BankRef) {
+func seedTemplateSource(t *testing.T, e env, src domain.BankRef) {
 	t.Helper()
 	cfg := domain.BankConfig{RetainMission: "remember tea", ReflectMission: "be brief"}
-	e.tx(t, func(tx port.Tx) error {
+	e.tx(t, func(tx store.Tx) error {
 		if err := tx.Banks().Create(e.ctx, domain.Bank{Ref: src, Name: "Source", Config: cfg}); err != nil {
 			return err
 		}
@@ -35,14 +35,14 @@ func checkExport(t *testing.T, tmpl domain.BankTemplate) {
 		t.Fatalf("export = %+v", tmpl)
 	}
 	for _, d := range tmpl.Directives {
-		if d.ID != "" || d.Bank != (port.BankRef{}) {
+		if d.ID != "" || d.Bank != (domain.BankRef{}) {
 			t.Errorf("exported directive keeps its identity: %+v", d)
 		}
 	}
 }
 
 // checkBuilds checks one pending refresh_mental_model build per model in bank b.
-func checkBuilds(t *testing.T, ops []domain.Operation, b port.BankRef, n int) {
+func checkBuilds(t *testing.T, ops []domain.Operation, b domain.BankRef, n int) {
 	t.Helper()
 	if len(ops) != n {
 		t.Fatalf("builds = %d, want %d", len(ops), n)
@@ -57,10 +57,10 @@ func checkBuilds(t *testing.T, ops []domain.Operation, b port.BankRef, n int) {
 
 func TestTemplateRoundTrip(t *testing.T) {
 	e := newEnv(t)
-	src := port.BankRef{Tenant: "t", Bank: "src"}
-	dst := port.BankRef{Tenant: "t", Bank: "dst"}
+	src := domain.BankRef{Tenant: "t", Bank: "src"}
+	dst := domain.BankRef{Tenant: "t", Bank: "dst"}
 	seedTemplateSource(t, e, src)
-	e.tx(t, func(tx port.Tx) error { // Export lists them with Reader.ListMentalModels
+	e.tx(t, func(tx store.Tx) error { // Export lists them with Reader.ListMentalModels
 		for _, s := range []domain.MentalModelSpec{
 			{ID: "tea", Name: "Tea", SourceQuery: "what tea?"},
 			{ID: "people", Name: "People", SourceQuery: "who is who?", Tags: []string{"Team"}},
@@ -95,7 +95,7 @@ func TestTemplateRoundTrip(t *testing.T) {
 }
 
 // assertTemplateCopied checks dst got src's directives with new ids and the models with normalized tags.
-func assertTemplateCopied(t *testing.T, e env, src, dst port.BankRef) {
+func assertTemplateCopied(t *testing.T, e env, src, dst domain.BankRef) {
 	t.Helper()
 	admin := NewDirectiveAdmin(e.store)
 	from, _ := admin.ListDirectives(e.ctx, src, nil, false)
@@ -108,7 +108,7 @@ func assertTemplateCopied(t *testing.T, e env, src, dst port.BankRef) {
 			t.Errorf("directive id %s reused", d.ID)
 		}
 	}
-	e.tx(t, func(tx port.Tx) error {
+	e.tx(t, func(tx store.Tx) error {
 		m, err := tx.MentalModels().Get(e.ctx, dst, "people")
 		if err != nil {
 			return err
@@ -122,7 +122,7 @@ func assertTemplateCopied(t *testing.T, e env, src, dst port.BankRef) {
 
 func TestTemplateCreateRollsBackOnBadSpec(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	codec := NewTemplateCodec(e.store, refreshStub{})
 	_, _, err := codec.CreateNamed(e.ctx, b, "x", domain.BankTemplate{MentalModels: []domain.MentalModelSpec{{}}})
 	if !errors.Is(err, domain.ErrInvalidArgument) {

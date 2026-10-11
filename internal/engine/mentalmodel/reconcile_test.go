@@ -3,12 +3,12 @@ package mentalmodel
 import (
 	"encoding/json"
 	"fmt"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/engine/routing"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"testing"
 	"time"
 )
@@ -23,14 +23,14 @@ func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
 	spec.Trigger.Mode = domain.RefreshModeFull
 	spec.Trigger.RefreshAfterConsolidation = true
 	e.addModel(spec)
-	f1 := e.addEmbeddedFact(pgtest.ID[port.UnitID]("f1"), "Alice leads the project", "proj")
+	f1 := e.addEmbeddedFact(pgtest.ID[domain.UnitID]("f1"), "Alice leads the project", "proj")
 
 	n := 0
 	cons := consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
-		Store: e.store, Config: e.config, Router: routing.NewRouter(), LLM: e.llm, Embedder: e.emb, Clock: e.clock,
-		NewID: func() port.UnitID {
+		Store: e.store, Config: e.config, Router: ai.NewRouter(), LLM: e.llm, Embedder: e.emb, Clock: e.clock,
+		NewID: func() domain.UnitID {
 			n++
-			id := pgtest.ID[port.UnitID](fmt.Sprintf("obs-%02d", n))
+			id := pgtest.ID[domain.UnitID](fmt.Sprintf("obs-%02d", n))
 			e.reads.track(id)
 			return id
 		},
@@ -63,7 +63,7 @@ func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := NewRefreshFailureReconciler(e.store.Read(), e.store, e.config, e.clock)
+	rec := NewRefreshFailureReconciler(e.store, e.store, e.config, e.clock)
 	paused, err := rec.ReconcileFailedRefreshes(e.ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
 func TestRunJobAcceptsLegacyModelIDKey(t *testing.T) {
 	for _, raw := range []string{`{"model_id":"m1"}`, `{"mental_model_id":"m1","model_id":"other"}`} {
 		r := &recordingRunner{}
-		if _, err := RunJob(t.Context(), r, port.Job{Payload: json.RawMessage(raw)}); err != nil {
+		if _, err := RunJob(t.Context(), r, store.Job{Payload: json.RawMessage(raw)}); err != nil {
 			t.Fatalf("%s: %v", raw, err)
 		}
 		if len(r.calls) != 1 || r.calls[0].id != "m1" {
@@ -90,13 +90,13 @@ func TestRunJobAcceptsLegacyModelIDKey(t *testing.T) {
 }
 
 // addEmbeddedFact commits a world fact with an embedding (so consolidation picks it up) and tracks it.
-func (e *env) addEmbeddedFact(id port.UnitID, text string, tags ...string) domain.Unit {
+func (e *env) addEmbeddedFact(id domain.UnitID, text string, tags ...string) domain.Unit {
 	e.t.Helper()
 	u := domain.Unit{
 		ID: id, Bank: e.bank, Type: domain.FactTypeWorld, Text: text, Tags: domain.NormalizeTags(tags),
 		Embedding: e.emb.Vector(text),
 	}
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		seq, err := tx.Seq(e.ctx, e.bank)
 		if err != nil {
 			return err

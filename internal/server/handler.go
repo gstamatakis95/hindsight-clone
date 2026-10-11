@@ -3,6 +3,7 @@ package server
 import (
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/engine/mentalmodel"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,7 +24,7 @@ func (d Deps) validate(rpc string, o *domain.BankConfig) error {
 
 // validatedSpec wraps patch so the patched spec's overrides pass the same check as CreateMentalModel. It
 // stays pure: the implementation runs it inside its transaction.
-func (d Deps) validatedSpec(patch SpecPatch) SpecPatch {
+func (d Deps) validatedSpec(patch mentalmodel.SpecPatch) mentalmodel.SpecPatch {
 	return func(cur domain.MentalModelSpec) (domain.MentalModelSpec, error) {
 		out, err := patch(cur)
 		if err != nil {

@@ -3,26 +3,33 @@ package config
 import (
 	"context"
 	"errors"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
-
-	mockconsolidate "memd/internal/mocks/engine/consolidate"
 )
 
-var ref = port.BankRef{Tenant: "t1", Bank: "b1"}
+var ref = domain.BankRef{Tenant: "t1", Bank: "b1"}
+
+// matchFunc is a StrategyMatcher backed by a function.
+type matchFunc func([]domain.ConsolidationStrategy, domain.ScopeKey) (*domain.ConsolidationStrategy, bool)
+
+// Match calls f.
+func (f matchFunc) Match(s []domain.ConsolidationStrategy, k domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
+	return f(s, k)
+}
 
 // seedStore returns a store over a new database holding tenant t1's config and banks (with their configs,
 // tombstoned when DeletingAt is set).
-func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank) port.Store {
+func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank) store.DB {
 	t.Helper()
 	s := pgtest.NewStore(t)
 	ctx := t.Context()
-	err := s.InTx(ctx, func(tx port.Tx) error {
+	err := s.InTx(ctx, func(tx store.Tx) error {
 		if err := tx.Banks().SetTenantConfig(ctx, ref.Tenant, tenant); err != nil {
 			return err
 		}
@@ -73,10 +80,10 @@ func TestEffectivePrecedence(t *testing.T) {
 
 func TestEffectiveUnknownOrDeletingBank(t *testing.T) {
 	now := time.Unix(0, 0)
-	banks := map[string]domain.Bank{"gone": {Ref: port.BankRef{Tenant: "t1", Bank: "gone"}, DeletingAt: &now}}
+	banks := map[string]domain.Bank{"gone": {Ref: domain.BankRef{Tenant: "t1", Bank: "gone"}, DeletingAt: &now}}
 	r := NewResolver(seedStore(t, domain.BankConfig{}, banks), nil, domain.BankConfig{})
 	for _, b := range []string{"missing", "gone"} {
-		_, err := r.Effective(context.Background(), port.BankRef{Tenant: "t1", Bank: b})
+		_, err := r.Effective(context.Background(), domain.BankRef{Tenant: "t1", Bank: b})
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("%s: err = %v, want NotFound", b, err)
 		}
@@ -100,15 +107,16 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 		},
 	}}
 	var gotStrategies []domain.ConsolidationStrategy
-	m := &mockconsolidate.StrategyMatcher{MatchFunc: func(
-		s []domain.ConsolidationStrategy, _ port.ScopeKey,
-	) (*domain.ConsolidationStrategy, bool) {
+	match := func(s []domain.ConsolidationStrategy, _ domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
 		gotStrategies = s
 		if len(s) == 0 {
 			return nil, false
 		}
 		return &s[0], true
-	}}
+	}
+	m := matchFunc(func(s []domain.ConsolidationStrategy, k domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
+		return match(s, k)
+	})
 	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), m, domain.BankConfig{})
 	scope := domain.NewScopeKey(ref, []string{"people"})
 
@@ -137,7 +145,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	}
 
 	// No match and no request: bank level only.
-	m.MatchFunc = func([]domain.ConsolidationStrategy, port.ScopeKey) (*domain.ConsolidationStrategy, bool) {
+	match = func([]domain.ConsolidationStrategy, domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
 		return nil, false
 	}
 	got, err = r.ForScope(context.Background(), scope, nil)
@@ -153,7 +161,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 // checks the server level the resolver holds is never changed.
 func TestEffectiveConcurrentNoAliasing(t *testing.T) {
 	server, err := ServerDefaults(func(k string) string {
-		if k == EnvModel {
+		if k == ai.EnvModel {
 			return "m"
 		}
 		return ""

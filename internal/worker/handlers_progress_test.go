@@ -5,7 +5,7 @@ import (
 	"errors"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
-	"memd/internal/port"
+	"memd/internal/store"
 	"memd/internal/worker"
 	"testing"
 
@@ -19,7 +19,7 @@ import (
 // checkpoint before their engine runs, and a cancelled checkpoint stops the job before the engine is called.
 func TestHandlersReportProgress(t *testing.T) {
 	kinds := []struct {
-		kind    port.JobKind
+		kind    domain.OperationKind
 		payload string
 	}{
 		{domain.OperationKindRefreshMentalModel, `{"mental_model_id":"m1"}`},
@@ -47,7 +47,7 @@ func TestHandlersReportProgress(t *testing.T) {
 					return nil
 				}}
 				c := e.register(progressHandlers(&engineCalls, cp))
-				err := c[k.kind](t.Context(), port.Job{ID: "op-1", Bank: hBank, Kind: k.kind, Payload: []byte(k.payload)})
+				err := c[k.kind](t.Context(), store.Job{ID: "op-1", Bank: hBank, Kind: k.kind, Payload: []byte(k.payload)})
 				if len(reports) != 1 || reports[0].Stage != string(k.kind) || !reports[0].At.Equal(e.clock.Now()) {
 					t.Fatalf("reports = %+v, want one at stage %s", reports, k.kind)
 				}
@@ -70,13 +70,13 @@ func TestHandlersReportProgress(t *testing.T) {
 func progressHandlers(calls *int, cp worker.Checkpoint) worker.Handlers {
 	return worker.Handlers{
 		Refresher: &mockmentalmodel.RefreshRunner{RunFunc: func(
-			context.Context, port.BankRef, port.MentalModelID, mentalmodel.RefreshOptions,
+			context.Context, domain.BankRef, domain.MentalModelID, mentalmodel.RefreshOptions,
 		) (mentalmodel.RefreshOutcome, error) {
 			*calls++
 			return mentalmodel.RefreshOutcome{}, nil
 		}},
-		Rederiver:  &mockcurate.Rederiver{RederiveFunc: func(context.Context, port.Job) error { *calls++; return nil }},
-		Retagger:   &mockdocs.Retagger{ApplyFunc: func(context.Context, port.Job) error { *calls++; return nil }},
-		Checkpoint: func(port.Job) worker.Checkpoint { return cp },
+		Rederiver:  &mockcurate.Rederiver{RederiveFunc: func(context.Context, store.Job) error { *calls++; return nil }},
+		Retagger:   &mockdocs.Retagger{ApplyFunc: func(context.Context, store.Job) error { *calls++; return nil }},
+		Checkpoint: func(store.Job) worker.Checkpoint { return cp },
 	}
 }
