@@ -109,3 +109,25 @@ func TestBankRef(t *testing.T) {
 		t.Fatalf("no tenant: err = %v", err)
 	}
 }
+
+// TestCheckNameRejectsDotIDs (WP-20 item 5): "." and ".." are rejected as tenant (header) and bank ids;
+// names that merely contain dots are fine.
+func TestCheckNameRejectsDotIDs(t *testing.T) {
+	acme := WithTenant(context.Background(), "acme")
+	for _, id := range []string{".", ".."} {
+		if _, err := bankRef(acme, id); status.Code(toStatus(err)) != codes.InvalidArgument {
+			t.Errorf("bank %q: err = %v, want INVALID_ARGUMENT", id, err)
+		}
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TenantHeader, id))
+		_, err := TenantInterceptor()(ctx, nil, &grpc.UnaryServerInfo{FullMethod: "/memory.v1.X/Y"},
+			func(context.Context, any) (any, error) { return nil, nil })
+		if status.Code(err) != codes.InvalidArgument {
+			t.Errorf("tenant header %q: err = %v, want INVALID_ARGUMENT", id, err)
+		}
+	}
+	for _, id := range []string{"...", ".a", "a.b", "a.."} {
+		if _, err := bankRef(acme, id); err != nil {
+			t.Errorf("bank %q rejected: %v", id, err)
+		}
+	}
+}

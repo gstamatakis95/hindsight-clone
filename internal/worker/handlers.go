@@ -52,6 +52,9 @@ type Handlers struct {
 	Clock port.Clock
 	// GraphBudget bounds one graph_maintenance run; 0 = DefaultGraphBudget.
 	GraphBudget time.Duration
+	// Checkpoint returns a job's checkpoint; refresh, rederive and retag report progress through it before
+	// their engine runs (decision 2003). nil = no progress.
+	Checkpoint func(j port.Job) Checkpoint
 }
 
 // Register registers every handler on r. retain_batch is never registered: it is a parent row whose status
@@ -124,6 +127,9 @@ func (h Handlers) refresh(ctx context.Context, j port.Job) error {
 	if h.Refresher == nil {
 		return notWired(j)
 	}
+	if err := h.started(ctx, j); err != nil {
+		return err
+	}
 	out, err := mentalmodel.RunJob(ctx, h.Refresher, j)
 	if err != nil {
 		return fmt.Errorf("refresh_mental_model: %w", err)
@@ -140,6 +146,9 @@ func (h Handlers) rederive(ctx context.Context, j port.Job) error {
 	if h.Rederiver == nil {
 		return notWired(j)
 	}
+	if err := h.started(ctx, j); err != nil {
+		return err
+	}
 	if err := h.Rederiver.Rederive(ctx, j); err != nil {
 		return fmt.Errorf("rederive_memory: %w", err)
 	}
@@ -151,8 +160,30 @@ func (h Handlers) retag(ctx context.Context, j port.Job) error {
 	if h.Retagger == nil {
 		return notWired(j)
 	}
+	if err := h.started(ctx, j); err != nil {
+		return err
+	}
 	if err := h.Retagger.Apply(ctx, j); err != nil {
 		return fmt.Errorf("retag_document: %w", err)
+	}
+	return nil
+}
+
+// started reports j's checkpoint before its engine runs: progress stage = the job kind, 0 of 1 done. The
+// engines of these kinds take no checkpoint of their own, so this is the job's one progress write and cancel
+// check: a cancelled job, or one whose bank is being deleted, stops here (domain.ErrCancelled) before any
+// model call. There is no checkpoint after the engine returns: a late cancel would turn committed work into
+// a failure, and Complete settles a cancel-requested row as CANCELLED anyway.
+func (h Handlers) started(ctx context.Context, j port.Job) error {
+	if h.Checkpoint == nil {
+		return nil
+	}
+	cp := h.Checkpoint(j)
+	if cp == nil {
+		return nil
+	}
+	if err := cp.Report(ctx, domain.Progress{Stage: string(j.Kind), At: h.Clock.Now(), Total: 1}); err != nil {
+		return fmt.Errorf("%s: checkpoint: %w", j.Kind, err)
 	}
 	return nil
 }

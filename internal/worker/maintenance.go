@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"memd/internal/domain"
+	"memd/internal/engine/bank"
 	"memd/internal/port"
 	"time"
 )
@@ -21,16 +22,35 @@ const (
 	DefaultOperationRetention = 7 * 24 * time.Hour
 	// DefaultEventRetention is how long lifecycle events are kept before pruning.
 	DefaultEventRetention = 30 * 24 * time.Hour
+	// DefaultConsolidationGrace is how old an unconsolidated unit must be before the tick consolidates its
+	// bank, so skip_consolidation followed by a manual Consolidate is not pre-empted (decision 2000).
+	DefaultConsolidationGrace = 10 * time.Minute
 	// consolidateSerialKey is the consolidate job's serial key: one per bank.
 	consolidateSerialKey = "consolidate"
 )
 
 // ConsolidationCandidates finds banks the consolidation reconcile must look at. It is a read the ports
-// don't expose yet; the Postgres adapter (or the consolidation engine) implements it.
+// don't expose; the Postgres adapter implements it (decision 2000).
 type ConsolidationCandidates interface {
-	// BanksToConsolidate returns every bank that is not tombstoned and has at least one live unit with
-	// consolidated_at and consolidation_failed_at unset.
-	BanksToConsolidate(ctx context.Context) ([]port.BankRef, error)
+	// UnconsolidatedBanks returns every bank that is not tombstoned and has at least one live fact with an
+	// embedding, consolidated_at and consolidation_failed_at unset, created before before.
+	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]port.BankRef, error)
+}
+
+// StalledDeleteSource finds tombstoned banks whose delete stopped: no delete_bank operation is pending or
+// processing (ReclaimStale or a shutdown release failed it at the attempt cap, or it failed for good). The
+// Postgres adapter implements it (decision 2001).
+type StalledDeleteSource interface {
+	// StalledBankDeletes returns every tombstoned bank with no pending or processing delete_bank operation.
+	StalledBankDeletes(ctx context.Context) ([]port.BankRef, error)
+}
+
+// GraphWorkSource finds banks with graph maintenance queued; the Postgres adapter implements it (decision
+// 2002).
+type GraphWorkSource interface {
+	// BanksWithGraphWork returns every bank that is not tombstoned and has graph_dirty or entity_maintenance
+	// rows.
+	BanksWithGraphWork(ctx context.Context) ([]port.BankRef, error)
 }
 
 // CronRefresher enqueues the refreshes of mental models whose refresh_cron schedule has fired; the mental
@@ -68,6 +88,16 @@ type MaintenanceDeps struct {
 	Clock port.Clock
 	// Consolidation lists banks for the consolidation reconcile; nil skips the step.
 	Consolidation ConsolidationCandidates
+	// Config resolves each candidate bank's effective config: banks with auto_consolidation or
+	// enable_observations false are skipped. nil = no filtering.
+	Config port.ConfigResolver
+	// ConsolidationGrace is how old an unconsolidated unit must be before the reconcile consolidates its bank
+	// (default DefaultConsolidationGrace).
+	ConsolidationGrace time.Duration
+	// Deletes lists tombstoned banks whose delete_bank stopped; nil skips the step.
+	Deletes StalledDeleteSource
+	// Graph lists banks with graph maintenance queued; nil skips the step.
+	Graph GraphWorkSource
 	// CronRefresh enqueues cron refreshes; nil skips the step.
 	CronRefresh CronRefresher
 	// RefreshFailures pauses models whose refresh failed; nil skips the step.
@@ -106,6 +136,9 @@ func (d MaintenanceDeps) withDefaults() MaintenanceDeps {
 	if d.OperationRetention <= 0 {
 		d.OperationRetention = DefaultOperationRetention
 	}
+	if d.ConsolidationGrace <= 0 {
+		d.ConsolidationGrace = DefaultConsolidationGrace
+	}
 	if d.StrandedRetryAfter <= 0 {
 		d.StrandedRetryAfter = DefaultStrandedRetryAfter
 	}
@@ -118,10 +151,11 @@ func (d MaintenanceDeps) withDefaults() MaintenanceDeps {
 	return d
 }
 
-// RunMaintenance ticks every 60s in every worker: reclaim stale jobs, cron refreshes, consolidation
-// reconcile, re-queue rederives of stranded facts, settle retain_batch parents, prune terminal ops and
-// events. No leader: each step is idempotent. The refresh-failure reconcile runs right after reclaim, so it
-// sees refreshes that reclaim failed in the same tick. It ticks once at start and returns nil when ctx is
+// RunMaintenance ticks every 60s in every worker: reclaim stale jobs, resume stalled bank deletes, cron
+// refreshes, consolidation and graph-maintenance reconciles, re-queue rederives of stranded facts, settle
+// retain_batch parents, prune terminal ops and events. No leader: each step is idempotent. The delete resume
+// and the refresh-failure reconcile run right after reclaim, so they see jobs reclaim failed in the same
+// tick. It ticks once at start and returns nil when ctx is
 // done; a failing step is logged and never stops the others.
 func RunMaintenance(ctx context.Context, d MaintenanceDeps) error {
 	if d.Claimer == nil || d.Store == nil {
@@ -151,9 +185,11 @@ type maintenanceStep struct {
 // maintenanceSteps run in this order on every tick.
 var maintenanceSteps = []maintenanceStep{
 	{"reclaim_stale", reclaimStale},
+	{"resume_bank_deletes", resumeBankDeletes},
 	{"refresh_failures", reconcileRefreshFailures},
 	{"cron_refresh", enqueueCronRefreshes},
 	{"consolidation_reconcile", reconcileConsolidation},
+	{"graph_reconcile", reconcileGraph},
 	{"rederive_stranded", rederiveStranded},
 	{"settle_retain_batches", settleBatches},
 	{"prune_operations", pruneOperations},
@@ -208,26 +244,96 @@ func enqueueCronRefreshes(ctx context.Context, d MaintenanceDeps) (int, error) {
 	return n, nil
 }
 
-// reconcileConsolidation enqueues a consolidate job for every bank with unconsolidated units, one short
-// transaction per bank. DedupePendingOrRunning joins the bank's queued or running automatic consolidate
-// (a running one re-enqueues itself while units remain), so concurrent ticks insert at most one, and a
-// tick never queues a job that would make a failing running consolidate skip its retry. A bank being
-// deleted (or already gone) is skipped; other errors don't stop the remaining banks. It returns how many
-// jobs it inserted.
+// reconcileConsolidation enqueues an automatic consolidate for every bank with a unit left unconsolidated for
+// longer than the grace, unless the bank's effective config turns automatic consolidation or observations
+// off (decision 2000). One short transaction per bank. DedupePendingOrRunning joins the bank's queued or
+// running automatic consolidate (a running one re-enqueues itself while units remain), so concurrent ticks
+// insert at most one, and a tick never queues a job that would make a failing running consolidate skip its
+// retry. A bank being deleted (or already gone) is skipped; other errors don't stop the remaining banks. It
+// returns how many jobs it inserted.
 func reconcileConsolidation(ctx context.Context, d MaintenanceDeps) (int, error) {
 	if d.Consolidation == nil {
 		return 0, nil
 	}
-	banks, err := d.Consolidation.BanksToConsolidate(ctx)
+	banks, err := d.Consolidation.UnconsolidatedBanks(ctx, d.Clock.Now().Add(-d.ConsolidationGrace))
 	if err != nil {
 		return 0, fmt.Errorf("list banks to consolidate: %w", err)
 	}
+	var keep []port.BankRef
+	var errs []error
+	for _, b := range banks {
+		ok, err := autoConsolidates(ctx, d.Config, b)
+		switch {
+		case gone(err):
+		case err != nil:
+			errs = append(errs, fmt.Errorf("bank %s/%s: config: %w", b.Tenant, b.Bank, err))
+		case ok:
+			keep = append(keep, b)
+		}
+	}
+	n, err := enqueueEach(ctx, d.Store, keep, domain.OperationKindConsolidate, consolidateSerialKey)
+	return n, errors.Join(append(errs, err)...)
+}
+
+// autoConsolidates reports whether b's effective config lets the tick consolidate it: auto_consolidation and
+// enable_observations both unset or true. A nil resolver lets every bank through.
+func autoConsolidates(ctx context.Context, r port.ConfigResolver, b port.BankRef) (bool, error) {
+	if r == nil {
+		return true, nil
+	}
+	cfg, err := r.Effective(ctx, b)
+	if err != nil {
+		return false, err
+	}
+	on := func(p *bool) bool { return p == nil || *p }
+	return on(cfg.AutoConsolidation) && on(cfg.EnableObservations), nil
+}
+
+// resumeBankDeletes re-enqueues delete_bank for every tombstoned bank whose delete stopped (decision 2001):
+// ReclaimStale and the shutdown release charge attempts and fail delete_bank at its cap with no
+// continuation, which would leave the bank tombstoned forever. The enqueue joins a delete_bank another tick
+// inserted meanwhile (DedupePendingOrRunning); a bank whose delete just finished is skipped.
+func resumeBankDeletes(ctx context.Context, d MaintenanceDeps) (int, error) {
+	if d.Deletes == nil {
+		return 0, nil
+	}
+	banks, err := d.Deletes.StalledBankDeletes(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list stalled bank deletes: %w", err)
+	}
+	return enqueueEach(ctx, d.Store, banks, domain.OperationKindDeleteBank, bank.DeleteBankSerialKey)
+}
+
+// reconcileGraph enqueues graph_maintenance for every bank with graph_dirty or entity_maintenance rows
+// (decision 2002). A removal that commits while the bank's graph_maintenance is finishing joins that running
+// row, so without this step its rows would wait for the next removal.
+func reconcileGraph(ctx context.Context, d MaintenanceDeps) (int, error) {
+	if d.Graph == nil {
+		return 0, nil
+	}
+	banks, err := d.Graph.BanksWithGraphWork(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list banks with graph work: %w", err)
+	}
+	return enqueueEach(ctx, d.Store, banks, domain.OperationKindGraphMaintenance, graphSerialKey)
+}
+
+// gone reports an error meaning the bank is being deleted or no longer exists.
+func gone(err error) bool {
+	return errors.Is(err, domain.ErrBankDeleting) || errors.Is(err, domain.ErrNotFound)
+}
+
+// enqueueEach enqueues (or joins) an automatic job of kind for every bank, one short transaction each, and
+// returns how many it inserted. A bank being deleted (or gone) is skipped; other errors don't stop the rest.
+func enqueueEach(
+	ctx context.Context, s port.Store, banks []port.BankRef, kind port.JobKind, serialKey string,
+) (int, error) {
 	inserted := 0
 	var errs []error
 	for _, b := range banks {
-		joined, err := enqueueConsolidate(ctx, d.Store, b)
+		joined, err := enqueueAutomatic(ctx, s, b, kind, serialKey)
 		switch {
-		case errors.Is(err, domain.ErrBankDeleting), errors.Is(err, domain.ErrNotFound):
+		case gone(err):
 		case err != nil:
 			errs = append(errs, fmt.Errorf("bank %s/%s: %w", b.Tenant, b.Bank, err))
 		case !joined:
@@ -237,16 +343,16 @@ func reconcileConsolidation(ctx context.Context, d MaintenanceDeps) (int, error)
 	return inserted, errors.Join(errs...)
 }
 
-// enqueueConsolidate enqueues (or joins) bank b's automatic consolidate: no overrides, no scopes, an empty
-// payload object (decision 502).
-func enqueueConsolidate(ctx context.Context, s port.Store, b port.BankRef) (joined bool, err error) {
+// enqueueAutomatic enqueues (or joins) bank b's automatic job of kind: no overrides, an empty payload object
+// (decision 502), DedupePendingOrRunning. It takes no change seq: nothing here is memory content, and Seq
+// refuses a tombstoned bank, which the delete_bank resume must still reach.
+func enqueueAutomatic(
+	ctx context.Context, s port.Store, b port.BankRef, kind port.JobKind, serialKey string,
+) (joined bool, err error) {
 	err = s.InTx(ctx, func(tx port.Tx) error {
 		_, j, err := tx.Queue().Enqueue(ctx, port.Job{
-			Bank:      b,
-			Kind:      domain.OperationKindConsolidate,
-			SerialKey: consolidateSerialKey,
-			Payload:   json.RawMessage(`{}`),
-			Dedupe:    port.DedupePendingOrRunning,
+			Bank: b, Kind: kind, SerialKey: serialKey, Payload: json.RawMessage(`{}`),
+			Dedupe: port.DedupePendingOrRunning,
 		})
 		joined = j
 		return err

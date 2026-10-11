@@ -1,10 +1,13 @@
 package worker
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/engine/consolidate"
 	"memd/internal/port"
 	"runtime/debug"
 	"time"
@@ -115,14 +118,16 @@ func (r *Runner) settleLost(ctx context.Context, j port.Job, err error, rec *rec
 	}
 }
 
-// retryAt applies the retry policy; nil = fail for good. A consolidate that would retry fails instead
-// when another automatic consolidate is already due for its bank (that one picks up the same units).
+// retryAt applies the retry policy; nil = fail for good. An automatic consolidate that would retry fails
+// instead when another automatic consolidate is already due for its bank (that one picks up the same units
+// with the same settings). A manual one (scopes or overrides) always keeps its retry: the automatic run
+// would use bank defaults, so its overrides would never be applied (decision 2003).
 func (r *Runner) retryAt(ctx context.Context, j port.Job, err error) *time.Time {
 	at, ok := nextRun(j, err, r.cfg.Clock.Now())
 	if !ok {
 		return nil
 	}
-	if j.Kind == domain.OperationKindConsolidate && r.cfg.Pending != nil {
+	if j.Kind == domain.OperationKindConsolidate && r.cfg.Pending != nil && automaticConsolidate(j) {
 		pending, perr := r.cfg.Pending.HasPending(ctx, j.Bank, j.Kind)
 		switch {
 		case perr != nil:
@@ -133,6 +138,21 @@ func (r *Runner) retryAt(ctx context.Context, j port.Job, err error) *time.Time 
 		}
 	}
 	return &at
+}
+
+// automaticConsolidate reports whether consolidate job j is the automatic kind: no overrides and no scopes in
+// its payload. An undecodable payload counts as manual, so its retry is never skipped.
+func automaticConsolidate(j port.Job) bool {
+	if j.Overrides != nil {
+		return false
+	}
+	var p consolidate.Payload
+	if raw := bytes.TrimSpace(j.Payload); len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return false
+		}
+	}
+	return len(p.Scopes) == 0
 }
 
 // persist runs a terminal Complete or Fail, retrying transient errors with backoff until ctx (the settle

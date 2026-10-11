@@ -2,6 +2,7 @@ package bank
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
@@ -90,15 +91,31 @@ var _ BankAdmin = (*bankAdmin)(nil)
 // NewBankAdmin returns the BankAdmin over s.
 func NewBankAdmin(s port.Store) BankAdmin { return &bankAdmin{s: s} }
 
-// CreateBank inserts the bank and returns it as stored.
+// CreateBank inserts the bank and returns it as stored. A bank being deleted is domain.ErrBankDeleting
+// (FAILED_PRECONDITION: writes wait for the delete to finish); an existing one is domain.ErrAlreadyExists
+// with a message of its own, never the store's (no SQL text reaches the client).
 func (a *bankAdmin) CreateBank(ctx context.Context, bank domain.Bank) (domain.Bank, error) {
 	var out domain.Bank
+	b := bank.Ref
+	exists := fmt.Errorf("%w: bank %s/%s already exists", domain.ErrAlreadyExists, b.Tenant, b.Bank)
 	err := a.s.InTx(ctx, func(tx port.Tx) error {
-		if err := tx.Banks().Create(ctx, domain.Bank{Ref: bank.Ref, Name: bank.Name, Config: bank.Config}); err != nil {
+		cur, err := tx.Banks().Get(ctx, b)
+		switch {
+		case err == nil && cur.Deleting():
+			return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		case err == nil:
+			return exists
+		case !errors.Is(err, domain.ErrNotFound):
 			return err
 		}
-		var err error
-		out, err = tx.Banks().Get(ctx, bank.Ref)
+		err = tx.Banks().Create(ctx, domain.Bank{Ref: b, Name: bank.Name, Config: bank.Config})
+		if errors.Is(err, domain.ErrAlreadyExists) {
+			return exists // lost a race with a concurrent create
+		}
+		if err != nil {
+			return err
+		}
+		out, err = tx.Banks().Get(ctx, b)
 		return err
 	})
 	if err != nil {

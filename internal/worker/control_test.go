@@ -81,6 +81,44 @@ func TestOperationControl(t *testing.T) {
 	}
 }
 
+// Accept (WP-20 item 2): cancelling a delete_bank is FAILED_PRECONDITION; on a deleting bank only
+// delete_bank may be retried, any other retry is FAILED_PRECONDITION (ErrBankDeleting).
+func TestControlDeleteBankAndDeletingBank(t *testing.T) {
+	bg := context.Background()
+	clock := newClock()
+	ops := newOps(clock)
+	oc := NewOperationControl(&fakeStore{ops: ops})
+	del := ops.add(port.Job{Bank: bankC, Kind: domain.OperationKindDeleteBank, SerialKey: "bank"})
+	retain := ops.add(port.Job{Bank: bankC, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:1"})
+	if _, err := oc.Cancel(bg, bankC, del); !errors.Is(err, domain.ErrFailedPrecondition) {
+		t.Fatalf("Cancel delete_bank = %v, want ErrFailedPrecondition", err)
+	}
+	if row := ops.row(del); row.status != domain.OperationStatusPending {
+		t.Fatalf("delete_bank after the refused cancel: %s", row.status)
+	}
+	if _, err := oc.Cancel(bg, bankC, retain); err != nil {
+		t.Fatalf("Cancel retain: %v", err)
+	}
+	ops.deleting[bankC] = true
+	if js, _ := ops.Claim(bg, "w", []port.JobKind{domain.OperationKindDeleteBank}, 1); len(js) != 1 {
+		t.Fatal("claim delete_bank")
+	}
+	if err := ops.Fail(bg, del, errors.New("crash"), nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := oc.Retry(bg, bankC, retain)
+	if !errors.Is(err, domain.ErrFailedPrecondition) || !errors.Is(err, domain.ErrBankDeleting) {
+		t.Fatalf("Retry retain on a deleting bank = %v, want ErrBankDeleting (FAILED_PRECONDITION)", err)
+	}
+	if row := ops.row(retain); row.status != domain.OperationStatusCancelled {
+		t.Fatalf("retain after the refused retry: %s", row.status)
+	}
+	op, err := oc.Retry(bg, bankC, del)
+	if err != nil || op.Status != domain.OperationStatusPending {
+		t.Fatalf("Retry delete_bank on a deleting bank = %+v, %v; want PENDING", op, err)
+	}
+}
+
 func TestPendingChecker(t *testing.T) {
 	bg := context.Background()
 	clock := newClock()

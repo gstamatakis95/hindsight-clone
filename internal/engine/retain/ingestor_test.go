@@ -104,6 +104,28 @@ func TestIngestFanOutRejectionStoresNothing(t *testing.T) {
 	}}})
 }
 
+// TestIngestDeletingBankStoresNoBlob (WP-20 item 3): a retain to a bank being deleted fails with
+// ErrBankDeleting (FAILED_PRECONDITION) before the blob Put, so no blob lands under the bank's prefix.
+func TestIngestDeletingBankStoresNoBlob(t *testing.T) {
+	e := newEnv(t, 0)
+	e.inTx(func(port.Tx) error { return nil }) // creates the bank
+	e.inTx(func(tx port.Tx) error { return tx.Banks().MarkDeleting(e.ctx, testBank, time.Now()) })
+	for _, async := range []bool{false, true} {
+		_, err := e.ingestor.Ingest(e.ctx, IngestRequest{Bank: testBank, RunAsync: async, Items: []IngestItem{
+			{DocumentID: "d1", Content: "Alice likes tea."},
+		}})
+		if !errors.Is(err, domain.ErrBankDeleting) || !errors.Is(err, domain.ErrFailedPrecondition) {
+			t.Fatalf("async=%v: err = %v, want ErrBankDeleting (FAILED_PRECONDITION)", async, err)
+		}
+	}
+	if keys := e.blob.Keys(); len(keys) != 0 {
+		t.Errorf("blobs written for a deleting bank: %v", keys)
+	}
+	if len(e.llm.Calls()) != 0 {
+		t.Errorf("%d LLM calls, want none", len(e.llm.Calls()))
+	}
+}
+
 // TestIngestAsyncEnqueuesChildrenUnderBatch: an async retain of several documents enqueues one
 // retain_document job per changed document under a retain_batch parent, with the merged overrides on the job
 // and the item fields in the payload; nothing is extracted until a worker runs the job.

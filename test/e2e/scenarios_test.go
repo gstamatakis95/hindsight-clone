@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"memd/internal/domain"
 	"memd/test/e2e/gatewayemu"
 	"strings"
 	"testing"
@@ -412,19 +413,26 @@ func (e *env) crashReclaim(t *testing.T) {
 }
 
 // bankDelete: DeleteBank tombstones at once (reads NOT_FOUND, writes FAILED_PRECONDITION), the delete_bank
-// job removes everything, and a later write creates a fresh, empty bank.
+// job removes everything, including the bank's blob prefix in MinIO, and a later write creates a fresh,
+// empty bank. The worker is stopped across the DeleteBank call, so the delete is still pending when the
+// write arrives and FAILED_PRECONDITION is the only acceptable answer.
 func (e *env) bankDelete(t *testing.T) {
 	const bank = "sc-delete"
 	e.retain(t, bank, aliceDoc, aliceText)
 	e.idle(t, bank)
+	prefix := domain.BankBlobPrefix(domain.BankRef{Tenant: e2eTenant, Bank: bank})
+	if keys := e.blobKeys(t, prefix); len(keys) == 0 {
+		t.Fatalf("no blob under %q after a retain", prefix)
+	}
+	if err := e.worker.Stop(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := e.c.Banks.DeleteBank(e.ctx(t), &pb.DeleteBankRequest{BankId: bank}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{{Content: "x"}}})
-	if code := codeOf(err); code != codes.FailedPrecondition && code != codes.OK {
-		// OK only when the delete already finished and the write created a new bank.
-		t.Fatalf("write to a deleting bank: %v", err)
-	}
+	wantCode(t, "write to a deleting bank", err, codes.FailedPrecondition)
+	e.worker.Restart()
 	ctx := e.ctx(t)
 	for {
 		_, err := e.c.Banks.GetBank(ctx, &pb.GetBankRequest{BankId: bank})
@@ -435,6 +443,9 @@ func (e *env) bankDelete(t *testing.T) {
 			t.Fatalf("bank still there: %v\n%s", err, tail(e.worker.Logs(), 4000))
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+	if keys := e.blobKeys(t, prefix); len(keys) != 0 {
+		t.Fatalf("blob prefix %q not empty after the delete: %v", prefix, keys)
 	}
 	e.retain(t, bank, "doc-new", "Carol paints murals.")
 	if got := e.facts(t, bank, aliceDoc); len(got) != 0 {

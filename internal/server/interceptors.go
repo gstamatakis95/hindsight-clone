@@ -75,11 +75,15 @@ func DeadlineInterceptor(def time.Duration) grpc.UnaryServerInterceptor {
 // maxNameLen bounds tenant and bank ids.
 const maxNameLen = 256
 
-// checkName validates a tenant or bank id: non-empty, at most 256 bytes, and free of '/' and control
-// characters. Blob keys are "{tenant}/{bank}/...", so a '/' would let one bank's prefix cover another's.
+// checkName validates a tenant or bank id: non-empty, not "." or "..", at most 256 bytes, and free of '/'
+// and control characters. Blob keys are "{tenant}/{bank}/...", so a '/' would let one bank's prefix cover
+// another's, and a dot segment would make the key a relative path on stores or tools that normalize it.
 func checkName(what, v string) error {
 	if v == "" {
 		return fmt.Errorf("%w: %s is required", domain.ErrInvalidArgument, what)
+	}
+	if v == "." || v == ".." {
+		return fmt.Errorf("%w: %s must not be %q", domain.ErrInvalidArgument, what, v)
 	}
 	if len(v) > maxNameLen {
 		return fmt.Errorf("%w: %s is longer than %d bytes", domain.ErrInvalidArgument, what, maxNameLen)

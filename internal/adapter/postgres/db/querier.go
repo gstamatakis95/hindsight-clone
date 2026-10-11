@@ -61,6 +61,9 @@ type Querier interface {
 	BankDeleteUnits(ctx context.Context, arg BankDeleteUnitsParams) (int64, error)
 	// BanksToConsolidate returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact with an embedding (the §0 predicate as in ScopeUnconsolidated, over the same partial index, plus embedding IS NOT NULL per decision 1500).
 	BanksToConsolidate(ctx context.Context) ([]BanksToConsolidateRow, error)
+	// BanksWithGraphWork returns, in byte order, the banks that are not tombstoned and have graph_dirty or
+	// entity_maintenance rows queued (WP-20, decision 2002).
+	BanksWithGraphWork(ctx context.Context) ([]BanksWithGraphWorkRow, error)
 	// BumpBankSeq increments a live bank's change_seq and returns it; the row lock is held until commit.
 	BumpBankSeq(ctx context.Context, arg BumpBankSeqParams) (int64, error)
 	// ChunkCommitted returns a document's committed chunks as (index, content hash).
@@ -297,11 +300,19 @@ type Querier interface {
 	// never claimed or run; the worker's maintenance tick calls this. It is idempotent: settled parents are no
 	// longer PENDING.
 	SettleRetainBatches(ctx context.Context) (int64, error)
+	// StalledBankDeletes returns, in byte order, the tombstoned banks with no pending or processing delete_bank
+	// operation (WP-20, decision 2001): their delete was failed by ReclaimStale or a shutdown release at the
+	// attempt cap, or failed for good.
+	StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesRow, error)
 	// StrandedFacts returns live facts left with a NULL embedding by a rederive_memory operation that ended
 	// FAILED or CANCELLED (WP-14b, decision 1452), on banks that are not tombstoned, when no rederive of the unit
 	// is pending or processing and none ended within retry_after_seconds. It walks the operations table (pruned
 	// after the retention period), not memory_units, so the maintenance tick never scans every unit.
 	StrandedFacts(ctx context.Context, arg StrandedFactsParams) ([]StrandedFactsRow, error)
+	// UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
+	// with an embedding created before @before (WP-20, decision 2000). It is BanksToConsolidate plus the grace
+	// cut-off, over the same partial index (tenant_id, bank_id, created_at).
+	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBanksRow, error)
 	// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
 	UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error
 	// UnitArchive copies a live unit into memory_units_archive, stamped with seq, with JSON snapshots of its entities ({id, name}) and causal links ({from, to, kind, weight, created_at}).

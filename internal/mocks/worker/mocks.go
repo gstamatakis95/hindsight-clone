@@ -295,8 +295,8 @@ var _ worker.ConsolidationCandidates = &ConsolidationCandidates{}
 //
 //		// make and configure a mocked worker.ConsolidationCandidates
 //		mockedConsolidationCandidates := &ConsolidationCandidates{
-//			BanksToConsolidateFunc: func(ctx context.Context) ([]port.BankRef, error) {
-//				panic("mock out the BanksToConsolidate method")
+//			UnconsolidatedBanksFunc: func(ctx context.Context, before time.Time) ([]port.BankRef, error) {
+//				panic("mock out the UnconsolidatedBanks method")
 //			},
 //		}
 //
@@ -305,49 +305,187 @@ var _ worker.ConsolidationCandidates = &ConsolidationCandidates{}
 //
 //	}
 type ConsolidationCandidates struct {
-	// BanksToConsolidateFunc mocks the BanksToConsolidate method.
-	BanksToConsolidateFunc func(ctx context.Context) ([]port.BankRef, error)
+	// UnconsolidatedBanksFunc mocks the UnconsolidatedBanks method.
+	UnconsolidatedBanksFunc func(ctx context.Context, before time.Time) ([]port.BankRef, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
-		// BanksToConsolidate holds details about calls to the BanksToConsolidate method.
-		BanksToConsolidate []struct {
+		// UnconsolidatedBanks holds details about calls to the UnconsolidatedBanks method.
+		UnconsolidatedBanks []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Before is the before argument value.
+			Before time.Time
+		}
+	}
+	lockUnconsolidatedBanks sync.RWMutex
+}
+
+// UnconsolidatedBanks calls UnconsolidatedBanksFunc.
+func (mock *ConsolidationCandidates) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]port.BankRef, error) {
+	if mock.UnconsolidatedBanksFunc == nil {
+		panic("ConsolidationCandidates.UnconsolidatedBanksFunc: method is nil but ConsolidationCandidates.UnconsolidatedBanks was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Before time.Time
+	}{
+		Ctx:    ctx,
+		Before: before,
+	}
+	mock.lockUnconsolidatedBanks.Lock()
+	mock.calls.UnconsolidatedBanks = append(mock.calls.UnconsolidatedBanks, callInfo)
+	mock.lockUnconsolidatedBanks.Unlock()
+	return mock.UnconsolidatedBanksFunc(ctx, before)
+}
+
+// UnconsolidatedBanksCalls gets all the calls that were made to UnconsolidatedBanks.
+// Check the length with:
+//
+//	len(mockedConsolidationCandidates.UnconsolidatedBanksCalls())
+func (mock *ConsolidationCandidates) UnconsolidatedBanksCalls() []struct {
+	Ctx    context.Context
+	Before time.Time
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Before time.Time
+	}
+	mock.lockUnconsolidatedBanks.RLock()
+	calls = mock.calls.UnconsolidatedBanks
+	mock.lockUnconsolidatedBanks.RUnlock()
+	return calls
+}
+
+// Ensure that StalledDeleteSource does implement worker.StalledDeleteSource.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.StalledDeleteSource = &StalledDeleteSource{}
+
+// StalledDeleteSource is a mock implementation of worker.StalledDeleteSource.
+//
+//	func TestSomethingThatUsesStalledDeleteSource(t *testing.T) {
+//
+//		// make and configure a mocked worker.StalledDeleteSource
+//		mockedStalledDeleteSource := &StalledDeleteSource{
+//			StalledBankDeletesFunc: func(ctx context.Context) ([]port.BankRef, error) {
+//				panic("mock out the StalledBankDeletes method")
+//			},
+//		}
+//
+//		// use mockedStalledDeleteSource in code that requires worker.StalledDeleteSource
+//		// and then make assertions.
+//
+//	}
+type StalledDeleteSource struct {
+	// StalledBankDeletesFunc mocks the StalledBankDeletes method.
+	StalledBankDeletesFunc func(ctx context.Context) ([]port.BankRef, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// StalledBankDeletes holds details about calls to the StalledBankDeletes method.
+		StalledBankDeletes []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 		}
 	}
-	lockBanksToConsolidate sync.RWMutex
+	lockStalledBankDeletes sync.RWMutex
 }
 
-// BanksToConsolidate calls BanksToConsolidateFunc.
-func (mock *ConsolidationCandidates) BanksToConsolidate(ctx context.Context) ([]port.BankRef, error) {
-	if mock.BanksToConsolidateFunc == nil {
-		panic("ConsolidationCandidates.BanksToConsolidateFunc: method is nil but ConsolidationCandidates.BanksToConsolidate was just called")
+// StalledBankDeletes calls StalledBankDeletesFunc.
+func (mock *StalledDeleteSource) StalledBankDeletes(ctx context.Context) ([]port.BankRef, error) {
+	if mock.StalledBankDeletesFunc == nil {
+		panic("StalledDeleteSource.StalledBankDeletesFunc: method is nil but StalledDeleteSource.StalledBankDeletes was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
 	}{
 		Ctx: ctx,
 	}
-	mock.lockBanksToConsolidate.Lock()
-	mock.calls.BanksToConsolidate = append(mock.calls.BanksToConsolidate, callInfo)
-	mock.lockBanksToConsolidate.Unlock()
-	return mock.BanksToConsolidateFunc(ctx)
+	mock.lockStalledBankDeletes.Lock()
+	mock.calls.StalledBankDeletes = append(mock.calls.StalledBankDeletes, callInfo)
+	mock.lockStalledBankDeletes.Unlock()
+	return mock.StalledBankDeletesFunc(ctx)
 }
 
-// BanksToConsolidateCalls gets all the calls that were made to BanksToConsolidate.
+// StalledBankDeletesCalls gets all the calls that were made to StalledBankDeletes.
 // Check the length with:
 //
-//	len(mockedConsolidationCandidates.BanksToConsolidateCalls())
-func (mock *ConsolidationCandidates) BanksToConsolidateCalls() []struct {
+//	len(mockedStalledDeleteSource.StalledBankDeletesCalls())
+func (mock *StalledDeleteSource) StalledBankDeletesCalls() []struct {
 	Ctx context.Context
 } {
 	var calls []struct {
 		Ctx context.Context
 	}
-	mock.lockBanksToConsolidate.RLock()
-	calls = mock.calls.BanksToConsolidate
-	mock.lockBanksToConsolidate.RUnlock()
+	mock.lockStalledBankDeletes.RLock()
+	calls = mock.calls.StalledBankDeletes
+	mock.lockStalledBankDeletes.RUnlock()
+	return calls
+}
+
+// Ensure that GraphWorkSource does implement worker.GraphWorkSource.
+// If this is not the case, regenerate this file with mockery.
+var _ worker.GraphWorkSource = &GraphWorkSource{}
+
+// GraphWorkSource is a mock implementation of worker.GraphWorkSource.
+//
+//	func TestSomethingThatUsesGraphWorkSource(t *testing.T) {
+//
+//		// make and configure a mocked worker.GraphWorkSource
+//		mockedGraphWorkSource := &GraphWorkSource{
+//			BanksWithGraphWorkFunc: func(ctx context.Context) ([]port.BankRef, error) {
+//				panic("mock out the BanksWithGraphWork method")
+//			},
+//		}
+//
+//		// use mockedGraphWorkSource in code that requires worker.GraphWorkSource
+//		// and then make assertions.
+//
+//	}
+type GraphWorkSource struct {
+	// BanksWithGraphWorkFunc mocks the BanksWithGraphWork method.
+	BanksWithGraphWorkFunc func(ctx context.Context) ([]port.BankRef, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// BanksWithGraphWork holds details about calls to the BanksWithGraphWork method.
+		BanksWithGraphWork []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockBanksWithGraphWork sync.RWMutex
+}
+
+// BanksWithGraphWork calls BanksWithGraphWorkFunc.
+func (mock *GraphWorkSource) BanksWithGraphWork(ctx context.Context) ([]port.BankRef, error) {
+	if mock.BanksWithGraphWorkFunc == nil {
+		panic("GraphWorkSource.BanksWithGraphWorkFunc: method is nil but GraphWorkSource.BanksWithGraphWork was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockBanksWithGraphWork.Lock()
+	mock.calls.BanksWithGraphWork = append(mock.calls.BanksWithGraphWork, callInfo)
+	mock.lockBanksWithGraphWork.Unlock()
+	return mock.BanksWithGraphWorkFunc(ctx)
+}
+
+// BanksWithGraphWorkCalls gets all the calls that were made to BanksWithGraphWork.
+// Check the length with:
+//
+//	len(mockedGraphWorkSource.BanksWithGraphWorkCalls())
+func (mock *GraphWorkSource) BanksWithGraphWorkCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockBanksWithGraphWork.RLock()
+	calls = mock.calls.BanksWithGraphWork
+	mock.lockBanksWithGraphWork.RUnlock()
 	return calls
 }
 

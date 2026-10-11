@@ -8,7 +8,12 @@ import (
 )
 
 // healthServer is grpc.health.v1 with readiness: Check runs every probe (Postgres, gateway) and reports
-// NOT_SERVING when one fails. Watch and List come from the standard server, which always reports SERVING.
+// NOT_SERVING when one fails. Service names are ignored by Check.
+//
+// Watch and List are the standard grpc-go health server's and run no probe: memd never calls
+// SetServingStatus, so Watch on "" streams SERVING once and then nothing (it is a liveness signal, not
+// readiness), Watch on any other name streams SERVICE_UNKNOWN, and List reports {"": SERVING}. Readiness
+// checks (k8s grpc probes, grpc_health_probe) call Check, which is the only probe-backed method.
 type healthServer struct {
 	*health.Server
 	// probes are the readiness checks.
@@ -20,6 +25,12 @@ var _ healthpb.HealthServer = (*healthServer)(nil)
 // newHealthServer returns a health server over probes.
 func newHealthServer(probes []ReadinessProbe) *healthServer {
 	return &healthServer{Server: health.NewServer(), probes: probes}
+}
+
+// NewHealthServer returns the grpc.health.v1 server over probes, for processes that serve health without
+// the memd API (the worker's MEMD_WORKER_HEALTH_ADDR). Its semantics are the API server's: see healthServer.
+func NewHealthServer(probes []ReadinessProbe) healthpb.HealthServer {
+	return newHealthServer(probes)
 }
 
 // Check runs the probes and reports SERVING only when all of them pass. Service names are ignored: every

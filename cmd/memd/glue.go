@@ -4,14 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/reflect"
 	"memd/internal/port"
 	"memd/internal/server"
+	"memd/internal/worker"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
 // Small adapters the composition root needs where no engine provides the interface: they only translate
@@ -24,6 +31,66 @@ var _ port.Clock = systemClock{}
 
 // Now returns the wall-clock time.
 func (systemClock) Now() time.Time { return time.Now() }
+
+// slotRouter is the composition root's port.ModelRouter: the engine router, except that a slot with no
+// model bound is domain.ErrFailedPrecondition (the deployment or bank config lacks a binding; the request
+// itself is fine) and worker.ErrPermanent, so a job on an unbound slot still fails at once instead of
+// retrying (decision 2004). EMBED and the unspecified slot keep the inner router's error.
+type slotRouter struct{ port.ModelRouter }
+
+var _ port.ModelRouter = slotRouter{}
+
+// Resolve returns cfg's binding for slot.
+func (r slotRouter) Resolve(cfg domain.BankConfig, slot port.ModelSlot) (port.ModelBinding, error) {
+	b, err := r.ModelRouter.Resolve(cfg, slot)
+	if err == nil || slot == domain.ModelSlotUnspecified || slot == domain.ModelSlotEmbed {
+		return b, err //nolint:wrapcheck // the inner router's typed error passes through
+	}
+	if bound, ok := cfg.Binding(slot); ok && bound.Model != "" {
+		return b, err //nolint:wrapcheck // the inner router's typed error passes through
+	}
+	return port.ModelBinding{}, fmt.Errorf("%w: %w: no model bound to slot %q (set %s or %s%s, or bind it in the "+
+		"tenant or bank config)", domain.ErrFailedPrecondition, worker.ErrPermanent, slot, config.EnvModel,
+		config.EnvModelPrefix, strings.ToUpper(string(slot)))
+}
+
+// effectiveWorkerID is this process's worker id: "<configured or hostname>-<uuid>". The uuid is fresh per
+// process, so two workers started with the same MEMD_WORKER_ID never share an id and the heartbeat fencing
+// keeps them apart (decision 2004). Without a configured id or a hostname the prefix is "worker".
+func effectiveWorkerID(configured string, hostname func() (string, error), newID func() string) string {
+	base := strings.TrimSpace(configured)
+	if base == "" {
+		if h, err := hostname(); err == nil {
+			base = strings.TrimSpace(h)
+		}
+	}
+	if base == "" {
+		base = "worker"
+	}
+	return base + "-" + newID()
+}
+
+// serveHealth serves grpc.health.v1 over probes on lis until ctx is done, then stops gracefully. The
+// worker uses it for MEMD_WORKER_HEALTH_ADDR; Check runs the probes, as on the api (server.NewHealthServer).
+func serveHealth(ctx context.Context, lis net.Listener, probes []server.ReadinessProbe) error {
+	srv := grpc.NewServer()
+	healthpb.RegisterHealthServer(srv, server.NewHealthServer(probes))
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(lis) }()
+	select {
+	case err := <-served:
+		return fmt.Errorf("memd: worker health: %w", err)
+	case <-ctx.Done():
+	}
+	stopped := make(chan struct{})
+	go func() { srv.GracefulStop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(apiShutdownGrace):
+		srv.Stop()
+	}
+	return nil
+}
 
 // operationReader serves GetOperation, ListOperations and ListEvents over port.Queue and port.EventRepo,
 // each in one short read-only transaction. An unknown or tombstoned bank is domain.ErrNotFound (SPEC: once a

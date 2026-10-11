@@ -15,7 +15,9 @@ import (
 // fixedBanks is a ConsolidationCandidates returning the same banks every time.
 type fixedBanks []port.BankRef
 
-func (f fixedBanks) BanksToConsolidate(context.Context) ([]port.BankRef, error) { return f, nil }
+func (f fixedBanks) UnconsolidatedBanks(context.Context, time.Time) ([]port.BankRef, error) {
+	return f, nil
+}
 
 // stepLog records the order maintenance steps ran in.
 type stepLog struct {
@@ -75,9 +77,9 @@ type loggingBanks struct {
 	log *stepLog
 }
 
-func (l loggingBanks) BanksToConsolidate(ctx context.Context) ([]port.BankRef, error) {
+func (l loggingBanks) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]port.BankRef, error) {
 	l.log.add("consolidation")
-	return l.fixedBanks.BanksToConsolidate(ctx)
+	return l.fixedBanks.UnconsolidatedBanks(ctx, before)
 }
 
 // Accept: three concurrent maintenance loops produce no duplicate enqueues.

@@ -26,8 +26,10 @@ import (
 	"memd/internal/worker"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/reflection"
@@ -54,6 +56,15 @@ type ports struct {
 	db       pinger
 	stranded worker.StrandedFactSource
 	batches  worker.BatchSettler
+	maint    maintenanceReads
+}
+
+// maintenanceReads are the maintenance tick's reads the ports don't expose; the Postgres store implements
+// them (decisions 2000-2002).
+type maintenanceReads interface {
+	worker.ConsolidationCandidates
+	worker.StalledDeleteSource
+	worker.GraphWorkSource
 }
 
 // deps is everything the two modes run.
@@ -120,11 +131,12 @@ func openAdapters(ctx context.Context, cfg Config) (ports, func(), error) {
 	}
 	gw := gateway.NewClient(gateway.Config{
 		BaseURL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey, EmbedModel: cfg.EmbedModel,
-		MaxConcurrent: cfg.GatewayMaxConcurrent, Timeout: cfg.GatewayTimeout,
+		MaxConcurrent: cfg.GatewayMaxConcurrent, SlotConcurrency: cfg.SlotConcurrency, Timeout: cfg.GatewayTimeout,
 	}, nil)
 	store := postgres.New(pool)
 	return ports{
 		store: store, claimer: store, blob: blob, gw: gw, db: pool, stranded: store, batches: store,
+		maint: store,
 	}, pool.Close, nil
 }
 
@@ -188,16 +200,19 @@ func wireEngines(
 			Scopes: c.scopes, Tokens: tok,
 			Checkpoint: func(j port.Job) consolidate.Checkpointer { return worker.NewCheckpoint(claimer, j.ID) },
 		}),
-		Refresher: mm.runner,
-		Deleter:   d.server.Deleter,
-		Rederiver: curate.NewRederiver(curate.RederiverDeps{Store: store, Embedder: p.gw, Linker: c.linker}),
-		Retagger:  d.server.Retagger,
-		Graph:     maintenance.NewGraphMaintainer(store, c.linker, clock),
-		Store:     store,
-		Clock:     clock,
+		Refresher:  mm.runner,
+		Deleter:    d.server.Deleter,
+		Rederiver:  curate.NewRederiver(curate.RederiverDeps{Store: store, Embedder: p.gw, Linker: c.linker}),
+		Retagger:   d.server.Retagger,
+		Graph:      maintenance.NewGraphMaintainer(store, c.linker, clock),
+		Store:      store,
+		Clock:      clock,
+		Checkpoint: func(j port.Job) worker.Checkpoint { return worker.NewCheckpoint(claimer, j.ID) },
 	}
 	d.maintenance = worker.MaintenanceDeps{
-		Claimer: claimer, Store: store, Clock: clock, Consolidation: c.read, CronRefresh: mm.triggers,
+		Claimer: claimer, Store: store, Clock: clock, CronRefresh: mm.triggers,
+		Consolidation: p.maint, Config: c.resolver, ConsolidationGrace: cfg.ConsolidationGrace,
+		Deletes: p.maint, Graph: p.maint,
 		RefreshFailures: mentalmodel.NewRefreshFailureReconciler(c.read, store, c.resolver, clock),
 		Stranded:        p.stranded, Batches: p.batches, Interval: cfg.MaintenanceInterval, StaleAfter: cfg.StaleAfter,
 		Logger: log,
@@ -208,7 +223,7 @@ func wireEngines(
 // wireCore builds config resolution, routing, retain, recall and reflect.
 func wireCore(p ports, tok *tokenCounter, serverCfg domain.BankConfig, clock port.Clock) core {
 	store, claimer, blob, gw := p.store, p.claimer, p.blob, p.gw
-	c := core{store: store, read: store.Read(), clock: clock, router: routing.NewRouter()}
+	c := core{store: store, read: store.Read(), clock: clock, router: slotRouter{routing.NewRouter()}}
 	c.matcher = consolidate.NewStrategyMatcher(c.read)
 	c.resolver = config.NewResolver(store, c.matcher, serverCfg)
 	c.times = timex.NewNormalizer(gw, c.router, clock)
@@ -343,17 +358,31 @@ func runAPI(ctx context.Context, d *deps) error {
 
 // runWorker runs the job runner and the maintenance tick until ctx is done. The runner's StaleAfter and
 // the maintenance reclaim's StaleAfter come from the one config value, so the runner's self-fence (3/4 of
-// it) always fires before another worker can reclaim the job.
+// it) always fires before another worker can reclaim the job. The worker id is "<MEMD_WORKER_ID or
+// hostname>-<uuid>", fresh per process (effectiveWorkerID). With MEMD_WORKER_HEALTH_ADDR set it also serves
+// grpc.health.v1 there.
 func runWorker(ctx context.Context, d *deps) error {
+	id := effectiveWorkerID(d.cfg.WorkerID, os.Hostname, uuid.NewString)
 	r := worker.NewRunner(d.claimer, worker.RunnerConfig{
-		WorkerID: d.cfg.WorkerID, Clock: d.clock, Slots: d.cfg.WorkerSlots, PollInterval: d.cfg.PollInterval,
+		WorkerID: id, Clock: d.clock, Slots: d.cfg.WorkerSlots, PollInterval: d.cfg.PollInterval,
 		HeartbeatInterval: d.cfg.HeartbeatInterval, StaleAfter: d.cfg.StaleAfter, Pending: d.pending, Logger: d.log,
 	})
 	worker.Register(r, d.handlers)
+	var lis net.Listener
+	if d.cfg.WorkerHealthAddr != "" {
+		var err error
+		if lis, err = (&net.ListenConfig{}).Listen(ctx, "tcp", d.cfg.WorkerHealthAddr); err != nil {
+			return fmt.Errorf("memd: listen %s: %w", d.cfg.WorkerHealthAddr, err)
+		}
+	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return r.Run(gctx) })
 	g.Go(func() error { return worker.RunMaintenance(gctx, d.maintenance) })
-	d.log.Info("memd worker running", "slots", d.cfg.WorkerSlots)
+	if lis != nil {
+		g.Go(func() error { return serveHealth(gctx, lis, d.server.Probes) })
+		d.log.Info("memd worker health serving", "addr", lis.Addr().String())
+	}
+	d.log.Info("memd worker running", "id", id, "slots", d.cfg.WorkerSlots)
 	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("memd: worker: %w", err)
 	}

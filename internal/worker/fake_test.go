@@ -437,6 +437,25 @@ func (t *fakeTx) Queue() port.Queue { return t.s.ops }
 
 func (t *fakeTx) Events() port.EventRepo { return &fakeEvents{s: t.s} }
 
+func (t *fakeTx) Banks() port.BankRepo { return &fakeBanks{ops: t.s.ops} }
+
+// fakeBanks serves Get from fakeOps.deleting: every bank exists, tombstoned when marked deleting.
+type fakeBanks struct {
+	port.BankRepo
+	ops *fakeOps
+}
+
+func (b *fakeBanks) Get(_ context.Context, ref port.BankRef) (domain.Bank, error) {
+	b.ops.mu.Lock()
+	defer b.ops.mu.Unlock()
+	bank := domain.Bank{Ref: ref}
+	if b.ops.deleting[ref] {
+		at := b.ops.clock.Now()
+		bank.DeletingAt = &at
+	}
+	return bank, nil
+}
+
 // fakeEvents records Prune calls.
 type fakeEvents struct {
 	port.EventRepo
