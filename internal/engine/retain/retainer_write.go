@@ -221,8 +221,13 @@ func factTime(f ExtractedFact, mentioned *time.Time) time.Time {
 // deleted and their other sources reset (EvidenceRepo.DeleteCiting, before the units go, since evidence rows
 // cascade), then the units are deleted and graph maintenance is queued for their neighbours. The units are
 // listed with UnitRepo.IDsByDocument, which writes nothing (decision 802, superseded by the CCR batch).
+// It first reopens the document (decision 2200), so a run that fails after replacing never leaves it stamped
+// complete.
 func (r *retainer) replace(ctx context.Context, tx port.Tx, rn *run) error {
 	b, doc := rn.j.Bank, rn.p.DocumentID
+	if err := reopen(ctx, tx, b, doc); err != nil {
+		return err
+	}
 	ids, err := tx.Units().IDsByDocument(ctx, b, doc)
 	if err != nil || len(ids) == 0 {
 		return err
@@ -238,6 +243,23 @@ func (r *retainer) replace(ctx context.Context, tx port.Tx, rn *run) error {
 		Payload: json.RawMessage(`{}`), Dedupe: port.DedupePendingOrRunning,
 	})
 	return err
+}
+
+// reopen clears the document's extracted_at when another retain of the same content completed it after this
+// run started (overlapping runs, decision 807): the units this run is about to replace are that retain's, so
+// until this run completes the document is in flight again. It re-upserts the document as read in this
+// transaction (the bank is Seq-locked), so only extracted_at changes. Without it, a run failing after its
+// first batch would leave a document stamped complete with only that batch's units, and every later retain
+// of the same content would report Unchanged (decision 2200).
+func reopen(ctx context.Context, tx port.Tx, b port.BankRef, id port.DocumentID) error {
+	d, err := tx.Documents().Get(ctx, b, id)
+	if err != nil || d.ExtractedAt == nil {
+		return err
+	}
+	return tx.Documents().Upsert(ctx, domain.Document{
+		ID: d.ID, Bank: d.Bank, Overrides: d.Overrides, Tags: d.Tags, BlobKey: d.BlobKey,
+		ObservationScopes: d.ObservationScopes,
+	})
 }
 
 // complete stamps the document's hashes and extracted_at, appends RETAIN_COMPLETED and queues the bank's

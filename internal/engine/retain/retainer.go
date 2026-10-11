@@ -16,8 +16,10 @@ import (
 type Retainer interface {
 	// ProcessDocument runs chunk -> extract -> normalize -> embed -> resolve -> link -> commit, one tx per
 	// chunk batch. Unchanged content + overrides hash with extracted_at set = no-op (unless
-	// force_reextract). A changed document replaces its old units in the first batch's tx; a retried job
-	// skips chunks already committed with a matching hash. Runs inline for sync Retain, else as a job.
+	// force_reextract). A changed document replaces its old units in the first batch's tx, which also
+	// clears extracted_at if an overlapping retain completed the document meanwhile (decision 2200); a
+	// retried job skips chunks already committed with a matching hash. Runs inline for sync Retain, else
+	// as a job.
 	// j.Payload is a DocumentPayload and j.Overrides the merged request < item overrides. A job with an id
 	// resumes across retries; an inline run (empty j.ID) starts fresh.
 	ProcessDocument(ctx context.Context, j port.Job) (RetainResult, error)
