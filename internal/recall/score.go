@@ -259,3 +259,14 @@ func proofSignal(u domain.Unit) float64 {
 	}
 	return min(1, max(0, 0.5+math.Log(float64(u.ProofCount))/10))
 }
+
+// passesFloors reports whether c passes the result floors of min_scores, applied after scoring (each arm applies
+// its own floor in retrieval, Query.ArmSettings): reranker (only for a candidate the cross-encoder scored;
+// Hindsight's rule for unscored candidates does not apply when rerank is off) and final.
+func passesFloors(c candidate, m domain.MinScores) bool {
+	// Compared as float32: the cross-encoder scores are float32, so a floor equal to a score keeps it.
+	if m.Reranker != nil && c.Reranker != nil && float32(*c.Reranker) < float32(*m.Reranker) {
+		return false
+	}
+	return m.Final == nil || c.Final >= *m.Final
+}

@@ -29,8 +29,8 @@ var testNow = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 // uid is the unit id of a readable fixture name.
 func uid(name string) domain.UnitID { return pgtest.ID[domain.UnitID](name) }
 
-// env is the recall engine with the four built-in arms, as cmd/memd/wire.go registers them, over a store on its
-// own database and the model fakes.
+// env is the recall engine with the four built-in arms, as cmd/memd/wire_services.go registers them, over a store on
+// its own database and the model fakes.
 type env struct {
 	store *postgres.DB
 	clock *clock.Manual

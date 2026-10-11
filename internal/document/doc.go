@@ -8,7 +8,7 @@
 // document is a feature package. It imports domain, the boundaries (store, blob, clock) and jobs, and never
 // another feature, an adapter, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Reprocessing builds the
 // retain_document payload itself (jobs.RetainPayload) and enqueues it through the jobs catalogue, so the
-// memory feature runs it without either package importing the other. cmd/memd/wire_document.go builds the
+// memory feature runs it without either package importing the other. cmd/memd/wire_services.go builds the
 // Service, hands it to grpcapi's DocumentHandler and registers RunRetagJob for the retag_document kind.
 //
 // # Retag: RetagDocument

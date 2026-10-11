@@ -6,7 +6,7 @@
 //
 // configsvc is a service. It imports domain, the store boundary, config (the concrete *config.Resolver) and prompts,
 // and never another service, an adapter, grpcapi, maintenance, gen, pgx, net/http, the S3 SDK or Datadog
-// (depguard). It runs no job and no sweep. cmd/memd/wire_config.go builds the Service and hands it to grpcapi's
+// (depguard). It runs no job and no sweep. cmd/memd/wire_services.go builds the Service and hands it to grpcapi's
 // ConfigHandler.
 //
 // The public surface:

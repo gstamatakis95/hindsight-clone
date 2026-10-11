@@ -11,7 +11,7 @@
 // resolves fuzzy scope tags and serves SearchMentalModels; [reflect.Agent] runs the agentic refresh loop and the
 // structured-output projection. It never imports another service, an adapter, grpcapi, maintenance, gen, pgx,
 // net/http, the S3 SDK or Datadog (depguard). Other services affect mental models only through the jobs
-// catalogue (jobs.EnqueueRefresh, jobs.QueueModelRefresh). cmd/memd/wire_mentalmodel.go builds the Service,
+// catalogue (jobs.EnqueueRefresh, jobs.QueueModelRefresh). cmd/memd/wire_services.go builds the Service,
 // hands it to grpcapi's MentalModelHandler and maintenance, and registers its job handler.
 //
 // The public surface:

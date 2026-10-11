@@ -14,7 +14,7 @@
 // and the libraries (recall.Engine, reflect.Agent, timex.Normalizer, linking), and never another feature
 // package, grpcapi, maintenance, an adapter, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Its effects
 // on other features go through the jobs catalogue: retain and curation enqueue consolidate, graph_maintenance
-// and refresh_mental_model jobs inside their own transactions. cmd/memd/wire_memory.go builds the Service,
+// and refresh_mental_model jobs inside their own transactions. cmd/memd/wire_services.go builds the Service,
 // hands it to grpcapi's MemoryHandler, registers [Service.RunRetainJob] and [Service.RunRederiveJob] with the
 // job runner, and gives it to the maintenance tick.
 //

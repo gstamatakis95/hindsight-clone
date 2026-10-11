@@ -230,3 +230,17 @@ func at(days int) *time.Time {
 	v := testNow.AddDate(0, 0, days)
 	return &v
 }
+
+// addChunks stores document doc with the given chunks (ids, indexes and texts) in the store.
+func (e *env) addChunks(t *testing.T, doc domain.DocumentID, cs ...domain.Chunk) {
+	t.Helper()
+	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
+		if err := tx.Documents().Upsert(ctx, domain.Document{ID: doc, Bank: testBank}); err != nil {
+			return err
+		}
+		for i := range cs {
+			cs[i].Bank, cs[i].DocumentID = testBank, doc
+		}
+		return tx.Chunks().Insert(ctx, cs)
+	})
+}

@@ -44,10 +44,10 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per proto service (holding only the services it
   calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes. No logic.
 - internal/observability: the optional Datadog traces, metrics and JSON logs, wired in cmd/memd only.
-- cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
-  service builds it, hands it to its gRPC handlers, registers its job handlers and sets its tick steps
-  (wire_maintenance.go runs last). config.go reads the environment (deployment, infrastructure and secrets only),
-  configfile.go the server config file (memd.example.yaml).
+- cmd/memd: wiring only. wire.go opens the infrastructure and runs the modes; wire_services.go builds the shared
+  libraries, then one wire<Area> function per service builds it, hands it to its gRPC handlers, registers its job
+  handlers and sets its tick steps (wireMaintenance runs last). config.go reads the environment (deployment,
+  infrastructure and secrets only), configfile.go the server config file (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
 - examples/: runnable scenarios written against the generated client only (never internal/);
   examples/internal/exampleutil is their shared helper. Keep each short, and make it exit non-zero when the
@@ -81,7 +81,7 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   models), and in the overrides message of each RPC that may change them. Operator-only settings go in a section
   of the server config file. Environment variables are only for deployment, infrastructure and secrets.
 - New retrieval arms implement recall.Arm, take only the boundary they read, run armtest, and are registered in
-  recallArms (cmd/memd/wire.go); clients reach them by name. Never special-case an arm in the engine.
+  recallArms (cmd/memd/wire_services.go); clients reach them by name. Never special-case an arm in the engine.
 - No per-memory delete API. Invalidate archives a unit; upsert and reprocess replace a document's units.
 - Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim. A handler
   takes the `*jobs.Run` it runs under: report progress with run.Report (it returns domain.ErrCancelled once the

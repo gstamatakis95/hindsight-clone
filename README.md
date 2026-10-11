@@ -347,7 +347,7 @@ grpcurl -plaintext -H 'x-tenant-id: acme' \
   localhost:50051 memory.v1.MemoryService/Recall
 ```
 
-To add an arm, implement `recall.Arm` in `internal/recall/arms`, register it in `cmd/memd/wire.go` and run the
+To add an arm, implement `recall.Arm` in `internal/recall/arms`, register it in `cmd/memd/wire_services.go` and run the
 `internal/recall/armtest` contract suite; `internal/recall/doc.go` has the steps.
 
 ## Datadog (optional)

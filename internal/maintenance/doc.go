@@ -7,7 +7,7 @@
 // maintenance sits above the services and jobs: it calls the services' sweeps (bank.Service's delete resume,
 // mentalmodel.Service's cron refreshes and failed-refresh reconcile, observation.Service's consolidation
 // reconcile, memory.Service's stranded-fact and retain-batch sweeps), the cross-bank scans of store.Maintenance
-// and the jobs catalogue, and never an adapter. No service imports it. cmd/memd/wire_maintenance.go builds it and
+// and the jobs catalogue, and never an adapter. No service imports it. cmd/memd/wire_services.go builds it and
 // registers [Service.RunGraphJob]; the worker and all modes run [Service.Run] beside the job runner. Its [Config] holds
 // the operator settings (tick interval, reclaim age, retention of terminal operations and lifecycle events, graph
 // budget); zero values take the defaults.

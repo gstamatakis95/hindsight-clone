@@ -6,7 +6,7 @@
 //
 // timex is a library: it imports domain, ai, clock and prompts and must never import a service, an adapter, gen,
 // pgx, net/http, the S3 SDK or Datadog (depguard). It works on domain.ExtractedFact rather than a retain type so
-// that retain can import timex without a cycle. cmd/memd/wire.go builds one [Normalizer] with
+// that retain can import timex without a cycle. cmd/memd/wire_services.go builds one [Normalizer] with
 // [New](gateway, router, clock) and hands it to retain and recall (its query parser).
 //
 // # Usage

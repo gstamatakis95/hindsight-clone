@@ -3,7 +3,10 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"memd/internal/domain"
+
+	"github.com/tiktoken-go/tokenizer"
 )
 
 // LLM calls chat completions. The adapter holds a process-wide semaphore plus one per slot.
@@ -124,4 +127,56 @@ type Reranker interface {
 	// are in [0,1]; otherwise the adapter applies a sigmoid (Hindsight's rule), so raw cross-encoder
 	// logits and normalized scores both work.
 	Rerank(ctx context.Context, b domain.ModelBinding, query string, docs []string) ([]float32, error)
+}
+
+// Router picks a slot's model binding from an already-merged config. It holds no state, so the zero value and
+// one Router shared by every caller are both fine.
+type Router struct{}
+
+// NewRouter returns the model router.
+func NewRouter() *Router { return &Router{} }
+
+// Resolve returns the binding cfg yields for slot: the slot's own binding, else models.default for a chat-model
+// slot (domain.ModelBindings.For). cfg is normally the effective config, whose levels package config has already
+// merged so that the most specific level yielding a binding won. EMBED (the server-wide embedder takes no binding)
+// and the unspecified slot are domain.ErrInvalidArgument. A slot with no model is domain.ErrModelUnbound
+// (FAILED_PRECONDITION: the request is fine, the server, tenant or bank config lacks a binding).
+func (*Router) Resolve(cfg domain.BankConfig, slot domain.ModelSlot) (domain.ModelBinding, error) {
+	if slot == domain.ModelSlotUnspecified || slot == domain.ModelSlotEmbed {
+		return domain.ModelBinding{}, fmt.Errorf("%w: slot %q has no per-call binding", domain.ErrInvalidArgument, slot)
+	}
+	b, ok := cfg.Binding(slot)
+	if !ok {
+		hint := "models.default or models." + string(slot)
+		if !domain.IsLLMSlot(slot) {
+			hint = "models." + string(slot)
+		}
+		return domain.ModelBinding{}, fmt.Errorf("%w: no model bound to slot %q (set %s in the server config file, "+
+			"or in the tenant or bank config)", domain.ErrModelUnbound, slot, hint)
+	}
+	return b, nil
+}
+
+// Tokenizer counts tokens with tiktoken's cl100k_base encoding, embedded in the binary (no download at start). One
+// value serves recall's packing and include budgets, retain's chunker and consolidation's source-fact budgets. The
+// codec only reads its tables after construction, so it is safe for concurrent use.
+type Tokenizer struct{ codec tokenizer.Codec }
+
+// NewTokenizer loads the cl100k_base encoding.
+func NewTokenizer() (*Tokenizer, error) {
+	codec, err := tokenizer.Get(tokenizer.Cl100kBase)
+	if err != nil {
+		return nil, fmt.Errorf("tokenizer: %w", err)
+	}
+	return &Tokenizer{codec: codec}, nil
+}
+
+// Count returns the number of tokens in text. A text the codec can't encode (it never happens for valid UTF-8) falls
+// back to about four characters per token, so budgets never break on one odd input.
+func (t *Tokenizer) Count(text string) int {
+	n, err := t.codec.Count(text)
+	if err != nil {
+		return (len(text) + 3) / 4
+	}
+	return n
 }

@@ -15,17 +15,11 @@ import (
 	"memd/internal/graph"
 	"memd/internal/grpcapi"
 	"memd/internal/jobs"
-	"memd/internal/linking"
 	"memd/internal/maintenance"
 	"memd/internal/observability"
-	"memd/internal/recall"
-	"memd/internal/recall/arms"
-	"memd/internal/reflect"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
-	"memd/internal/timex"
 	"net"
-	"net/http"
 	"os"
 	"time"
 
@@ -36,8 +30,8 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-// The composition root. wire.go opens the infrastructure (Postgres, blob storage, the AI gateway), builds the shared
-// libraries once (core) and runs the two modes; each wire_<area>.go builds one area's service, its gRPC handlers, its
+// The composition root. wire.go opens the infrastructure (Postgres, blob storage, the AI gateway) and runs the two
+// modes; wire_services.go builds the shared libraries once (core) and then each service with its gRPC handlers, its
 // job handlers and its part of the maintenance tick.
 
 // modelGateway is the AI gateway as the services see it: one client serves all three model interfaces.
@@ -62,7 +56,7 @@ type infra struct {
 }
 
 // jobHandlers are the worker's job handlers by kind: every service's RunXJob and maintenance's graph job, which
-// each wire_<area>.go adds. retain_batch has none: it is a parent row whose status aggregates its children, not a
+// wire_services.go adds. retain_batch has none: it is a parent row whose status aggregates its children, not a
 // job a worker runs.
 type jobHandlers map[domain.OperationKind]jobs.Handler
 
@@ -203,81 +197,6 @@ func checkEmbedding(ctx context.Context, emb ai.Embedder) error {
 			"in the server config file)", len(vec), domain.EmbeddingDim)
 	}
 	return nil
-}
-
-// core are the libraries several services share.
-type core struct {
-	db       store.DB
-	read     store.Reader
-	clock    clock.Clock
-	tok      *ai.Tokenizer
-	resolver *config.Resolver
-	router   *ai.Router
-	times    *timex.Normalizer
-	linker   *linking.Linker
-	entities *linking.Resolver
-	recall   *recall.Engine
-	agent    *reflect.Agent
-}
-
-// wireServices builds the shared libraries, then every service over them; tel (nil = Datadog off) traces the
-// gRPC server, the jobs and the maintenance tick.
-func wireServices(
-	cfg Config, in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock, log *slog.Logger,
-	tel *observability.Telemetry,
-) *deps {
-	c := wireCore(in, tok, serverCfg, clk)
-	d := &deps{
-		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk, tel: tel, handlers: jobHandlers{},
-		recallArms: armNames(c.recall),
-		probes: []grpcapi.ReadinessProbe{
-			grpcapi.PostgresProbe{Ping: in.ping}, grpcapi.NewGatewayProbe(cfg.GatewayURL, &http.Client{}, clk),
-		},
-	}
-	wireMemory(c, in, d)
-	wireDocuments(c, in, d)
-	wireObservations(c, in, d)
-	wireMentalModels(c, in, d)
-	wireBanks(c, in, d)
-	wireConfig(c, d)
-	wireOperations(c, d)
-	wireMaintenance(cfg, c, in, d)
-	return d
-}
-
-// recallArms are the registered recall arms, in fusion order: the built-in vector, text, graph and temporal arms.
-// A new arm implements recall.Arm in its own file under internal/recall/arms (or its own package), takes only the
-// boundary it reads, and is added here.
-func recallArms(s store.Search, g graph.Reader) []recall.Arm {
-	return []recall.Arm{arms.NewVector(s), arms.NewText(s), arms.NewGraph(s, g), arms.NewTemporal(s)}
-}
-
-// armNames are the names of e's registered arms.
-func armNames(e *recall.Engine) []string {
-	var out []string
-	for _, a := range e.Arms() {
-		out = append(out, a.Name)
-	}
-	return out
-}
-
-// wireCore builds the libraries: config resolution, routing, time normalization, linking, recall (the registered
-// arms over the store and the graph reader) and the reflect agent.
-func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock) core {
-	db, gw := in.db, in.gw
-	c := core{db: db, read: db.Read(), clock: clk, tok: tok, router: ai.NewRouter()}
-	c.resolver = config.NewResolver(db, serverCfg)
-	c.times = timex.New(gw, c.router, clk)
-	c.linker = linking.NewLinker()
-	c.entities = linking.NewResolver(linking.ResolverConfig{})
-	c.recall = recall.New(recall.Deps{
-		DB: db, Arms: recallArms(c.read, in.graph), Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router,
-		Times: c.times, Clock: clk, Tokens: tok,
-	})
-	c.agent = reflect.New(reflect.Deps{
-		DB: db, Config: c.resolver, Router: c.router, LLM: gw, Clock: clk, Recall: c.recall,
-	})
-	return c
 }
 
 // apiShutdownGrace is how long in-flight RPCs may finish after a stop signal.
