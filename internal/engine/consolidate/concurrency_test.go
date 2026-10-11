@@ -72,7 +72,7 @@ func TestRunRetagMidRunIsNotStamped(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d1", []string{"bob"}, seq)
+				_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d1", []string{"alice", "x"}, []string{"bob"}, seq)
 				return err
 			})
 		}}

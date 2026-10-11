@@ -167,8 +167,9 @@ func TestRetagChangeClearsObservations(t *testing.T) {
 	if len(ops) != 1 || ops[0].ID != id || ops[0].SerialKey != "doc:d1" {
 		t.Fatalf("retag jobs = %+v, want one with id %s, serial doc:d1", ops, id)
 	}
-	if us := f.units(t, "f1"); !slices.Equal(us["f1"].Tags, []string{"a", "b"}) {
-		t.Fatalf("unit tags changed before the job ran: %v", us["f1"].Tags)
+	// UpdateDocument's transaction retags the units (decision 1900); the observation stays until the job.
+	if us := f.units(t, "f1", "o1"); !slices.Equal(us["f1"].Tags, []string{"c"}) || us["o1"].ID == "" {
+		t.Fatalf("before the job: f1 tags %v, o1 present %t; want [c] and o1 kept", us["f1"].Tags, us["o1"].ID != "")
 	}
 
 	job := f.claimRetag(t)
@@ -269,8 +270,9 @@ func TestRetagUnknownDocument(t *testing.T) {
 	}
 }
 
-// TestRetagSetEqualAfterFailedRetagReenqueues: the tags were committed on the document but the retag job
-// failed, so the units still carry the old tags; repeating the same tags must re-enqueue the job.
+// TestRetagSetEqualAfterFailedRetagReenqueues: the tags were committed on the document (and its units) but
+// the retag job failed, so the observations derived under the old tags were never cleared; repeating the
+// same tags must re-enqueue the job.
 func TestRetagSetEqualAfterFailedRetagReenqueues(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)

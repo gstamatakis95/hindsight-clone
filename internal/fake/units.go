@@ -131,20 +131,30 @@ func (r unitRepo) Update(_ context.Context, u domain.Unit) error {
 	return nil
 }
 
-// SetDocumentTags rewrites the tags and seq of the document's live units, clears their consolidation
-// stamps and returns their ids.
+// SetDocumentTags replaces the document-derived tags of the document's units, live and archived, with
+// normalize((tags − oldTags) ∪ newTags); on the live units it also sets seq and clears both consolidation
+// stamps, and it returns their ids.
 func (r unitRepo) SetDocumentTags(
-	_ context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64,
+	_ context.Context, b port.BankRef, doc port.DocumentID, oldTags, newTags []string, seq int64,
 ) ([]port.UnitID, error) {
-	if err := checkTags(tags); err != nil {
+	if err := checkTags(oldTags); err != nil {
 		return nil, err
+	}
+	if err := checkTags(newTags); err != nil {
+		return nil, err
+	}
+	for id, row := range r.t.st.archive {
+		if row.u.Bank == b && row.u.DocumentID == doc {
+			row.u.Tags = replaceDocTags(row.u.Tags, oldTags, newTags)
+			r.t.st.archive[id] = row
+		}
 	}
 	var ids []port.UnitID
 	for id, row := range r.t.st.units {
 		if row.u.Bank != b || row.u.DocumentID != doc {
 			continue
 		}
-		row.u.Tags, row.u.Seq = slices.Clone(tags), seq
+		row.u.Tags, row.u.Seq = replaceDocTags(row.u.Tags, oldTags, newTags), seq
 		row.u.ConsolidatedAt, row.u.ConsolidationFailedAt = nil, nil
 		row.u.UpdatedAt = r.t.now
 		r.t.st.units[id] = row
@@ -152,6 +162,17 @@ func (r unitRepo) SetDocumentTags(
 	}
 	slices.Sort(ids)
 	return ids, nil
+}
+
+// replaceDocTags returns normalize((tags − oldTags) ∪ newTags) as a new slice.
+func replaceDocTags(tags, oldTags, newTags []string) []string {
+	out := make([]string, 0, len(tags)+len(newTags))
+	for _, t := range tags {
+		if !slices.Contains(oldTags, t) {
+			out = append(out, t)
+		}
+	}
+	return domain.NormalizeTags(append(out, newTags...))
 }
 
 // AppendAudit writes one memory_audit row.

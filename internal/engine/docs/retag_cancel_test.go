@@ -38,8 +38,11 @@ func TestRetagApplyCancelledMidTx(t *testing.T) {
 	if !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("Apply cancelled mid-tx: %v, want ErrCancelled", err)
 	}
-	us, err := f.store.Read().GetUnits(ctx, testBank, []port.UnitID{"f1"})
-	if err != nil || len(us) != 1 || len(us[0].Tags) != 2 {
-		t.Errorf("f1 after a cancelled retag = %+v (%v), want its old tags", us, err)
+	us, err := f.store.Read().GetUnits(ctx, testBank, []port.UnitID{"o1"})
+	if err != nil || len(us) != 1 {
+		t.Errorf("o1 after a cancelled retag_document = %+v (%v), want it kept", us, err)
+	}
+	if cons := f.jobs(t, domain.OperationKindConsolidate); len(cons) != 0 {
+		t.Errorf("a cancelled retag_document enqueued %d consolidate jobs, want none", len(cons))
 	}
 }

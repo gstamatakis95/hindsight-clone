@@ -187,7 +187,7 @@ func TestRejectUnnormalizedTags(t *testing.T) {
 			return tx.Units().Insert(t.Context(), []domain.Unit{u})
 		},
 		"Units().SetDocumentTags": func(tx port.Tx) error {
-			_, err := tx.Units().SetDocumentTags(t.Context(), fuBank, "doc-1", bad, 1)
+			_, err := tx.Units().SetDocumentTags(t.Context(), fuBank, "doc-1", nil, bad, 1)
 			return err
 		},
 		"Documents().Upsert": func(tx port.Tx) error {
@@ -212,7 +212,7 @@ func TestRejectUnnormalizedTags(t *testing.T) {
 		if err := tx.Units().Archive(t.Context(), fuBank, u.ID, "test"); err != nil {
 			return err
 		}
-		_, err := tx.Units().SetDocumentTags(t.Context(), fuBank, "doc-1", []string{"new"}, 1)
+		_, err := tx.Units().SetDocumentTags(t.Context(), fuBank, "doc-1", nil, []string{"new"}, 1)
 		return err
 	}); err != nil {
 		t.Fatalf("Archive + SetDocumentTags: %v", err)

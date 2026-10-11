@@ -86,8 +86,8 @@ func (e *env) runRetaggedBetweenBatches(j port.Job) {
 			stale++
 		}
 	}
-	if stale != 1 {
-		e.t.Errorf("%d units with stale tags before retag_document, want 1 (only the first batch's)", stale)
+	if stale != 0 { // UpdateDocument retags the first batch's units in its own tx (decision 1900)
+		e.t.Errorf("%d units with stale tags before retag_document, want 0", stale)
 	}
 	e.applyRetag(j)
 	e.checkRetagged("after retag_document", "new")

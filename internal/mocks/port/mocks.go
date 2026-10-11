@@ -1886,7 +1886,7 @@ var _ port.UnitRepo = &UnitRepo{}
 //			RestoreFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) error {
 //				panic("mock out the Restore method")
 //			},
-//			SetDocumentTagsFunc: func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64) ([]port.UnitID, error) {
+//			SetDocumentTagsFunc: func(ctx context.Context, b port.BankRef, doc port.DocumentID, oldTags []string, newTags []string, seq int64) ([]port.UnitID, error) {
 //				panic("mock out the SetDocumentTags method")
 //			},
 //			UnconsolidatedFunc: func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey, limit int) ([]domain.Unit, error) {
@@ -1933,7 +1933,7 @@ type UnitRepo struct {
 	RestoreFunc func(ctx context.Context, b port.BankRef, id port.UnitID) error
 
 	// SetDocumentTagsFunc mocks the SetDocumentTags method.
-	SetDocumentTagsFunc func(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64) ([]port.UnitID, error)
+	SetDocumentTagsFunc func(ctx context.Context, b port.BankRef, doc port.DocumentID, oldTags []string, newTags []string, seq int64) ([]port.UnitID, error)
 
 	// UnconsolidatedFunc mocks the Unconsolidated method.
 	UnconsolidatedFunc func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey, limit int) ([]domain.Unit, error)
@@ -2035,8 +2035,10 @@ type UnitRepo struct {
 			B port.BankRef
 			// Doc is the doc argument value.
 			Doc port.DocumentID
-			// Tags is the tags argument value.
-			Tags []string
+			// OldTags is the oldTags argument value.
+			OldTags []string
+			// NewTags is the newTags argument value.
+			NewTags []string
 			// Seq is the seq argument value.
 			Seq int64
 		}
@@ -2442,27 +2444,29 @@ func (mock *UnitRepo) RestoreCalls() []struct {
 }
 
 // SetDocumentTags calls SetDocumentTagsFunc.
-func (mock *UnitRepo) SetDocumentTags(ctx context.Context, b port.BankRef, doc port.DocumentID, tags []string, seq int64) ([]port.UnitID, error) {
+func (mock *UnitRepo) SetDocumentTags(ctx context.Context, b port.BankRef, doc port.DocumentID, oldTags []string, newTags []string, seq int64) ([]port.UnitID, error) {
 	if mock.SetDocumentTagsFunc == nil {
 		panic("UnitRepo.SetDocumentTagsFunc: method is nil but UnitRepo.SetDocumentTags was just called")
 	}
 	callInfo := struct {
-		Ctx  context.Context
-		B    port.BankRef
-		Doc  port.DocumentID
-		Tags []string
-		Seq  int64
+		Ctx     context.Context
+		B       port.BankRef
+		Doc     port.DocumentID
+		OldTags []string
+		NewTags []string
+		Seq     int64
 	}{
-		Ctx:  ctx,
-		B:    b,
-		Doc:  doc,
-		Tags: tags,
-		Seq:  seq,
+		Ctx:     ctx,
+		B:       b,
+		Doc:     doc,
+		OldTags: oldTags,
+		NewTags: newTags,
+		Seq:     seq,
 	}
 	mock.lockSetDocumentTags.Lock()
 	mock.calls.SetDocumentTags = append(mock.calls.SetDocumentTags, callInfo)
 	mock.lockSetDocumentTags.Unlock()
-	return mock.SetDocumentTagsFunc(ctx, b, doc, tags, seq)
+	return mock.SetDocumentTagsFunc(ctx, b, doc, oldTags, newTags, seq)
 }
 
 // SetDocumentTagsCalls gets all the calls that were made to SetDocumentTags.
@@ -2470,18 +2474,20 @@ func (mock *UnitRepo) SetDocumentTags(ctx context.Context, b port.BankRef, doc p
 //
 //	len(mockedUnitRepo.SetDocumentTagsCalls())
 func (mock *UnitRepo) SetDocumentTagsCalls() []struct {
-	Ctx  context.Context
-	B    port.BankRef
-	Doc  port.DocumentID
-	Tags []string
-	Seq  int64
+	Ctx     context.Context
+	B       port.BankRef
+	Doc     port.DocumentID
+	OldTags []string
+	NewTags []string
+	Seq     int64
 } {
 	var calls []struct {
-		Ctx  context.Context
-		B    port.BankRef
-		Doc  port.DocumentID
-		Tags []string
-		Seq  int64
+		Ctx     context.Context
+		B       port.BankRef
+		Doc     port.DocumentID
+		OldTags []string
+		NewTags []string
+		Seq     int64
 	}
 	mock.lockSetDocumentTags.RLock()
 	calls = mock.calls.SetDocumentTags

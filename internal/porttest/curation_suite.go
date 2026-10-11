@@ -16,6 +16,7 @@ func curationCases() []storeCase {
 	return []storeCase{
 		{"UnitsUpdate", testUnitUpdate},
 		{"UnitsSetDocumentTags", testSetDocumentTags},
+		{"UnitsSetDocumentTagsKeepsExtraTags", testSetDocumentTagsKeepsExtraTags},
 		{"UpdateAndRetagResetConsolidation", testResetConsolidation},
 		{"DirectivesUpsertListDelete", testDirectives},
 		{"LinksCountDirtyClearDirty", testLinksDirty},
@@ -92,7 +93,7 @@ func testSetDocumentTags(t *testing.T, s port.Store) {
 		if seq, err = tx.Seq(t.Context(), bankA); err != nil {
 			return err
 		}
-		ids, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", tags, seq)
+		ids, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", []string{"old"}, tags, seq)
 		return err
 	})
 	wantSet(t, "SetDocumentTags ids", ids, []port.UnitID{u1.ID, u2.ID})
@@ -109,6 +110,68 @@ func testSetDocumentTags(t *testing.T, s port.Store) {
 				want.tags, want.seq)
 		}
 	}
+}
+
+// testSetDocumentTagsKeepsExtraTags (CCR WP-19-1): SetDocumentTags replaces only the document-derived tags.
+// A unit with doc tags [a] plus label tags retagged [a]→[b] ends with [b] plus the same label tags, live and
+// archived, in domain.NormalizeTags (byte) order; the live unit's seq is stamped and both consolidation
+// stamps are cleared; the other tenant's doc-1 is untouched; unnormalized old tags are INVALID_ARGUMENT.
+func testSetDocumentTagsKeepsExtraTags(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA, bankOtherTenant)
+	upsertDocs(t, s, bankA, "doc-1")
+	upsertDocs(t, s, bankOtherTenant, "doc-1")
+	labels := []string{"topic:x", "topic-y", "topic_z", "a.b"} // punctuation sorts differently outside "C"
+	before := domain.NormalizeTags(append([]string{"a"}, labels...))
+	live, arch, theirs := embeddedFact(bankA, "live"), embeddedFact(bankA, "archived"), fact(bankOtherTenant, "o")
+	for _, u := range []*domain.Unit{&live, &arch, &theirs} {
+		u.DocumentID, u.Tags = "doc-1", before
+	}
+	insertUnits(t, s, live, arch)
+	theirSeq := insertUnits(t, s, theirs)
+	archive(t, s, arch.ID)
+	inTx(t, s, func(tx port.Tx) error {
+		if err := tx.Units().MarkConsolidated(t.Context(), []port.UnitID{live.ID}, day(3)); err != nil {
+			return err
+		}
+		return tx.Units().MarkConsolidationFailed(t.Context(), []port.UnitID{live.ID}, day(3))
+	})
+	var (
+		seq int64
+		ids []port.UnitID
+	)
+	inTx(t, s, func(tx port.Tx) error {
+		var err error
+		if seq, err = tx.Seq(t.Context(), bankA); err != nil {
+			return err
+		}
+		ids, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", []string{"a"}, []string{"b"}, seq)
+		return err
+	})
+	wantSet(t, "SetDocumentTags ids (live only)", ids, []port.UnitID{live.ID})
+	want := domain.NormalizeTags(append([]string{"b"}, labels...))
+	if got := getUnits(t, s, bankA, live.ID); len(got) != 1 || !slices.Equal(got[0].Tags, want) || got[0].Seq != seq {
+		t.Errorf("live unit after retag [a]→[b] = %+v, want tags %v seq %d", got, want, seq)
+	}
+	wantSeq(t, "Unconsolidated after the retag", unitIDs(unconsolidated(t, s, bankA, nil, 10)),
+		[]port.UnitID{live.ID})
+	inTx(t, s, func(tx port.Tx) error {
+		if _, err := tx.Seq(t.Context(), bankA); err != nil {
+			return err
+		}
+		return tx.Units().Restore(t.Context(), bankA, arch.ID)
+	})
+	if got := getUnits(t, s, bankA, arch.ID); len(got) != 1 || !slices.Equal(got[0].Tags, want) {
+		t.Errorf("archived unit after retag [a]→[b] and Restore = %+v, want tags %v", got, want)
+	}
+	if got := getUnits(t, s, bankOtherTenant, theirs.ID); len(got) != 1 || !slices.Equal(got[0].Tags, before) ||
+		got[0].Seq != theirSeq {
+		t.Errorf("other tenant's unit after bank A's retag = %+v, want tags %v seq %d", got, before, theirSeq)
+	}
+	err := txErr(t, s, func(tx port.Tx) error {
+		_, err := tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", []string{"B", "a"}, []string{"b"}, seq)
+		return err
+	})
+	wantErrIs(t, "SetDocumentTags(unnormalized old tags)", err, domain.ErrInvalidArgument)
 }
 
 // testResetConsolidation: Update and SetDocumentTags clear consolidated_at and consolidation_failed_at, so the
@@ -140,7 +203,7 @@ func testResetConsolidation(t *testing.T, s port.Store) {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", []string{"x"}, seq)
+		_, err = tx.Units().SetDocumentTags(t.Context(), bankA, "doc-1", nil, []string{"x"}, seq)
 		return err
 	})
 	wantSeq(t, "Unconsolidated after SetDocumentTags", unitIDs(unconsolidated(t, s, bankA, nil, 10)),

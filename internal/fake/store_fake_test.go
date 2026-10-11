@@ -368,7 +368,7 @@ func (f fixture) myBankWrites(ent port.EntityID, unit port.UnitID) {
 		if _, err := tx.Seq(ctx, mine); err != nil {
 			return err
 		}
-		if ids, err := tx.Units().SetDocumentTags(ctx, mine, "doc-1", []string{"x"}, 1); err != nil || len(ids) != 0 {
+		if ids, err := tx.Units().SetDocumentTags(ctx, mine, "doc-1", nil, []string{"x"}, 1); err != nil || len(ids) != 0 {
 			t.Errorf("SetDocumentTags(mine) = %v, %v; want nothing", ids, err)
 		}
 		if ids, err := tx.Units().DeleteByDocument(ctx, mine, "doc-1"); err != nil || len(ids) != 0 {

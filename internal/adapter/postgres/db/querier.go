@@ -336,9 +336,12 @@ type Querier interface {
 	UnitRestoreLinks(ctx context.Context, arg UnitRestoreLinksParams) error
 	// UnitScopeUpsert records an observation scope of a bank; an existing scope only gets a new updated_at.
 	UnitScopeUpsert(ctx context.Context, arg UnitScopeUpsertParams) error
-	// UnitSetArchivedDocumentTags rewrites the tags of a document's archived units.
+	// UnitSetArchivedDocumentTags replaces the document-derived tags of a document's archived units, like
+	// UnitSetDocumentTags.
 	UnitSetArchivedDocumentTags(ctx context.Context, arg UnitSetArchivedDocumentTagsParams) error
-	// UnitSetDocumentTags rewrites the tags and seq of a document's live units, clears their consolidation stamps and returns their ids.
+	// UnitSetDocumentTags replaces the document-derived tags of a document's live units with
+	// (tags - old_tags) + new_tags (deduplicated, byte-sorted like domain.NormalizeTags), sets seq, clears their
+	// consolidation stamps and returns their ids.
 	UnitSetDocumentTags(ctx context.Context, arg UnitSetDocumentTagsParams) ([]uuid.UUID, error)
 	// UnitTakeArchived deletes a bank's archived unit and returns its row.
 	UnitTakeArchived(ctx context.Context, arg UnitTakeArchivedParams) (MemoryUnitsArchive, error)
