@@ -298,3 +298,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   WP-17 fix-up launched: adopt tag-only changes instead of superseding; add 3 gateway overflow markers.
   Accepted gap: the ChangeDetector uses the default 0.45 fuzzy floor (needs a ConfigResolver; deferred to avoid
   a constructor change under WP-14b).
+- 2026-10-11 WP-17 merged (tag-only changes adopted by a running retain/reprocess; 3 overflow markers). Gates pass. WP-14b must rebase; a sync Retain overlapping a tag-only UpdateDocument now succeeds.
