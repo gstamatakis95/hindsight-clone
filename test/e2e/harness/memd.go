@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -65,13 +64,9 @@ const (
 // Slots is every bindable slot (domain.ModelSlot values); the harness binds each to gatewayemu.ModelFor(slot).
 var Slots = gatewayemu.Slots
 
-// placeholderMarker is what the cmd/memd placeholder prints before exiting 1.
-const placeholderMarker = "not implemented"
-
 // Timeouts of memd processes.
 const (
 	buildTimeout = 5 * time.Minute
-	probeTimeout = 10 * time.Second
 	readyTimeout = 90 * time.Second
 	stopTimeout  = 15 * time.Second
 	// workerGrace is how long a worker must stay up to count as started (it serves no health endpoint).
@@ -86,7 +81,7 @@ var (
 )
 
 // BuildMemd builds ./cmd/memd once per test binary and returns its path. It skips the test, with the reason,
-// when the binary can't be built or is still the placeholder that only prints "not implemented".
+// when the binary can't be built.
 func BuildMemd(t testing.TB) string {
 	t.Helper()
 	root := RepoRoot(t)
@@ -100,7 +95,7 @@ func BuildMemd(t testing.TB) string {
 	return buildBin
 }
 
-// build compiles memd into a temporary directory and probes it. A non-empty skip says why e2e can't run memd.
+// build compiles memd into a temporary directory. A non-empty skip says why e2e can't run memd.
 func build(root string) (bin, skip string, err error) {
 	dir, err := os.MkdirTemp("", "memd-e2e-bin-")
 	if err != nil {
@@ -113,18 +108,6 @@ func build(root string) (bin, skip string, err error) {
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Sprintf("harness: memd can't be built: %v\n%s", err, out), nil
-	}
-	pctx, pcancel := context.WithTimeout(context.Background(), probeTimeout)
-	defer pcancel()
-	// The placeholder exits at once whatever the arguments; a real memd given no mode prints usage and exits.
-	// The scrubbed environment keeps a real memd from reaching a developer's database through MEMD_*.
-	probe := exec.CommandContext(pctx, bin) //nolint:gosec // bin is the binary just built
-	probe.Env = []string{
-		"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), EnvDSN + "=postgres://probe@127.0.0.1:1/none",
-	}
-	out, _ := probe.CombinedOutput()
-	if bytes.Contains(out, []byte(placeholderMarker)) {
-		return "", "harness: cmd/memd is a placeholder: " + strings.TrimSpace(string(out)), nil
 	}
 	return bin, "", nil
 }
@@ -208,7 +191,7 @@ type Proc struct {
 
 // StartMemd starts memd from bin against the stack and waits until it is ready: the gRPC health check
 // SERVING for api and all, still running after a short grace for worker. The process is killed with the
-// test. It skips the test when memd exits early as the placeholder, and fails it on any other early exit.
+// test. It fails the test when memd exits early.
 func (s *Stack) StartMemd(t testing.TB, bin string, o MemdOptions) *Proc {
 	t.Helper()
 	if o.Mode == "" {
@@ -272,13 +255,10 @@ func (p *Proc) start() {
 	}
 }
 
-// earlyExit skips the test when memd is the placeholder, and fails it otherwise.
+// earlyExit fails the test with memd's log.
 func (p *Proc) earlyExit(err error) {
 	p.t.Helper()
 	logs := p.Logs()
-	if strings.Contains(logs, placeholderMarker) {
-		p.t.Skipf("harness: cmd/memd is a placeholder: %s", strings.TrimSpace(logs))
-	}
 	p.t.Fatalf("harness: memd %s not ready: %v\n--- memd log ---\n%s", p.Mode, err, logs)
 }
 

@@ -169,6 +169,17 @@ says so.
 - **What:** the loop requires *some* retrieval first, not Hindsight's mental models → observations → recall
   order; `directive_compliance` is not checked.
 
+## Out of scope
+
+memd matches Hindsight's memory engine except for these, which it does not provide:
+
+- Hard delete of a single memory or document (invalidate a memory, or delete the bank).
+- Bank aliases and clone; an export / import of memories (templates carry config, directives and mental-model
+  specs, not memories).
+- An append update mode for documents, client-supplied operation ids, and provider batch APIs for extraction.
+- Authentication, per-tenant rate limits, and security or PII scanning.
+- Images, audio, files and multilingual handling; agent tooling such as an ops CLI, mounts or an MCP server.
+
 ## Platform
 
 - **Prompt versions are not recorded** on operations or calls, although each prompt has a computable version

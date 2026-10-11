@@ -1,6 +1,6 @@
 // Package fake provides scripted, deterministic stand-ins for the AI boundary (ai.LLM, ai.Embedder, ai.Reranker) and
-// for blob.Store, for engine, worker and cmd/memd tests. There is no fake store.DB: code that touches the store is
-// tested against real Postgres (internal/store/postgres/pgtest). The test clock is clock.Manual.
+// for blob.Store, for service, library, job and cmd/memd tests. There is no fake store.DB: code that touches the store
+// is tested against real Postgres (internal/store/postgres/pgtest). The test clock is clock.Manual.
 //
 // # Where it sits
 //

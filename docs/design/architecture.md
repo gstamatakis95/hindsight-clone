@@ -17,7 +17,9 @@ Postgres and object storage, so processes are disposable and scale by replica co
 | `memd all` | Both in one process, under one error group: if either fails, both stop. |
 
 In production `memd api` and `memd worker` run as separate deployments over the same Postgres, bucket and
-server config file. Schema migrations are a separate step (`alembic upgrade head`, see
+server config file. Only the api talks to clients and only the worker runs the LLM-heavy background jobs, so the
+two scale on different signals: the api on CPU or in-flight RPCs, the worker on pending jobs (the
+`memd.queue.depth` metric). Schema migrations are a separate step (`alembic upgrade head`, see
 [storage.md](storage.md#migrations)) that runs before memd; memd never runs DDL.
 
 - **Startup.** memd reads its environment and flags (deployment, infrastructure and secrets only) and the server
@@ -32,6 +34,29 @@ server config file. Schema migrations are a separate step (`alembic upgrade head
 - **Shutdown.** SIGINT or SIGTERM stops the api with a 20 s grace for in-flight RPCs. The worker stops claiming,
   gives running handlers 20 s to finish, then cancels the rest and settles them (up to 30 s more). A Kubernetes
   worker therefore needs `terminationGracePeriodSeconds` of at least 50 s (60 s recommended).
+
+## Design decisions
+
+The choices the rest of the design builds on:
+
+- **No message broker.** Jobs are Postgres rows claimed with `FOR UPDATE SKIP LOCKED` (the design Hindsight uses
+  for its `async_operations` table), inserted in the same transaction as their cause, and serialized by the claim's
+  serial-key predicate. There is no Kafka, Redis or separate queue to keep consistent with the database.
+- **Tenancy is a column.** Every table carries `tenant_id` and every store call takes `(tenant, bank)`; Hindsight
+  uses a schema per tenant instead. Authentication is out of scope: the tenant comes from a header an auth layer in
+  front of memd can set.
+- **One embedding model per deployment.** nomic-embed-text-v1.5 at 768 dimensions: one `vector(768)` column and one
+  shared HNSW index for all banks. Per-bank partial indexes are not built; add them if one shared index gets slow.
+- **Keyword search is BM25 through pg_search.** Hindsight supports it beside vchord_bm25 and pg_textsearch; its
+  default is native `ts_rank_cd`.
+- **The graph is plain tables and recursive CTEs**, no graph extension, behind a boundary that lets a graph database
+  serve the graph arm later ([Graph boundary](#graph-boundary)).
+- **Coalescing:** automatic jobs dedupe on (bank, kind, serial key); jobs carrying overrides are never merged.
+- **Reflect is strict:** a failed retrieval dependency fails the call rather than answering from partial evidence.
+- **Mental models refresh agentically by default** (Hindsight's behaviour), with a cheaper single-shot strategy per
+  bank, model or call. **A model paused by a failed refresh stays paused** until a manual refresh succeeds.
+- **No hard delete of a single memory.** Invalidate archives one reversibly; upsert and reprocess replace a
+  document's memories; DeleteBank removes everything.
 
 ## Layering
 

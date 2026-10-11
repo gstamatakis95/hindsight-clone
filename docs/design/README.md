@@ -17,6 +17,10 @@ shared conventions); the root [README](../../README.md) is the user guide.
 | [known-limitations.md](known-limitations.md) | Accepted gaps, their impact and workarounds |
 | [rules-to-tests.md](rules-to-tests.md) | Every behavioural rule mapped to the tests that assert it |
 
+Related: [eval/README.md](../../eval/README.md) covers the benchmarks (LoCoMo, LongMemEval, golden fixtures; how a
+run works, the LoCoMo methodology and how to add a benchmark), and [examples/README.md](../../examples/README.md)
+the runnable client scenarios.
+
 Conventions: present tense; a section names the package that implements it; defaults are the built-in ones unless
 the server config file overrides them. When behaviour changes, update the design section, its row in
 rules-to-tests.md and the tests together.
