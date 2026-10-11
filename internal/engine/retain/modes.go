@@ -43,29 +43,29 @@ type strategy struct {
 
 var _ ExtractionStrategy = (*strategy)(nil)
 
-// concise extracts compact facts (the default mode).
-func concise() ExtractionStrategy {
+// conciseMode extracts compact facts (the default mode).
+func conciseMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeConcise, tmpl: prompts.ExtractConcise, llm: true}
 }
 
-// verbose extracts detailed facts with every dimension.
-func verbose() ExtractionStrategy {
+// verboseMode extracts detailed facts with every dimension.
+func verboseMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeVerbose, tmpl: prompts.ExtractVerbose, llm: true}
 }
 
-// verbatim keeps each chunk's text as one fact and extracts only its metadata.
-func verbatim() ExtractionStrategy {
+// verbatimMode keeps each chunk's text as one fact and extracts only its metadata.
+func verbatimMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeVerbatim, tmpl: prompts.ExtractVerbatim, llm: true, verbatim: true}
 }
 
-// chunks stores each chunk as one fact with no LLM call.
-func chunks() ExtractionStrategy {
+// chunksMode stores each chunk as one fact with no LLM call.
+func chunksMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeChunks, verbatim: true}
 }
 
-// custom extracts with BankConfig.CustomExtractionPrompt as the guidelines; a blank prompt falls back to the
+// customMode extracts with BankConfig.CustomExtractionPrompt as the guidelines; a blank prompt falls back to the
 // concise template.
-func custom() ExtractionStrategy {
+func customMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeCustom, tmpl: prompts.ExtractCustom, llm: true}
 }
 

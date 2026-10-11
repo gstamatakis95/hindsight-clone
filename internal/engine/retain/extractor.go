@@ -60,7 +60,7 @@ var _ Extractor = (*extractor)(nil)
 // NewExtractor returns the Extractor. modes are the strategies it can run; none = all five built-in ones.
 func NewExtractor(llm port.LLM, router port.ModelRouter, modes ...ExtractionStrategy) Extractor {
 	if len(modes) == 0 {
-		modes = []ExtractionStrategy{concise(), verbose(), verbatim(), chunks(), custom()}
+		modes = []ExtractionStrategy{conciseMode(), verboseMode(), verbatimMode(), chunksMode(), customMode()}
 	}
 	m := make(map[domain.ExtractionMode]ExtractionStrategy, len(modes))
 	for _, s := range modes {
