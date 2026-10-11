@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"reflect"
 	"strings"
@@ -20,7 +21,10 @@ import (
 // masked list or map with no elements becomes a non-nil empty one (an explicit clear). An absent or empty
 // mask means every populated leaf of the request: set singular messages are recursed into (a set but empty
 // one yields no path), and lists, maps and Structs are leaves, so a sibling the request leaves unset is
-// never touched.
+// never touched. One exception (SPEC "Model routing", decision 604): with an implicit mask, models (and a
+// spec's overrides.models) merge per slot into the stored bindings, so binding one slot never drops
+// another; an explicit models path still replaces the whole list, which is how a client replaces or
+// clears it.
 
 // maskPaths validates mask against msg's type and returns its normalized paths; an empty mask yields
 // msg's populated leaf paths. Paths in immutable are rejected.
@@ -75,8 +79,12 @@ func dropImmutable(paths, immutable []string) []string {
 	return out
 }
 
-// configPatch builds the ConfigPatch of an Update*Config request.
-func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask) (ConfigPatch, error) {
+// configPatch builds the ConfigPatch of an Update*Config request. check (nil = none) validates the
+// patched level inside the patch and, with an implicit mask, the request level first: the per-slot merge
+// would otherwise hide a slot the request binds twice.
+func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask, check func(domain.BankConfig) error) (
+	ConfigPatch, error,
+) {
 	if patch == nil {
 		patch = &pb.BankConfig{}
 	}
@@ -89,13 +97,71 @@ func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask) (ConfigPatch
 	if d.err != nil {
 		return nil, d.err
 	}
+	paths, merge := splitModels(paths, mask, "models")
+	if merge && check != nil {
+		if err := check(src); err != nil {
+			return nil, err
+		}
+	}
 	return func(cur domain.BankConfig) (domain.BankConfig, error) {
 		out := cur
 		if err := applyPaths(&out, &src, paths); err != nil {
 			return domain.BankConfig{}, err
 		}
+		if merge {
+			if err := mergeModelsAt(&out, &src, "models"); err != nil {
+				return domain.BankConfig{}, err
+			}
+		}
+		if check != nil {
+			if err := check(out); err != nil {
+				return domain.BankConfig{}, err
+			}
+		}
 		return out, nil
 	}, nil
+}
+
+// splitModels removes modelsPath from an implicit mask's paths and reports whether it was there, so the
+// caller merges it per slot instead; an explicit mask's paths come back unchanged (a masked list
+// replaces).
+func splitModels(paths []string, mask *fieldmaskpb.FieldMask, modelsPath string) ([]string, bool) {
+	if len(mask.GetPaths()) != 0 {
+		return paths, false
+	}
+	rest := make([]string, 0, len(paths))
+	found := false
+	for _, p := range paths {
+		if p == modelsPath {
+			found = true
+			continue
+		}
+		rest = append(rest, p)
+	}
+	return rest, found
+}
+
+// mergeModelsAt merges the slot bindings at path in src into those at path in dst, per slot (the
+// config.Merge rule: src's binding of a slot replaces dst's, dst's other slots are kept). Pointer structs
+// along the path are copied before the write, as in applyPaths, and the result shares no memory with
+// either input.
+func mergeModelsAt[T any](dst, src *T, path string) error {
+	val, err := fieldByPath(reflect.ValueOf(src).Elem(), path, false)
+	if err != nil || !val.IsValid() {
+		return err
+	}
+	target, err := fieldByPath(reflect.ValueOf(dst).Elem(), path, true)
+	if err != nil {
+		return err
+	}
+	cur, okCur := target.Interface().([]domain.SlotBinding)
+	add, okAdd := val.Interface().([]domain.SlotBinding)
+	if !okCur || !okAdd {
+		return fmt.Errorf("%w: path %q is not a model list", domain.ErrInvalidArgument, path)
+	}
+	merged := config.Merge(domain.BankConfig{Models: cur}, domain.BankConfig{Models: add}).Models
+	target.Set(reflect.ValueOf(merged))
+	return nil
 }
 
 // resetPatch builds the ConfigPatch of ResetBankConfig: the paths go back to unset (inherit); no paths =
@@ -117,8 +183,12 @@ func resetPatch(paths []string) (ConfigPatch, error) {
 	}, nil
 }
 
-// specPatch builds the SpecPatch of UpdateMentalModel; the id cannot be changed.
-func specPatch(patch *pb.MentalModelSpec, mask *fieldmaskpb.FieldMask) (SpecPatch, error) {
+// specPatch builds the SpecPatch of UpdateMentalModel; the id cannot be changed. With an implicit mask,
+// overrides.models merges per slot, and check (nil = none) first validates the request's overrides (the
+// caller validates the patched spec's).
+func specPatch(patch *pb.MentalModelSpec, mask *fieldmaskpb.FieldMask, check func(domain.BankConfig) error) (
+	SpecPatch, error,
+) {
 	if patch == nil {
 		patch = &pb.MentalModelSpec{}
 	}
@@ -131,10 +201,21 @@ func specPatch(patch *pb.MentalModelSpec, mask *fieldmaskpb.FieldMask) (SpecPatc
 	if d.err != nil {
 		return nil, d.err
 	}
+	paths, merge := splitModels(paths, mask, "overrides.models")
+	if merge && check != nil && src.Overrides != nil {
+		if err := check(*src.Overrides); err != nil {
+			return nil, err
+		}
+	}
 	return func(cur domain.MentalModelSpec) (domain.MentalModelSpec, error) {
 		out := cur
 		if err := applyPaths(&out, &src, paths); err != nil {
 			return domain.MentalModelSpec{}, err
+		}
+		if merge {
+			if err := mergeModelsAt(&out, &src, "overrides.models"); err != nil {
+				return domain.MentalModelSpec{}, err
+			}
 		}
 		return out, nil
 	}, nil

@@ -78,7 +78,7 @@ func TestFieldMaskConfigPatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			patch, err := configPatch(tt.patch, tt.mask)
+			patch, err := configPatch(tt.patch, tt.mask, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -104,11 +104,11 @@ func TestFieldMaskInvalid(t *testing.T) {
 	for _, m := range []*fieldmaskpb.FieldMask{
 		mask("nope"), mask("recall.nope"), mask("models.slot"), mask("retain_mission.x"),
 	} {
-		if _, err := configPatch(&pb.BankConfig{}, m); !errors.Is(err, domain.ErrInvalidArgument) {
+		if _, err := configPatch(&pb.BankConfig{}, m, nil); !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("mask %v: err = %v, want ErrInvalidArgument", m.GetPaths(), err)
 		}
 	}
-	if _, err := specPatch(&pb.MentalModelSpec{Id: "x"}, mask("id")); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := specPatch(&pb.MentalModelSpec{Id: "x"}, mask("id"), nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("id path: err = %v, want ErrInvalidArgument", err)
 	}
 	if _, err := resetPatch([]string{"bogus"}); !errors.Is(err, domain.ErrInvalidArgument) {
@@ -146,7 +146,7 @@ func TestFieldMaskReset(t *testing.T) {
 func TestFieldMaskSpecPatch(t *testing.T) {
 	patch, err := specPatch(&pb.MentalModelSpec{
 		Name: "new", Trigger: &pb.RefreshTrigger{RefreshCron: "0 * * * *"},
-	}, mask("name", "trigger.refresh_cron", "tags"))
+	}, mask("name", "trigger.refresh_cron", "tags"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestFieldMaskSpecPatch(t *testing.T) {
 // TestFieldMaskImpliedLeaves checks a request with no mask patches only its populated leaves: sibling
 // fields of a set nested message survive, and a set but empty nested message changes nothing.
 func TestFieldMaskImpliedLeaves(t *testing.T) {
-	patch, err := configPatch(&pb.BankConfig{Recall: &pb.RecallConfig{Rerank: ptr(false)}}, nil)
+	patch, err := configPatch(&pb.BankConfig{Recall: &pb.RecallConfig{Rerank: ptr(false)}}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,14 +180,14 @@ func TestFieldMaskImpliedLeaves(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got  %+v\nwant %+v", got.Recall, want.Recall)
 	}
-	empty, err := configPatch(&pb.BankConfig{Recall: &pb.RecallConfig{}}, nil)
+	empty, err := configPatch(&pb.BankConfig{Recall: &pb.RecallConfig{}}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := empty(baseConfig()); !reflect.DeepEqual(got, baseConfig()) {
 		t.Fatalf("empty nested message changed the config: %+v", got)
 	}
-	spec, err := specPatch(&pb.MentalModelSpec{Trigger: &pb.RefreshTrigger{RefreshCron: "0 * * * *"}}, nil)
+	spec, err := specPatch(&pb.MentalModelSpec{Trigger: &pb.RefreshTrigger{RefreshCron: "0 * * * *"}}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

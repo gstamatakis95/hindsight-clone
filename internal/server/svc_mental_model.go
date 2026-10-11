@@ -125,7 +125,7 @@ func (s *mentalModelServer) UpdateMentalModel(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	patch, err := specPatch(req.GetSpec(), req.GetUpdateMask())
+	patch, err := specPatch(req.GetSpec(), req.GetUpdateMask(), s.d.checker(config.RPCMentalModelSpec))
 	if err != nil {
 		return nil, toStatus(err)
 	}
