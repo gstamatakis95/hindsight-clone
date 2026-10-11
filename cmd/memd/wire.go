@@ -36,12 +36,23 @@ import (
 // ports the engines consume, builds every engine once, and hands them to the gRPC server (api mode) and the
 // job handlers and maintenance tick (worker mode).
 
-// adapters are the concrete adapters; everything else sees them only through ports.
-type adapters struct {
-	pool  *pgxpool.Pool
-	store *postgres.Store
-	blob  *s3.Blob
-	gw    *gateway.Client
+// modelGateway is the AI gateway as the engines see it: one client serves all three model ports.
+type modelGateway interface {
+	port.LLM
+	port.Embedder
+	port.Reranker
+}
+
+// ports are the adapters narrowed to the interfaces the engines, handlers and probes consume. openAdapters
+// is the only place the concrete adapter types appear; tests build ports from internal/fake.
+type ports struct {
+	store    port.Store
+	claimer  port.Claimer
+	blob     port.Blob
+	gw       modelGateway
+	db       pinger
+	stranded worker.StrandedFactSource
+	batches  worker.BatchSettler
 }
 
 // deps is everything the two modes run.
@@ -59,11 +70,11 @@ type deps struct {
 // buildDeps connects the adapters, checks the gateway's embedding dimension and builds every engine. The
 // returned closer releases the Postgres pool.
 func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (*deps, func(), error) {
-	a, closer, err := openAdapters(ctx, cfg)
+	p, closer, err := openAdapters(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := checkEmbedding(ctx, a.gw); err != nil {
+	if err := checkEmbedding(ctx, p.gw); err != nil {
 		closer()
 		return nil, nil, err
 	}
@@ -77,26 +88,26 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger) (*deps, func()
 		closer()
 		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
-	d := wireEngines(cfg, a, tok, serverCfg, systemClock{}, log)
+	d := wireEngines(cfg, p, tok, serverCfg, systemClock{}, log)
 	return d, closer, nil
 }
 
-// openAdapters opens the Postgres pool, the blob store and the gateway client.
-func openAdapters(ctx context.Context, cfg Config) (adapters, func(), error) {
+// openAdapters opens the Postgres pool, the blob store and the gateway client, and narrows them to ports.
+func openAdapters(ctx context.Context, cfg Config) (ports, func(), error) {
 	pcfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
-		return adapters{}, nil, fmt.Errorf("memd: %s: %w", envDSN, err)
+		return ports{}, nil, fmt.Errorf("memd: %s: %w", envDSN, err)
 	}
 	pcfg.MaxConns = int32(poolSize(cfg)) //nolint:gosec // poolSize is small and positive
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
-		return adapters{}, nil, fmt.Errorf("memd: postgres: %w", err)
+		return ports{}, nil, fmt.Errorf("memd: postgres: %w", err)
 	}
 	pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := pool.Ping(pctx); err != nil {
 		pool.Close()
-		return adapters{}, nil, fmt.Errorf("memd: postgres: %w", err)
+		return ports{}, nil, fmt.Errorf("memd: postgres: %w", err)
 	}
 	blob, err := s3.NewBlob(ctx, s3.Config{
 		Endpoint: cfg.S3Endpoint, Region: cfg.S3Region, Bucket: cfg.S3Bucket, AccessKeyID: cfg.S3AccessKey,
@@ -104,13 +115,16 @@ func openAdapters(ctx context.Context, cfg Config) (adapters, func(), error) {
 	})
 	if err != nil {
 		pool.Close()
-		return adapters{}, nil, fmt.Errorf("memd: s3: %w", err)
+		return ports{}, nil, fmt.Errorf("memd: s3: %w", err)
 	}
 	gw := gateway.NewClient(gateway.Config{
 		BaseURL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey, EmbedModel: cfg.EmbedModel,
 		MaxConcurrent: cfg.GatewayMaxConcurrent, Timeout: cfg.GatewayTimeout,
 	}, nil)
-	return adapters{pool: pool, store: postgres.New(pool), blob: blob, gw: gw}, pool.Close, nil
+	store := postgres.New(pool)
+	return ports{
+		store: store, claimer: store, blob: blob, gw: gw, db: pool, stranded: store, batches: store,
+	}, pool.Close, nil
 }
 
 // poolSize is the Postgres pool size: the configured one, else enough for every worker slot (each may hold a
@@ -159,25 +173,23 @@ type core struct {
 
 // wireEngines builds every engine over the adapters, narrowed to ports.
 func wireEngines(
-	cfg Config, a adapters, tok *tokenCounter, serverCfg domain.BankConfig, clock port.Clock, log *slog.Logger,
+	cfg Config, p ports, tok *tokenCounter, serverCfg domain.BankConfig, clock port.Clock, log *slog.Logger,
 ) *deps {
-	var store port.Store = a.store
-	var claimer port.Claimer = a.store
-	var blob port.Blob = a.blob
-	c := wireCore(store, claimer, blob, a.gw, tok, serverCfg, clock)
-	mm := wireMentalModels(c, a.gw)
+	store, claimer := p.store, p.claimer
+	c := wireCore(p, tok, serverCfg, clock)
+	mm := wireMentalModels(c, p.gw)
 	d := &deps{cfg: cfg, log: log, claimer: claimer, clock: clock, pending: worker.NewPendingChecker(store, clock)}
-	d.server = wireServer(cfg, c, mm, a, tok)
+	d.server = wireServer(cfg, c, mm, p)
 	d.handlers = worker.Handlers{
 		Retainer: c.retainer,
 		Consolidator: consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
-			Store: store, Config: c.resolver, Router: c.router, LLM: a.gw, Embedder: a.gw, Clock: clock,
+			Store: store, Config: c.resolver, Router: c.router, LLM: p.gw, Embedder: p.gw, Clock: clock,
 			Scopes: c.scopes, Tokens: tok,
 			Checkpoint: func(j port.Job) consolidate.Checkpointer { return worker.NewCheckpoint(claimer, j.ID) },
 		}),
 		Refresher: mm.runner,
 		Deleter:   d.server.Deleter,
-		Rederiver: curate.NewRederiver(curate.RederiverDeps{Store: store, Embedder: a.gw, Linker: c.linker}),
+		Rederiver: curate.NewRederiver(curate.RederiverDeps{Store: store, Embedder: p.gw, Linker: c.linker}),
 		Retagger:  d.server.Retagger,
 		Graph:     maintenance.NewGraphMaintainer(store, c.linker, clock),
 		Store:     store,
@@ -186,17 +198,15 @@ func wireEngines(
 	d.maintenance = worker.MaintenanceDeps{
 		Claimer: claimer, Store: store, Clock: clock, Consolidation: c.read, CronRefresh: mm.triggers,
 		RefreshFailures: mentalmodel.NewRefreshFailureReconciler(c.read, store, c.resolver, clock),
-		Stranded:        a.store, Batches: a.store, Interval: cfg.MaintenanceInterval, StaleAfter: cfg.StaleAfter,
+		Stranded:        p.stranded, Batches: p.batches, Interval: cfg.MaintenanceInterval, StaleAfter: cfg.StaleAfter,
 		Logger: log,
 	}
 	return d
 }
 
 // wireCore builds config resolution, routing, retain, recall and reflect.
-func wireCore(
-	store port.Store, claimer port.Claimer, blob port.Blob, gw *gateway.Client, tok *tokenCounter,
-	serverCfg domain.BankConfig, clock port.Clock,
-) core {
+func wireCore(p ports, tok *tokenCounter, serverCfg domain.BankConfig, clock port.Clock) core {
+	store, claimer, blob, gw := p.store, p.claimer, p.blob, p.gw
 	c := core{store: store, read: store.Read(), clock: clock, router: routing.NewRouter()}
 	c.matcher = consolidate.NewStrategyMatcher(c.read)
 	c.resolver = config.NewResolver(store, c.matcher, serverCfg)
@@ -233,7 +243,7 @@ type mentalModels struct {
 }
 
 // wireMentalModels builds the refresh runner (both strategies), admin, page search and triggers.
-func wireMentalModels(c core, gw *gateway.Client) mentalModels {
+func wireMentalModels(c core, gw modelGateway) mentalModels {
 	detector := mentalmodel.NewChangeDetector(c.read, c.read)
 	md := mentalmodel.ModelDeps{LLM: gw, Router: c.router, Clock: c.clock, Directives: c.dirs}
 	runner := mentalmodel.NewRefreshRunner(mentalmodel.RefreshRunnerDeps{
@@ -257,8 +267,8 @@ func wireMentalModels(c core, gw *gateway.Client) mentalModels {
 }
 
 // wireServer fills server.Deps.
-func wireServer(cfg Config, c core, mm mentalModels, a adapters, _ *tokenCounter) server.Deps {
-	var blob port.Blob = a.blob
+func wireServer(cfg Config, c core, mm mentalModels, p ports) server.Deps {
+	blob := p.blob
 	return server.Deps{
 		Ingestor: retain.NewIngestor(retain.IngestorDeps{
 			Store: c.store, Blob: blob, Config: c.resolver, Retainer: c.retainer, Merge: config.Merge,
@@ -273,7 +283,7 @@ func wireServer(cfg Config, c core, mm mentalModels, a adapters, _ *tokenCounter
 		}),
 		Stats:     bank.NewStatsReader(c.read),
 		Previewer: bank.NewPromptPreviewer(c.resolver, c.dirs),
-		Deleter: bank.NewBankDeleter(c.store, blob, port.Claimer(a.store), c.clock,
+		Deleter: bank.NewBankDeleter(c.store, blob, p.claimer, c.clock,
 			bank.DeleterConfig{Blobs: blob}),
 		Templates:  bank.NewTemplateCodec(c.store, c.queuer),
 		Retagger:   docs.NewRetagger(c.store),
@@ -296,7 +306,7 @@ func wireServer(cfg Config, c core, mm mentalModels, a adapters, _ *tokenCounter
 		ValidateOverrides: config.ValidateOverrides,
 		DefaultDeadline:   cfg.RPCDeadline,
 		Probes: []server.ReadinessProbe{
-			postgresProbe{db: a.pool}, &gatewayProbe{url: cfg.GatewayURL, hc: &http.Client{}},
+			postgresProbe{db: p.db}, &gatewayProbe{url: cfg.GatewayURL, hc: &http.Client{}},
 		},
 	}
 }

@@ -180,6 +180,7 @@ func (e *env) invalidateRestore(t *testing.T) {
 	if target == nil {
 		t.Fatal("no Lisbon fact")
 	}
+	seq := e.changeSeq(t, bank)
 	inv, err := e.c.Units.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
 		BankId: bank, MemoryId: target.GetId(), State: pb.MemoryState_MEMORY_STATE_INVALIDATED, Reason: "wrong",
 	})
@@ -192,6 +193,7 @@ func (e *env) invalidateRestore(t *testing.T) {
 	if _, ok := e.recall(t, bank, "Alice Lisbon")[target.GetId()]; ok {
 		t.Fatal("recall returned an invalidated fact")
 	}
+	seq = e.wantSeqAfter(t, bank, seq, "invalidate")
 	e.idle(t, bank)
 	res, err := e.c.Units.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
 		BankId: bank, MemoryId: target.GetId(), State: pb.MemoryState_MEMORY_STATE_VALID, Reason: "right after all",
@@ -207,6 +209,50 @@ func (e *env) invalidateRestore(t *testing.T) {
 	if _, ok := e.recall(t, bank, "Alice Lisbon")[target.GetId()]; !ok {
 		t.Fatal("restored fact not recalled")
 	}
+	seq = e.wantSeqAfter(t, bank, seq, "restore")
+	e.editFact(t, bank, target.GetId(), seq)
+}
+
+// editFact edits a fact's text: the edit commits in the RPC (new text, change seq bumped), the rederive job
+// re-embeds it, and recall then finds it by its new text.
+func (e *env) editFact(t *testing.T, bank, id string, seq int64) {
+	t.Helper()
+	text := "Alice moved to Porto in 2023."
+	ed, err := e.c.Units.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
+		BankId: bank, MemoryId: id, Text: &text, Reason: "she moved again",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ed.GetMemory().GetText() != text || ed.GetOperationId() == "" || ed.GetMemory().GetEditedAt() == nil {
+		t.Fatalf("edit: %+v", ed)
+	}
+	e.wantSeqAfter(t, bank, seq, "edit")
+	e.waitOp(t, bank, ed.GetOperationId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	e.idle(t, bank)
+	if got := e.recall(t, bank, "Alice Porto 2023"); got[id] != text {
+		t.Fatalf("edited fact not recalled with its new text: %v", got)
+	}
+}
+
+// changeSeq reads the bank's change_seq.
+func (e *env) changeSeq(t *testing.T, bank string) int64 {
+	t.Helper()
+	resp, err := e.c.Banks.GetBankStats(e.ctx(t), &pb.GetBankStatsRequest{BankId: bank})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.GetStats().GetChangeSeq()
+}
+
+// wantSeqAfter fails unless the bank's change_seq moved past before (every curation calls tx.Seq).
+func (e *env) wantSeqAfter(t *testing.T, bank string, before int64, what string) int64 {
+	t.Helper()
+	now := e.changeSeq(t, bank)
+	if now <= before {
+		t.Fatalf("%s left change_seq at %d (was %d)", what, now, before)
+	}
+	return now
 }
 
 // retagReprocess: UpdateDocument rewrites the units' tags; ReprocessDocument re-extracts the document.
