@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"memd/internal/config"
 
 	pb "memd/gen/memory/v1"
 )
@@ -45,7 +46,8 @@ func (s *tenantServer) GetTenantConfig(
 	return &pb.GetTenantConfigResponse{Config: configValueToProto(out)}, nil
 }
 
-// UpdateTenantConfig patches the tenant-level config with the masked fields of the request config.
+// UpdateTenantConfig patches the tenant-level config with the masked fields of the request config; the
+// patched config must pass config.RPCBankConfig (checked inside the patch).
 func (s *tenantServer) UpdateTenantConfig(
 	ctx context.Context, req *pb.UpdateTenantConfigRequest,
 ) (*pb.UpdateTenantConfigResponse, error) {
@@ -56,7 +58,7 @@ func (s *tenantServer) UpdateTenantConfig(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	patch, err := configPatch(req.GetConfig(), req.GetUpdateMask())
+	patch, err := configPatch(req.GetConfig(), req.GetUpdateMask(), s.d.checker(config.RPCBankConfig))
 	if err != nil {
 		return nil, toStatus(err)
 	}

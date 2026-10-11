@@ -26,6 +26,13 @@ doesn't say what an absent mask means.
   - So `{recall: {rerank: false}}` sets only `recall.rerank`, and stored `recall.budget_low` and
     `recall.rrf_k` survive. A trigger patch on a mental model likewise keeps the trigger's other fields.
   - Such a request can't clear anything; a clear needs an explicit mask.
+  - **models merge per slot (WP-21, decision 2100).** Under an implicit mask, `models` (and a mental model's
+    `overrides.models`) is not replaced. The request's bindings merge into the stored list per slot, using
+    config.Merge's rule, as SPEC "Model routing" says: "setting one slot never clears the others". So
+    `UpdateBankConfig{models:[REFLECT]}` with no mask keeps a stored EXTRACT binding.
+  - An **explicit** `models` / `overrides.models` path, or a parent such as `overrides`, still replaces the
+    whole list, and `[]` under it is an explicit clear. That is how a client replaces or clears its bindings.
+  - Other lists (`consolidation_strategies`, `entity_labels` and so on) are replaced by set, as before.
 - **ResetBankConfig.** `paths` reset the named fields to unset; no paths resets the whole bank override
   to the zero config.
 - **Purity.** Patches are pure functions (`ConfigPatch`, `SpecPatch`). Pointer structs along a path are

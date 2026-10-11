@@ -22,7 +22,14 @@ var _ pb.BankServiceServer = (*bankServer)(nil)
 // newBankServer returns the BankService server over d.
 func newBankServer(d Deps) *bankServer { return &bankServer{d: d} }
 
-// CreateBank creates a bank with its own config overrides (not validated: they are the bank's config).
+// checker returns a check of one config level against rpc's override rules, for configPatch and
+// specPatch; it passes when no validator is wired.
+func (d Deps) checker(rpc string) func(domain.BankConfig) error {
+	return func(c domain.BankConfig) error { return d.validate(rpc, &c) }
+}
+
+// CreateBank creates a bank with its own config overrides. Every field is allowed (they are the bank's
+// config); the slot and disposition rules of config.RPCBankConfig apply.
 func (s *bankServer) CreateBank(ctx context.Context, req *pb.CreateBankRequest) (*pb.CreateBankResponse, error) {
 	if s.d.Banks == nil {
 		return nil, notWired("Deps.Banks")
@@ -33,6 +40,9 @@ func (s *bankServer) CreateBank(ctx context.Context, req *pb.CreateBankRequest) 
 	}
 	in, err := createBankFromProto(req)
 	if err != nil {
+		return nil, toStatus(err)
+	}
+	if err := s.d.validate(config.RPCBankConfig, &in.Config); err != nil {
 		return nil, toStatus(err)
 	}
 	in.Ref = b
@@ -86,7 +96,8 @@ func (s *bankServer) GetBankConfig(
 	}, nil
 }
 
-// UpdateBankConfig patches the bank's own overrides with the masked fields of the request config.
+// UpdateBankConfig patches the bank's own overrides with the masked fields of the request config; the
+// patched overrides must pass config.RPCBankConfig (checked inside the patch).
 func (s *bankServer) UpdateBankConfig(
 	ctx context.Context, req *pb.UpdateBankConfigRequest,
 ) (*pb.UpdateBankConfigResponse, error) {
@@ -97,7 +108,7 @@ func (s *bankServer) UpdateBankConfig(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	patch, err := configPatch(req.GetConfig(), req.GetUpdateMask())
+	patch, err := configPatch(req.GetConfig(), req.GetUpdateMask(), s.d.checker(config.RPCBankConfig))
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -243,6 +254,9 @@ func (s *bankServer) CreateBankFromTemplate(
 	}
 	t, err := bankTemplateFromProto(req.GetTemplate())
 	if err != nil {
+		return nil, toStatus(err)
+	}
+	if err := s.d.validate(config.RPCBankConfig, &t.Config); err != nil {
 		return nil, toStatus(err)
 	}
 	for i := range t.MentalModels {
