@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"memd/internal/server"
+	"memd/internal/grpcapi"
 	"sort"
 	"testing"
 	"time"
@@ -88,7 +88,7 @@ func (c tenantConn) NewStream(
 
 // out adds the tenant header.
 func (c tenantConn) out(ctx context.Context) context.Context {
-	return metadata.AppendToOutgoingContext(ctx, server.TenantHeader, c.tenant)
+	return metadata.AppendToOutgoingContext(ctx, grpcapi.TenantHeader, c.tenant)
 }
 
 // Pending returns the bank's BankStats.pending_operations_by_kind without zero counts.

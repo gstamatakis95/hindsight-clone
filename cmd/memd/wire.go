@@ -19,10 +19,10 @@ import (
 	"memd/internal/engine/reflect"
 	"memd/internal/engine/retain"
 	"memd/internal/engine/timex"
+	"memd/internal/grpcapi"
 	"memd/internal/jobs"
 	"memd/internal/maintenance"
 	"memd/internal/observability"
-	"memd/internal/server"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"net"
@@ -38,8 +38,8 @@ import (
 )
 
 // The composition root. wire.go opens the infrastructure (Postgres, blob storage, the AI gateway), builds the shared
-// libraries once (core) and runs the two modes; each wire_<area>.go builds one area's engines and fills its part of the
-// gRPC server's dependencies, the job handlers and the maintenance tick.
+// libraries once (core) and runs the two modes; each wire_<area>.go builds one area's engines, its gRPC handlers, its
+// job handlers and its part of the maintenance tick.
 
 // modelGateway is the AI gateway as the engines see it: one client serves all three model interfaces.
 type modelGateway interface {
@@ -56,14 +56,15 @@ type infra struct {
 	maint   store.Maintenance
 	blob    blob.Store
 	gw      modelGateway
-	ping    pinger
+	ping    func(ctx context.Context) error
 }
 
 // deps is everything the two modes run.
 type deps struct {
 	cfg         Config
 	log         *slog.Logger
-	server      server.Deps
+	api         grpcapi.Handlers
+	probes      []grpcapi.ReadinessProbe
 	handlers    handlers
 	maintenance maintenance.Deps
 	claimer     jobs.Claimer
@@ -133,7 +134,7 @@ func openInfra(ctx context.Context, cfg Config, embedModel string, tel *observab
 		TraceCall: tel.GatewayHook(),
 	}, tel.HTTPClient(nil))
 	pg := postgres.New(pool)
-	return infra{db: pg, claimer: pg, maint: pg, blob: bs, gw: gw, ping: pool}, pool.Close, nil
+	return infra{db: pg, claimer: pg, maint: pg, blob: bs, gw: gw, ping: pool.Ping}, pool.Close, nil
 }
 
 // openBlob builds the blob.Store adapter MEMD_BLOB_PROVIDER selects (Config.Validate has already rejected an
@@ -206,11 +207,8 @@ func wireEngines(
 	d := &deps{
 		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk,
 		handlers: handlers{db: in.db, clock: clk},
-		server: server.Deps{
-			DefaultDeadline: time.Duration(*cfg.File.API.RPCDeadline),
-			Probes: []server.ReadinessProbe{
-				postgresProbe{db: in.ping}, &gatewayProbe{url: cfg.GatewayURL, hc: &http.Client{}},
-			},
+		probes: []grpcapi.ReadinessProbe{
+			grpcapi.PostgresProbe{Ping: in.ping}, grpcapi.NewGatewayProbe(cfg.GatewayURL, &http.Client{}),
 		},
 	}
 	wireMemory(c, in, d)
@@ -283,7 +281,8 @@ func runAPI(ctx context.Context, d *deps) error {
 
 // newGRPCServer builds the gRPC server over d, traced when d.tel is enabled.
 func newGRPCServer(d *deps) *grpc.Server {
-	return server.New(d.server, d.tel.GRPCServerOptions(server.TenantFrom)...)
+	o := grpcapi.Options{DefaultDeadline: time.Duration(*d.cfg.File.API.RPCDeadline), Probes: d.probes}
+	return grpcapi.New(d.api, o, d.tel.GRPCServerOptions(grpcapi.TenantFrom)...)
 }
 
 // runWorker runs the job runner and the maintenance tick until ctx is done. The runner's StaleAfter and
@@ -317,7 +316,7 @@ func runWorker(ctx context.Context, d *deps) error {
 	g.Go(func() error { return r.Run(gctx) })
 	g.Go(func() error { return maint.Run(gctx) })
 	if lis != nil {
-		g.Go(func() error { return serveHealth(gctx, lis, d.server.Probes) })
+		g.Go(func() error { return grpcapi.ServeHealth(gctx, lis, d.probes, apiShutdownGrace) })
 		d.log.Info("memd worker health serving", "addr", lis.Addr().String())
 	}
 	d.log.Info("memd worker running", "id", id, "slots", d.cfg.WorkerSlots)

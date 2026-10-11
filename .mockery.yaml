@@ -1,8 +1,7 @@
 # mockery v3: mocks of the interfaces tests stub (the AI and blob boundaries, the config resolver, the engines'
-# consumer interfaces, operation control and the server's consumer interfaces), written to internal/mocks/<path
-# relative to internal/>, one Go package per source package (package mock<name>). Store code is tested against real
-# Postgres (internal/store/postgres/pgtest), so the store package has no mocks. Add an interface here when a test
-# needs it. The matryer (moq-style) template needs only the standard library; testify is not an approved
+# consumer interfaces and operation control), written to internal/mocks/<path relative to internal/>, one Go
+# package per source package (package mock<name>). Store code is tested against real Postgres
+# (internal/store/postgres/pgtest), so the store package has no mocks. Add an interface here when a test needs it. The matryer (moq-style) template needs only the standard library; testify is not an approved
 # dependency. Never hand-edit the output; run `make gen`.
 template: matryer
 all: false
@@ -62,13 +61,3 @@ packages:
   memd/internal/jobs:
     interfaces:
       OperationControl: {}
-  memd/internal/server:
-    interfaces:
-      BankAdmin: {}
-      DirectiveAdmin: {}
-      DocumentAdmin: {}
-      MentalModelAdmin: {}
-      ObservationAdmin: {}
-      OperationReader: {}
-      ReadinessProbe: {}
-      TenantAdmin: {}

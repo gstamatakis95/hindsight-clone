@@ -8,7 +8,7 @@
 // domain is the innermost layer of memd's ports-and-adapters layout (domain -> port -> engine/adapter -> server/worker
 // -> cmd/memd/wire.go). It imports nothing internal and nothing vendor-specific (depguard enforces both); its only
 // dependency outside the standard library is golang.org/x/text for Unicode normalization of tags. Every other package
-// may import it. Proto types never appear here: internal/server converts between memory.v1 messages and these types,
+// may import it. Proto types never appear here: internal/grpcapi converts between memory.v1 messages and these types,
 // and the Postgres adapter stores them in columns and JSON.
 //
 // # Representation

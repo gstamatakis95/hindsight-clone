@@ -98,5 +98,5 @@
 // defaults_test.go (spec defaults, the file over them, rerank), merge_test.go (precedence, the model-routing
 // rule across levels, no aliasing), resolver_test.go (on real Postgres through pgtest: precedence, the strategy
 // level, unknown and tombstoned banks, concurrent use) and validate_test.go. The FieldMask helpers are exercised
-// through the server's patch tests (internal/server/fieldmask_test.go).
+// through the gRPC API's patch tests (internal/grpcapi/fieldmask_test.go).
 package config

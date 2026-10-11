@@ -7,19 +7,19 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/reflect"
-	"memd/internal/server"
+	"memd/internal/grpcapi"
 	"memd/internal/store"
 )
 
 // Small adapters the composition root needs where no engine provides the interface: they only translate
-// between the store and the server's or reflect's consumer interfaces, with no business logic.
+// between the store and the gRPC handlers' or reflect's interfaces, with no business logic.
 
 // operationReader serves GetOperation, ListOperations and ListEvents over store.Queue and store.EventRepo,
 // each in one short read-only transaction. An unknown or tombstoned bank is domain.ErrNotFound (SPEC: once a
 // bank is deleting, reads return NOT_FOUND; GetBank NOT_FOUND is the delete's completion signal).
 type operationReader struct{ s store.DB }
 
-var _ server.OperationReader = (*operationReader)(nil)
+var _ grpcapi.OperationReader = (*operationReader)(nil)
 
 // readBank runs fn in a transaction after checking b is a live bank.
 func (o *operationReader) readBank(ctx context.Context, b domain.BankRef, fn func(tx store.Tx) error) error {

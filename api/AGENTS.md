@@ -36,7 +36,7 @@ Where a new type goes:
 - **New config goes in `BankConfig`,** in its phase group (`RetainConfig`, `ObservationConfig`, `RecallConfig`,
   `ReflectConfig`, `MentalModelConfig`, `ModelBindings`). Every request that does work takes its own overrides
   message (`RetainOverrides`, `RecallOverrides`, ...) holding only what that RPC may change; add the knob there
-  too when the RPC should be able to set it, and map it in `internal/server/convert_overrides.go`. A model
+  too when the RPC should be able to set it, and map it in `internal/grpcapi/convert_overrides.go`. A model
   binding is atomic (one FieldMask path). Use `optional` for scalars whose unset value must differ from zero.
   Document the default in the field comment.
 - **Keep the naming rules.** Every RPC gets its own `<Rpc>Request` / `<Rpc>Response`. Every enum value is

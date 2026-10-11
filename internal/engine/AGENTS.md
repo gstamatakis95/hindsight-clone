@@ -8,7 +8,7 @@ docs, maintenance and timex. These rules add to the root AGENTS.md.
   `memd/internal/blob`, `memd/internal/clock`, `memd/internal/config`, `memd/internal/prompts`,
   `memd/internal/jobs` and other engine packages.
 - Never import an adapter (`internal/store/postgres`, `internal/ai/gateway`, `internal/blob/s3`),
-  `internal/server`, `internal/maintenance`, `memd/gen`, pgx, `net/http` or the AWS SDK. depguard fails the
+  `internal/grpcapi`, `internal/maintenance`, `memd/gen`, pgx, `net/http` or the AWS SDK. depguard fails the
   build if you do.
 - Engines never import each other in a cycle. When you need another engine, declare the small
   interface you consume in your own package (consumer-declared), e.g. mentalmodel declares the

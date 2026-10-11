@@ -26,7 +26,7 @@ linters:
               desc: engines depend on the ai interfaces only
             - pkg: "memd/internal/blob/s3"
               desc: engines depend on blob.Store only
-            - pkg: "memd/internal/server"
+            - pkg: "memd/internal/grpcapi"
               desc: engines don't know about gRPC
             - pkg: "memd/internal/maintenance"
               desc: the maintenance tick sits above the engines
@@ -40,8 +40,8 @@ linters:
               desc: use blob.Store
             - pkg: "github.com/DataDog"
               desc: observability is wired in cmd/memd via internal/observability; engines stay vendor-free
-        server:
-          files: ["**/internal/server/**"]
+        grpcapi:
+          files: ["**/internal/grpcapi/**"]
           deny:
             - pkg: "memd/internal/store/postgres"
               desc: handlers call engines
@@ -49,6 +49,10 @@ linters:
               desc: handlers call engines
             - pkg: "memd/internal/blob/s3"
               desc: handlers call engines
+            - pkg: "memd/internal/maintenance"
+              desc: handlers never run the maintenance tick
+            - pkg: "github.com/jackc/pgx"
+              desc: handlers call engines; the Postgres probe takes the pool's Ping
         domain:
           files: ["**/internal/domain/**"]
           deny:
@@ -71,8 +75,8 @@ linters:
               desc: contracts sit below config
             - pkg: "memd/internal/engine"
               desc: contracts sit below the engines
-            - pkg: "memd/internal/server"
-              desc: contracts sit below the server
+            - pkg: "memd/internal/grpcapi"
+              desc: contracts sit below the gRPC API
             - pkg: "memd/internal/jobs"
               desc: contracts sit below jobs
             - pkg: "memd/internal/maintenance"
@@ -92,8 +96,8 @@ linters:
               desc: adapters translate; they never decide
             - pkg: "memd/internal/engine"
               desc: adapters never import engines
-            - pkg: "memd/internal/server"
-              desc: adapters never import the server
+            - pkg: "memd/internal/grpcapi"
+              desc: adapters never import the gRPC API
             - pkg: "memd/internal/jobs"
               desc: adapters satisfy jobs.Claimer structurally; they never import jobs
             - pkg: "memd/internal/maintenance"
@@ -107,7 +111,7 @@ linters:
               desc: jobs sits below the engines; they import it
             - pkg: "memd/internal/config"
               desc: jobs sits beside config, below the engines
-            - pkg: "memd/internal/server"
+            - pkg: "memd/internal/grpcapi"
               desc: jobs doesn't know about gRPC
             - pkg: "memd/internal/maintenance"
               desc: the maintenance tick sits above jobs
@@ -130,7 +134,7 @@ linters:
         maintenance:
           files: ["**/internal/maintenance/**", "!$test"]   # tests use pgtest
           deny:
-            - pkg: "memd/internal/server"
+            - pkg: "memd/internal/grpcapi"
               desc: maintenance doesn't know about gRPC
             - pkg: "memd/internal/store/postgres"
               desc: maintenance depends on the store interfaces only

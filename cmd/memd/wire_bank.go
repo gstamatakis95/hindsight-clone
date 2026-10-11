@@ -1,14 +1,18 @@
 package main
 
-import "memd/internal/engine/bank"
+import (
+	"memd/internal/engine/bank"
+	"memd/internal/grpcapi"
+)
 
-// wireBanks builds the bank area: bank admin, stats and tag listings, templates and the two-step bank delete (the
-// DeleteBank RPC and the delete_bank job).
+// wireBanks builds the bank area: BankService (bank admin, the effective config, stats and tag listings, the prompt
+// preview, directives, templates) and the two-step bank delete (the DeleteBank RPC and the delete_bank job).
 func wireBanks(c core, in infra, d *deps) {
 	deleter := bank.NewBankDeleter(c.db, in.blob, c.clock, bank.DeleterConfig{})
-	d.server.Banks = bank.NewBankAdmin(c.db)
-	d.server.Stats = bank.NewStatsReader(c.read)
-	d.server.Templates = bank.NewTemplateCodec(c.db, c.clock)
-	d.server.Deleter = deleter
+	d.api.Bank = &grpcapi.BankHandler{
+		Banks: bank.NewBankAdmin(c.db), Config: c.resolver, Stats: bank.NewStatsReader(c.read),
+		Previewer: bank.NewPromptPreviewer(c.resolver, c.dirs), Deleter: deleter,
+		Templates: bank.NewTemplateCodec(c.db, c.clock), Directives: bank.NewDirectiveAdmin(c.db),
+	}
 	d.handlers.deleter = deleter
 }

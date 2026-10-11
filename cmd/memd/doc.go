@@ -11,13 +11,12 @@
 // Postgres pool and postgres.DB, the blob store MEMD_BLOB_PROVIDER selects, the AI gateway client), narrows each to
 // its boundary (store, blob, ai), builds the shared libraries once (config resolver, ai.Router, ai.Tokenizer,
 // timex, retain's shared pieces, recall, reflect) and runs the two modes. Each wire_<area>.go (memory, document,
-// observation, mentalmodel, bank, config, operation, maintenance) builds one area's engines and fills its part of
-// the gRPC server's dependencies (internal/server), the job handlers (handlers.go adapts the engines to
-// jobs.Handler for the internal/jobs runner) and the maintenance service (internal/maintenance). config.go reads
-// the environment and flags, configfile.go the server config file; probes.go holds the readiness probes and the
-// worker's health server, workerid.go the worker id, and glue.go the small adapters no engine provides yet: the
-// operation reader and the reflect page reader. Engines never import this package; nothing here holds business
-// logic.
+// observation, mentalmodel, bank, config, operation, maintenance) builds one area's engines, its gRPC handlers
+// (internal/grpcapi), its job handlers (handlers.go adapts the engines to jobs.Handler for the internal/jobs runner)
+// and its part of the maintenance service (internal/maintenance). config.go reads the environment and flags,
+// configfile.go the server config file, workerid.go the worker id, and glue.go the small adapters no engine provides
+// yet: the operation reader and the reflect page reader. The readiness probes and the worker's health server live in
+// internal/grpcapi. Engines never import this package; nothing here holds business logic.
 //
 // # Startup
 //
@@ -103,9 +102,11 @@
 //
 // config_test.go covers settings from the environment and flags, validation (the blob provider and S3 keys
 // included), the server config file (its sections, required slots, unknown keys and bad values, the default
-// path), the worker id and health server, and the embedding check;
-// wire_test.go runs the fully wired stack over a pgtest database and the model fakes and checks that no model call
-// happens inside a store transaction; handlers_test.go pins each job's result keys and delete_bank's
+// path), the worker id, and the embedding check. stack_test.go is the shared test stack: the fully wired API and
+// worker over a pgtest database, an in-memory blob store and the gateway emulator, on bufconn. On it,
+// wire_test.go checks that no model call happens inside a store transaction, and api_test.go checks the API's
+// behaviour through the real engines (every RPC wired, config and spec-override validation, document retags,
+// reflect's based_on); handlers_test.go pins each job's result keys and delete_bank's
 // continuations; glue_test.go checks ListEvents' default and cap; and
 // observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest, an unreachable agent
 // still serves). End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a gateway
