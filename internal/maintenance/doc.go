@@ -23,10 +23,10 @@
 //  3. refresh_failures: mentalmodel.Service.ReconcileFailedRefreshes pauses models whose latest refresh failed
 //     for good.
 //  4. cron_refresh: mentalmodel.Service.EnqueueDueCronRefreshes enqueues refreshes whose refresh_cron fired.
-//  5. consolidation_reconcile: enqueues the automatic consolidate for banks with a fact left unconsolidated
-//     longer than the bank's observations.reconcile_grace_seconds (default 600, so skip_consolidation followed
-//     by a manual Consolidate is not pre-empted), unless the bank turns observations.auto_consolidation or
-//     observations.enabled off.
+//  5. consolidation_reconcile: observation.Service.ReconcileConsolidation enqueues the automatic consolidate
+//     for banks with a fact left unconsolidated longer than the bank's observations.reconcile_grace_seconds
+//     (default 600, so skip_consolidation followed by a manual Consolidate is not pre-empted), unless the bank
+//     turns observations.auto_consolidation or observations.enabled off.
 //  6. graph_reconcile: enqueues graph_maintenance for banks with graph_dirty or entity_maintenance rows.
 //  7. rederive_stranded: memory.Service.RederiveStranded re-enqueues rederive_memory for facts whose rederive
 //     ended FAILED or CANCELLED and left them without an embedding, 10 minutes after it ended.

@@ -27,13 +27,6 @@ packages:
       PromptPreviewer: {}
       StatsReader: {}
       TemplateCodec: {}
-  memd/internal/engine/consolidate:
-    interfaces:
-      Consolidator: {}
-      StrategyPreviewer: {}
-  memd/internal/engine/docs:
-    interfaces:
-      Retagger: {}
   memd/internal/jobs:
     interfaces:
       OperationControl: {}

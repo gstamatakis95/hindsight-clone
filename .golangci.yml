@@ -42,7 +42,8 @@ linters:
             - pkg: "github.com/DataDog"
               desc: observability is wired in cmd/memd via internal/observability; engines stay vendor-free
         svc-mentalmodel:
-          files: ["**/internal/mentalmodel/**", "!$test"]   # tests use pgtest
+          files: ["**/internal/mentalmodel/**", "**/internal/observation/**", "**/internal/document/**",
+            "!$test"]   # tests use pgtest
           deny:
             - pkg: "memd/internal/store/postgres"
               desc: services depend on the store interfaces only
@@ -74,6 +75,40 @@ linters:
             - pkg: "memd/internal/document"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
+        svc-observation-features:
+          files: ["**/internal/observation/**"]
+          deny:
+            - pkg: "memd/internal/engine"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
+        svc-document-features:
+          files: ["**/internal/document/**"]
+          deny:
+            - pkg: "memd/internal/engine"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/bank"
               desc: services never import each other; enqueue the other service's job instead

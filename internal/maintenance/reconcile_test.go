@@ -2,51 +2,12 @@ package maintenance
 
 import (
 	"context"
-	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
 	"memd/internal/store"
 	"testing"
 	"time"
 )
-
-// bankConfigs stores each bank's config and returns a resolver over ops (no server level); a bank that does not
-// exist resolves to domain.ErrNotFound.
-func bankConfigs(t *testing.T, ops *opsDB, cfgs map[domain.BankRef]domain.BankConfig) *config.Resolver {
-	t.Helper()
-	err := ops.InTx(t.Context(), func(tx store.Tx) error {
-		for b, cfg := range cfgs {
-			if err := tx.Banks().SetConfig(t.Context(), b, cfg); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return config.NewResolver(ops, domain.BankConfig{})
-}
-
-// waitingBanks is a store.Maintenance whose UnconsolidatedBanks returns fixed banks with their oldest waiting
-// fact.
-type waitingBanks struct {
-	store.Maintenance
-	banks []store.UnconsolidatedBank
-}
-
-func (w waitingBanks) UnconsolidatedBanks(context.Context, time.Time) ([]store.UnconsolidatedBank, error) {
-	return w.banks, nil
-}
-
-// waiting lists banks whose oldest fact has waited since the zero time (longer than any grace).
-func waiting(bs ...domain.BankRef) waitingBanks {
-	var w waitingBanks
-	for _, b := range bs {
-		w.banks = append(w.banks, store.UnconsolidatedBank{Bank: b})
-	}
-	return w
-}
 
 // graphBanks is a store.Maintenance whose BanksWithGraphWork returns fixed banks.
 type graphBanks struct {
@@ -57,69 +18,6 @@ type graphBanks struct {
 func (g graphBanks) BanksWithGraphWork(context.Context) ([]domain.BankRef, error) {
 	return g.banks, nil
 }
-
-// The tick consolidates only banks whose effective config leaves automatic
-// consolidation and observations on; a bank whose config can't be found (gone) is skipped silently.
-func TestConsolidationReconcileSkipsDisabledBanks(t *testing.T) {
-	clock := newClock()
-	ops := newOps(t)
-	bankD := domain.BankRef{Tenant: "t3", Bank: "gone"}
-	deps := New(Deps{
-		Claimer: ops, Store: ops, Clock: clock, Logger: quiet,
-		Consolidation: waiting(bankA, bankB, bankC, bankD),
-		Resolver: bankConfigs(t, ops, map[domain.BankRef]domain.BankConfig{
-			bankA: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(true), Enabled: ptrBool(true)}),
-			bankB: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(false), Enabled: ptrBool(true)}),
-			bankC: observations(domain.ObservationConfig{AutoConsolidation: ptrBool(true), Enabled: ptrBool(false)}),
-		}),
-	})
-	n, err := deps.reconcileConsolidation(context.Background())
-	if err != nil || n != 1 {
-		t.Fatalf("reconcile = %d, %v; want 1 inserted", n, err)
-	}
-	for b, want := range map[domain.BankRef]int{bankA: 1, bankB: 0, bankC: 0, bankD: 0} {
-		if got := ops.countBank(b, domain.OperationKindConsolidate, ""); got != want {
-			t.Errorf("bank %v: %d consolidate jobs, want %d", b, got, want)
-		}
-	}
-}
-
-// The tick consolidates a bank only once its oldest waiting fact is older than the bank's own
-// observations.reconcile_grace_seconds (default 10 min), so a skip_consolidation retain followed by a manual
-// Consolidate within the grace is not pre-empted.
-func TestConsolidationReconcileGrace(t *testing.T) {
-	clock := newClock()
-	ops := newOps(t)
-	fiveMinutesAgo := clock.Now().Add(-5 * time.Minute)
-	src := waitingBanks{banks: []store.UnconsolidatedBank{
-		{Bank: bankA, Oldest: fiveMinutesAgo},
-		{Bank: bankB, Oldest: fiveMinutesAgo},
-		{Bank: bankC, Oldest: fiveMinutesAgo},
-	}}
-	deps := New(Deps{
-		Claimer: ops, Store: ops, Clock: clock, Logger: quiet, Consolidation: src,
-		Resolver: bankConfigs(t, ops, map[domain.BankRef]domain.BankConfig{
-			bankA: observations(domain.ObservationConfig{ReconcileGraceSeconds: ptrInt(180)}),
-			bankB: {},
-			bankC: observations(domain.ObservationConfig{ReconcileGraceSeconds: ptrInt(600)}),
-		}),
-	})
-	if _, err := deps.reconcileConsolidation(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for b, want := range map[domain.BankRef]int{bankA: 1, bankB: 0, bankC: 0} {
-		if got := ops.countBank(b, domain.OperationKindConsolidate, ""); got != want {
-			t.Errorf("bank %v: %d consolidate jobs, want %d", b, got, want)
-		}
-	}
-}
-
-// observations is a config with only the observations group set.
-func observations(o domain.ObservationConfig) domain.BankConfig {
-	return domain.BankConfig{Observations: &o}
-}
-
-func ptrInt(v int) *int { return &v }
 
 // A delete_bank that ReclaimStale fails at its attempt cap is re-enqueued by the
 // same tick's resume step, and later ticks join that row instead of adding more.

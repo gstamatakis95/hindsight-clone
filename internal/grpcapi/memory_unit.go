@@ -3,8 +3,8 @@ package grpcapi
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/engine/curate"
 	"memd/internal/memory"
+	"memd/internal/observation"
 
 	pb "memd/gen/memory/v1"
 )
@@ -14,8 +14,8 @@ type MemoryUnitHandler struct {
 	pb.UnimplementedMemoryUnitServiceServer
 	// Memory serves ListMemories, GetMemory and UpdateMemory.
 	Memory *memory.Service
-	// Lister serves GetObservationHistory.
-	Lister curate.MemoryLister
+	// Observations serves GetObservationHistory.
+	Observations *observation.Service
 }
 
 var _ pb.MemoryUnitServiceServer = (*MemoryUnitHandler)(nil)
@@ -65,7 +65,7 @@ func (h *MemoryUnitHandler) GetMemory(ctx context.Context, req *pb.GetMemoryRequ
 	return &pb.GetMemoryResponse{Memory: unitToProto(u)}, nil
 }
 
-// GetObservationHistory returns every version of an observation, in the order the lister returns them.
+// GetObservationHistory returns every version of an observation, in the order the store returns them.
 func (h *MemoryUnitHandler) GetObservationHistory(
 	ctx context.Context, req *pb.GetObservationHistoryRequest,
 ) (*pb.GetObservationHistoryResponse, error) {
@@ -73,7 +73,7 @@ func (h *MemoryUnitHandler) GetObservationHistory(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	versions, err := h.Lister.ObservationHistory(ctx, b, id)
+	versions, err := h.Observations.ListObservationHistory(ctx, b, id)
 	if err != nil {
 		return nil, toStatus(err)
 	}
