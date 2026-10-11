@@ -107,3 +107,15 @@ Every name below was checked to exist (`func Test...` or a suite case string) wh
 | Deterministic failures skip retries; transient ones back off | `worker.TestRetryPolicy`, `worker.TestRunnerRetrySchedule` |
 | Large retains create a retain_batch parent aggregating its children; eval barrier = sync Retain + empty pending_operations_by_kind | `retain.TestIngestAsyncEnqueuesChildrenUnderBatch`, `postgres.TestSettleRetainBatches`, `e2e.TestScenarios/RetainAsync`, `e2e.TestGoldenAgainstMemdAll` |
 | Terminal operations are pruned after the retention; pending and processing never are | `worker.TestPruneOperations`, `porttest:Prune`, `porttest:EventsPrune` |
+
+## Final-review additions (WP-20)
+
+| Rule | Tests |
+|---|---|
+| Cancel works on PENDING and PROCESSING operations, except delete_bank (FAILED_PRECONDITION, decision 2001) | `worker.TestControlDeleteBankAndDeletingBank` |
+| Retry is refused with FAILED_PRECONDITION on a deleting bank, except for delete_bank | `worker.TestControlDeleteBankAndDeletingBank` |
+| Maintenance tick: consolidation reconcile skips banks with auto_consolidation or enable_observations off, and only units older than the grace (decision 2000) | `worker.TestConsolidationReconcileSkipsDisabledBanks`, `worker.TestConsolidationReconcileGrace`, `postgres_test.TestUnconsolidatedBanks` |
+| Maintenance tick: re-enqueues delete_bank for a tombstoned bank with no active delete | `worker.TestMaintenanceResumesStalledBankDelete`, `postgres_test.TestStalledBankDeletes` |
+| Maintenance tick: enqueues graph_maintenance for banks with graph work | `worker.TestMaintenanceEnqueuesGraphMaintenance`, `postgres_test.TestBanksWithGraphWork` |
+| Handlers write progress at checkpoints | `worker_test.TestHandlersReportProgress` |
+| Bank delete removes the bank's blob prefix; writes during the delete fail with FAILED_PRECONDITION | `e2e.TestScenarios/BankDelete` |

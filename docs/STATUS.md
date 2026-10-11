@@ -330,3 +330,9 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   gates incl. make e2e pass; no cross-engine regression. Accepted gaps recorded in decisions 1900 and 2100
   (stale document tags after a failed content-retain; label/doc tag-name collision; a pre-existing invalid
   stored config blocks updates until reset). rules.md updated. Waiting on WP-20.
+- 2026-10-11 WP-20 merged as 916f85a (tick config filter + 10 min grace; delete_bank recovery; cancel of
+  delete_bank refused, a deliberate SPEC deviation, decision 2001; graph reconcile; manual consolidate retry;
+  retain bank check before Put; worker id uuid suffix; S3 key / required-slot startup checks; per-slot
+  concurrency env; worker health; "."/".." ids; e2e blob-prefix assertion). Rulings: the grace is a process
+  setting (BankConfig is frozen; the tick has no request to override from), accepted; the cancel deviation is
+  accepted. All gates incl. make e2e pass. rules.md rows added. Focused check spawned.
