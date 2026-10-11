@@ -24,6 +24,9 @@ flowchart TB
   API & W --> GW["AI gateway (OpenAI-compatible)"]
 ```
 
+The whole gRPC API is one file, [`api/memory/v1/memory.proto`](api/memory/v1/memory.proto): the shared
+conventions first, then every service, then each service's messages.
+
 ## Quick start
 
 From a clean checkout (Go, Docker, Python 3.12 and `grpcurl` installed):
@@ -162,3 +165,6 @@ In Kubernetes, set `DD_AGENT_HOST` from the node IP (`status.hostIP`) to reach t
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) first: layout, rules and the `make gen && make lint && make test` gate.
+
+The API may change freely until the first release, so `make lint` runs `buf lint` only; after the first release,
+`buf breaking` runs against that tag. Proto rules are in [api/AGENTS.md](api/AGENTS.md).
