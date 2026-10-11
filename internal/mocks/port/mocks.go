@@ -33,6 +33,9 @@ var _ port.Blob = &Blob{}
 //			GetFunc: func(ctx context.Context, key string) (io.ReadCloser, error) {
 //				panic("mock out the Get method")
 //			},
+//			ListFunc: func(ctx context.Context, prefix string, after string, limit int) ([]string, error) {
+//				panic("mock out the List method")
+//			},
 //			PutFunc: func(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
 //				panic("mock out the Put method")
 //			},
@@ -51,6 +54,9 @@ type Blob struct {
 
 	// GetFunc mocks the Get method.
 	GetFunc func(ctx context.Context, key string) (io.ReadCloser, error)
+
+	// ListFunc mocks the List method.
+	ListFunc func(ctx context.Context, prefix string, after string, limit int) ([]string, error)
 
 	// PutFunc mocks the Put method.
 	PutFunc func(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
@@ -78,6 +84,17 @@ type Blob struct {
 			// Key is the key argument value.
 			Key string
 		}
+		// List holds details about calls to the List method.
+		List []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Prefix is the prefix argument value.
+			Prefix string
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
 		// Put holds details about calls to the Put method.
 		Put []struct {
 			// Ctx is the ctx argument value.
@@ -95,6 +112,7 @@ type Blob struct {
 	lockDelete       sync.RWMutex
 	lockDeletePrefix sync.RWMutex
 	lockGet          sync.RWMutex
+	lockList         sync.RWMutex
 	lockPut          sync.RWMutex
 }
 
@@ -203,6 +221,50 @@ func (mock *Blob) GetCalls() []struct {
 	mock.lockGet.RLock()
 	calls = mock.calls.Get
 	mock.lockGet.RUnlock()
+	return calls
+}
+
+// List calls ListFunc.
+func (mock *Blob) List(ctx context.Context, prefix string, after string, limit int) ([]string, error) {
+	if mock.ListFunc == nil {
+		panic("Blob.ListFunc: method is nil but Blob.List was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Prefix string
+		After  string
+		Limit  int
+	}{
+		Ctx:    ctx,
+		Prefix: prefix,
+		After:  after,
+		Limit:  limit,
+	}
+	mock.lockList.Lock()
+	mock.calls.List = append(mock.calls.List, callInfo)
+	mock.lockList.Unlock()
+	return mock.ListFunc(ctx, prefix, after, limit)
+}
+
+// ListCalls gets all the calls that were made to List.
+// Check the length with:
+//
+//	len(mockedBlob.ListCalls())
+func (mock *Blob) ListCalls() []struct {
+	Ctx    context.Context
+	Prefix string
+	After  string
+	Limit  int
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Prefix string
+		After  string
+		Limit  int
+	}
+	mock.lockList.RLock()
+	calls = mock.calls.List
+	mock.lockList.RUnlock()
 	return calls
 }
 
@@ -1806,6 +1868,9 @@ var _ port.UnitRepo = &UnitRepo{}
 //			DeleteByDocumentFunc: func(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
 //				panic("mock out the DeleteByDocument method")
 //			},
+//			IDsByDocumentFunc: func(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
+//				panic("mock out the IDsByDocument method")
+//			},
 //			InsertFunc: func(ctx context.Context, us []domain.Unit) error {
 //				panic("mock out the Insert method")
 //			},
@@ -1848,6 +1913,9 @@ type UnitRepo struct {
 
 	// DeleteByDocumentFunc mocks the DeleteByDocument method.
 	DeleteByDocumentFunc func(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error)
+
+	// IDsByDocumentFunc mocks the IDsByDocument method.
+	IDsByDocumentFunc func(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error)
 
 	// InsertFunc mocks the Insert method.
 	InsertFunc func(ctx context.Context, us []domain.Unit) error
@@ -1898,6 +1966,15 @@ type UnitRepo struct {
 		}
 		// DeleteByDocument holds details about calls to the DeleteByDocument method.
 		DeleteByDocument []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Doc is the doc argument value.
+			Doc port.DocumentID
+		}
+		// IDsByDocument holds details about calls to the IDsByDocument method.
+		IDsByDocument []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
@@ -1992,6 +2069,7 @@ type UnitRepo struct {
 	lockAppendAudit              sync.RWMutex
 	lockArchive                  sync.RWMutex
 	lockDeleteByDocument         sync.RWMutex
+	lockIDsByDocument            sync.RWMutex
 	lockInsert                   sync.RWMutex
 	lockMarkConsolidated         sync.RWMutex
 	lockMarkConsolidationFailed  sync.RWMutex
@@ -2120,6 +2198,46 @@ func (mock *UnitRepo) DeleteByDocumentCalls() []struct {
 	mock.lockDeleteByDocument.RLock()
 	calls = mock.calls.DeleteByDocument
 	mock.lockDeleteByDocument.RUnlock()
+	return calls
+}
+
+// IDsByDocument calls IDsByDocumentFunc.
+func (mock *UnitRepo) IDsByDocument(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
+	if mock.IDsByDocumentFunc == nil {
+		panic("UnitRepo.IDsByDocumentFunc: method is nil but UnitRepo.IDsByDocument was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Doc port.DocumentID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Doc: doc,
+	}
+	mock.lockIDsByDocument.Lock()
+	mock.calls.IDsByDocument = append(mock.calls.IDsByDocument, callInfo)
+	mock.lockIDsByDocument.Unlock()
+	return mock.IDsByDocumentFunc(ctx, b, doc)
+}
+
+// IDsByDocumentCalls gets all the calls that were made to IDsByDocument.
+// Check the length with:
+//
+//	len(mockedUnitRepo.IDsByDocumentCalls())
+func (mock *UnitRepo) IDsByDocumentCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Doc port.DocumentID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Doc port.DocumentID
+	}
+	mock.lockIDsByDocument.RLock()
+	calls = mock.calls.IDsByDocument
+	mock.lockIDsByDocument.RUnlock()
 	return calls
 }
 
@@ -3599,8 +3717,17 @@ var _ port.EvidenceRepo = &EvidenceRepo{}
 //			CitesFunc: func(ctx context.Context, s port.ScopeKey, unit port.UnitID) (bool, error) {
 //				panic("mock out the Cites method")
 //			},
+//			CitingScopesFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error) {
+//				panic("mock out the CitingScopes method")
+//			},
+//			DeleteAllObservationsFunc: func(ctx context.Context, b port.BankRef) ([]port.UnitID, []port.UnitID, error) {
+//				panic("mock out the DeleteAllObservations method")
+//			},
 //			DeleteCitingFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.UnitID, []port.UnitID, error) {
 //				panic("mock out the DeleteCiting method")
+//			},
+//			DeleteScopesFunc: func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, []port.UnitID, error) {
+//				panic("mock out the DeleteScopes method")
 //			},
 //		}
 //
@@ -3615,8 +3742,17 @@ type EvidenceRepo struct {
 	// CitesFunc mocks the Cites method.
 	CitesFunc func(ctx context.Context, s port.ScopeKey, unit port.UnitID) (bool, error)
 
+	// CitingScopesFunc mocks the CitingScopes method.
+	CitingScopesFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error)
+
+	// DeleteAllObservationsFunc mocks the DeleteAllObservations method.
+	DeleteAllObservationsFunc func(ctx context.Context, b port.BankRef) ([]port.UnitID, []port.UnitID, error)
+
 	// DeleteCitingFunc mocks the DeleteCiting method.
 	DeleteCitingFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.UnitID, []port.UnitID, error)
+
+	// DeleteScopesFunc mocks the DeleteScopes method.
+	DeleteScopesFunc func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, []port.UnitID, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -3638,6 +3774,22 @@ type EvidenceRepo struct {
 			// Unit is the unit argument value.
 			Unit port.UnitID
 		}
+		// CitingScopes holds details about calls to the CitingScopes method.
+		CitingScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.UnitID
+		}
+		// DeleteAllObservations holds details about calls to the DeleteAllObservations method.
+		DeleteAllObservations []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
 		// DeleteCiting holds details about calls to the DeleteCiting method.
 		DeleteCiting []struct {
 			// Ctx is the ctx argument value.
@@ -3647,10 +3799,22 @@ type EvidenceRepo struct {
 			// Ids is the ids argument value.
 			Ids []port.UnitID
 		}
+		// DeleteScopes holds details about calls to the DeleteScopes method.
+		DeleteScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Scopes is the scopes argument value.
+			Scopes []port.ScopeKey
+		}
 	}
-	lockAdd          sync.RWMutex
-	lockCites        sync.RWMutex
-	lockDeleteCiting sync.RWMutex
+	lockAdd                   sync.RWMutex
+	lockCites                 sync.RWMutex
+	lockCitingScopes          sync.RWMutex
+	lockDeleteAllObservations sync.RWMutex
+	lockDeleteCiting          sync.RWMutex
+	lockDeleteScopes          sync.RWMutex
 }
 
 // Add calls AddFunc.
@@ -3733,6 +3897,82 @@ func (mock *EvidenceRepo) CitesCalls() []struct {
 	return calls
 }
 
+// CitingScopes calls CitingScopesFunc.
+func (mock *EvidenceRepo) CitingScopes(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.ScopeKey, error) {
+	if mock.CitingScopesFunc == nil {
+		panic("EvidenceRepo.CitingScopesFunc: method is nil but EvidenceRepo.CitingScopes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockCitingScopes.Lock()
+	mock.calls.CitingScopes = append(mock.calls.CitingScopes, callInfo)
+	mock.lockCitingScopes.Unlock()
+	return mock.CitingScopesFunc(ctx, b, ids)
+}
+
+// CitingScopesCalls gets all the calls that were made to CitingScopes.
+// Check the length with:
+//
+//	len(mockedEvidenceRepo.CitingScopesCalls())
+func (mock *EvidenceRepo) CitingScopesCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}
+	mock.lockCitingScopes.RLock()
+	calls = mock.calls.CitingScopes
+	mock.lockCitingScopes.RUnlock()
+	return calls
+}
+
+// DeleteAllObservations calls DeleteAllObservationsFunc.
+func (mock *EvidenceRepo) DeleteAllObservations(ctx context.Context, b port.BankRef) ([]port.UnitID, []port.UnitID, error) {
+	if mock.DeleteAllObservationsFunc == nil {
+		panic("EvidenceRepo.DeleteAllObservationsFunc: method is nil but EvidenceRepo.DeleteAllObservations was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockDeleteAllObservations.Lock()
+	mock.calls.DeleteAllObservations = append(mock.calls.DeleteAllObservations, callInfo)
+	mock.lockDeleteAllObservations.Unlock()
+	return mock.DeleteAllObservationsFunc(ctx, b)
+}
+
+// DeleteAllObservationsCalls gets all the calls that were made to DeleteAllObservations.
+// Check the length with:
+//
+//	len(mockedEvidenceRepo.DeleteAllObservationsCalls())
+func (mock *EvidenceRepo) DeleteAllObservationsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockDeleteAllObservations.RLock()
+	calls = mock.calls.DeleteAllObservations
+	mock.lockDeleteAllObservations.RUnlock()
+	return calls
+}
+
 // DeleteCiting calls DeleteCitingFunc.
 func (mock *EvidenceRepo) DeleteCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.UnitID, []port.UnitID, error) {
 	if mock.DeleteCitingFunc == nil {
@@ -3770,6 +4010,46 @@ func (mock *EvidenceRepo) DeleteCitingCalls() []struct {
 	mock.lockDeleteCiting.RLock()
 	calls = mock.calls.DeleteCiting
 	mock.lockDeleteCiting.RUnlock()
+	return calls
+}
+
+// DeleteScopes calls DeleteScopesFunc.
+func (mock *EvidenceRepo) DeleteScopes(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, []port.UnitID, error) {
+	if mock.DeleteScopesFunc == nil {
+		panic("EvidenceRepo.DeleteScopesFunc: method is nil but EvidenceRepo.DeleteScopes was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}{
+		Ctx:    ctx,
+		B:      b,
+		Scopes: scopes,
+	}
+	mock.lockDeleteScopes.Lock()
+	mock.calls.DeleteScopes = append(mock.calls.DeleteScopes, callInfo)
+	mock.lockDeleteScopes.Unlock()
+	return mock.DeleteScopesFunc(ctx, b, scopes)
+}
+
+// DeleteScopesCalls gets all the calls that were made to DeleteScopes.
+// Check the length with:
+//
+//	len(mockedEvidenceRepo.DeleteScopesCalls())
+func (mock *EvidenceRepo) DeleteScopesCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Scopes []port.ScopeKey
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}
+	mock.lockDeleteScopes.RLock()
+	calls = mock.calls.DeleteScopes
+	mock.lockDeleteScopes.RUnlock()
 	return calls
 }
 
@@ -5135,11 +5415,23 @@ var _ port.Tx = &Tx{}
 //			BankSeqFunc: func(ctx context.Context, b port.BankRef) (int64, error) {
 //				panic("mock out the BankSeq method")
 //			},
+//			BankStatsFunc: func(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+//				panic("mock out the BankStats method")
+//			},
 //			BanksFunc: func() port.BankRepo {
 //				panic("mock out the Banks method")
 //			},
+//			BanksToConsolidateFunc: func(ctx context.Context) ([]port.BankRef, error) {
+//				panic("mock out the BanksToConsolidate method")
+//			},
 //			ChunksFunc: func() port.ChunkRepo {
 //				panic("mock out the Chunks method")
+//			},
+//			CountObservationsFunc: func(ctx context.Context, s port.ScopeKey) (int, error) {
+//				panic("mock out the CountObservations method")
+//			},
+//			CronModelsFunc: func(ctx context.Context) ([]port.CronModel, error) {
+//				panic("mock out the CronModels method")
 //			},
 //			DirectivesFunc: func() port.DirectiveRepo {
 //				panic("mock out the Directives method")
@@ -5150,6 +5442,9 @@ var _ port.Tx = &Tx{}
 //			EntitiesFunc: func() port.EntityRepo {
 //				panic("mock out the Entities method")
 //			},
+//			EntityStatesFunc: func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+//				panic("mock out the EntityStates method")
+//			},
 //			EventsFunc: func() port.EventRepo {
 //				panic("mock out the Events method")
 //			},
@@ -5159,14 +5454,44 @@ var _ port.Tx = &Tx{}
 //			ExpandGraphFunc: func(ctx context.Context, q port.GraphQuery) ([]port.Hit, error) {
 //				panic("mock out the ExpandGraph method")
 //			},
+//			FailedRefreshesFunc: func(ctx context.Context) ([]port.FailedRefresh, error) {
+//				panic("mock out the FailedRefreshes method")
+//			},
+//			GetChunksFunc: func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+//				panic("mock out the GetChunks method")
+//			},
+//			GetUnitFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+//				panic("mock out the GetUnit method")
+//			},
 //			GetUnitsFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]domain.Unit, error) {
 //				panic("mock out the GetUnits method")
 //			},
 //			LinksFunc: func() port.LinkRepo {
 //				panic("mock out the Links method")
 //			},
+//			ListDocumentsFunc: func(ctx context.Context, q port.DocumentQuery) ([]domain.Document, error) {
+//				panic("mock out the ListDocuments method")
+//			},
+//			ListMentalModelsFunc: func(ctx context.Context, q port.ModelQuery) ([]domain.MentalModel, string, error) {
+//				panic("mock out the ListMentalModels method")
+//			},
+//			ListScopesFunc: func(ctx context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
+//				panic("mock out the ListScopes method")
+//			},
+//			ListUnitsFunc: func(ctx context.Context, q port.UnitQuery) ([]domain.Unit, error) {
+//				panic("mock out the ListUnits method")
+//			},
 //			MentalModelsFunc: func() port.MentalModelRepo {
 //				panic("mock out the MentalModels method")
+//			},
+//			ModelsCitingFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error) {
+//				panic("mock out the ModelsCiting method")
+//			},
+//			NewestSeqInScopeFunc: func(ctx context.Context, q port.ScopeQuery) (int64, error) {
+//				panic("mock out the NewestSeqInScope method")
+//			},
+//			ObservationHistoryFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error) {
+//				panic("mock out the ObservationHistory method")
 //			},
 //			QueueFunc: func() port.Queue {
 //				panic("mock out the Queue method")
@@ -5183,6 +5508,12 @@ var _ port.Tx = &Tx{}
 //			SeqFunc: func(ctx context.Context, b port.BankRef) (int64, error) {
 //				panic("mock out the Seq method")
 //			},
+//			StaleScopesFunc: func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.ScopeKey, error) {
+//				panic("mock out the StaleScopes method")
+//			},
+//			TagCountsFunc: func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+//				panic("mock out the TagCounts method")
+//			},
 //			UnitsFunc: func() port.UnitRepo {
 //				panic("mock out the Units method")
 //			},
@@ -5196,11 +5527,23 @@ type Tx struct {
 	// BankSeqFunc mocks the BankSeq method.
 	BankSeqFunc func(ctx context.Context, b port.BankRef) (int64, error)
 
+	// BankStatsFunc mocks the BankStats method.
+	BankStatsFunc func(ctx context.Context, b port.BankRef) (domain.BankStats, error)
+
 	// BanksFunc mocks the Banks method.
 	BanksFunc func() port.BankRepo
 
+	// BanksToConsolidateFunc mocks the BanksToConsolidate method.
+	BanksToConsolidateFunc func(ctx context.Context) ([]port.BankRef, error)
+
 	// ChunksFunc mocks the Chunks method.
 	ChunksFunc func() port.ChunkRepo
+
+	// CountObservationsFunc mocks the CountObservations method.
+	CountObservationsFunc func(ctx context.Context, s port.ScopeKey) (int, error)
+
+	// CronModelsFunc mocks the CronModels method.
+	CronModelsFunc func(ctx context.Context) ([]port.CronModel, error)
 
 	// DirectivesFunc mocks the Directives method.
 	DirectivesFunc func() port.DirectiveRepo
@@ -5211,6 +5554,9 @@ type Tx struct {
 	// EntitiesFunc mocks the Entities method.
 	EntitiesFunc func() port.EntityRepo
 
+	// EntityStatesFunc mocks the EntityStates method.
+	EntityStatesFunc func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error)
+
 	// EventsFunc mocks the Events method.
 	EventsFunc func() port.EventRepo
 
@@ -5220,14 +5566,44 @@ type Tx struct {
 	// ExpandGraphFunc mocks the ExpandGraph method.
 	ExpandGraphFunc func(ctx context.Context, q port.GraphQuery) ([]port.Hit, error)
 
+	// FailedRefreshesFunc mocks the FailedRefreshes method.
+	FailedRefreshesFunc func(ctx context.Context) ([]port.FailedRefresh, error)
+
+	// GetChunksFunc mocks the GetChunks method.
+	GetChunksFunc func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
+
+	// GetUnitFunc mocks the GetUnit method.
+	GetUnitFunc func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+
 	// GetUnitsFunc mocks the GetUnits method.
 	GetUnitsFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]domain.Unit, error)
 
 	// LinksFunc mocks the Links method.
 	LinksFunc func() port.LinkRepo
 
+	// ListDocumentsFunc mocks the ListDocuments method.
+	ListDocumentsFunc func(ctx context.Context, q port.DocumentQuery) ([]domain.Document, error)
+
+	// ListMentalModelsFunc mocks the ListMentalModels method.
+	ListMentalModelsFunc func(ctx context.Context, q port.ModelQuery) ([]domain.MentalModel, string, error)
+
+	// ListScopesFunc mocks the ListScopes method.
+	ListScopesFunc func(ctx context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error)
+
+	// ListUnitsFunc mocks the ListUnits method.
+	ListUnitsFunc func(ctx context.Context, q port.UnitQuery) ([]domain.Unit, error)
+
 	// MentalModelsFunc mocks the MentalModels method.
 	MentalModelsFunc func() port.MentalModelRepo
+
+	// ModelsCitingFunc mocks the ModelsCiting method.
+	ModelsCitingFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error)
+
+	// NewestSeqInScopeFunc mocks the NewestSeqInScope method.
+	NewestSeqInScopeFunc func(ctx context.Context, q port.ScopeQuery) (int64, error)
+
+	// ObservationHistoryFunc mocks the ObservationHistory method.
+	ObservationHistoryFunc func(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
 
 	// QueueFunc mocks the Queue method.
 	QueueFunc func() port.Queue
@@ -5244,6 +5620,12 @@ type Tx struct {
 	// SeqFunc mocks the Seq method.
 	SeqFunc func(ctx context.Context, b port.BankRef) (int64, error)
 
+	// StaleScopesFunc mocks the StaleScopes method.
+	StaleScopesFunc func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.ScopeKey, error)
+
+	// TagCountsFunc mocks the TagCounts method.
+	TagCountsFunc func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error)
+
 	// UnitsFunc mocks the Units method.
 	UnitsFunc func() port.UnitRepo
 
@@ -5256,11 +5638,35 @@ type Tx struct {
 			// B is the b argument value.
 			B port.BankRef
 		}
+		// BankStats holds details about calls to the BankStats method.
+		BankStats []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
 		// Banks holds details about calls to the Banks method.
 		Banks []struct {
 		}
+		// BanksToConsolidate holds details about calls to the BanksToConsolidate method.
+		BanksToConsolidate []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
 		// Chunks holds details about calls to the Chunks method.
 		Chunks []struct {
+		}
+		// CountObservations holds details about calls to the CountObservations method.
+		CountObservations []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// S is the s argument value.
+			S port.ScopeKey
+		}
+		// CronModels holds details about calls to the CronModels method.
+		CronModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
 		}
 		// Directives holds details about calls to the Directives method.
 		Directives []struct {
@@ -5270,6 +5676,15 @@ type Tx struct {
 		}
 		// Entities holds details about calls to the Entities method.
 		Entities []struct {
+		}
+		// EntityStates holds details about calls to the EntityStates method.
+		EntityStates []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Units is the units argument value.
+			Units []port.UnitID
 		}
 		// Events holds details about calls to the Events method.
 		Events []struct {
@@ -5284,6 +5699,29 @@ type Tx struct {
 			// Q is the q argument value.
 			Q port.GraphQuery
 		}
+		// FailedRefreshes holds details about calls to the FailedRefreshes method.
+		FailedRefreshes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+		// GetChunks holds details about calls to the GetChunks method.
+		GetChunks []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.ChunkID
+		}
+		// GetUnit holds details about calls to the GetUnit method.
+		GetUnit []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.UnitID
+		}
 		// GetUnits holds details about calls to the GetUnits method.
 		GetUnits []struct {
 			// Ctx is the ctx argument value.
@@ -5296,8 +5734,65 @@ type Tx struct {
 		// Links holds details about calls to the Links method.
 		Links []struct {
 		}
+		// ListDocuments holds details about calls to the ListDocuments method.
+		ListDocuments []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.DocumentQuery
+		}
+		// ListMentalModels holds details about calls to the ListMentalModels method.
+		ListMentalModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.ModelQuery
+		}
+		// ListScopes holds details about calls to the ListScopes method.
+		ListScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
+		// ListUnits holds details about calls to the ListUnits method.
+		ListUnits []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.UnitQuery
+		}
 		// MentalModels holds details about calls to the MentalModels method.
 		MentalModels []struct {
+		}
+		// ModelsCiting holds details about calls to the ModelsCiting method.
+		ModelsCiting []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.UnitID
+		}
+		// NewestSeqInScope holds details about calls to the NewestSeqInScope method.
+		NewestSeqInScope []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.ScopeQuery
+		}
+		// ObservationHistory holds details about calls to the ObservationHistory method.
+		ObservationHistory []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.UnitID
 		}
 		// Queue holds details about calls to the Queue method.
 		Queue []struct {
@@ -5330,28 +5825,69 @@ type Tx struct {
 			// B is the b argument value.
 			B port.BankRef
 		}
+		// StaleScopes holds details about calls to the StaleScopes method.
+		StaleScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Scopes is the scopes argument value.
+			Scopes []port.ScopeKey
+		}
+		// TagCounts holds details about calls to the TagCounts method.
+		TagCounts []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Source is the source argument value.
+			Source domain.TagSource
+			// Prefix is the prefix argument value.
+			Prefix string
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
 		// Units holds details about calls to the Units method.
 		Units []struct {
 		}
 	}
-	lockBankSeq        sync.RWMutex
-	lockBanks          sync.RWMutex
-	lockChunks         sync.RWMutex
-	lockDirectives     sync.RWMutex
-	lockDocuments      sync.RWMutex
-	lockEntities       sync.RWMutex
-	lockEvents         sync.RWMutex
-	lockEvidence       sync.RWMutex
-	lockExpandGraph    sync.RWMutex
-	lockGetUnits       sync.RWMutex
-	lockLinks          sync.RWMutex
-	lockMentalModels   sync.RWMutex
-	lockQueue          sync.RWMutex
-	lockSearchTemporal sync.RWMutex
-	lockSearchText     sync.RWMutex
-	lockSearchVector   sync.RWMutex
-	lockSeq            sync.RWMutex
-	lockUnits          sync.RWMutex
+	lockBankSeq            sync.RWMutex
+	lockBankStats          sync.RWMutex
+	lockBanks              sync.RWMutex
+	lockBanksToConsolidate sync.RWMutex
+	lockChunks             sync.RWMutex
+	lockCountObservations  sync.RWMutex
+	lockCronModels         sync.RWMutex
+	lockDirectives         sync.RWMutex
+	lockDocuments          sync.RWMutex
+	lockEntities           sync.RWMutex
+	lockEntityStates       sync.RWMutex
+	lockEvents             sync.RWMutex
+	lockEvidence           sync.RWMutex
+	lockExpandGraph        sync.RWMutex
+	lockFailedRefreshes    sync.RWMutex
+	lockGetChunks          sync.RWMutex
+	lockGetUnit            sync.RWMutex
+	lockGetUnits           sync.RWMutex
+	lockLinks              sync.RWMutex
+	lockListDocuments      sync.RWMutex
+	lockListMentalModels   sync.RWMutex
+	lockListScopes         sync.RWMutex
+	lockListUnits          sync.RWMutex
+	lockMentalModels       sync.RWMutex
+	lockModelsCiting       sync.RWMutex
+	lockNewestSeqInScope   sync.RWMutex
+	lockObservationHistory sync.RWMutex
+	lockQueue              sync.RWMutex
+	lockSearchTemporal     sync.RWMutex
+	lockSearchText         sync.RWMutex
+	lockSearchVector       sync.RWMutex
+	lockSeq                sync.RWMutex
+	lockStaleScopes        sync.RWMutex
+	lockTagCounts          sync.RWMutex
+	lockUnits              sync.RWMutex
 }
 
 // BankSeq calls BankSeqFunc.
@@ -5390,6 +5926,42 @@ func (mock *Tx) BankSeqCalls() []struct {
 	return calls
 }
 
+// BankStats calls BankStatsFunc.
+func (mock *Tx) BankStats(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+	if mock.BankStatsFunc == nil {
+		panic("Tx.BankStatsFunc: method is nil but Tx.BankStats was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockBankStats.Lock()
+	mock.calls.BankStats = append(mock.calls.BankStats, callInfo)
+	mock.lockBankStats.Unlock()
+	return mock.BankStatsFunc(ctx, b)
+}
+
+// BankStatsCalls gets all the calls that were made to BankStats.
+// Check the length with:
+//
+//	len(mockedTx.BankStatsCalls())
+func (mock *Tx) BankStatsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockBankStats.RLock()
+	calls = mock.calls.BankStats
+	mock.lockBankStats.RUnlock()
+	return calls
+}
+
 // Banks calls BanksFunc.
 func (mock *Tx) Banks() port.BankRepo {
 	if mock.BanksFunc == nil {
@@ -5417,6 +5989,38 @@ func (mock *Tx) BanksCalls() []struct {
 	return calls
 }
 
+// BanksToConsolidate calls BanksToConsolidateFunc.
+func (mock *Tx) BanksToConsolidate(ctx context.Context) ([]port.BankRef, error) {
+	if mock.BanksToConsolidateFunc == nil {
+		panic("Tx.BanksToConsolidateFunc: method is nil but Tx.BanksToConsolidate was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockBanksToConsolidate.Lock()
+	mock.calls.BanksToConsolidate = append(mock.calls.BanksToConsolidate, callInfo)
+	mock.lockBanksToConsolidate.Unlock()
+	return mock.BanksToConsolidateFunc(ctx)
+}
+
+// BanksToConsolidateCalls gets all the calls that were made to BanksToConsolidate.
+// Check the length with:
+//
+//	len(mockedTx.BanksToConsolidateCalls())
+func (mock *Tx) BanksToConsolidateCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockBanksToConsolidate.RLock()
+	calls = mock.calls.BanksToConsolidate
+	mock.lockBanksToConsolidate.RUnlock()
+	return calls
+}
+
 // Chunks calls ChunksFunc.
 func (mock *Tx) Chunks() port.ChunkRepo {
 	if mock.ChunksFunc == nil {
@@ -5441,6 +6045,74 @@ func (mock *Tx) ChunksCalls() []struct {
 	mock.lockChunks.RLock()
 	calls = mock.calls.Chunks
 	mock.lockChunks.RUnlock()
+	return calls
+}
+
+// CountObservations calls CountObservationsFunc.
+func (mock *Tx) CountObservations(ctx context.Context, s port.ScopeKey) (int, error) {
+	if mock.CountObservationsFunc == nil {
+		panic("Tx.CountObservationsFunc: method is nil but Tx.CountObservations was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		S   port.ScopeKey
+	}{
+		Ctx: ctx,
+		S:   s,
+	}
+	mock.lockCountObservations.Lock()
+	mock.calls.CountObservations = append(mock.calls.CountObservations, callInfo)
+	mock.lockCountObservations.Unlock()
+	return mock.CountObservationsFunc(ctx, s)
+}
+
+// CountObservationsCalls gets all the calls that were made to CountObservations.
+// Check the length with:
+//
+//	len(mockedTx.CountObservationsCalls())
+func (mock *Tx) CountObservationsCalls() []struct {
+	Ctx context.Context
+	S   port.ScopeKey
+} {
+	var calls []struct {
+		Ctx context.Context
+		S   port.ScopeKey
+	}
+	mock.lockCountObservations.RLock()
+	calls = mock.calls.CountObservations
+	mock.lockCountObservations.RUnlock()
+	return calls
+}
+
+// CronModels calls CronModelsFunc.
+func (mock *Tx) CronModels(ctx context.Context) ([]port.CronModel, error) {
+	if mock.CronModelsFunc == nil {
+		panic("Tx.CronModelsFunc: method is nil but Tx.CronModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockCronModels.Lock()
+	mock.calls.CronModels = append(mock.calls.CronModels, callInfo)
+	mock.lockCronModels.Unlock()
+	return mock.CronModelsFunc(ctx)
+}
+
+// CronModelsCalls gets all the calls that were made to CronModels.
+// Check the length with:
+//
+//	len(mockedTx.CronModelsCalls())
+func (mock *Tx) CronModelsCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockCronModels.RLock()
+	calls = mock.calls.CronModels
+	mock.lockCronModels.RUnlock()
 	return calls
 }
 
@@ -5522,6 +6194,46 @@ func (mock *Tx) EntitiesCalls() []struct {
 	mock.lockEntities.RLock()
 	calls = mock.calls.Entities
 	mock.lockEntities.RUnlock()
+	return calls
+}
+
+// EntityStates calls EntityStatesFunc.
+func (mock *Tx) EntityStates(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+	if mock.EntityStatesFunc == nil {
+		panic("Tx.EntityStatesFunc: method is nil but Tx.EntityStates was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Units: units,
+	}
+	mock.lockEntityStates.Lock()
+	mock.calls.EntityStates = append(mock.calls.EntityStates, callInfo)
+	mock.lockEntityStates.Unlock()
+	return mock.EntityStatesFunc(ctx, b, units)
+}
+
+// EntityStatesCalls gets all the calls that were made to EntityStates.
+// Check the length with:
+//
+//	len(mockedTx.EntityStatesCalls())
+func (mock *Tx) EntityStatesCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Units []port.UnitID
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}
+	mock.lockEntityStates.RLock()
+	calls = mock.calls.EntityStates
+	mock.lockEntityStates.RUnlock()
 	return calls
 }
 
@@ -5615,6 +6327,118 @@ func (mock *Tx) ExpandGraphCalls() []struct {
 	return calls
 }
 
+// FailedRefreshes calls FailedRefreshesFunc.
+func (mock *Tx) FailedRefreshes(ctx context.Context) ([]port.FailedRefresh, error) {
+	if mock.FailedRefreshesFunc == nil {
+		panic("Tx.FailedRefreshesFunc: method is nil but Tx.FailedRefreshes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockFailedRefreshes.Lock()
+	mock.calls.FailedRefreshes = append(mock.calls.FailedRefreshes, callInfo)
+	mock.lockFailedRefreshes.Unlock()
+	return mock.FailedRefreshesFunc(ctx)
+}
+
+// FailedRefreshesCalls gets all the calls that were made to FailedRefreshes.
+// Check the length with:
+//
+//	len(mockedTx.FailedRefreshesCalls())
+func (mock *Tx) FailedRefreshesCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockFailedRefreshes.RLock()
+	calls = mock.calls.FailedRefreshes
+	mock.lockFailedRefreshes.RUnlock()
+	return calls
+}
+
+// GetChunks calls GetChunksFunc.
+func (mock *Tx) GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+	if mock.GetChunksFunc == nil {
+		panic("Tx.GetChunksFunc: method is nil but Tx.GetChunks was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockGetChunks.Lock()
+	mock.calls.GetChunks = append(mock.calls.GetChunks, callInfo)
+	mock.lockGetChunks.Unlock()
+	return mock.GetChunksFunc(ctx, b, ids)
+}
+
+// GetChunksCalls gets all the calls that were made to GetChunks.
+// Check the length with:
+//
+//	len(mockedTx.GetChunksCalls())
+func (mock *Tx) GetChunksCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.ChunkID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}
+	mock.lockGetChunks.RLock()
+	calls = mock.calls.GetChunks
+	mock.lockGetChunks.RUnlock()
+	return calls
+}
+
+// GetUnit calls GetUnitFunc.
+func (mock *Tx) GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+	if mock.GetUnitFunc == nil {
+		panic("Tx.GetUnitFunc: method is nil but Tx.GetUnit was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockGetUnit.Lock()
+	mock.calls.GetUnit = append(mock.calls.GetUnit, callInfo)
+	mock.lockGetUnit.Unlock()
+	return mock.GetUnitFunc(ctx, b, id)
+}
+
+// GetUnitCalls gets all the calls that were made to GetUnit.
+// Check the length with:
+//
+//	len(mockedTx.GetUnitCalls())
+func (mock *Tx) GetUnitCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}
+	mock.lockGetUnit.RLock()
+	calls = mock.calls.GetUnit
+	mock.lockGetUnit.RUnlock()
+	return calls
+}
+
 // GetUnits calls GetUnitsFunc.
 func (mock *Tx) GetUnits(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]domain.Unit, error) {
 	if mock.GetUnitsFunc == nil {
@@ -5682,6 +6506,158 @@ func (mock *Tx) LinksCalls() []struct {
 	return calls
 }
 
+// ListDocuments calls ListDocumentsFunc.
+func (mock *Tx) ListDocuments(ctx context.Context, q port.DocumentQuery) ([]domain.Document, error) {
+	if mock.ListDocumentsFunc == nil {
+		panic("Tx.ListDocumentsFunc: method is nil but Tx.ListDocuments was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.DocumentQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListDocuments.Lock()
+	mock.calls.ListDocuments = append(mock.calls.ListDocuments, callInfo)
+	mock.lockListDocuments.Unlock()
+	return mock.ListDocumentsFunc(ctx, q)
+}
+
+// ListDocumentsCalls gets all the calls that were made to ListDocuments.
+// Check the length with:
+//
+//	len(mockedTx.ListDocumentsCalls())
+func (mock *Tx) ListDocumentsCalls() []struct {
+	Ctx context.Context
+	Q   port.DocumentQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.DocumentQuery
+	}
+	mock.lockListDocuments.RLock()
+	calls = mock.calls.ListDocuments
+	mock.lockListDocuments.RUnlock()
+	return calls
+}
+
+// ListMentalModels calls ListMentalModelsFunc.
+func (mock *Tx) ListMentalModels(ctx context.Context, q port.ModelQuery) ([]domain.MentalModel, string, error) {
+	if mock.ListMentalModelsFunc == nil {
+		panic("Tx.ListMentalModelsFunc: method is nil but Tx.ListMentalModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.ModelQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListMentalModels.Lock()
+	mock.calls.ListMentalModels = append(mock.calls.ListMentalModels, callInfo)
+	mock.lockListMentalModels.Unlock()
+	return mock.ListMentalModelsFunc(ctx, q)
+}
+
+// ListMentalModelsCalls gets all the calls that were made to ListMentalModels.
+// Check the length with:
+//
+//	len(mockedTx.ListMentalModelsCalls())
+func (mock *Tx) ListMentalModelsCalls() []struct {
+	Ctx context.Context
+	Q   port.ModelQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.ModelQuery
+	}
+	mock.lockListMentalModels.RLock()
+	calls = mock.calls.ListMentalModels
+	mock.lockListMentalModels.RUnlock()
+	return calls
+}
+
+// ListScopes calls ListScopesFunc.
+func (mock *Tx) ListScopes(ctx context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
+	if mock.ListScopesFunc == nil {
+		panic("Tx.ListScopesFunc: method is nil but Tx.ListScopes was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		After string
+		Limit int
+	}{
+		Ctx:   ctx,
+		B:     b,
+		After: after,
+		Limit: limit,
+	}
+	mock.lockListScopes.Lock()
+	mock.calls.ListScopes = append(mock.calls.ListScopes, callInfo)
+	mock.lockListScopes.Unlock()
+	return mock.ListScopesFunc(ctx, b, after, limit)
+}
+
+// ListScopesCalls gets all the calls that were made to ListScopes.
+// Check the length with:
+//
+//	len(mockedTx.ListScopesCalls())
+func (mock *Tx) ListScopesCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	After string
+	Limit int
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		After string
+		Limit int
+	}
+	mock.lockListScopes.RLock()
+	calls = mock.calls.ListScopes
+	mock.lockListScopes.RUnlock()
+	return calls
+}
+
+// ListUnits calls ListUnitsFunc.
+func (mock *Tx) ListUnits(ctx context.Context, q port.UnitQuery) ([]domain.Unit, error) {
+	if mock.ListUnitsFunc == nil {
+		panic("Tx.ListUnitsFunc: method is nil but Tx.ListUnits was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.UnitQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListUnits.Lock()
+	mock.calls.ListUnits = append(mock.calls.ListUnits, callInfo)
+	mock.lockListUnits.Unlock()
+	return mock.ListUnitsFunc(ctx, q)
+}
+
+// ListUnitsCalls gets all the calls that were made to ListUnits.
+// Check the length with:
+//
+//	len(mockedTx.ListUnitsCalls())
+func (mock *Tx) ListUnitsCalls() []struct {
+	Ctx context.Context
+	Q   port.UnitQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.UnitQuery
+	}
+	mock.lockListUnits.RLock()
+	calls = mock.calls.ListUnits
+	mock.lockListUnits.RUnlock()
+	return calls
+}
+
 // MentalModels calls MentalModelsFunc.
 func (mock *Tx) MentalModels() port.MentalModelRepo {
 	if mock.MentalModelsFunc == nil {
@@ -5706,6 +6682,122 @@ func (mock *Tx) MentalModelsCalls() []struct {
 	mock.lockMentalModels.RLock()
 	calls = mock.calls.MentalModels
 	mock.lockMentalModels.RUnlock()
+	return calls
+}
+
+// ModelsCiting calls ModelsCitingFunc.
+func (mock *Tx) ModelsCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error) {
+	if mock.ModelsCitingFunc == nil {
+		panic("Tx.ModelsCitingFunc: method is nil but Tx.ModelsCiting was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockModelsCiting.Lock()
+	mock.calls.ModelsCiting = append(mock.calls.ModelsCiting, callInfo)
+	mock.lockModelsCiting.Unlock()
+	return mock.ModelsCitingFunc(ctx, b, ids)
+}
+
+// ModelsCitingCalls gets all the calls that were made to ModelsCiting.
+// Check the length with:
+//
+//	len(mockedTx.ModelsCitingCalls())
+func (mock *Tx) ModelsCitingCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}
+	mock.lockModelsCiting.RLock()
+	calls = mock.calls.ModelsCiting
+	mock.lockModelsCiting.RUnlock()
+	return calls
+}
+
+// NewestSeqInScope calls NewestSeqInScopeFunc.
+func (mock *Tx) NewestSeqInScope(ctx context.Context, q port.ScopeQuery) (int64, error) {
+	if mock.NewestSeqInScopeFunc == nil {
+		panic("Tx.NewestSeqInScopeFunc: method is nil but Tx.NewestSeqInScope was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.ScopeQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockNewestSeqInScope.Lock()
+	mock.calls.NewestSeqInScope = append(mock.calls.NewestSeqInScope, callInfo)
+	mock.lockNewestSeqInScope.Unlock()
+	return mock.NewestSeqInScopeFunc(ctx, q)
+}
+
+// NewestSeqInScopeCalls gets all the calls that were made to NewestSeqInScope.
+// Check the length with:
+//
+//	len(mockedTx.NewestSeqInScopeCalls())
+func (mock *Tx) NewestSeqInScopeCalls() []struct {
+	Ctx context.Context
+	Q   port.ScopeQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.ScopeQuery
+	}
+	mock.lockNewestSeqInScope.RLock()
+	calls = mock.calls.NewestSeqInScope
+	mock.lockNewestSeqInScope.RUnlock()
+	return calls
+}
+
+// ObservationHistory calls ObservationHistoryFunc.
+func (mock *Tx) ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error) {
+	if mock.ObservationHistoryFunc == nil {
+		panic("Tx.ObservationHistoryFunc: method is nil but Tx.ObservationHistory was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockObservationHistory.Lock()
+	mock.calls.ObservationHistory = append(mock.calls.ObservationHistory, callInfo)
+	mock.lockObservationHistory.Unlock()
+	return mock.ObservationHistoryFunc(ctx, b, id)
+}
+
+// ObservationHistoryCalls gets all the calls that were made to ObservationHistory.
+// Check the length with:
+//
+//	len(mockedTx.ObservationHistoryCalls())
+func (mock *Tx) ObservationHistoryCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}
+	mock.lockObservationHistory.RLock()
+	calls = mock.calls.ObservationHistory
+	mock.lockObservationHistory.RUnlock()
 	return calls
 }
 
@@ -5880,6 +6972,98 @@ func (mock *Tx) SeqCalls() []struct {
 	return calls
 }
 
+// StaleScopes calls StaleScopesFunc.
+func (mock *Tx) StaleScopes(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.ScopeKey, error) {
+	if mock.StaleScopesFunc == nil {
+		panic("Tx.StaleScopesFunc: method is nil but Tx.StaleScopes was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}{
+		Ctx:    ctx,
+		B:      b,
+		Scopes: scopes,
+	}
+	mock.lockStaleScopes.Lock()
+	mock.calls.StaleScopes = append(mock.calls.StaleScopes, callInfo)
+	mock.lockStaleScopes.Unlock()
+	return mock.StaleScopesFunc(ctx, b, scopes)
+}
+
+// StaleScopesCalls gets all the calls that were made to StaleScopes.
+// Check the length with:
+//
+//	len(mockedTx.StaleScopesCalls())
+func (mock *Tx) StaleScopesCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Scopes []port.ScopeKey
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}
+	mock.lockStaleScopes.RLock()
+	calls = mock.calls.StaleScopes
+	mock.lockStaleScopes.RUnlock()
+	return calls
+}
+
+// TagCounts calls TagCountsFunc.
+func (mock *Tx) TagCounts(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+	if mock.TagCountsFunc == nil {
+		panic("Tx.TagCountsFunc: method is nil but Tx.TagCounts was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}{
+		Ctx:    ctx,
+		B:      b,
+		Source: source,
+		Prefix: prefix,
+		After:  after,
+		Limit:  limit,
+	}
+	mock.lockTagCounts.Lock()
+	mock.calls.TagCounts = append(mock.calls.TagCounts, callInfo)
+	mock.lockTagCounts.Unlock()
+	return mock.TagCountsFunc(ctx, b, source, prefix, after, limit)
+}
+
+// TagCountsCalls gets all the calls that were made to TagCounts.
+// Check the length with:
+//
+//	len(mockedTx.TagCountsCalls())
+func (mock *Tx) TagCountsCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Source domain.TagSource
+	Prefix string
+	After  string
+	Limit  int
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}
+	mock.lockTagCounts.RLock()
+	calls = mock.calls.TagCounts
+	mock.lockTagCounts.RUnlock()
+	return calls
+}
+
 // Units calls UnitsFunc.
 func (mock *Tx) Units() port.UnitRepo {
 	if mock.UnitsFunc == nil {
@@ -5920,11 +7104,56 @@ var _ port.Reader = &Reader{}
 //			BankSeqFunc: func(ctx context.Context, b port.BankRef) (int64, error) {
 //				panic("mock out the BankSeq method")
 //			},
+//			BankStatsFunc: func(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+//				panic("mock out the BankStats method")
+//			},
+//			BanksToConsolidateFunc: func(ctx context.Context) ([]port.BankRef, error) {
+//				panic("mock out the BanksToConsolidate method")
+//			},
+//			CountObservationsFunc: func(ctx context.Context, s port.ScopeKey) (int, error) {
+//				panic("mock out the CountObservations method")
+//			},
+//			CronModelsFunc: func(ctx context.Context) ([]port.CronModel, error) {
+//				panic("mock out the CronModels method")
+//			},
+//			EntityStatesFunc: func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+//				panic("mock out the EntityStates method")
+//			},
 //			ExpandGraphFunc: func(ctx context.Context, q port.GraphQuery) ([]port.Hit, error) {
 //				panic("mock out the ExpandGraph method")
 //			},
+//			FailedRefreshesFunc: func(ctx context.Context) ([]port.FailedRefresh, error) {
+//				panic("mock out the FailedRefreshes method")
+//			},
+//			GetChunksFunc: func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+//				panic("mock out the GetChunks method")
+//			},
+//			GetUnitFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+//				panic("mock out the GetUnit method")
+//			},
 //			GetUnitsFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]domain.Unit, error) {
 //				panic("mock out the GetUnits method")
+//			},
+//			ListDocumentsFunc: func(ctx context.Context, q port.DocumentQuery) ([]domain.Document, error) {
+//				panic("mock out the ListDocuments method")
+//			},
+//			ListMentalModelsFunc: func(ctx context.Context, q port.ModelQuery) ([]domain.MentalModel, string, error) {
+//				panic("mock out the ListMentalModels method")
+//			},
+//			ListScopesFunc: func(ctx context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
+//				panic("mock out the ListScopes method")
+//			},
+//			ListUnitsFunc: func(ctx context.Context, q port.UnitQuery) ([]domain.Unit, error) {
+//				panic("mock out the ListUnits method")
+//			},
+//			ModelsCitingFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error) {
+//				panic("mock out the ModelsCiting method")
+//			},
+//			NewestSeqInScopeFunc: func(ctx context.Context, q port.ScopeQuery) (int64, error) {
+//				panic("mock out the NewestSeqInScope method")
+//			},
+//			ObservationHistoryFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error) {
+//				panic("mock out the ObservationHistory method")
 //			},
 //			SearchTemporalFunc: func(ctx context.Context, q port.TemporalQuery) ([]port.Hit, error) {
 //				panic("mock out the SearchTemporal method")
@@ -5934,6 +7163,12 @@ var _ port.Reader = &Reader{}
 //			},
 //			SearchVectorFunc: func(ctx context.Context, q port.VectorQuery) ([]port.Hit, error) {
 //				panic("mock out the SearchVector method")
+//			},
+//			StaleScopesFunc: func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.ScopeKey, error) {
+//				panic("mock out the StaleScopes method")
+//			},
+//			TagCountsFunc: func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+//				panic("mock out the TagCounts method")
 //			},
 //		}
 //
@@ -5945,11 +7180,56 @@ type Reader struct {
 	// BankSeqFunc mocks the BankSeq method.
 	BankSeqFunc func(ctx context.Context, b port.BankRef) (int64, error)
 
+	// BankStatsFunc mocks the BankStats method.
+	BankStatsFunc func(ctx context.Context, b port.BankRef) (domain.BankStats, error)
+
+	// BanksToConsolidateFunc mocks the BanksToConsolidate method.
+	BanksToConsolidateFunc func(ctx context.Context) ([]port.BankRef, error)
+
+	// CountObservationsFunc mocks the CountObservations method.
+	CountObservationsFunc func(ctx context.Context, s port.ScopeKey) (int, error)
+
+	// CronModelsFunc mocks the CronModels method.
+	CronModelsFunc func(ctx context.Context) ([]port.CronModel, error)
+
+	// EntityStatesFunc mocks the EntityStates method.
+	EntityStatesFunc func(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error)
+
 	// ExpandGraphFunc mocks the ExpandGraph method.
 	ExpandGraphFunc func(ctx context.Context, q port.GraphQuery) ([]port.Hit, error)
 
+	// FailedRefreshesFunc mocks the FailedRefreshes method.
+	FailedRefreshesFunc func(ctx context.Context) ([]port.FailedRefresh, error)
+
+	// GetChunksFunc mocks the GetChunks method.
+	GetChunksFunc func(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error)
+
+	// GetUnitFunc mocks the GetUnit method.
+	GetUnitFunc func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+
 	// GetUnitsFunc mocks the GetUnits method.
 	GetUnitsFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]domain.Unit, error)
+
+	// ListDocumentsFunc mocks the ListDocuments method.
+	ListDocumentsFunc func(ctx context.Context, q port.DocumentQuery) ([]domain.Document, error)
+
+	// ListMentalModelsFunc mocks the ListMentalModels method.
+	ListMentalModelsFunc func(ctx context.Context, q port.ModelQuery) ([]domain.MentalModel, string, error)
+
+	// ListScopesFunc mocks the ListScopes method.
+	ListScopesFunc func(ctx context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error)
+
+	// ListUnitsFunc mocks the ListUnits method.
+	ListUnitsFunc func(ctx context.Context, q port.UnitQuery) ([]domain.Unit, error)
+
+	// ModelsCitingFunc mocks the ModelsCiting method.
+	ModelsCitingFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error)
+
+	// NewestSeqInScopeFunc mocks the NewestSeqInScope method.
+	NewestSeqInScopeFunc func(ctx context.Context, q port.ScopeQuery) (int64, error)
+
+	// ObservationHistoryFunc mocks the ObservationHistory method.
+	ObservationHistoryFunc func(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
 
 	// SearchTemporalFunc mocks the SearchTemporal method.
 	SearchTemporalFunc func(ctx context.Context, q port.TemporalQuery) ([]port.Hit, error)
@@ -5960,6 +7240,12 @@ type Reader struct {
 	// SearchVectorFunc mocks the SearchVector method.
 	SearchVectorFunc func(ctx context.Context, q port.VectorQuery) ([]port.Hit, error)
 
+	// StaleScopesFunc mocks the StaleScopes method.
+	StaleScopesFunc func(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.ScopeKey, error)
+
+	// TagCountsFunc mocks the TagCounts method.
+	TagCountsFunc func(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error)
+
 	// calls tracks calls to the methods.
 	calls struct {
 		// BankSeq holds details about calls to the BankSeq method.
@@ -5969,12 +7255,68 @@ type Reader struct {
 			// B is the b argument value.
 			B port.BankRef
 		}
+		// BankStats holds details about calls to the BankStats method.
+		BankStats []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+		// BanksToConsolidate holds details about calls to the BanksToConsolidate method.
+		BanksToConsolidate []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+		// CountObservations holds details about calls to the CountObservations method.
+		CountObservations []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// S is the s argument value.
+			S port.ScopeKey
+		}
+		// CronModels holds details about calls to the CronModels method.
+		CronModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+		// EntityStates holds details about calls to the EntityStates method.
+		EntityStates []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Units is the units argument value.
+			Units []port.UnitID
+		}
 		// ExpandGraph holds details about calls to the ExpandGraph method.
 		ExpandGraph []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Q is the q argument value.
 			Q port.GraphQuery
+		}
+		// FailedRefreshes holds details about calls to the FailedRefreshes method.
+		FailedRefreshes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+		// GetChunks holds details about calls to the GetChunks method.
+		GetChunks []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.ChunkID
+		}
+		// GetUnit holds details about calls to the GetUnit method.
+		GetUnit []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.UnitID
 		}
 		// GetUnits holds details about calls to the GetUnits method.
 		GetUnits []struct {
@@ -5984,6 +7326,63 @@ type Reader struct {
 			B port.BankRef
 			// Ids is the ids argument value.
 			Ids []port.UnitID
+		}
+		// ListDocuments holds details about calls to the ListDocuments method.
+		ListDocuments []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.DocumentQuery
+		}
+		// ListMentalModels holds details about calls to the ListMentalModels method.
+		ListMentalModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.ModelQuery
+		}
+		// ListScopes holds details about calls to the ListScopes method.
+		ListScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
+		// ListUnits holds details about calls to the ListUnits method.
+		ListUnits []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.UnitQuery
+		}
+		// ModelsCiting holds details about calls to the ModelsCiting method.
+		ModelsCiting []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.UnitID
+		}
+		// NewestSeqInScope holds details about calls to the NewestSeqInScope method.
+		NewestSeqInScope []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q port.ScopeQuery
+		}
+		// ObservationHistory holds details about calls to the ObservationHistory method.
+		ObservationHistory []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.UnitID
 		}
 		// SearchTemporal holds details about calls to the SearchTemporal method.
 		SearchTemporal []struct {
@@ -6006,13 +7405,54 @@ type Reader struct {
 			// Q is the q argument value.
 			Q port.VectorQuery
 		}
+		// StaleScopes holds details about calls to the StaleScopes method.
+		StaleScopes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Scopes is the scopes argument value.
+			Scopes []port.ScopeKey
+		}
+		// TagCounts holds details about calls to the TagCounts method.
+		TagCounts []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Source is the source argument value.
+			Source domain.TagSource
+			// Prefix is the prefix argument value.
+			Prefix string
+			// After is the after argument value.
+			After string
+			// Limit is the limit argument value.
+			Limit int
+		}
 	}
-	lockBankSeq        sync.RWMutex
-	lockExpandGraph    sync.RWMutex
-	lockGetUnits       sync.RWMutex
-	lockSearchTemporal sync.RWMutex
-	lockSearchText     sync.RWMutex
-	lockSearchVector   sync.RWMutex
+	lockBankSeq            sync.RWMutex
+	lockBankStats          sync.RWMutex
+	lockBanksToConsolidate sync.RWMutex
+	lockCountObservations  sync.RWMutex
+	lockCronModels         sync.RWMutex
+	lockEntityStates       sync.RWMutex
+	lockExpandGraph        sync.RWMutex
+	lockFailedRefreshes    sync.RWMutex
+	lockGetChunks          sync.RWMutex
+	lockGetUnit            sync.RWMutex
+	lockGetUnits           sync.RWMutex
+	lockListDocuments      sync.RWMutex
+	lockListMentalModels   sync.RWMutex
+	lockListScopes         sync.RWMutex
+	lockListUnits          sync.RWMutex
+	lockModelsCiting       sync.RWMutex
+	lockNewestSeqInScope   sync.RWMutex
+	lockObservationHistory sync.RWMutex
+	lockSearchTemporal     sync.RWMutex
+	lockSearchText         sync.RWMutex
+	lockSearchVector       sync.RWMutex
+	lockStaleScopes        sync.RWMutex
+	lockTagCounts          sync.RWMutex
 }
 
 // BankSeq calls BankSeqFunc.
@@ -6051,6 +7491,182 @@ func (mock *Reader) BankSeqCalls() []struct {
 	return calls
 }
 
+// BankStats calls BankStatsFunc.
+func (mock *Reader) BankStats(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+	if mock.BankStatsFunc == nil {
+		panic("Reader.BankStatsFunc: method is nil but Reader.BankStats was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockBankStats.Lock()
+	mock.calls.BankStats = append(mock.calls.BankStats, callInfo)
+	mock.lockBankStats.Unlock()
+	return mock.BankStatsFunc(ctx, b)
+}
+
+// BankStatsCalls gets all the calls that were made to BankStats.
+// Check the length with:
+//
+//	len(mockedReader.BankStatsCalls())
+func (mock *Reader) BankStatsCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockBankStats.RLock()
+	calls = mock.calls.BankStats
+	mock.lockBankStats.RUnlock()
+	return calls
+}
+
+// BanksToConsolidate calls BanksToConsolidateFunc.
+func (mock *Reader) BanksToConsolidate(ctx context.Context) ([]port.BankRef, error) {
+	if mock.BanksToConsolidateFunc == nil {
+		panic("Reader.BanksToConsolidateFunc: method is nil but Reader.BanksToConsolidate was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockBanksToConsolidate.Lock()
+	mock.calls.BanksToConsolidate = append(mock.calls.BanksToConsolidate, callInfo)
+	mock.lockBanksToConsolidate.Unlock()
+	return mock.BanksToConsolidateFunc(ctx)
+}
+
+// BanksToConsolidateCalls gets all the calls that were made to BanksToConsolidate.
+// Check the length with:
+//
+//	len(mockedReader.BanksToConsolidateCalls())
+func (mock *Reader) BanksToConsolidateCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockBanksToConsolidate.RLock()
+	calls = mock.calls.BanksToConsolidate
+	mock.lockBanksToConsolidate.RUnlock()
+	return calls
+}
+
+// CountObservations calls CountObservationsFunc.
+func (mock *Reader) CountObservations(ctx context.Context, s port.ScopeKey) (int, error) {
+	if mock.CountObservationsFunc == nil {
+		panic("Reader.CountObservationsFunc: method is nil but Reader.CountObservations was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		S   port.ScopeKey
+	}{
+		Ctx: ctx,
+		S:   s,
+	}
+	mock.lockCountObservations.Lock()
+	mock.calls.CountObservations = append(mock.calls.CountObservations, callInfo)
+	mock.lockCountObservations.Unlock()
+	return mock.CountObservationsFunc(ctx, s)
+}
+
+// CountObservationsCalls gets all the calls that were made to CountObservations.
+// Check the length with:
+//
+//	len(mockedReader.CountObservationsCalls())
+func (mock *Reader) CountObservationsCalls() []struct {
+	Ctx context.Context
+	S   port.ScopeKey
+} {
+	var calls []struct {
+		Ctx context.Context
+		S   port.ScopeKey
+	}
+	mock.lockCountObservations.RLock()
+	calls = mock.calls.CountObservations
+	mock.lockCountObservations.RUnlock()
+	return calls
+}
+
+// CronModels calls CronModelsFunc.
+func (mock *Reader) CronModels(ctx context.Context) ([]port.CronModel, error) {
+	if mock.CronModelsFunc == nil {
+		panic("Reader.CronModelsFunc: method is nil but Reader.CronModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockCronModels.Lock()
+	mock.calls.CronModels = append(mock.calls.CronModels, callInfo)
+	mock.lockCronModels.Unlock()
+	return mock.CronModelsFunc(ctx)
+}
+
+// CronModelsCalls gets all the calls that were made to CronModels.
+// Check the length with:
+//
+//	len(mockedReader.CronModelsCalls())
+func (mock *Reader) CronModelsCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockCronModels.RLock()
+	calls = mock.calls.CronModels
+	mock.lockCronModels.RUnlock()
+	return calls
+}
+
+// EntityStates calls EntityStatesFunc.
+func (mock *Reader) EntityStates(ctx context.Context, b port.BankRef, units []port.UnitID) ([]domain.EntityState, error) {
+	if mock.EntityStatesFunc == nil {
+		panic("Reader.EntityStatesFunc: method is nil but Reader.EntityStates was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}{
+		Ctx:   ctx,
+		B:     b,
+		Units: units,
+	}
+	mock.lockEntityStates.Lock()
+	mock.calls.EntityStates = append(mock.calls.EntityStates, callInfo)
+	mock.lockEntityStates.Unlock()
+	return mock.EntityStatesFunc(ctx, b, units)
+}
+
+// EntityStatesCalls gets all the calls that were made to EntityStates.
+// Check the length with:
+//
+//	len(mockedReader.EntityStatesCalls())
+func (mock *Reader) EntityStatesCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	Units []port.UnitID
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		Units []port.UnitID
+	}
+	mock.lockEntityStates.RLock()
+	calls = mock.calls.EntityStates
+	mock.lockEntityStates.RUnlock()
+	return calls
+}
+
 // ExpandGraph calls ExpandGraphFunc.
 func (mock *Reader) ExpandGraph(ctx context.Context, q port.GraphQuery) ([]port.Hit, error) {
 	if mock.ExpandGraphFunc == nil {
@@ -6084,6 +7700,118 @@ func (mock *Reader) ExpandGraphCalls() []struct {
 	mock.lockExpandGraph.RLock()
 	calls = mock.calls.ExpandGraph
 	mock.lockExpandGraph.RUnlock()
+	return calls
+}
+
+// FailedRefreshes calls FailedRefreshesFunc.
+func (mock *Reader) FailedRefreshes(ctx context.Context) ([]port.FailedRefresh, error) {
+	if mock.FailedRefreshesFunc == nil {
+		panic("Reader.FailedRefreshesFunc: method is nil but Reader.FailedRefreshes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockFailedRefreshes.Lock()
+	mock.calls.FailedRefreshes = append(mock.calls.FailedRefreshes, callInfo)
+	mock.lockFailedRefreshes.Unlock()
+	return mock.FailedRefreshesFunc(ctx)
+}
+
+// FailedRefreshesCalls gets all the calls that were made to FailedRefreshes.
+// Check the length with:
+//
+//	len(mockedReader.FailedRefreshesCalls())
+func (mock *Reader) FailedRefreshesCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockFailedRefreshes.RLock()
+	calls = mock.calls.FailedRefreshes
+	mock.lockFailedRefreshes.RUnlock()
+	return calls
+}
+
+// GetChunks calls GetChunksFunc.
+func (mock *Reader) GetChunks(ctx context.Context, b port.BankRef, ids []port.ChunkID) ([]domain.Chunk, error) {
+	if mock.GetChunksFunc == nil {
+		panic("Reader.GetChunksFunc: method is nil but Reader.GetChunks was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockGetChunks.Lock()
+	mock.calls.GetChunks = append(mock.calls.GetChunks, callInfo)
+	mock.lockGetChunks.Unlock()
+	return mock.GetChunksFunc(ctx, b, ids)
+}
+
+// GetChunksCalls gets all the calls that were made to GetChunks.
+// Check the length with:
+//
+//	len(mockedReader.GetChunksCalls())
+func (mock *Reader) GetChunksCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.ChunkID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.ChunkID
+	}
+	mock.lockGetChunks.RLock()
+	calls = mock.calls.GetChunks
+	mock.lockGetChunks.RUnlock()
+	return calls
+}
+
+// GetUnit calls GetUnitFunc.
+func (mock *Reader) GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+	if mock.GetUnitFunc == nil {
+		panic("Reader.GetUnitFunc: method is nil but Reader.GetUnit was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockGetUnit.Lock()
+	mock.calls.GetUnit = append(mock.calls.GetUnit, callInfo)
+	mock.lockGetUnit.Unlock()
+	return mock.GetUnitFunc(ctx, b, id)
+}
+
+// GetUnitCalls gets all the calls that were made to GetUnit.
+// Check the length with:
+//
+//	len(mockedReader.GetUnitCalls())
+func (mock *Reader) GetUnitCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}
+	mock.lockGetUnit.RLock()
+	calls = mock.calls.GetUnit
+	mock.lockGetUnit.RUnlock()
 	return calls
 }
 
@@ -6124,6 +7852,274 @@ func (mock *Reader) GetUnitsCalls() []struct {
 	mock.lockGetUnits.RLock()
 	calls = mock.calls.GetUnits
 	mock.lockGetUnits.RUnlock()
+	return calls
+}
+
+// ListDocuments calls ListDocumentsFunc.
+func (mock *Reader) ListDocuments(ctx context.Context, q port.DocumentQuery) ([]domain.Document, error) {
+	if mock.ListDocumentsFunc == nil {
+		panic("Reader.ListDocumentsFunc: method is nil but Reader.ListDocuments was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.DocumentQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListDocuments.Lock()
+	mock.calls.ListDocuments = append(mock.calls.ListDocuments, callInfo)
+	mock.lockListDocuments.Unlock()
+	return mock.ListDocumentsFunc(ctx, q)
+}
+
+// ListDocumentsCalls gets all the calls that were made to ListDocuments.
+// Check the length with:
+//
+//	len(mockedReader.ListDocumentsCalls())
+func (mock *Reader) ListDocumentsCalls() []struct {
+	Ctx context.Context
+	Q   port.DocumentQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.DocumentQuery
+	}
+	mock.lockListDocuments.RLock()
+	calls = mock.calls.ListDocuments
+	mock.lockListDocuments.RUnlock()
+	return calls
+}
+
+// ListMentalModels calls ListMentalModelsFunc.
+func (mock *Reader) ListMentalModels(ctx context.Context, q port.ModelQuery) ([]domain.MentalModel, string, error) {
+	if mock.ListMentalModelsFunc == nil {
+		panic("Reader.ListMentalModelsFunc: method is nil but Reader.ListMentalModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.ModelQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListMentalModels.Lock()
+	mock.calls.ListMentalModels = append(mock.calls.ListMentalModels, callInfo)
+	mock.lockListMentalModels.Unlock()
+	return mock.ListMentalModelsFunc(ctx, q)
+}
+
+// ListMentalModelsCalls gets all the calls that were made to ListMentalModels.
+// Check the length with:
+//
+//	len(mockedReader.ListMentalModelsCalls())
+func (mock *Reader) ListMentalModelsCalls() []struct {
+	Ctx context.Context
+	Q   port.ModelQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.ModelQuery
+	}
+	mock.lockListMentalModels.RLock()
+	calls = mock.calls.ListMentalModels
+	mock.lockListMentalModels.RUnlock()
+	return calls
+}
+
+// ListScopes calls ListScopesFunc.
+func (mock *Reader) ListScopes(ctx context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
+	if mock.ListScopesFunc == nil {
+		panic("Reader.ListScopesFunc: method is nil but Reader.ListScopes was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		After string
+		Limit int
+	}{
+		Ctx:   ctx,
+		B:     b,
+		After: after,
+		Limit: limit,
+	}
+	mock.lockListScopes.Lock()
+	mock.calls.ListScopes = append(mock.calls.ListScopes, callInfo)
+	mock.lockListScopes.Unlock()
+	return mock.ListScopesFunc(ctx, b, after, limit)
+}
+
+// ListScopesCalls gets all the calls that were made to ListScopes.
+// Check the length with:
+//
+//	len(mockedReader.ListScopesCalls())
+func (mock *Reader) ListScopesCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	After string
+	Limit int
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		After string
+		Limit int
+	}
+	mock.lockListScopes.RLock()
+	calls = mock.calls.ListScopes
+	mock.lockListScopes.RUnlock()
+	return calls
+}
+
+// ListUnits calls ListUnitsFunc.
+func (mock *Reader) ListUnits(ctx context.Context, q port.UnitQuery) ([]domain.Unit, error) {
+	if mock.ListUnitsFunc == nil {
+		panic("Reader.ListUnitsFunc: method is nil but Reader.ListUnits was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.UnitQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListUnits.Lock()
+	mock.calls.ListUnits = append(mock.calls.ListUnits, callInfo)
+	mock.lockListUnits.Unlock()
+	return mock.ListUnitsFunc(ctx, q)
+}
+
+// ListUnitsCalls gets all the calls that were made to ListUnits.
+// Check the length with:
+//
+//	len(mockedReader.ListUnitsCalls())
+func (mock *Reader) ListUnitsCalls() []struct {
+	Ctx context.Context
+	Q   port.UnitQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.UnitQuery
+	}
+	mock.lockListUnits.RLock()
+	calls = mock.calls.ListUnits
+	mock.lockListUnits.RUnlock()
+	return calls
+}
+
+// ModelsCiting calls ModelsCitingFunc.
+func (mock *Reader) ModelsCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error) {
+	if mock.ModelsCitingFunc == nil {
+		panic("Reader.ModelsCitingFunc: method is nil but Reader.ModelsCiting was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockModelsCiting.Lock()
+	mock.calls.ModelsCiting = append(mock.calls.ModelsCiting, callInfo)
+	mock.lockModelsCiting.Unlock()
+	return mock.ModelsCitingFunc(ctx, b, ids)
+}
+
+// ModelsCitingCalls gets all the calls that were made to ModelsCiting.
+// Check the length with:
+//
+//	len(mockedReader.ModelsCitingCalls())
+func (mock *Reader) ModelsCitingCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}
+	mock.lockModelsCiting.RLock()
+	calls = mock.calls.ModelsCiting
+	mock.lockModelsCiting.RUnlock()
+	return calls
+}
+
+// NewestSeqInScope calls NewestSeqInScopeFunc.
+func (mock *Reader) NewestSeqInScope(ctx context.Context, q port.ScopeQuery) (int64, error) {
+	if mock.NewestSeqInScopeFunc == nil {
+		panic("Reader.NewestSeqInScopeFunc: method is nil but Reader.NewestSeqInScope was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   port.ScopeQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockNewestSeqInScope.Lock()
+	mock.calls.NewestSeqInScope = append(mock.calls.NewestSeqInScope, callInfo)
+	mock.lockNewestSeqInScope.Unlock()
+	return mock.NewestSeqInScopeFunc(ctx, q)
+}
+
+// NewestSeqInScopeCalls gets all the calls that were made to NewestSeqInScope.
+// Check the length with:
+//
+//	len(mockedReader.NewestSeqInScopeCalls())
+func (mock *Reader) NewestSeqInScopeCalls() []struct {
+	Ctx context.Context
+	Q   port.ScopeQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   port.ScopeQuery
+	}
+	mock.lockNewestSeqInScope.RLock()
+	calls = mock.calls.NewestSeqInScope
+	mock.lockNewestSeqInScope.RUnlock()
+	return calls
+}
+
+// ObservationHistory calls ObservationHistoryFunc.
+func (mock *Reader) ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error) {
+	if mock.ObservationHistoryFunc == nil {
+		panic("Reader.ObservationHistoryFunc: method is nil but Reader.ObservationHistory was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockObservationHistory.Lock()
+	mock.calls.ObservationHistory = append(mock.calls.ObservationHistory, callInfo)
+	mock.lockObservationHistory.Unlock()
+	return mock.ObservationHistoryFunc(ctx, b, id)
+}
+
+// ObservationHistoryCalls gets all the calls that were made to ObservationHistory.
+// Check the length with:
+//
+//	len(mockedReader.ObservationHistoryCalls())
+func (mock *Reader) ObservationHistoryCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.UnitID
+	}
+	mock.lockObservationHistory.RLock()
+	calls = mock.calls.ObservationHistory
+	mock.lockObservationHistory.RUnlock()
 	return calls
 }
 
@@ -6232,5 +8228,97 @@ func (mock *Reader) SearchVectorCalls() []struct {
 	mock.lockSearchVector.RLock()
 	calls = mock.calls.SearchVector
 	mock.lockSearchVector.RUnlock()
+	return calls
+}
+
+// StaleScopes calls StaleScopesFunc.
+func (mock *Reader) StaleScopes(ctx context.Context, b port.BankRef, scopes []port.ScopeKey) ([]port.ScopeKey, error) {
+	if mock.StaleScopesFunc == nil {
+		panic("Reader.StaleScopesFunc: method is nil but Reader.StaleScopes was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}{
+		Ctx:    ctx,
+		B:      b,
+		Scopes: scopes,
+	}
+	mock.lockStaleScopes.Lock()
+	mock.calls.StaleScopes = append(mock.calls.StaleScopes, callInfo)
+	mock.lockStaleScopes.Unlock()
+	return mock.StaleScopesFunc(ctx, b, scopes)
+}
+
+// StaleScopesCalls gets all the calls that were made to StaleScopes.
+// Check the length with:
+//
+//	len(mockedReader.StaleScopesCalls())
+func (mock *Reader) StaleScopesCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Scopes []port.ScopeKey
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Scopes []port.ScopeKey
+	}
+	mock.lockStaleScopes.RLock()
+	calls = mock.calls.StaleScopes
+	mock.lockStaleScopes.RUnlock()
+	return calls
+}
+
+// TagCounts calls TagCountsFunc.
+func (mock *Reader) TagCounts(ctx context.Context, b port.BankRef, source domain.TagSource, prefix string, after string, limit int) ([]domain.TagCount, error) {
+	if mock.TagCountsFunc == nil {
+		panic("Reader.TagCountsFunc: method is nil but Reader.TagCounts was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}{
+		Ctx:    ctx,
+		B:      b,
+		Source: source,
+		Prefix: prefix,
+		After:  after,
+		Limit:  limit,
+	}
+	mock.lockTagCounts.Lock()
+	mock.calls.TagCounts = append(mock.calls.TagCounts, callInfo)
+	mock.lockTagCounts.Unlock()
+	return mock.TagCountsFunc(ctx, b, source, prefix, after, limit)
+}
+
+// TagCountsCalls gets all the calls that were made to TagCounts.
+// Check the length with:
+//
+//	len(mockedReader.TagCountsCalls())
+func (mock *Reader) TagCountsCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	Source domain.TagSource
+	Prefix string
+	After  string
+	Limit  int
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		Source domain.TagSource
+		Prefix string
+		After  string
+		Limit  int
+	}
+	mock.lockTagCounts.RLock()
+	calls = mock.calls.TagCounts
+	mock.lockTagCounts.RUnlock()
 	return calls
 }

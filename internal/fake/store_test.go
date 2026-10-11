@@ -38,6 +38,24 @@ func TestStoreGapsContract(t *testing.T) {
 	porttest.RunStoreGapsSuite(t, newWallStore)
 }
 
+// newWallQueue returns an empty store and its claimer on the wall clock.
+func newWallQueue(*testing.T) (port.Store, port.Claimer) {
+	s := fake.NewStore(wallClock{})
+	return s, s
+}
+
+// TestReadsContract runs the WP-15 id-keyed reads suite.
+func TestReadsContract(t *testing.T) { porttest.RunReadsSuite(t, newWallStore) }
+
+// TestCurationReadsContract runs the WP-15 curation listings suite.
+func TestCurationReadsContract(t *testing.T) { porttest.RunCurationReadsSuite(t, newWallStore) }
+
+// TestMaintenanceContract runs the WP-15 cross-bank maintenance reads suite.
+func TestMaintenanceContract(t *testing.T) { porttest.RunMaintenanceSuite(t, newWallQueue) }
+
+// TestObservationAdminContract runs the WP-15 observation administration suite.
+func TestObservationAdminContract(t *testing.T) { porttest.RunObservationAdminSuite(t, newWallStore) }
+
 // TestQueueGapsContract runs the queue gap cases added in WP-01 (cancel-requested Fail, tombstoned banks,
 // join-and-upgrade versus a concurrent claim).
 func TestQueueGapsContract(t *testing.T) {

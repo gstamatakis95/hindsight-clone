@@ -59,12 +59,16 @@ type Querier interface {
 	BankDeleteUnitEntities(ctx context.Context, arg BankDeleteUnitEntitiesParams) (int64, error)
 	// BankDeleteUnits deletes up to lim memory_units rows of the bank.
 	BankDeleteUnits(ctx context.Context, arg BankDeleteUnitsParams) (int64, error)
+	// BanksToConsolidate returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact with an embedding (the §0 predicate as in ScopeUnconsolidated, over the same partial index, plus embedding IS NOT NULL per decision 1500).
+	BanksToConsolidate(ctx context.Context) ([]BanksToConsolidateRow, error)
 	// BumpBankSeq increments a live bank's change_seq and returns it; the row lock is held until commit.
 	BumpBankSeq(ctx context.Context, arg BumpBankSeqParams) (int64, error)
 	// ChunkCommitted returns a document's committed chunks as (index, content hash).
 	ChunkCommitted(ctx context.Context, arg ChunkCommittedParams) ([]ChunkCommittedRow, error)
 	// ChunkDeleteReplaced deletes another chunk at the same (document, index), so the new one can replace it.
 	ChunkDeleteReplaced(ctx context.Context, arg ChunkDeleteReplacedParams) error
+	// ChunkGetMany returns the bank's chunks with the given ids.
+	ChunkGetMany(ctx context.Context, arg ChunkGetManyParams) ([]Chunk, error)
 	// ChunkInsert stores one chunk; a replayed insert of the same id rewrites it in place.
 	ChunkInsert(ctx context.Context, arg ChunkInsertParams) error
 	// ClaimAlive reports whether a job is processing without a cancel request in a live bank.
@@ -115,8 +119,8 @@ type Querier interface {
 	DocumentSetTags(ctx context.Context, arg DocumentSetTagsParams) (int64, error)
 	// DocumentUnitCounts counts a document's live units per fact type.
 	DocumentUnitCounts(ctx context.Context, arg DocumentUnitCountsParams) ([]DocumentUnitCountsRow, error)
-	// DocumentUpsert inserts a document or replaces its tags, overrides and blob key; either way extracted_at is
-	// cleared and the hashes of the last completed retain are kept.
+	// DocumentUpsert inserts a document or replaces its tags, overrides, observation scopes and blob key; either
+	// way extracted_at is cleared and the hashes of the last completed retain are kept.
 	DocumentUpsert(ctx context.Context, arg DocumentUpsertParams) error
 	// EntityAttach links a unit to entities, skipping existing rows, and returns the newly linked entity ids.
 	EntityAttach(ctx context.Context, arg EntityAttachParams) ([]uuid.UUID, error)
@@ -142,6 +146,8 @@ type Querier interface {
 	EntityLockForDelete(ctx context.Context, arg EntityLockForDeleteParams) ([]uuid.UUID, error)
 	// EntityPendingMaintenance returns up to lim entity ids queued in a bank's entity_maintenance, oldest first.
 	EntityPendingMaintenance(ctx context.Context, arg EntityPendingMaintenanceParams) ([]uuid.UUID, error)
+	// EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the sorted live observations attached to it or citing a live fact attached to it.
+	EntityStatesOf(ctx context.Context, arg EntityStatesOfParams) ([]EntityStatesOfRow, error)
 	// EntityUnitBank returns the tenant and bank of a live unit.
 	EntityUnitBank(ctx context.Context, id uuid.UUID) (EntityUnitBankRow, error)
 	// EntityUpdate replaces a bank's entity's name, kind and label value, widens its first and last seen, and returns its id.
@@ -161,6 +167,12 @@ type Querier interface {
 	EvidenceCites(ctx context.Context, arg EvidenceCitesParams) (bool, error)
 	// EvidenceCiting locks, in id order, the bank's observations citing any of the units and returns their ids.
 	EvidenceCiting(ctx context.Context, arg EvidenceCitingParams) ([]uuid.UUID, error)
+	// EvidenceCitingScopes returns, in byte order, the distinct scope keys of the bank's live observations citing any of the units.
+	EvidenceCitingScopes(ctx context.Context, arg EvidenceCitingScopesParams) ([]string, error)
+	// EvidenceLockAll locks, in id order, every live observation of the bank and returns their ids.
+	EvidenceLockAll(ctx context.Context, arg EvidenceLockAllParams) ([]uuid.UUID, error)
+	// EvidenceLockScopes locks, in id order, the bank's live observations whose scope key is one of keys and returns their ids.
+	EvidenceLockScopes(ctx context.Context, arg EvidenceLockScopesParams) ([]uuid.UUID, error)
 	// EvidenceObservationBank returns the tenant and bank of a live observation.
 	EvidenceObservationBank(ctx context.Context, id uuid.UUID) (EvidenceObservationBankRow, error)
 	// EvidenceOtherSources returns the distinct units the observations cite, other than the excluded ones.
@@ -202,6 +214,8 @@ type Querier interface {
 	MentalModelTrimHistory(ctx context.Context, arg MentalModelTrimHistoryParams) error
 	// MentalModelUpdate replaces a mental model's spec, content and refresh state.
 	MentalModelUpdate(ctx context.Context, arg MentalModelUpdateParams) (int64, error)
+	// ModelsCitingUnits returns, in byte order, the ids of the bank's mental models whose source_ids include any of the units.
+	ModelsCitingUnits(ctx context.Context, arg ModelsCitingUnitsParams) ([]string, error)
 	// QueueCancel cancels a pending job at once or records the cancel request of a processing one.
 	QueueCancel(ctx context.Context, arg QueueCancelParams) (Operation, error)
 	// QueueCancelBank cancels every pending job of a bank except its delete_bank job.
@@ -230,6 +244,53 @@ type Querier interface {
 	QueueSetPayload(ctx context.Context, arg QueueSetPayloadParams) error
 	// QueueStatus returns an operation's status.
 	QueueStatus(ctx context.Context, id uuid.UUID) (string, error)
+	// ReadsBankStats returns a bank row with its counts in one statement (one snapshot). The per-type maps are JSON
+	// objects (type -> count). No row means the bank is unknown.
+	ReadsBankStats(ctx context.Context, arg ReadsBankStatsParams) (ReadsBankStatsRow, error)
+	// ReadsCronModels returns every model with a non-empty refresh_cron on a bank that is not tombstoned, with the
+	// created_at of its newest refresh_mental_model operation (any status; enqueued is false when it has none),
+	// ordered by tenant, bank and id in byte order.
+	ReadsCronModels(ctx context.Context) ([]ReadsCronModelsRow, error)
+	// ReadsFailedRefreshes returns, per existing model on a bank that is not tombstoned, its latest completed or
+	// failed refresh_mental_model operation (finished_at, created_at, id, all descending; cancelled ones ignored)
+	// when that operation failed, ordered by tenant, bank and model id in byte order.
+	ReadsFailedRefreshes(ctx context.Context) ([]ReadsFailedRefreshesRow, error)
+	// ReadsListDocuments returns a bank's documents newest first ((created_at, id) descending, id in byte order)
+	// strictly before the cursor (NULL after_created_at = first page), with their live unit counts per fact type as
+	// a JSON object. id_like '' = no id filter; tags use domain.MatchTags semantics under tags_match; time_field
+	// 'updated_at' bounds updated_at, anything else created_at (start inclusive, end exclusive).
+	ReadsListDocuments(ctx context.Context, arg ReadsListDocumentsParams) ([]ReadsListDocumentsRow, error)
+	// ReadsListMentalModels returns a bank's models ordered by id (byte order) after after_id ('' = from the start):
+	// folder '' or folder_path = folder or LIKE folder_like (folder escaped, then '/%'); tags with
+	// domain.MatchTags semantics under tags_match (filter tags normalized, never NULL); refresh_after keeps only
+	// models whose trigger sets refresh_after_consolidation. A NULL lim returns all.
+	ReadsListMentalModels(ctx context.Context, arg ReadsListMentalModelsParams) ([]MentalModel, error)
+	// WP-15 unit reads (decision 1500): GetUnit and ListUnits over live and archived units.
+	// ReadsListUnits returns up to lim units of a bank, newest first ((created_at, id) descending) and strictly
+	// before the cursor (NULL after_created_at = first page), from memory_units (include_live) and
+	// memory_units_archive (include_archived). Optional filters: unit_id, types (empty = all), text_like ('' =
+	// none; ILIKE pattern), document_id, entity_id (live units only: archived units never match), start_at
+	// (inclusive) and end_at (exclusive) on time_field (a NULL field never matches; an archived unit's updated_at
+	// is archived_at), and tags with domain.MatchTags semantics under tags_match (filter tags normalized, never
+	// NULL). Each row carries its entity names (live: current names; archived: snapshot names, byte order), its
+	// cited sources (live observations) and stale (a live observation with an unconsolidated live fact of the bank
+	// whose tags contain the observation's tags).
+	ReadsListUnits(ctx context.Context, arg ReadsListUnitsParams) ([]ReadsListUnitsRow, error)
+	// ReadsObservationHistory returns an observation's version rows, newest first.
+	ReadsObservationHistory(ctx context.Context, arg ReadsObservationHistoryParams) ([]ReadsObservationHistoryRow, error)
+	// WP-15 admin reads (decision 1500): tag counts, bank stats, observation history, mental-model listings, cron and
+	// failed-refresh sweeps, and document listings. Text keysets and orderings use COLLATE "C" (byte order). LIKE
+	// patterns arrive already escaped (%, _ and \ literal) from the Go side.
+	// ReadsTagCounts counts, per tag, the items of one source ('memories': live units, 'mental_models',
+	// 'documents') of a bank carrying it, keeping tags that match prefix_like and sort after after ('' = from the
+	// start), in byte order; a NULL lim returns all.
+	ReadsTagCounts(ctx context.Context, arg ReadsTagCountsParams) ([]ReadsTagCountsRow, error)
+	// ScopeListPage returns up to lim of the bank's observation scopes with a key strictly after after ("" = from the start, so the shared scope "" lists), in byte order, each with its live observation count.
+	ScopeListPage(ctx context.Context, arg ScopeListPageParams) ([]ScopeListPageRow, error)
+	// ScopeObservationCount counts the bank's live observations whose scope key is the given one.
+	ScopeObservationCount(ctx context.Context, arg ScopeObservationCountParams) (int64, error)
+	// ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
+	ScopeUnconsolidated(ctx context.Context, arg ScopeUnconsolidatedParams) ([]ScopeUnconsolidatedRow, error)
 	// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
 	UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error
 	// UnitArchive copies a live unit into memory_units_archive, stamped with seq, with JSON snapshots of its entities ({id, name}) and causal links ({from, to, kind, weight, created_at}).
@@ -238,6 +299,8 @@ type Querier interface {
 	UnitDeleteIDs(ctx context.Context, arg UnitDeleteIDsParams) error
 	// UnitHandOverLinks appends the snapshot's causal links whose partner is itself archived in the bank to that partner's links snapshot, so restoring the partner later restores them.
 	UnitHandOverLinks(ctx context.Context, arg UnitHandOverLinksParams) error
+	// UnitIDsByDocument returns the ids of a document's live units, sorted.
+	UnitIDsByDocument(ctx context.Context, arg UnitIDsByDocumentParams) ([]uuid.UUID, error)
 	// UnitInsert stores one unit exactly as given; a NULL created_at takes the database's now().
 	UnitInsert(ctx context.Context, arg UnitInsertParams) error
 	// UnitLockDocument locks a document's live units in id order and returns their ids.
@@ -268,7 +331,7 @@ type Querier interface {
 	UnitSetDocumentTags(ctx context.Context, arg UnitSetDocumentTagsParams) ([]uuid.UUID, error)
 	// UnitTakeArchived deletes a bank's archived unit and returns its row.
 	UnitTakeArchived(ctx context.Context, arg UnitTakeArchivedParams) (MemoryUnitsArchive, error)
-	// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp, with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays).
+	// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
 	UnitUnconsolidated(ctx context.Context, arg UnitUnconsolidatedParams) ([]UnitUnconsolidatedRow, error)
 	// UnitUpdate replaces a live fact's curated fields and embedding and clears its consolidation stamps.
 	UnitUpdate(ctx context.Context, arg UnitUpdateParams) (int64, error)

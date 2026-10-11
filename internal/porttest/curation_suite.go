@@ -116,7 +116,7 @@ func testSetDocumentTags(t *testing.T, s port.Store) {
 func testResetConsolidation(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA)
 	upsertDocs(t, s, bankA, "doc-1")
-	u, v := fact(bankA, "edited"), fact(bankA, "retagged")
+	u, v := embeddedFact(bankA, "edited"), embeddedFact(bankA, "retagged")
 	u.CreatedAt, v.CreatedAt, v.DocumentID = day(1), day(2), "doc-1"
 	insertUnits(t, s, u, v)
 	inTx(t, s, func(tx port.Tx) error { // both stamps on both units, so each reset must clear both

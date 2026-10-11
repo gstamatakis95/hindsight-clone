@@ -116,6 +116,9 @@ func (r bankRepo) DeleteBatch(_ context.Context, b port.BankRef, limit int) (int
 			return deleteSlice(&st.obsVersions, n, func(v obsVersionRow) bool { return v.bank == b })
 		},
 		func(n int) int {
+			return deleteWhere(st.scopes, n, func(k scopeRowKey, _ []string) bool { return k.bank == b })
+		},
+		func(n int) int {
 			return deleteSlice(&st.audit, n, func(v domain.AuditEntry) bool { return v.Bank == b })
 		},
 		func(n int) int {

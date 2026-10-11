@@ -51,9 +51,19 @@ func (r unitRepo) insert(u domain.Unit) error {
 	if u.CreatedAt.IsZero() {
 		u.CreatedAt = r.t.now
 	}
-	u.UpdatedAt, u.State, u.Entities, u.SourceIDs = r.t.now, domain.MemoryStateValid, nil, nil
+	u.UpdatedAt, u.State, u.Entities, u.SourceIDs, u.Stale = r.t.now, domain.MemoryStateValid, nil, nil, false
 	st.units[u.ID] = unitRow{u: u, order: st.next()}
+	if u.Type == domain.FactTypeObservation {
+		st.recordScope(u.Bank, u.Tags)
+	}
 	return nil
+}
+
+// recordScope records the observation scope of tags in bank b (an observation_scopes row; only a bank
+// delete removes it).
+func (s *state) recordScope(b port.BankRef, tags []string) {
+	key := domain.NewScopeKey(b, tags)
+	s.scopes[scopeRowKey{b, key.String()}] = key.Tags
 }
 
 // UpsertObservation inserts the observation or replaces the text, proof count, embedding, version and seq
@@ -79,6 +89,7 @@ func (r unitRepo) UpsertObservation(_ context.Context, o domain.Unit) error {
 	row.u.Embedding = slices.Clone(o.Embedding)
 	row.u.UpdatedAt = r.t.now
 	r.t.st.units[o.ID] = row
+	r.t.st.recordScope(o.Bank, o.Tags) // like Postgres: the given tags, even on the update path
 	return nil
 }
 
@@ -153,16 +164,16 @@ func (r unitRepo) AppendAudit(_ context.Context, a domain.AuditEntry) error {
 	return nil
 }
 
-// Unconsolidated returns the bank's oldest unstamped facts (created_at, then id), optionally only those
-// whose tags contain every tag of one of scopes.
+// Unconsolidated returns the bank's oldest unstamped facts that have an embedding (created_at, then id),
+// optionally only those whose tags contain every tag of one of scopes. A fact waiting for rederive (no
+// embedding) is not a consolidation candidate (decision 1500).
 func (r unitRepo) Unconsolidated(
 	_ context.Context, b port.BankRef, scopes []port.ScopeKey, limit int,
 ) ([]domain.Unit, error) {
 	var out []unitRow
 	for _, row := range r.t.st.units {
 		u := row.u
-		if u.Bank != b || u.Type == domain.FactTypeObservation || u.ConsolidatedAt != nil ||
-			u.ConsolidationFailedAt != nil || !inAnyScope(u.Tags, scopes) {
+		if u.Bank != b || !consolidationCandidate(u) || !inAnyScope(u.Tags, scopes) {
 			continue
 		}
 		out = append(out, row)
@@ -171,6 +182,16 @@ func (r unitRepo) Unconsolidated(
 		return cmp.Or(x.u.CreatedAt.Compare(y.u.CreatedAt), cmp.Compare(x.u.ID, y.u.ID))
 	})
 	return unitsOut(r.t.st, capped(out, limit)), nil
+}
+
+// unconsolidated is the CCR WP-15-1 §0 predicate: a fact with neither consolidation stamp set.
+func unconsolidated(u domain.Unit) bool {
+	return isFactType(u.Type) && u.ConsolidatedAt == nil && u.ConsolidationFailedAt == nil
+}
+
+// consolidationCandidate is unconsolidated plus a stored embedding: the facts consolidation may decide on.
+func consolidationCandidate(u domain.Unit) bool {
+	return unconsolidated(u) && len(u.Embedding) > 0
 }
 
 // inAnyScope reports whether tags contain every tag of at least one scope; no scopes = no filter.
@@ -195,6 +216,21 @@ func containsAll(have, want []string) bool {
 		}
 	}
 	return true
+}
+
+// IDsByDocument returns the sorted ids of b's live units whose document is doc; it writes nothing.
+func (r unitRepo) IDsByDocument(ctx context.Context, b port.BankRef, doc port.DocumentID) ([]port.UnitID, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, ctxErr(err)
+	}
+	ids := []port.UnitID{}
+	for id, row := range r.t.st.units {
+		if row.u.Bank == b && row.u.DocumentID == doc {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids, nil
 }
 
 // MarkConsolidated stamps consolidated_at on the given live units.
@@ -235,22 +271,29 @@ func (r unitRepo) DeleteByDocument(_ context.Context, b port.BankRef, doc port.D
 	return ids, nil
 }
 
-// Archive moves a live unit to the archive with snapshots of its entities and causal links, then removes
-// it like DeleteByDocument does.
+// Archive moves a live unit to the archive, stamped with the transaction's change seq (it calls Tx.Seq, like
+// Postgres), with snapshots of its entities (ids and canonical names) and causal links, then removes it like
+// DeleteByDocument does.
 func (r unitRepo) Archive(_ context.Context, b port.BankRef, id port.UnitID, reason string) error {
 	st := r.t.st
 	row, ok := st.units[id]
 	if !ok || row.u.Bank != b {
 		return notFound("unit %s", id)
 	}
+	seq, err := r.t.seq(b)
+	if err != nil {
+		return err
+	}
 	a := archiveRow{u: row.u, reason: reason, at: r.t.now}
-	a.u.State, a.u.Embedding = domain.MemoryStateInvalidated, nil
+	a.u.State, a.u.Embedding, a.u.Seq = domain.MemoryStateInvalidated, nil, seq
 	for k := range st.unitEntities {
 		if k.unit == id {
 			a.entities = append(a.entities, k.entity)
+			a.names = append(a.names, st.entities[k.entity].e.CanonicalName)
 		}
 	}
 	slices.Sort(a.entities)
+	slices.Sort(a.names)
 	for k, l := range st.links {
 		if k.kind == domain.LinkCausal && (k.from == id || k.to == id) {
 			a.links = append(a.links, l.l)

@@ -21,6 +21,9 @@ var (
 	ErrBankDeleting = fmt.Errorf("%w: bank is being deleted", ErrFailedPrecondition)
 	// ErrUnavailable: a dependency (database, gateway, embedder, reranker) failed. gRPC UNAVAILABLE.
 	ErrUnavailable = errors.New("unavailable")
+	// ErrContextOverflow: the prompt did not fit the model's context window. Wraps ErrUnavailable; reflect
+	// synthesises from what it has instead of failing.
+	ErrContextOverflow = fmt.Errorf("%w: context window exceeded", ErrUnavailable)
 	// ErrResourceExhausted: a token budget such as max_total_tokens was exceeded. gRPC RESOURCE_EXHAUSTED.
 	ErrResourceExhausted = errors.New("resource exhausted")
 	// ErrTooManyScopes: ALL_COMBINATIONS fan-out over max_combinations. Wraps ErrInvalidArgument.

@@ -120,6 +120,27 @@ func (b *Blob) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 	return n, nil
 }
 
+// List returns up to limit keys starting with prefix and sorting strictly after after, in ascending byte
+// order. An empty prefix or a limit <= 0 is domain.ErrInvalidArgument.
+func (b *Blob) List(ctx context.Context, prefix, after string, limit int) ([]string, error) {
+	if prefix == "" || limit <= 0 {
+		return nil, fmt.Errorf("%w: fake blob list: empty prefix or limit %d <= 0", domain.ErrInvalidArgument, limit)
+	}
+	if err := b.gate(ctx, "list", prefix); err != nil {
+		return nil, err
+	}
+	keys := []string{}
+	for _, k := range b.Keys() {
+		if strings.HasPrefix(k, prefix) && k > after {
+			keys = append(keys, k)
+			if len(keys) == limit {
+				break
+			}
+		}
+	}
+	return keys, nil
+}
+
 // Keys returns every stored key in ascending order, for assertions.
 func (b *Blob) Keys() []string {
 	b.mu.Lock()

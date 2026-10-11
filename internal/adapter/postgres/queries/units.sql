@@ -68,7 +68,7 @@ VALUES (
     COALESCE(sqlc.narg(at)::timestamptz, now())
 );
 
--- UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp, with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays).
+-- UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
 -- name: UnitUnconsolidated :many
 SELECT sqlc.embed(u),
     COALESCE((SELECT array_agg(e.canonical_name ORDER BY e.canonical_name)
@@ -77,11 +77,18 @@ SELECT sqlc.embed(u),
 FROM memory_units u
 WHERE u.tenant_id = @tenant_id AND u.bank_id = @bank_id
   AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
+  AND u.embedding IS NOT NULL
   AND (NOT @filter_scopes::bool OR EXISTS (
       SELECT 1 FROM jsonb_array_elements(@scopes::jsonb) AS s(tags)
       WHERE u.tags @> ARRAY(SELECT jsonb_array_elements_text(s.tags))))
 ORDER BY u.created_at, u.id
 LIMIT @lim;
+
+-- UnitIDsByDocument returns the ids of a document's live units, sorted.
+-- name: UnitIDsByDocument :many
+SELECT id FROM memory_units
+WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND document_id = @document_id::text
+ORDER BY id;
 
 -- UnitMarkConsolidated stamps consolidated_at on the units.
 -- name: UnitMarkConsolidated :exec

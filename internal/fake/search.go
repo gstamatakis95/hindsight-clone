@@ -162,9 +162,10 @@ type temporalHit struct {
 	mid time.Time
 }
 
-// searchTemporal is the temporal arm: units whose occurrence overlaps the half-open window, scored by the
-// proximity of their midpoint to the window's centre (1 / (1 + distance in days)). With Buckets > 1 and
-// both bounds set, hits are taken round-robin from that many equal sub-windows.
+// searchTemporal is the temporal arm: units whose occurrence overlaps the half-open window (and that pass
+// the relevance filter, see relevant), scored by the proximity of their midpoint to the window's centre
+// (1 / (1 + distance in days)). With Buckets > 1 and both bounds set, hits are taken round-robin from that
+// many equal sub-windows.
 func searchTemporal(ctx context.Context, st *state, q port.TemporalQuery) ([]port.Hit, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, ctxErr(err)
@@ -198,9 +199,22 @@ func temporalCandidate(u domain.Unit, q port.TemporalQuery, centre time.Time) (t
 		(!w.End.IsZero() && !start.Before(w.End)) || (!w.Start.IsZero() && end.Before(w.Start)) {
 		return temporalHit{}, false
 	}
+	if !relevant(u, q) {
+		return temporalHit{}, false
+	}
 	mid := start.Add(end.Sub(start) / 2)
 	days := math.Abs(mid.Sub(centre).Hours()) / 24
 	return temporalHit{port.Hit{ID: u.ID, Score: 1 / (1 + days)}, mid}, true
+}
+
+// relevant applies the temporal arm's relevance filter: on only when q has an Embedding and MinSimilarity > 0,
+// it then drops units with no embedding and those whose cosine similarity to q.Embedding is below
+// MinSimilarity. The hit score stays the temporal score.
+func relevant(u domain.Unit, q port.TemporalQuery) bool {
+	if len(q.Embedding) == 0 || q.MinSimilarity <= 0 {
+		return true
+	}
+	return len(u.Embedding) > 0 && cosine(u.Embedding, q.Embedding) >= q.MinSimilarity
 }
 
 // windowCentre is the reference time of proximity scores: the centre of a closed window, else its bound.

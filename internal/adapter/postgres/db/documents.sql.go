@@ -40,7 +40,7 @@ func (q *Queries) DocumentComplete(ctx context.Context, arg DocumentCompletePara
 }
 
 const documentGet = `-- name: DocumentGet :one
-SELECT tenant_id, bank_id, id, content_hash, overrides_hash, overrides, tags, blob_key, extracted_at, created_at, updated_at FROM documents WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+SELECT tenant_id, bank_id, id, content_hash, overrides_hash, overrides, tags, blob_key, extracted_at, created_at, updated_at, observation_scopes FROM documents WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
 `
 
 type DocumentGetParams struct {
@@ -65,6 +65,7 @@ func (q *Queries) DocumentGet(ctx context.Context, arg DocumentGetParams) (Docum
 		&i.ExtractedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ObservationScopes,
 	)
 	return i, err
 }
@@ -135,24 +136,25 @@ func (q *Queries) DocumentUnitCounts(ctx context.Context, arg DocumentUnitCounts
 }
 
 const documentUpsert = `-- name: DocumentUpsert :exec
-INSERT INTO documents AS d (tenant_id, bank_id, id, overrides, tags, blob_key, extracted_at)
-VALUES ($1, $2, $3, $4, $5, $6, NULL)
+INSERT INTO documents AS d (tenant_id, bank_id, id, overrides, tags, blob_key, observation_scopes, extracted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
 ON CONFLICT (tenant_id, bank_id, id) DO UPDATE
-SET overrides = EXCLUDED.overrides, tags = EXCLUDED.tags, blob_key = EXCLUDED.blob_key, extracted_at = NULL,
-    updated_at = now()
+SET overrides = EXCLUDED.overrides, tags = EXCLUDED.tags, blob_key = EXCLUDED.blob_key,
+    observation_scopes = EXCLUDED.observation_scopes, extracted_at = NULL, updated_at = now()
 `
 
 type DocumentUpsertParams struct {
-	TenantID  string
-	BankID    string
-	ID        string
-	Overrides json.RawMessage
-	Tags      []string
-	BlobKey   string
+	TenantID          string
+	BankID            string
+	ID                string
+	Overrides         json.RawMessage
+	Tags              []string
+	BlobKey           string
+	ObservationScopes json.RawMessage
 }
 
-// DocumentUpsert inserts a document or replaces its tags, overrides and blob key; either way extracted_at is
-// cleared and the hashes of the last completed retain are kept.
+// DocumentUpsert inserts a document or replaces its tags, overrides, observation scopes and blob key; either
+// way extracted_at is cleared and the hashes of the last completed retain are kept.
 func (q *Queries) DocumentUpsert(ctx context.Context, arg DocumentUpsertParams) error {
 	_, err := q.db.Exec(ctx, documentUpsert,
 		arg.TenantID,
@@ -161,6 +163,7 @@ func (q *Queries) DocumentUpsert(ctx context.Context, arg DocumentUpsertParams) 
 		arg.Overrides,
 		arg.Tags,
 		arg.BlobKey,
+		arg.ObservationScopes,
 	)
 	return err
 }

@@ -274,12 +274,34 @@ func classify(ctx, actx context.Context, a attempt, err error) error {
 		return transient(fmt.Errorf("%w: gateway %s: timed out after %s: %w",
 			domain.ErrUnavailable, a.path, a.timeout, context.DeadlineExceeded))
 	}
-	wrapped := fmt.Errorf("%w: gateway %s: %w", domain.ErrUnavailable, a.path, err)
 	var se *statusError
 	if errors.As(err, &se) && !se.retryable() {
-		return wrapped
+		if se.contextOverflow() {
+			return fmt.Errorf("%w: gateway %s: %w", domain.ErrContextOverflow, a.path, err)
+		}
+		return fmt.Errorf("%w: gateway %s: %w", domain.ErrUnavailable, a.path, err)
 	}
-	return transient(wrapped)
+	return transient(fmt.Errorf("%w: gateway %s: %w", domain.ErrUnavailable, a.path, err))
+}
+
+// overflowMarkers are the (lowercased) body fragments providers use for a prompt over the context window.
+var overflowMarkers = []string{
+	"context_length_exceeded", "maximum context length", "prompt is too long", "input is too long",
+}
+
+// contextOverflow reports whether the response is a 400 or 413 whose body says the prompt did not fit the
+// model's context window (CCR WP-11-1).
+func (e *statusError) contextOverflow() bool {
+	if e.code != http.StatusBadRequest && e.code != http.StatusRequestEntityTooLarge {
+		return false
+	}
+	body := strings.ToLower(e.body)
+	for _, m := range overflowMarkers {
+		if strings.Contains(body, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // transientError marks an error as worth retrying; it unwraps to the underlying error.

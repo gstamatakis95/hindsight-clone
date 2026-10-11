@@ -27,6 +27,9 @@ type UnitRepo interface {
 	// consolidated_at and consolidation_failed_at (callers delete the old observations with
 	// EvidenceRepo.DeleteCiting), and returns their ids.
 	SetDocumentTags(ctx context.Context, b BankRef, doc DocumentID, tags []string, seq int64) ([]UnitID, error)
+	// IDsByDocument returns the ids of doc's live units, sorted; an unknown document has none. It writes
+	// nothing, so callers can run EvidenceRepo.DeleteCiting before DeleteByDocument.
+	IDsByDocument(ctx context.Context, b BankRef, doc DocumentID) ([]UnitID, error)
 	// AppendAudit writes one memory_audit row.
 	AppendAudit(ctx context.Context, a domain.AuditEntry) error
 	// Unconsolidated returns the bank's oldest units with consolidated_at and consolidation_failed_at
@@ -55,7 +58,8 @@ type UnitRepo interface {
 type DocumentRepo interface {
 	// Get returns the document; an unknown id returns domain.ErrNotFound.
 	Get(ctx context.Context, b BankRef, id DocumentID) (domain.Document, error)
-	// Upsert inserts or replaces the document's tags, overrides and blob key, and clears extracted_at.
+	// Upsert inserts or replaces the document's tags, overrides, observation scopes and blob key, and clears
+	// extracted_at.
 	// The hashes of the last completed retain are kept until Complete.
 	Upsert(ctx context.Context, d domain.Document) error
 	// Complete stamps content_hash, overrides_hash and extracted_at after the last chunk commits.
@@ -117,6 +121,16 @@ type EvidenceRepo interface {
 	// DeleteCiting deletes observations citing any of ids and resets consolidated_at on their
 	// other sources. It returns both sets so callers can queue consolidation and refreshes.
 	DeleteCiting(ctx context.Context, b BankRef, ids []UnitID) (deleted, reset []UnitID, err error)
+	// CitingScopes returns the distinct scopes of b's live observations that cite any of ids, ordered by
+	// ScopeKey.String().
+	CitingScopes(ctx context.Context, b BankRef, ids []UnitID) ([]ScopeKey, error)
+	// DeleteScopes deletes every live observation of b whose scope is one of scopes (none when scopes is
+	// empty), resets their remaining live sources exactly as DeleteCiting does, and returns the deleted
+	// observations and the reset sources, both sorted. observation_scopes rows are kept, so a cleared scope
+	// still lists with 0 observations. The caller calls Tx.Seq.
+	DeleteScopes(ctx context.Context, b BankRef, scopes []ScopeKey) (deleted, reset []UnitID, err error)
+	// DeleteAllObservations is DeleteScopes over every scope of b (ClearObservations with no scopes).
+	DeleteAllObservations(ctx context.Context, b BankRef) (deleted, reset []UnitID, err error)
 }
 
 // EventRepo appends lifecycle events in the caller's tx; ListEvents reads them by seq.

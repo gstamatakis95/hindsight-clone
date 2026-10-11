@@ -105,13 +105,13 @@ func testUpsertObservation(t *testing.T, s port.Store) {
 // testUnconsolidatedOrder: facts only (no observations), oldest created_at first, limit honoured, bank scoped.
 func testUnconsolidatedOrder(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA, bankB)
-	f1, f2, f3 := fact(bankA, "first"), fact(bankA, "second"), fact(bankA, "third")
+	f1, f2, f3 := embeddedFact(bankA, "first"), embeddedFact(bankA, "second"), embeddedFact(bankA, "third")
 	f1.CreatedAt, f2.CreatedAt, f3.CreatedAt = day(1), day(2), day(3)
 	f2.Type = domain.FactTypeExperience
 	obs := observation(bankA, "an observation")
 	obs.CreatedAt = day(0)
 	insertUnits(t, s, f3, obs, f1, f2)
-	other := fact(bankB, "other bank")
+	other := embeddedFact(bankB, "other bank")
 	other.CreatedAt = day(0)
 	insertUnits(t, s, other)
 
@@ -133,7 +133,7 @@ func testUnconsolidatedScopes(t *testing.T, s port.Store) {
 	tagSets := [][]string{{"alpha"}, {"alpha", "beta"}, {"beta"}, {}, {"gamma"}}
 	us := make([]domain.Unit, len(tagSets))
 	for i, tags := range tagSets {
-		us[i] = fact(bankA, "scoped fact")
+		us[i] = embeddedFact(bankA, "scoped fact")
 		us[i].Tags = domain.NormalizeTags(tags)
 		us[i].CreatedAt = day(i + 1)
 	}
@@ -157,7 +157,9 @@ func testUnconsolidatedScopes(t *testing.T, s port.Store) {
 // testMarkConsolidated: consolidated and parked units leave Unconsolidated and keep their stamps.
 func testMarkConsolidated(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA)
-	us := []domain.Unit{fact(bankA, "f1"), fact(bankA, "f2"), fact(bankA, "f3"), fact(bankA, "f4")}
+	us := []domain.Unit{
+		embeddedFact(bankA, "f1"), embeddedFact(bankA, "f2"), embeddedFact(bankA, "f3"), embeddedFact(bankA, "f4"),
+	}
 	for i := range us {
 		us[i].CreatedAt = day(i + 1)
 	}
@@ -619,7 +621,7 @@ func testEvidenceCites(t *testing.T, s port.Store) {
 // Unconsolidated; observations not citing them stay.
 func testEvidenceDeleteCiting(t *testing.T, s port.Store) {
 	ensureBanks(t, s, bankA)
-	f1, f2, f3 := fact(bankA, "f1"), fact(bankA, "f2"), fact(bankA, "f3")
+	f1, f2, f3 := embeddedFact(bankA, "f1"), embeddedFact(bankA, "f2"), embeddedFact(bankA, "f3")
 	o1, o2 := observation(bankA, "o1 rests on f1 and f2"), observation(bankA, "o2 rests on f3")
 	insertUnits(t, s, f1, f2, f3, o1, o2)
 	addEvidence(t, s, o1.ID, f1.ID, f2.ID)

@@ -147,6 +147,39 @@ func (b *Blob) DeletePrefix(ctx context.Context, prefix string) (int, error) {
 	return removed, nil
 }
 
+// List returns up to limit keys starting with prefix and sorting strictly after after, in ascending byte
+// order (S3 lists keys in UTF-8 binary order). It follows ListObjectsV2 pages (StartAfter, then
+// continuation tokens) until limit keys are read or none are left. An empty prefix or a limit <= 0 is
+// rejected with domain.ErrInvalidArgument: a listing of the whole bucket, or an empty page a caller could
+// read as "nothing left", is never returned.
+func (b *Blob) List(ctx context.Context, prefix, after string, limit int) ([]string, error) {
+	if prefix == "" || limit <= 0 {
+		return nil, fmt.Errorf("%w: s3 list: empty prefix or limit %d <= 0", domain.ErrInvalidArgument, limit)
+	}
+	in := &awss3.ListObjectsV2Input{Bucket: aws.String(b.bucket), Prefix: aws.String(prefix)}
+	if after != "" {
+		in.StartAfter = aws.String(after)
+	}
+	keys := []string{}
+	for {
+		in.MaxKeys = aws.Int32(int32(min(limit-len(keys), maxListKeys))) //nolint:gosec // bounded by maxListKeys
+		out, err := b.client.ListObjectsV2(ctx, in)
+		if err != nil {
+			return nil, wrapErr("list", prefix, err)
+		}
+		for _, o := range out.Contents {
+			keys = append(keys, aws.ToString(o.Key))
+		}
+		if len(keys) >= limit || !aws.ToBool(out.IsTruncated) || out.NextContinuationToken == nil {
+			return keys, nil
+		}
+		in.ContinuationToken = out.NextContinuationToken
+	}
+}
+
+// maxListKeys is the largest page ListObjectsV2 returns.
+const maxListKeys = 1000
+
 // deleteBatch deletes the listed objects (at most 1,000, one ListObjectsV2 page) in one quiet
 // DeleteObjects call and returns how many were removed. Quiet mode reports only failures, so the count is
 // the batch size minus the failed keys; any failed key is an error.
