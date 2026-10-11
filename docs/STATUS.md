@@ -324,3 +324,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
     validate. Plus LOWs (CreateBank on a deleting bank, cancel of delete_bank, "."/".." ids, unbound-slot
     startup check, per-slot concurrency env, worker health, e2e blob-prefix assertion) → folded into WP-20.
 - 2026-10-11 WP-21 (config writes: per-slot models merge on implicit mask; validated whole-config writes) merged; gates pass.
+- 2026-10-11 WP-18 (the consolidation→refresh payload uses mental_model_id + a legacy key fallback; cited-scope re-check before stamping; e2e ConsolidationTriggersRefresh) merged; gates pass.
