@@ -30,6 +30,8 @@ var modelTypes = []struct{ pkg, name string }{
 	{"memd/internal/reflect", "Agent"},
 	{"memd/internal/timex", "Normalizer"},
 	{aiPkg, "Router"},
+	{"memd/internal/memory", "Service"},
+	{"memd/internal/memory", "extractor"},
 }
 
 func run(pass *analysis.Pass) (any, error) {

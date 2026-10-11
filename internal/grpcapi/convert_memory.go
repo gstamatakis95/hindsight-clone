@@ -2,7 +2,7 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/retain"
+	"memd/internal/memory"
 	"memd/internal/recall"
 	reflecteng "memd/internal/reflect"
 
@@ -16,9 +16,9 @@ import (
 // ---------- retain ----------
 
 // retainRequestFromProto converts a RetainRequest; Bank carries only bank_id (the handler sets the tenant).
-func retainRequestFromProto(r *pb.RetainRequest) (retain.IngestRequest, error) {
+func retainRequestFromProto(r *pb.RetainRequest) (memory.RetainRequest, error) {
 	var d decoder
-	out := retain.IngestRequest{
+	out := memory.RetainRequest{
 		Bank:              domain.BankRef{Bank: r.GetBankId()},
 		Items:             d.retainItems(r.GetItems()),
 		DocumentTags:      r.GetDocumentTags(),
@@ -30,8 +30,8 @@ func retainRequestFromProto(r *pb.RetainRequest) (retain.IngestRequest, error) {
 }
 
 // retainItem converts a RetainItem.
-func (d *decoder) retainItem(it *pb.RetainItem) retain.IngestItem {
-	return retain.IngestItem{
+func (d *decoder) retainItem(it *pb.RetainItem) memory.RetainItem {
+	return memory.RetainItem{
 		Content:           it.GetContent(),
 		Context:           it.GetContext(),
 		Timestamp:         d.tsPtr(it.GetTimestamp()),
@@ -48,11 +48,11 @@ func (d *decoder) retainItem(it *pb.RetainItem) retain.IngestItem {
 }
 
 // retainItems converts repeated RetainItems; nil stays nil.
-func (d *decoder) retainItems(in []*pb.RetainItem) []retain.IngestItem {
+func (d *decoder) retainItems(in []*pb.RetainItem) []memory.RetainItem {
 	if in == nil {
 		return nil
 	}
-	out := make([]retain.IngestItem, len(in))
+	out := make([]memory.RetainItem, len(in))
 	for i, it := range in {
 		out[i] = d.retainItem(it)
 	}
@@ -60,7 +60,7 @@ func (d *decoder) retainItems(in []*pb.RetainItem) []retain.IngestItem {
 }
 
 // retainedDocToProto converts a RetainedDocument.
-func retainedDocToProto(x retain.RetainedDocument) *pb.RetainedDocument {
+func retainedDocToProto(x memory.RetainedDocument) *pb.RetainedDocument {
 	return &pb.RetainedDocument{
 		DocumentId: string(x.DocumentID), UnitsCreated: i32(x.UnitsCreated), Unchanged: x.Unchanged,
 		OperationId: string(x.OperationID),
@@ -69,7 +69,7 @@ func retainedDocToProto(x retain.RetainedDocument) *pb.RetainedDocument {
 
 // retainResultToProto converts a retain outcome to a RetainResponse; Usage is the per-slot token usage of a
 // synchronous retain (nil when run_async).
-func retainResultToProto(r retain.IngestResult) *pb.RetainResponse {
+func retainResultToProto(r memory.RetainResult) *pb.RetainResponse {
 	var docs []*pb.RetainedDocument
 	if r.Documents != nil {
 		docs = make([]*pb.RetainedDocument, len(r.Documents))

@@ -24,11 +24,17 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, CompileTags, SearchPages,
   ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking (Linker,
   Resolver, LabelResolver).
+- Features, one package per gRPC service, each exporting one `Service` built by `New(Deps)`, owning its RPCs, job
+  handlers (`Run*Job`) and maintenance sweeps, and never importing another feature:
+  - internal/memory: MemoryService (Retain, Recall, Reflect, ListMemories, GetMemory, UpdateMemory,
+    InvalidateMemory, RestoreMemory); jobs retain_document and rederive_memory; sweeps RederiveStranded and
+    SettleRetainBatches.
 - internal/engine/*: the remaining business logic over the boundaries and libraries.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per service (holding only the engines it
   calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
-  area builds its engines and gRPC handlers; handlers.go adapts the engines to job handlers. config.go reads
+  area builds its engines or feature Service, its gRPC handlers and its job handlers (a feature registers its
+  Run*Job methods; handlers.go adapts the remaining engines). config.go reads
   the environment (deployment, infrastructure and secrets only), configfile.go the server config file
   (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.

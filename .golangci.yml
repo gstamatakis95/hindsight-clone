@@ -80,6 +80,8 @@ linters:
           deny:
             - pkg: "memd/internal/engine"
               desc: libraries never import the engines (services)
+            - pkg: "memd/internal/memory"
+              desc: libraries never import the features
             - pkg: "memd/internal/grpcapi"
               desc: libraries don't know about gRPC
             - pkg: "memd/internal/maintenance"
@@ -114,8 +116,49 @@ linters:
               desc: recall sits below reflect (reflect imports recall)
             - pkg: "memd/internal/linking"
               desc: recall never links
+        feature-memory:
+          files: ["**/internal/memory/**", "!$test"]   # tests use pgtest
+          deny:
+            - pkg: "memd/internal/store/postgres"
+              desc: features depend on the store interfaces only
+            - pkg: "memd/internal/ai/gateway"
+              desc: features depend on the ai interfaces only
+            - pkg: "memd/internal/blob/s3"
+              desc: features depend on blob.Store only
+            - pkg: "memd/gen"
+              desc: no proto types in features; use domain
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB
+            - pkg: "net/http"
+              desc: use ai.LLM / ai.Embedder / ai.Reranker
+            - pkg: "github.com/aws"
+              desc: use blob.Store
+            - pkg: "github.com/DataDog"
+              desc: features stay vendor-free
+        feature-memory-isolation:
+          files: ["**/internal/memory/**"]   # tests included: they commit other features' effects through store
+          deny:
+            - pkg: "memd/internal/engine"
+              desc: features never import one another; enqueue through the jobs catalogue
+            - pkg: "memd/internal/document"
+              desc: features never import one another; enqueue through the jobs catalogue
+            - pkg: "memd/internal/observation"
+              desc: features never import one another; enqueue through the jobs catalogue
+            - pkg: "memd/internal/mentalmodel"
+              desc: features never import one another; enqueue through the jobs catalogue
+            - pkg: "memd/internal/bank"
+              desc: features never import one another; enqueue through the jobs catalogue
+            - pkg: "memd/internal/configsvc"
+              desc: features never import one another; enqueue through the jobs catalogue
+            - pkg: "memd/internal/operation"
+              desc: features never import one another; enqueue through the jobs catalogue
+            - pkg: "memd/internal/grpcapi"
+              desc: features don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the features
         grpcapi:
           files: ["**/internal/grpcapi/**"]
+
           deny:
             - pkg: "memd/internal/store/postgres"
               desc: handlers call engines
