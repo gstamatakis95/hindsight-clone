@@ -35,9 +35,6 @@ var bankDeleteSteps = []bankDeleteStep{
 	{"observation_evidence", func(ctx context.Context, q *db.Queries, b port.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteEvidence(ctx, db.BankDeleteEvidenceParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
 	}},
-	{"parked_links", func(ctx context.Context, q *db.Queries, b port.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteParkedLinks(ctx, db.BankDeleteParkedLinksParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
-	}},
 	{"graph_dirty", func(ctx context.Context, q *db.Queries, b port.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteGraphDirty(ctx, db.BankDeleteGraphDirtyParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
 	}},
@@ -79,9 +76,6 @@ var bankDeleteSteps = []bankDeleteStep{
 	}},
 	{"mental_models", func(ctx context.Context, q *db.Queries, b port.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteModels(ctx, db.BankDeleteModelsParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
-	}},
-	{"mental_model_folders", func(ctx context.Context, q *db.Queries, b port.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteModelFolders(ctx, db.BankDeleteModelFoldersParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
 	}},
 	{"directives", func(ctx context.Context, q *db.Queries, b port.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteDirectives(ctx, db.BankDeleteDirectivesParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
@@ -142,8 +136,8 @@ func (r *bankRepo) Delete(ctx context.Context, b port.BankRef) error {
 // bankUnkeyedTables are the bank-keyed tables with no foreign key to the bank (decision 004): the bank row's
 // cascade misses them, so Delete removes their rows itself.
 var bankUnkeyedTables = map[string]bool{
-	"parked_links": true, "graph_dirty": true, "entity_maintenance": true, "observation_versions": true,
-	"memory_audit": true, "memory_units_archive": true,
+	"graph_dirty": true, "entity_maintenance": true, "observation_versions": true, "memory_audit": true,
+	"memory_units_archive": true,
 }
 
 // deleteUnkeyed deletes every row of b in bankUnkeyedTables.

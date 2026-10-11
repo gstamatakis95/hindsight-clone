@@ -128,8 +128,6 @@ var unkeyedTables = map[string]string{
 		VALUES ($1, $2, gen_random_uuid())`,
 	"entity_maintenance": `INSERT INTO entity_maintenance (tenant_id, bank_id, entity_id)
 		VALUES ($1, $2, gen_random_uuid())`,
-	"parked_links": `INSERT INTO parked_links (tenant_id, bank_id, archived_unit_id, other_unit_id, kind, direction)
-		VALUES ($1, $2, gen_random_uuid(), gen_random_uuid(), 'causal', 'out')`,
 	"observation_versions": `INSERT INTO observation_versions (tenant_id, bank_id, observation_id, version, text)
 		VALUES ($1, $2, gen_random_uuid(), 1, 'v1')`,
 	"memory_audit": `INSERT INTO memory_audit (tenant_id, bank_id, unit_id, action)

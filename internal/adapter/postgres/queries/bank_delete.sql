@@ -30,12 +30,6 @@ DELETE FROM observation_evidence WHERE ctid = ANY(ARRAY(
     LIMIT @lim::int
 ));
 
--- BankDeleteParkedLinks deletes up to lim parked_links rows of the bank.
--- name: BankDeleteParkedLinks :execrows
-DELETE FROM parked_links WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM parked_links d WHERE d.tenant_id = @tenant_id AND d.bank_id = @bank_id LIMIT @lim::int
-));
-
 -- BankDeleteGraphDirty deletes up to lim graph_dirty rows of the bank.
 -- name: BankDeleteGraphDirty :execrows
 DELETE FROM graph_dirty WHERE ctid = ANY(ARRAY(
@@ -106,12 +100,6 @@ DELETE FROM mental_model_history WHERE ctid = ANY(ARRAY(
 -- name: BankDeleteModels :execrows
 DELETE FROM mental_models WHERE ctid = ANY(ARRAY(
     SELECT d.ctid FROM mental_models d WHERE d.tenant_id = @tenant_id AND d.bank_id = @bank_id LIMIT @lim::int
-));
-
--- BankDeleteModelFolders deletes up to lim mental_model_folders rows of the bank.
--- name: BankDeleteModelFolders :execrows
-DELETE FROM mental_model_folders WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM mental_model_folders d WHERE d.tenant_id = @tenant_id AND d.bank_id = @bank_id LIMIT @lim::int
 ));
 
 -- BankDeleteDirectives deletes up to lim directives rows of the bank.

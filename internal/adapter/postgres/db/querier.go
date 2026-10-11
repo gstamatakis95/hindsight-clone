@@ -39,8 +39,6 @@ type Querier interface {
 	BankDeleteLinks(ctx context.Context, arg BankDeleteLinksParams) (int64, error)
 	// BankDeleteMemoryAudit deletes up to lim memory_audit rows of the bank.
 	BankDeleteMemoryAudit(ctx context.Context, arg BankDeleteMemoryAuditParams) (int64, error)
-	// BankDeleteModelFolders deletes up to lim mental_model_folders rows of the bank.
-	BankDeleteModelFolders(ctx context.Context, arg BankDeleteModelFoldersParams) (int64, error)
 	// BankDeleteModelHistory deletes up to lim mental_model_history rows of the bank.
 	BankDeleteModelHistory(ctx context.Context, arg BankDeleteModelHistoryParams) (int64, error)
 	// BankDeleteModels deletes up to lim mental_models rows of the bank.
@@ -51,8 +49,6 @@ type Querier interface {
 	BankDeleteObservationVersions(ctx context.Context, arg BankDeleteObservationVersionsParams) (int64, error)
 	// BankDeleteOperations deletes every operation of a bank.
 	BankDeleteOperations(ctx context.Context, arg BankDeleteOperationsParams) error
-	// BankDeleteParkedLinks deletes up to lim parked_links rows of the bank.
-	BankDeleteParkedLinks(ctx context.Context, arg BankDeleteParkedLinksParams) (int64, error)
 	// BankDeleteRow deletes a tombstoned bank's row; a live bank matches nothing.
 	BankDeleteRow(ctx context.Context, arg BankDeleteRowParams) (int64, error)
 	// BankDeleteUnitEntities deletes up to lim unit_entities rows of the bank (via memory_units).

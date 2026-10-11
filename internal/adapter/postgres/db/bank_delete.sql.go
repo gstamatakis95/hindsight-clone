@@ -261,27 +261,6 @@ func (q *Queries) BankDeleteMemoryAudit(ctx context.Context, arg BankDeleteMemor
 	return result.RowsAffected(), nil
 }
 
-const bankDeleteModelFolders = `-- name: BankDeleteModelFolders :execrows
-DELETE FROM mental_model_folders WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM mental_model_folders d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
-))
-`
-
-type BankDeleteModelFoldersParams struct {
-	TenantID string
-	BankID   string
-	Lim      int32
-}
-
-// BankDeleteModelFolders deletes up to lim mental_model_folders rows of the bank.
-func (q *Queries) BankDeleteModelFolders(ctx context.Context, arg BankDeleteModelFoldersParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteModelFolders, arg.TenantID, arg.BankID, arg.Lim)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const bankDeleteModelHistory = `-- name: BankDeleteModelHistory :execrows
 DELETE FROM mental_model_history WHERE ctid = ANY(ARRAY(
     SELECT d.ctid FROM mental_model_history d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
@@ -379,27 +358,6 @@ type BankDeleteOperationsParams struct {
 func (q *Queries) BankDeleteOperations(ctx context.Context, arg BankDeleteOperationsParams) error {
 	_, err := q.db.Exec(ctx, bankDeleteOperations, arg.TenantID, arg.BankID)
 	return err
-}
-
-const bankDeleteParkedLinks = `-- name: BankDeleteParkedLinks :execrows
-DELETE FROM parked_links WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM parked_links d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
-))
-`
-
-type BankDeleteParkedLinksParams struct {
-	TenantID string
-	BankID   string
-	Lim      int32
-}
-
-// BankDeleteParkedLinks deletes up to lim parked_links rows of the bank.
-func (q *Queries) BankDeleteParkedLinks(ctx context.Context, arg BankDeleteParkedLinksParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteParkedLinks, arg.TenantID, arg.BankID, arg.Lim)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const bankDeleteRow = `-- name: BankDeleteRow :execrows
