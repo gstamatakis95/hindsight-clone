@@ -1,7 +1,7 @@
 # memd developer targets. See AGENTS.md ("Commands") and docs/SPEC.md.
 #
 #   make gen      buf generate, sqlc, mockery
-#   make lint     golangci-lint, interface-doc check, buf lint + breaking, ruff
+#   make lint     golangci-lint, interface-doc check, buf lint, ruff
 #   make test     go test -race ./...
 #   make e2e      opt-in end-to-end tests (docker compose stack + emulated gateway)
 #   make up       docker compose: postgres, minio
@@ -19,7 +19,6 @@ ALEMBIC := $(VENV)/bin/alembic
 RUFF    := $(VENV)/bin/ruff
 MOCKERY := $(ROOT)/.bin/mockery
 COMPOSE := docker compose -f $(ROOT)/docker-compose.yml
-BREAKING_AGAINST ?= main
 
 export MEMD_PG_PORT ?= 55432
 export MEMD_DSN ?= postgresql+psycopg://memd:memd@localhost:$(MEMD_PG_PORT)/memd
@@ -51,7 +50,7 @@ tools: $(MOCKERY) venv ## build mockery and the alembic venv
 
 # ---------- lint ----------
 
-lint: lint-go lint-ifacedoc lint-proto lint-py ## golangci-lint, ifacedoc, buf lint + breaking, ruff
+lint: lint-go lint-ifacedoc lint-proto lint-py ## golangci-lint, ifacedoc, buf lint, ruff
 
 lint-go:
 	golangci-lint run ./...
@@ -59,18 +58,10 @@ lint-go:
 lint-ifacedoc:
 	go run ./tools/ifacedoc .
 
-# buf breaking runs against BREAKING_AGAINST (default main; after the contracts merge, use
-# BREAKING_AGAINST=contracts-v1 to check against the frozen tag). An unresolvable ref fails the target; the
-# check is skipped only when the ref exists but has no protos yet (the WP-00 branch against an empty main).
+# The API may change freely until the first release, so only buf lint runs here. The first release tag
+# becomes the buf breaking baseline: add `buf breaking --against '.git#tag=<that tag>'` to this target then.
 lint-proto:
 	buf lint
-	@git rev-parse --verify --quiet '$(BREAKING_AGAINST)^{commit}' >/dev/null || \
-		{ echo "buf breaking: ref '$(BREAKING_AGAINST)' does not resolve" >&2; exit 1; }
-	@if git cat-file -e '$(BREAKING_AGAINST):api/memory/v1' 2>/dev/null; then \
-		buf breaking --against '.git#ref=$(BREAKING_AGAINST)'; \
-	else \
-		echo "buf breaking: skipped ($(BREAKING_AGAINST) has no api/memory/v1 yet)"; \
-	fi
 
 ruff: lint-py ## ruff check + format --check over migrations
 
