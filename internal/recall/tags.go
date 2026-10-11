@@ -13,7 +13,7 @@ import (
 // MAX_EXACT_COMBINATIONS). Exceeding it is an error rather than a silent truncation.
 const maxExactCombinations = 32
 
-// tagCompiler turns flat tags or tag groups into one tag predicate shared by all four arms; vocab may be nil, in
+// tagCompiler turns flat tags or tag groups into one tag predicate shared by every arm; vocab may be nil, in
 // which case fuzzy leaves fail.
 type tagCompiler struct {
 	vocab tagVocabulary

@@ -83,6 +83,9 @@
 // rejected, because every stored embedding shares one vector space. Failures are domain.ErrInvalidArgument. The
 // server runs Validate on request overrides, CreateBank, templates and the patched level of every
 // Update*Config and UpdateMentalModel; a reset is not checked, so it can always repair a stored level.
+// [CheckArms] checks recall.arms and recall.arm_boosts against the recall arms the server registered; config
+// never imports recall, so cmd/memd passes the names (for the server config file) and grpcapi checks every
+// RecallConfig a request carries with it.
 //
 // # FieldMask helpers
 //

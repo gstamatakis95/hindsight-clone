@@ -36,7 +36,7 @@ func (e *curateEnv) assertNotLive(ids ...domain.UnitID) {
 	}
 }
 
-// searchIDs returns the ids the semantic arm (for text's embedding) and the keyword arm (for q) return.
+// searchIDs returns the ids the vector search (for text's embedding) and the text search (for q) return.
 func (e *curateEnv) searchIDs(text, q string) (semantic, keyword []domain.UnitID) {
 	e.t.Helper()
 	vec, err := e.fake.Read().SearchVector(e.ctx, store.VectorQuery{

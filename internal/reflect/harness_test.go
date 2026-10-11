@@ -12,6 +12,7 @@ import (
 	mockai "memd/internal/mocks/ai"
 	"memd/internal/prompts"
 	"memd/internal/recall"
+	"memd/internal/recall/arms"
 	rf "memd/internal/reflect"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
@@ -44,6 +45,7 @@ type harness struct {
 	llm   *fake.LLM
 	emb   *mockai.Embedder
 	clock *clock.Manual
+	arms  []recall.Arm // the recall arms; nil = the built-ins
 	r     *rf.Agent
 }
 
@@ -97,8 +99,13 @@ func (h *harness) build() {
 		h.t.Fatal(err)
 	}
 	resolver, router := config.NewResolver(h.store, server), ai.NewRouter()
+	registered := h.arms
+	if registered == nil {
+		r := h.store.Read()
+		registered = []recall.Arm{arms.NewVector(r), arms.NewText(r), arms.NewGraph(r, h.store.Graph()), arms.NewTemporal(r)}
+	}
 	engine := recall.New(recall.Deps{
-		DB: h.store, Graph: h.store.Graph(), Config: resolver, Embedder: h.emb, Router: router, Clock: h.clock,
+		DB: h.store, Arms: registered, Config: resolver, Embedder: h.emb, Router: router, Clock: h.clock,
 		Tokens: tok,
 	})
 	h.r = rf.New(rf.Deps{DB: h.store, Config: resolver, Router: router, LLM: h.llm, Clock: h.clock, Recall: engine})

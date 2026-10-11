@@ -47,12 +47,12 @@
 // tenant's config even before the tenant has a row; plain TenantConfig reads, which sit on hot paths, never wait on it.
 //
 // The Reader returned by [DB.Read] runs each call as its own statement on the pool; calls that need
-// transaction-local settings (the semantic arm's SET LOCAL) open a short read-only transaction. A Tx embeds the same
+// transaction-local settings (the vector search's SET LOCAL) open a short read-only transaction. A Tx embeds the same
 // reader bound to its own transaction, so reads inside InTx see the transaction's writes.
 //
 // # Recall arms
 //
-// The four arms build their SQL at run time, because the tag filter is a variable tree (domain.TagPredicate) that sqlc
+// The searches build their SQL at run time, because the tag filter is a variable tree (domain.TagPredicate) that sqlc
 // can't express; every value is a bind parameter with an explicit cast and only fixed SQL text is concatenated. Each
 // arm filters by bank, fact types, tag predicate and seq range, reads only memory_units (live units; archived ones live
 // in memory_units_archive) and breaks score ties by id.

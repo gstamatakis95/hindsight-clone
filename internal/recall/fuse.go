@@ -7,25 +7,25 @@ import (
 )
 
 // rrf merges the arms' ranked lists into one by reciprocal-rank fusion.
-type rrf struct{}
+type rrf struct {
+	// order is the arms' registration order: lists are summed in it, so float sums and ties are deterministic.
+	order []string
+}
 
-// newRRF returns the fuser.
-func newRRF() rrf { return rrf{} }
-
-// armOrder is the fixed order arms are summed in, so float sums and ties are deterministic.
-var armOrder = []string{ArmSemantic, ArmKeyword, ArmGraph, ArmTemporal}
+// newRRF returns the fuser summing arms in order (the registration order).
+func newRRF(order []string) rrf { return rrf{order: order} }
 
 // Fuse merges lists (keyed by arm name, each best first with candidate.Arms[arm].Rank set) by reciprocal-rank
 // fusion with constant k (<= 0 = 60): RRF = sum over arms of 1 / (k + rank). The result merges each unit's arm
-// scores and is ordered by candidate.RRF, best first; ties keep first-seen order (arms in semantic, keyword, graph,
-// temporal order, then rank), as Hindsight's stable sort does.
-func (rrf) Fuse(lists map[string][]candidate, k int) []candidate {
+// scores and is ordered by candidate.RRF, best first; ties keep first-seen order (arms in registration order, then
+// rank), as Hindsight's stable sort does.
+func (f rrf) Fuse(lists map[string][]candidate, k int) []candidate {
 	if k <= 0 {
 		k = defaultRRFK
 	}
 	byID := map[string]*candidate{}
 	var order []*candidate
-	for _, arm := range orderedArms(lists) {
+	for _, arm := range f.orderedArms(lists) {
 		for i, c := range lists[arm] {
 			s := armScore{Rank: i + 1}
 			if a, ok := c.Arms[arm]; ok {
@@ -83,16 +83,16 @@ func boostedRRF(c candidate, k int, boosts map[string]float64) float64 {
 	return s
 }
 
-// orderedArms returns the arm names of lists: the four known arms in armOrder, then any others sorted.
-func orderedArms(lists map[string][]candidate) []string {
+// orderedArms returns the arm names of lists: the registered arms in order, then any others sorted.
+func (f rrf) orderedArms(lists map[string][]candidate) []string {
 	var out, rest []string
-	for _, a := range armOrder {
+	for _, a := range f.order {
 		if _, ok := lists[a]; ok {
 			out = append(out, a)
 		}
 	}
 	for _, a := range slices.Sorted(maps.Keys(lists)) {
-		if !slices.Contains(armOrder, a) {
+		if !slices.Contains(f.order, a) {
 			rest = append(rest, a)
 		}
 	}

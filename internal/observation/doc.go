@@ -39,8 +39,8 @@
 //     each fact (those are skipped, so a replayed run is safe). Scopes are processed in a fixed order.
 //  3. Per scope, resolve the scope's config with ForScope (the matching consolidation strategy sits between
 //     bank and request) and decide its facts in LLM batches of observations.llm_batch_size. For each batch,
-//     with no transaction open: find related observations of exactly that scope (per fact, the semantic and
-//     keyword arms over store.Reader, interleaved, 10 per fact), render the CONSOLIDATE prompt with those
+//     with no transaction open: find related observations of exactly that scope (per fact, the vector and
+//     text searches of store.Reader, interleaved, 10 per fact), render the CONSOLIDATE prompt with those
 //     observations and some of their source facts (within source_facts_max_tokens_per_observation and
 //     source_facts_max_tokens), and call CONSOLIDATE with a per-call schema: source_fact_ids limited to the
 //     batch's ids with minItems 1, and creates.maxItems = the scope's remaining capacity under

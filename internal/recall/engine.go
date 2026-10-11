@@ -2,14 +2,15 @@ package recall
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"memd/internal/ai"
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/graph"
 	"memd/internal/store"
 	"memd/internal/timex"
+	"slices"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -26,7 +27,7 @@ type Engine struct {
 	times    *timex.Normalizer
 	clock    clock.Clock
 	count    tokenCounter
-	arms     []retriever
+	arms     registry
 	tags     *tagCompiler
 	fuser    rrf
 	scorer   *scorer
@@ -38,11 +39,12 @@ type Engine struct {
 
 // Deps are the Engine's dependencies.
 type Deps struct {
-	// DB serves the searches, hydration, includes, fuzzy tags, stale scopes and page listings through DB.Read, and
-	// whole pages in a short read-only transaction.
+	// DB serves hydration, includes, fuzzy tags, stale scopes and page listings through DB.Read, and whole pages
+	// in a short read-only transaction.
 	DB store.DB
-	// Graph serves the graph arm's expansion (postgres.DB.Graph in production).
-	Graph graph.Reader
+	// Arms are the registered recall arms, in fusion order; cmd/memd/wire.go registers the built-in vector, text,
+	// graph and temporal arms (internal/recall/arms). Names must be unique and non-empty.
+	Arms []Arm
 	// Config merges server < tenant < bank < request.
 	Config *config.Resolver
 	// Embedder embeds the query and page searches.
@@ -60,24 +62,34 @@ type Deps struct {
 	Tokens *ai.Tokenizer
 }
 
-// New returns the Engine over d with the four standard arms.
-func New(d Deps) *Engine { return newEngine(d, d.DB.Read(), d.Tokens, nil) }
+// New returns the Engine over d. An arm with an empty or repeated name is a wiring bug: New panics.
+func New(d Deps) *Engine { return newEngine(d, d.DB.Read(), d.Tokens) }
 
-// newEngine is New with the reader, the token counter and the arms (nil = semantic, keyword, graph, temporal over
-// read) chosen by the caller; tests spy on reads, count words and stub arms.
-func newEngine(d Deps, read store.Reader, count tokenCounter, arms []retriever) *Engine {
-	if arms == nil {
-		arms = []retriever{newSemantic(read), newKeyword(read), newGraph(read, d.Graph), newTemporal(read)}
-	}
+// newEngine is New with the reader and the token counter chosen by the caller; tests count words.
+func newEngine(d Deps, read store.Reader, count tokenCounter) *Engine {
+	arms := newRegistry(d.Arms)
 	return &Engine{
 		db: d.DB, read: read, config: d.Config, embedder: d.Embedder, times: d.Times, clock: d.Clock, count: count,
-		arms: arms, tags: newTagCompiler(read), fuser: newRRF(), scorer: newScorer(d.Reranker, d.Router, d.Clock),
-		gate: newScoreGate(), packer: newPacker(count), prefer: newObservationPreference(),
-		includer: newIncluder(read, count),
+		arms: arms, tags: newTagCompiler(read), fuser: newRRF(arms.names()), gate: newScoreGate(),
+		scorer: newScorer(d.Reranker, d.Router, d.Clock, arms.windowed), packer: newPacker(count),
+		prefer: newObservationPreference(), includer: newIncluder(read, count),
 	}
 }
 
-// Recall resolves the effective config (unknown bank = domain.ErrNotFound), parses, retrieves over the enabled
+// Arms lists the registered arms in fusion order (ListRecallArms).
+func (r *Engine) Arms() []ArmInfo {
+	out := make([]ArmInfo, len(r.arms.arms))
+	for i, a := range r.arms.arms {
+		out[i] = ArmInfo{Name: a.Name(), Description: a.Description()}
+	}
+	return out
+}
+
+// CheckArms returns domain.ErrInvalidArgument when names holds an arm name that is not registered, or a name
+// twice; reflect checks its request's arms with it before its loop starts.
+func (r *Engine) CheckArms(names []string) error { return r.arms.check("arms", names) }
+
+// Recall resolves the effective config (unknown bank = domain.ErrNotFound), parses, retrieves over the selected
 // arms concurrently, fuses, scores, gates, packs and enriches. It is read-only and opens a short read transaction
 // only to resolve config. A failing arm, embedder or reranker fails the call; a recall that finds nothing is not a
 // failure.
@@ -85,6 +97,9 @@ func (r *Engine) Recall(ctx context.Context, req Request) (Result, error) {
 	start := r.clock.Now()
 	if strings.TrimSpace(req.Query) == "" {
 		return Result{}, fmt.Errorf("%w: recall: query is empty", domain.ErrInvalidArgument)
+	}
+	if err := r.arms.checkRequest(req); err != nil {
+		return Result{}, fmt.Errorf("recall: %w", err)
 	}
 	var overrides []domain.BankConfig
 	if req.Overrides != nil {
@@ -101,7 +116,7 @@ func (r *Engine) Recall(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	set := settingsOf(cfg)
-	lists, arms, err := r.retrieve(ctx, q, set)
+	lists, arms, err := r.retrieve(ctx, q, r.arms.selected(req, cfg))
 	if err != nil {
 		return Result{}, err
 	}
@@ -148,29 +163,27 @@ func (r *Engine) CompileTags(
 	return r.tags.Compile(ctx, b, f, minSimilarity)
 }
 
-// retrieve runs the enabled arms concurrently. The temporal arm runs only when the query has a window. It
-// returns each arm's list by name and one trace entry per arm that ran, in arm order.
-func (r *Engine) retrieve(ctx context.Context, q *parsedQuery, set settings) (
+// retrieve runs arms concurrently, each over its own copy of q's Query. It returns each arm's list by name and one
+// trace entry per arm that ran, in arm order; an arm that returns ErrSkip has neither.
+func (r *Engine) retrieve(ctx context.Context, q *parsedQuery, arms []Arm) (
 	map[string][]candidate, []ArmTrace, error,
 ) {
-	var run []retriever
-	for _, a := range r.arms {
-		if set.enabled[a.Name()] && (a.Name() != ArmTemporal || q.Window != nil) {
-			run = append(run, a)
-		}
-	}
-	results := make([][]candidate, len(run))
-	traces := make([]ArmTrace, len(run))
+	results := make([][]candidate, len(arms))
+	traces := make([]*ArmTrace, len(arms))
 	g, gctx := errgroup.WithContext(ctx)
-	for i, a := range run {
+	for i, a := range arms {
 		g.Go(func() error {
 			t0 := r.clock.Now()
-			cs, err := a.Retrieve(gctx, q)
+			hs, err := a.Retrieve(gctx, q.arm())
+			if errors.Is(err, ErrSkip) {
+				return nil
+			}
 			if err != nil {
 				return fmt.Errorf("recall: %s arm: %w", a.Name(), err)
 			}
+			cs := candidates(a.Name(), hs, q.Limit)
 			results[i] = cs
-			traces[i] = ArmTrace{
+			traces[i] = &ArmTrace{
 				Arm: a.Name(), Candidates: len(cs), DurationMS: r.clock.Now().Sub(t0).Milliseconds(),
 				TopIDs: topIDs(cs),
 			}
@@ -180,11 +193,33 @@ func (r *Engine) retrieve(ctx context.Context, q *parsedQuery, set settings) (
 	if err := g.Wait(); err != nil {
 		return nil, nil, fmt.Errorf("recall: retrieve: %w", err)
 	}
-	lists := make(map[string][]candidate, len(run))
-	for i, a := range run {
-		lists[a.Name()] = results[i]
+	lists := make(map[string][]candidate, len(arms))
+	var out []ArmTrace
+	for i, a := range arms {
+		if traces[i] != nil {
+			lists[a.Name()] = results[i]
+			out = append(out, *traces[i])
+		}
 	}
-	return lists, traces, nil
+	return lists, out, nil
+}
+
+// candidates turns an arm's hits (best first) into candidates carrying their 1-based rank and raw score,
+// keeping at most limit (<= 0 = all) and dropping repeated ids.
+func candidates(arm string, hs []Hit, limit int) []candidate {
+	if limit > 0 && len(hs) > limit {
+		hs = hs[:limit]
+	}
+	out := make([]candidate, 0, len(hs))
+	seen := make(map[domain.UnitID]bool, len(hs))
+	for _, h := range hs {
+		if seen[h.ID] {
+			continue
+		}
+		seen[h.ID] = true
+		out = append(out, candidate{ID: h.ID, Arms: map[string]armScore{arm: {Rank: len(out) + 1, Score: h.Score}}})
+	}
+	return out
 }
 
 // rank keeps the top reranker_max_candidates of fused (strategy boosts decide that cut), hydrates them
@@ -194,7 +229,7 @@ func (r *Engine) rank(ctx context.Context, q *parsedQuery, fused []candidate, se
 	[]candidate, int, error,
 ) {
 	top := trimBoosted(fused, set.rerankMax, set.rrfK, set.boosts)
-	hydrated, err := r.hydrate(ctx, q.Bank, q.Seq, top)
+	hydrated, err := r.hydrate(ctx, q, top)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -214,11 +249,12 @@ func (r *Engine) rank(ctx context.Context, q *parsedQuery, fused []candidate, se
 	return kept, reranked, nil
 }
 
-// hydrate attaches each candidate's unit, keeping fused order and dropping ids that no longer resolve or
-// whose unit was rewritten outside seq since the arm saw it (a refresh's snapshot stays at or below S).
-func (r *Engine) hydrate(ctx context.Context, b domain.BankRef, seq domain.SeqRange, cs []candidate) (
-	[]candidate, error,
-) {
+// hydrate attaches each candidate's unit, keeping fused order. It is the engine's re-check of every arm's hits: it
+// keeps only live units of q's bank (GetUnits) that pass q's fact types, tag predicate and seq bound, so it drops
+// ids that no longer resolve, units rewritten outside the seq bound since the arm saw them (a refresh's snapshot
+// stays at or below S), and anything an arm returned that the query excludes. For the built-in arms, which filter
+// natively, it removes only what changed since retrieval.
+func (r *Engine) hydrate(ctx context.Context, q *parsedQuery, cs []candidate) ([]candidate, error) {
 	if len(cs) == 0 {
 		return nil, nil
 	}
@@ -226,13 +262,13 @@ func (r *Engine) hydrate(ctx context.Context, b domain.BankRef, seq domain.SeqRa
 	for i, c := range cs {
 		ids[i] = c.ID
 	}
-	units, err := r.read.GetUnits(ctx, b, ids)
+	units, err := r.read.GetUnits(ctx, q.Bank, ids)
 	if err != nil {
 		return nil, err
 	}
 	byID := make(map[domain.UnitID]*domain.Unit, len(units))
 	for i := range units {
-		if seq.Contains(units[i].Seq) {
+		if admits(q, units[i]) {
 			byID[units[i].ID] = &units[i]
 		}
 	}
@@ -244,6 +280,12 @@ func (r *Engine) hydrate(ctx context.Context, b domain.BankRef, seq domain.SeqRa
 		}
 	}
 	return out, nil
+}
+
+// admits reports whether u passes q's bank, fact types, tag predicate and seq bound.
+func admits(q *parsedQuery, u domain.Unit) bool {
+	return u.Bank == q.Bank && (len(q.Types) == 0 || slices.Contains(q.Types, u.Type)) &&
+		q.Predicate.Eval(u.Tags) && q.Seq.Contains(u.Seq)
 }
 
 // staleScopes returns the canonical keys of the packed observations' scopes that still hold unconsolidated
@@ -293,12 +335,9 @@ func result(packed []candidate, e enrichment, stale map[string]bool) Result {
 
 // scoresOf returns a candidate's wire scores.
 func scoresOf(c candidate) Scores {
-	s := Scores{Final: c.Final, Reranker: c.Reranker}
-	if a, ok := c.Arms[ArmSemantic]; ok {
-		s.Semantic = &a.Score
-	}
-	if a, ok := c.Arms[ArmKeyword]; ok {
-		s.Keyword = &a.Score
+	s := Scores{Final: c.Final, Reranker: c.Reranker, Arms: make(map[string]float64, len(c.Arms))}
+	for arm, a := range c.Arms {
+		s.Arms[arm] = a.Score
 	}
 	return s
 }

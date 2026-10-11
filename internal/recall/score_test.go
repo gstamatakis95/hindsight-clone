@@ -3,7 +3,6 @@ package recall
 import (
 	"math"
 	"memd/internal/domain"
-	"memd/internal/store"
 	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"testing"
@@ -21,8 +20,8 @@ func flatReranker(e *env) { e.rr.SetFunc(func(string, string) float32 { return 0
 func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 
 func TestBoostRecencyIsolated(t *testing.T) {
-	sem := arm(ArmSemantic, "old", "new")
-	e := newEnv(t, envOpts{rerank: true, arms: []retriever{sem}})
+	sem := arm(armVector, "old", "new")
+	e := newEnv(t, envOpts{rerank: true, arms: []Arm{sem}})
 	flatReranker(e)
 	old, fresh := fact("old", "the old fact"), fact("new", "the new fact")
 	old.OccurredStart, fresh.OccurredStart = at(-730), at(-1)
@@ -50,15 +49,15 @@ func TestBoostTemporalIsolated(t *testing.T) {
 	// 182.5 days. Hindsight's linear proximity: 1 - min(|best - mid| / 182.5, 1).
 	w := &domain.TimeWindow{Start: testNow.AddDate(-1, 0, 0), End: testNow}
 	mid := time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)
-	sem := arm(ArmSemantic, "far", "centre", "span", "undated", "outside")
+	sem := arm(armVector, "far", "centre", "span", "undated", "outside")
 	// The adapter's own scores order the arm (buckets) but must not reach the boost.
-	tmp := &stubArm{name: ArmTemporal, hits: []store.Hit{
+	tmp := &stubArm{name: armTemporal, window: true, hits: []Hit{
 		{ID: uid("far"), Score: 1},
 		{ID: uid("centre"), Score: 0.01},
 		{ID: uid("span"), Score: 0.5},
 		{ID: uid("undated"), Score: 0.9},
 	}}
-	e := newEnv(t, envOpts{rerank: true, arms: []retriever{sem, tmp}})
+	e := newEnv(t, envOpts{rerank: true, arms: []Arm{sem, tmp}})
 	flatReranker(e)
 	far, centre, span := fact("far", "far event"), fact("centre", "centre event"), fact("span", "span event")
 	undated, outside := fact("undated", "undated event"), fact("outside", "outside event")
@@ -112,8 +111,8 @@ func TestTemporalProximityWindows(t *testing.T) {
 }
 
 func TestBoostProofIsolated(t *testing.T) {
-	sem := arm(ArmSemantic, "o1", "o50")
-	e := newEnv(t, envOpts{rerank: true, arms: []retriever{sem}})
+	sem := arm(armVector, "o1", "o50")
+	e := newEnv(t, envOpts{rerank: true, arms: []Arm{sem}})
 	flatReranker(e)
 	o1 := domain.Unit{ID: uid("o1"), Bank: testBank, Type: domain.FactTypeObservation, Text: "weak obs", ProofCount: 1}
 	o50 := domain.Unit{
@@ -137,7 +136,7 @@ func TestBoostNeutral(t *testing.T) {
 	timeless := domain.Unit{Type: domain.FactTypeWorld, Timeless: true, MentionedAt: at(-1000)}
 	undated := domain.Unit{Type: domain.FactTypeObservation}
 	for _, u := range []domain.Unit{timeless, undated} {
-		b := boost(candidate{Unit: &u}, q, s)
+		b := boost(candidate{Unit: &u}, q, s, nil)
 		if b != (boosts{Recency: 1, Temporal: 1, Proof: 1}) {
 			t.Fatalf("boost(%+v) = %+v, want neutral", u, b)
 		}

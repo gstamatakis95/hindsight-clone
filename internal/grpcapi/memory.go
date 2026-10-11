@@ -10,7 +10,7 @@ import (
 // MemoryHandler serves memory.v1.MemoryService.
 type MemoryHandler struct {
 	pb.UnimplementedMemoryServiceServer
-	// Memory serves Retain, Recall and Reflect.
+	// Memory serves Retain, Recall, Reflect and ListRecallArms.
 	Memory *memory.Service
 }
 
@@ -61,6 +61,18 @@ func (h *MemoryHandler) Recall(ctx context.Context, req *pb.RecallRequest) (*pb.
 		return nil, toStatus(err)
 	}
 	return recallResultToProto(out), nil
+}
+
+// ListRecallArms lists the registered recall arms with their descriptions.
+func (h *MemoryHandler) ListRecallArms(
+	context.Context, *pb.ListRecallArmsRequest,
+) (*pb.ListRecallArmsResponse, error) {
+	infos := h.Memory.ListRecallArms()
+	out := &pb.ListRecallArmsResponse{Arms: make([]*pb.RecallArm, len(infos))}
+	for i, a := range infos {
+		out.Arms[i] = &pb.RecallArm{Name: a.Name, Description: a.Description}
+	}
+	return out, nil
 }
 
 // Reflect answers a query with the agentic reflect loop.

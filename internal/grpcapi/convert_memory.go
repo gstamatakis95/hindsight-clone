@@ -97,6 +97,7 @@ func recallRequestFromProto(r *pb.RecallRequest) (recall.Request, error) {
 		QueryTime:          d.tsPtr(r.GetQueryTime()),
 		Window:             d.window(r.GetTimeWindowStart(), r.GetTimeWindowEnd()),
 		PreferObservations: r.GetPreferObservations(),
+		Arms:               r.GetArms(),
 		MinScores:          minScoresFromProto(r.GetMinScores()),
 		Include:            recallIncludeFromProto(r.GetInclude()),
 		Trace:              r.GetTrace(),
@@ -190,6 +191,7 @@ func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.Request, error) {
 		Include:            reflectIncludeFromProto(r.GetInclude()),
 		QueryTime:          d.tsPtr(r.GetQueryTime()),
 		Overrides:          d.reflectOverrides(r.GetOverrides()),
+		Arms:               r.GetArms(),
 	}
 	return out, d.err
 }

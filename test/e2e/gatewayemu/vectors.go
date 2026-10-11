@@ -14,7 +14,7 @@ type EmbedMode int
 
 const (
 	// EmbedSharedTokens hashes each content word into a few dimensions (a bag of words), so texts that share
-	// words have a positive cosine similarity and recall's semantic arm finds them. The default.
+	// words have a positive cosine similarity and recall's vector arm finds them. The default.
 	EmbedSharedTokens EmbedMode = iota
 	// EmbedTextHash derives the whole vector from a hash of the full text: equal texts are identical, any two
 	// different texts are nearly orthogonal.

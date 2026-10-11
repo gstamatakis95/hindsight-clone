@@ -210,10 +210,10 @@ type RecallConfig struct {
 	BudgetMid *int `json:"budget_mid,omitempty"`
 	// BudgetHigh is the per-arm limit at BUDGET_HIGH (default 1000).
 	BudgetHigh *int `json:"budget_high,omitempty"`
-	// StrategyBoosts weights arms by name in fusion.
-	StrategyBoosts map[string]float64 `json:"strategy_boosts"`
-	// EnabledStrategies lists the arms to run; nil = all four.
-	EnabledStrategies []string `json:"enabled_strategies"`
+	// ArmBoosts weights recall arms by name in fusion.
+	ArmBoosts map[string]float64 `json:"arm_boosts"`
+	// Arms lists the recall arms to run by name; empty = every registered arm.
+	Arms []string `json:"arms"`
 	// RerankerMaxCandidates is how many fused candidates are reranked (default 300).
 	RerankerMaxCandidates *int `json:"reranker_max_candidates,omitempty"`
 	// Rerank toggles the cross-encoder.

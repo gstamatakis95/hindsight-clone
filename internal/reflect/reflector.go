@@ -31,6 +31,9 @@ type Request struct {
 	QueryTime *time.Time
 	// Overrides are request-level config overrides; nil = none.
 	Overrides *domain.BankConfig
+	// Arms are the recall arms the recall and search_observations tools run; empty = the effective recall.arms.
+	// An unknown or repeated name is domain.ErrInvalidArgument, before the loop starts.
+	Arms []string
 	// Seq bounds the units every retrieval sees; zero = unbounded. Internal callers only.
 	Seq domain.SeqRange
 	// Types limits fact types for retrieval tools; empty = all. Internal callers only.

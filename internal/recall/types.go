@@ -1,31 +1,9 @@
 package recall
 
 import (
-	"context"
 	"memd/internal/domain"
 	"time"
 )
-
-// Arm names, as returned by retriever.Name and used as keys of the fused lists, candidate.Arms,
-// RecallConfig.StrategyBoosts and RecallConfig.EnabledStrategies.
-const (
-	// ArmSemantic is the HNSW cosine arm.
-	ArmSemantic = "semantic"
-	// ArmKeyword is the BM25 arm.
-	ArmKeyword = "keyword"
-	// ArmGraph is the link-expansion arm.
-	ArmGraph = "graph"
-	// ArmTemporal is the occurrence-overlap arm.
-	ArmTemporal = "temporal"
-)
-
-// retriever is one recall arm.
-type retriever interface {
-	// Name is the arm name: semantic | keyword | graph | temporal.
-	Name() string
-	// Retrieve returns the arm's candidates for q, best first, at most q.Limit.
-	Retrieve(ctx context.Context, q *parsedQuery) ([]candidate, error)
-}
 
 // candidate is one unit moving through the recall pipeline with every score it has collected.
 type candidate struct {
@@ -75,7 +53,10 @@ type Request struct {
 	Window *domain.TimeWindow
 	// PreferObservations drops raw facts covered by a returned observation and backfills.
 	PreferObservations bool
-	// MinScores are the arm and result floors.
+	// Arms are the arms to run by name; empty = the effective recall.arms (all registered arms by default). An
+	// unknown or repeated name is domain.ErrInvalidArgument.
+	Arms []string
+	// MinScores are the arm and result floors; an unknown arm name is domain.ErrInvalidArgument.
 	MinScores domain.MinScores
 	// Include asks for chunks, source facts and entity state.
 	Include domain.RecallInclude
@@ -120,15 +101,13 @@ type Scores struct {
 	Final float64
 	// Reranker is the cross-encoder score; nil = not reranked.
 	Reranker *float64
-	// Semantic is the cosine similarity; nil = not returned by the semantic arm.
-	Semantic *float64
-	// Keyword is the BM25 score; nil = not returned by the keyword arm.
-	Keyword *float64
+	// Arms are the raw scores by arm name of the arms that returned the unit.
+	Arms map[string]float64
 }
 
 // Trace mirrors memory.v1.Trace.
 type Trace struct {
-	// Arms has one entry per arm that ran: semantic, keyword, graph, temporal.
+	// Arms has one entry per arm that ran, in fusion order (an arm that returned ErrSkip has none).
 	Arms []ArmTrace
 	// Fused is the number of candidates after fusion.
 	Fused int
@@ -140,7 +119,7 @@ type Trace struct {
 	TokenBudget int
 	// TokensUsed is the token count of the packed results.
 	TokensUsed int
-	// Window is the time window the temporal arm used (explicit or resolved by TIME_PARSE); nil = none.
+	// Window is the query's time window (explicit or resolved by TIME_PARSE); nil = none.
 	Window *domain.TimeWindow
 	// DurationMS is the recall duration.
 	DurationMS int64

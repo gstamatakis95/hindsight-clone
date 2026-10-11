@@ -76,9 +76,9 @@ func TestFieldMaskConfigPatch(t *testing.T) {
 			},
 		},
 		{
-			"empty nested list is an explicit clear", &pb.BankConfig{}, mask("recall.enabled_strategies"),
+			"empty nested list is an explicit clear", &pb.BankConfig{}, mask("recall.arms"),
 			func(c *domain.BankConfig) {
-				c.Recall = &domain.RecallConfig{RRFK: ptr(60), RecencyAlpha: ptr(0.2), EnabledStrategies: []string{}}
+				c.Recall = &domain.RecallConfig{RRFK: ptr(60), RecencyAlpha: ptr(0.2), Arms: []string{}}
 			},
 		},
 		{

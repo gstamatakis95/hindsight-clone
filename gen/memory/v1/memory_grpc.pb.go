@@ -56,9 +56,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MemoryService_Retain_FullMethodName  = "/memory.v1.MemoryService/Retain"
-	MemoryService_Recall_FullMethodName  = "/memory.v1.MemoryService/Recall"
-	MemoryService_Reflect_FullMethodName = "/memory.v1.MemoryService/Reflect"
+	MemoryService_Retain_FullMethodName         = "/memory.v1.MemoryService/Retain"
+	MemoryService_Recall_FullMethodName         = "/memory.v1.MemoryService/Recall"
+	MemoryService_Reflect_FullMethodName        = "/memory.v1.MemoryService/Reflect"
+	MemoryService_ListRecallArms_FullMethodName = "/memory.v1.MemoryService/ListRecallArms"
 )
 
 // MemoryServiceClient is the client API for MemoryService service.
@@ -71,13 +72,17 @@ type MemoryServiceClient interface {
 	// commit); run_async=true enqueues retain_document jobs and returns their ids. A write to an unknown
 	// bank creates it with tenant defaults.
 	Retain(ctx context.Context, in *RetainRequest, opts ...grpc.CallOption) (*RetainResponse, error)
-	// Recall retrieves memories with four arms (semantic, keyword, graph, temporal), RRF fusion, rerank,
-	// boosts and token packing. Unknown bank = NOT_FOUND.
+	// Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
+	// rerank, boosts and token packing. Unknown bank = NOT_FOUND.
 	Recall(ctx context.Context, in *RecallRequest, opts ...grpc.CallOption) (*RecallResponse, error)
 	// Reflect answers a query with an agentic tool loop over mental models, observations and raw facts.
 	// Strict: a failing retrieval dependency fails the call with UNAVAILABLE; exceeding max_total_tokens
 	// fails it with RESOURCE_EXHAUSTED. Unknown bank = NOT_FOUND.
 	Reflect(ctx context.Context, in *ReflectRequest, opts ...grpc.CallOption) (*ReflectResponse, error)
+	// ListRecallArms lists the recall arms this server has registered, with a one-line description each: the
+	// names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
+	// MinScores.arms accept.
+	ListRecallArms(ctx context.Context, in *ListRecallArmsRequest, opts ...grpc.CallOption) (*ListRecallArmsResponse, error)
 }
 
 type memoryServiceClient struct {
@@ -118,6 +123,16 @@ func (c *memoryServiceClient) Reflect(ctx context.Context, in *ReflectRequest, o
 	return out, nil
 }
 
+func (c *memoryServiceClient) ListRecallArms(ctx context.Context, in *ListRecallArmsRequest, opts ...grpc.CallOption) (*ListRecallArmsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRecallArmsResponse)
+	err := c.cc.Invoke(ctx, MemoryService_ListRecallArms_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MemoryServiceServer is the server API for MemoryService service.
 // All implementations must embed UnimplementedMemoryServiceServer
 // for forward compatibility.
@@ -128,13 +143,17 @@ type MemoryServiceServer interface {
 	// commit); run_async=true enqueues retain_document jobs and returns their ids. A write to an unknown
 	// bank creates it with tenant defaults.
 	Retain(context.Context, *RetainRequest) (*RetainResponse, error)
-	// Recall retrieves memories with four arms (semantic, keyword, graph, temporal), RRF fusion, rerank,
-	// boosts and token packing. Unknown bank = NOT_FOUND.
+	// Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
+	// rerank, boosts and token packing. Unknown bank = NOT_FOUND.
 	Recall(context.Context, *RecallRequest) (*RecallResponse, error)
 	// Reflect answers a query with an agentic tool loop over mental models, observations and raw facts.
 	// Strict: a failing retrieval dependency fails the call with UNAVAILABLE; exceeding max_total_tokens
 	// fails it with RESOURCE_EXHAUSTED. Unknown bank = NOT_FOUND.
 	Reflect(context.Context, *ReflectRequest) (*ReflectResponse, error)
+	// ListRecallArms lists the recall arms this server has registered, with a one-line description each: the
+	// names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
+	// MinScores.arms accept.
+	ListRecallArms(context.Context, *ListRecallArmsRequest) (*ListRecallArmsResponse, error)
 	mustEmbedUnimplementedMemoryServiceServer()
 }
 
@@ -153,6 +172,9 @@ func (UnimplementedMemoryServiceServer) Recall(context.Context, *RecallRequest) 
 }
 func (UnimplementedMemoryServiceServer) Reflect(context.Context, *ReflectRequest) (*ReflectResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Reflect not implemented")
+}
+func (UnimplementedMemoryServiceServer) ListRecallArms(context.Context, *ListRecallArmsRequest) (*ListRecallArmsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListRecallArms not implemented")
 }
 func (UnimplementedMemoryServiceServer) mustEmbedUnimplementedMemoryServiceServer() {}
 func (UnimplementedMemoryServiceServer) testEmbeddedByValue()                       {}
@@ -229,6 +251,24 @@ func _MemoryService_Reflect_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MemoryService_ListRecallArms_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRecallArmsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).ListRecallArms(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_ListRecallArms_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).ListRecallArms(ctx, req.(*ListRecallArmsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MemoryService_ServiceDesc is the grpc.ServiceDesc for MemoryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -247,6 +287,10 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Reflect",
 			Handler:    _MemoryService_Reflect_Handler,
+		},
+		{
+			MethodName: "ListRecallArms",
+			Handler:    _MemoryService_ListRecallArms_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

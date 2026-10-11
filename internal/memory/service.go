@@ -98,6 +98,9 @@ func (s *Service) Recall(ctx context.Context, req recall.Request) (recall.Result
 	return s.d.Recall.Recall(ctx, req) //nolint:wrapcheck // the engine returns domain error classes
 }
 
+// ListRecallArms lists the recall engine's registered arms, in fusion order.
+func (s *Service) ListRecallArms() []recall.ArmInfo { return s.d.Recall.Arms() }
+
 // Reflect answers a query with the reflect agent.
 func (s *Service) Reflect(ctx context.Context, req reflect.Request) (reflect.Result, error) {
 	return s.d.Agent.Reflect(ctx, req) //nolint:wrapcheck // the agent returns domain error classes

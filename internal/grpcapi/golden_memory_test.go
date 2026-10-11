@@ -1,6 +1,7 @@
 package grpcapi
 
 import (
+	"errors"
 	"memd/internal/domain"
 	"memd/internal/memory"
 	"memd/internal/recall"
@@ -110,7 +111,10 @@ func TestGoldenRecallRequest(t *testing.T) {
 		TimeWindowStart:    timestamppb.New(goldenTime(3)),
 		TimeWindowEnd:      timestamppb.New(goldenTime(4)),
 		PreferObservations: true,
-		MinScores:          &pb.MinScores{Semantic: ptr(0.1), Keyword: ptr(0.2), Reranker: ptr(0.3), Final: ptr(0.4)},
+		Arms:               []string{"graph", "vector"},
+		MinScores: &pb.MinScores{
+			Arms: map[string]float64{"vector": 0.1, "text": 0.2}, Reranker: ptr(0.3), Final: ptr(0.4),
+		},
 		Include: &pb.RecallInclude{
 			Chunks: ptr(true), ChunksMaxTokens: ptr[int32](11), SourceFacts: ptr(false),
 			SourceFactsMaxTokens: ptr[int32](22), Entities: ptr(true),
@@ -136,7 +140,10 @@ func TestGoldenRecallRequest(t *testing.T) {
 		QueryTime:          ptr(goldenTime(2)),
 		Window:             &domain.TimeWindow{Start: goldenTime(3), End: goldenTime(4)},
 		PreferObservations: true,
-		MinScores:          domain.MinScores{Semantic: ptr(0.1), Keyword: ptr(0.2), Reranker: ptr(0.3), Final: ptr(0.4)},
+		Arms:               []string{"graph", "vector"},
+		MinScores: domain.MinScores{
+			Arms: map[string]float64{"vector": 0.1, "text": 0.2}, Reranker: ptr(0.3), Final: ptr(0.4),
+		},
 		Include: domain.RecallInclude{
 			Chunks: ptr(true), ChunksMaxTokens: ptr(11), SourceFacts: ptr(false), SourceFactsMaxTokens: ptr(22),
 			Entities: ptr(true),
@@ -153,6 +160,10 @@ func TestGoldenRecallRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkGolden(t, got, want)
+	in.Overrides.Recall.Arms = []string{"vector"}
+	if _, err := recallRequestFromProto(in); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("overrides.recall.arms: err = %v, want INVALID_ARGUMENT", err)
+	}
 }
 
 // TestGoldenReflectRequest checks every ReflectRequest field, the tag filter and the include flags.
@@ -174,6 +185,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		}},
 		Include:   &pb.ReflectInclude{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
 		QueryTime: timestamppb.New(goldenTime(5)),
+		Arms:      []string{"text"},
 		Overrides: &pb.ReflectOverrides{
 			Reflect: &pb.ReflectConfig{Mission: "reflect-overrides", Disposition: &pb.Disposition{Skepticism: 2}},
 			Recall:  &pb.RecallConfig{BudgetLow: ptr[int32](5)}, ReflectModel: &pb.ModelBinding{Model: "reflect-model"},
@@ -199,6 +211,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		}},
 		Include:   reflecteng.Include{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
 		QueryTime: ptr(goldenTime(5)),
+		Arms:      []string{"text"},
 		Overrides: &domain.BankConfig{
 			Reflect: &domain.ReflectConfig{Mission: "reflect-overrides", Disposition: &domain.Disposition{Skepticism: 2}},
 			Recall:  &domain.RecallConfig{BudgetLow: ptr(5)},
