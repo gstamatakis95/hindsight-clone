@@ -46,19 +46,10 @@
 //     dimensions, default off; no BankConfig knob sets it yet).
 //   - [JSON] returns a JSON asset; [DoneTool] returns a done-tool asset and fills the {directive_rules}
 //     slot of the directive variants with the rendered [ReflectToolDirectiveRules] list.
-//   - [Version] is the prompt's version; [Names] lists every template.
+//   - [Names] lists every template. Callers put the system template's name in ai.StructuredRequest.Name or
+//     ai.ChatRequest.Name.
 //
 // A missing schema or asset is domain.ErrInvalidArgument; a file that is not valid JSON is an error.
-//
-// # Versions
-//
-// [Version] is the first 16 hex digits of the SHA-256 of the template file, followed by its response
-// schema when one exists, followed by every tool file of its operation (templates/<op>_tool*.json and
-// <op>_tool*.tmpl, sorted, where <op> is the name up to the first underscore; so reflect_system's version
-// covers reflect_tools.json and the done variants). Callers put the system template's name in
-// ai.StructuredRequest.Name or ai.ChatRequest.Name. No call site records the version yet
-// (docs/design/known-limitations.md#platform); editing only a user template would not change it. An unknown
-// name has version "".
 //
 // # Concurrency
 //
@@ -71,7 +62,7 @@
 // data struct with unknown fields rejected, so field names the callers use are checked against the templates)
 // and with zero data, renders rarely taken branches, pairs schemas with templates, validates every JSON
 // asset, and pins Hindsight parity points (fact_type labels, id-less source memories, the N/A marker, the
-// narrator rule, the gated causal section, directive rules in done tools, tool files in Version).
+// narrator rule, the gated causal section, directive rules in done tools).
 // reflect_golden_test.go compares reflect_system without the recall tool against a golden file. Design:
 // docs/design/architecture.md#prompts.
 package prompts

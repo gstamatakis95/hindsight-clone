@@ -39,10 +39,9 @@
 // Disabled, Start returns a nil *Telemetry and a no-op stop func. Every Telemetry method is nil-safe and returns
 // "install nothing" (nil server options, nil hooks, the HTTP client and slog handler unchanged, the pgx config
 // untouched, a sampler that never starts), so wire.go calls the same code either way, nothing starts, no agent is
-// contacted, no statsd client exists and memd behaves exactly as without this package. [Telemetry.Enabled] reports
-// which state it is. Enabled, each half degrades on its own: a tracer that fails to start leaves the metrics on (the
-// tracing helpers then install nothing), a DogStatsD client that can't be created leaves tracing on, and when both
-// fail Start returns nil.
+// contacted, no statsd client exists and memd behaves exactly as without this package. Enabled, each half degrades
+// on its own: a tracer that fails to start leaves the metrics on (the tracing helpers then install nothing), a
+// DogStatsD client that can't be created leaves tracing on, and when both fail Start returns nil.
 //
 // Enabled, the standard Datadog variables are read by the libraries: DD_AGENT_HOST / DD_TRACE_AGENT_PORT or
 // DD_TRACE_AGENT_URL (trace agent address), DD_DOGSTATSD_URL (udp://host:port or unix:///path) or DD_AGENT_HOST with

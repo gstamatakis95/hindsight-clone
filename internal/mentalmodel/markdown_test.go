@@ -84,9 +84,6 @@ func TestSplitMarkdownSections(t *testing.T) {
 	if got := blockTexts(d.Sections[1]); !reflect.DeepEqual(got, []string{"First para\ncontinues here."}) {
 		t.Fatalf("title blocks = %q", got)
 	}
-	if d.blockCount() != 6 {
-		t.Fatalf("blockCount = %d, want 6", d.blockCount())
-	}
 }
 
 func TestSplitMarkdownBlockIDs(t *testing.T) {

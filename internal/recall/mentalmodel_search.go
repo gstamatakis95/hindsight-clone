@@ -27,8 +27,8 @@ type SearchMentalModelsRequest struct {
 	Query string
 	// FolderPrefix limits pages to a folder subtree; empty = all.
 	FolderPrefix string
-	// Limit caps the hits; 0 or less = domain.SearchResults' default (10).
-	Limit int
+	// MaxResults caps the hits; 0 or less = domain.SearchResults' default (10).
+	MaxResults int
 }
 
 // pageScore is one page's raw scores.
@@ -39,7 +39,7 @@ type pageScore struct {
 	fused    float64
 }
 
-// SearchMentalModels ranks whole mental-model pages for req.Query, best first, at most req.Limit (default 10): it
+// SearchMentalModels ranks whole mental-model pages for req.Query, best first, at most req.MaxResults (default 10): it
 // lists the
 // folder's pages, scores each by term overlap (name weighted double) and by cosine similarity to the query
 // embedding, and fuses the two rankings with RRF (k = 60), with no rerank. A bank holds tens to hundreds of pages, so
@@ -68,7 +68,7 @@ func (r *Engine) SearchMentalModels(ctx context.Context, req SearchMentalModelsR
 		scores[i] = pageScore{m: m, text: pageTextScore(terms, m), semantic: cosine(qv, m.Embedding)}
 	}
 	fusePages(scores)
-	limit := req.Limit
+	limit := req.MaxResults
 	if limit <= 0 {
 		limit = domain.SearchResults.Default
 	}

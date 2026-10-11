@@ -42,7 +42,7 @@ func TestDisabledStartsAndInstallsNothing(t *testing.T) {
 	t.Setenv("DD_TRACE_AGENT_URL", agent.URL)
 	dogstatsd := listenUDP(t)
 	tel, stop := Start(Config{Profiler: true, Metrics: true})
-	if tel != nil || tel.Enabled() {
+	if tel != nil {
 		t.Fatal("disabled Start returned an enabled Telemetry")
 	}
 	if tel.UsageHook() != nil {

@@ -2,8 +2,6 @@ package prompts
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -124,9 +122,6 @@ func TestEveryTemplateRendersWithFixture(t *testing.T) {
 				t.Fatalf("Render: %v", err)
 			}
 			checkOutput(t, out)
-			if v := Version(name); len(v) != versionLen {
-				t.Fatalf("Version = %q", v)
-			}
 		})
 	}
 }
@@ -203,8 +198,8 @@ func TestBranchVariants(t *testing.T) {
 	}
 }
 
-// TestSchemasPairWithTemplates checks every response schema is named after a template, so Version of that
-// template covers it, and that it fits the strict structured-output subset.
+// TestSchemasPairWithTemplates checks every response schema is named after a template and fits the strict
+// structured-output subset.
 func TestSchemasPairWithTemplates(t *testing.T) {
 	entries, err := fs.ReadDir(templatesFS, dir)
 	if err != nil {
@@ -223,7 +218,7 @@ func TestSchemasPairWithTemplates(t *testing.T) {
 			continue // timex names these templates itself and follows its own schema conventions
 		}
 		if !names[stem] {
-			t.Errorf("%s has no templates/%s.tmpl, so no Version covers it", e.Name(), stem)
+			t.Errorf("%s has no templates/%s.tmpl", e.Name(), stem)
 			continue
 		}
 		raw, err := Schema(stem)
@@ -336,9 +331,6 @@ func TestEveryJSONAssetIsValid(t *testing.T) {
 func TestUnknownNames(t *testing.T) {
 	if _, err := Render("no_such_template", nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("Render err = %v", err)
-	}
-	if v := Version("no_such_template"); v != "" {
-		t.Fatalf("Version = %q", v)
 	}
 	if _, err := Schema("no_such_template"); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("Schema err = %v", err)
@@ -619,29 +611,5 @@ func TestJSONHelperKeepsHTML(t *testing.T) {
 	got, err := toJSON("<a&b>")
 	if err != nil || got != `"<a&b>"` {
 		t.Fatalf("json = %q, %v", got, err)
-	}
-}
-
-// TestVersionCoversToolAssets checks Version of a reflect template also hashes the reflect tool files, and
-// that a template without tool files hashes just its template and schema.
-func TestVersionCoversToolAssets(t *testing.T) {
-	base := func(name string) string {
-		h := sha256.New()
-		for _, file := range []string{name + tmplExt, name + schemaExt} {
-			if b, err := templatesFS.ReadFile(path.Join(dir, file)); err == nil {
-				h.Write(b)
-			}
-		}
-		return hex.EncodeToString(h.Sum(nil))[:versionLen]
-	}
-	files := toolFiles(ReflectSystem)
-	if len(files) < 5 || !sort.StringsAreSorted(files) {
-		t.Fatalf("reflect tool files = %v", files)
-	}
-	if Version(ReflectSystem) == base(ReflectSystem) {
-		t.Error("Version(reflect_system) ignores the reflect tool assets")
-	}
-	if Version(DedupSystem) != base(DedupSystem) {
-		t.Error("Version(dedup_system) changed without tool assets")
 	}
 }

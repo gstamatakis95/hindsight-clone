@@ -570,7 +570,7 @@ handlers and maintenance sweeps)
 | `internal/jobs` | `Runner` (claim, heartbeat, retry, settle), the `Run` handle a handler works through, and `kinds.go`, the catalogue of every job kind's payload, serial key and Enqueue helper. |
 | `internal/maintenance` | `Service`: the 60 s maintenance tick and the `graph_maintenance` job. |
 | `internal/grpcapi` | The gRPC surface: one handler type per service, interceptors, proto <-> domain conversion, FieldMask patches, error mapping with details, health and readiness probes. |
-| `internal/prompts` | Every prompt template, schema and tool list, embedded and rendered by name (`Render`, `Schema`, `Version`). |
+| `internal/prompts` | Every prompt template, schema and tool list, embedded and rendered by name (`Render`, `Schema`). |
 | `internal/jsonschema` | The JSON Schema subset that validates structured model output. |
 | `internal/observability` | `Telemetry`: the optional Datadog traces, metrics and JSON logs. |
 | `internal/fake` | Test support: scripted, deterministic LLM, embedder, reranker and blob fakes. |

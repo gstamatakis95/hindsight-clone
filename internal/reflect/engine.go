@@ -179,7 +179,7 @@ func (r *Agent) newRun(
 	if req.QueryTime != nil {
 		queryTime = *req.QueryTime
 	}
-	tools := r.offered(cfg, req.ExcludeMentalModels, req.Types)
+	tools := r.offered(cfg, req.ExcludeMentalModels, req.FactTypes)
 	data := promptData(cfg, directives, toolNames(tools), queryTime)
 	data.BankName, data.Context, data.Query = bankName, req.Context, req.Query
 	data.Budget, data.AnswerAsDocument = string(effectiveBudget(req.Budget)), req.AsDocument

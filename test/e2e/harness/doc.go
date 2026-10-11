@@ -29,9 +29,8 @@
 //
 // # memd processes
 //
-// [BuildMemd] builds ./cmd/memd once per test binary into a temporary directory and probes it with a scrubbed
-// environment. It skips the test (rather than failing it) when the build fails or when the binary prints "not
-// implemented". [Stack.MemdEnv] is the environment memd needs for the stack: MEMD_DSN, the MEMD_S3_* settings
+// [BuildMemd] builds ./cmd/memd once per test binary into a temporary directory; a build failure fails the test
+// with the compiler output. [Stack.MemdEnv] is the environment memd needs for the stack: MEMD_DSN, the MEMD_S3_* settings
 // (path-style, the compose credentials), MEMD_GATEWAY_URL and MEMD_GATEWAY_API_KEY. [Stack.StartMemd]
 // adds MEMD_GRPC_ADDR on a free port for api and all and MEMD_CONFIG, a server config file ([MemdConfig]) binding every
 // slot in [Slots] to gatewayemu.ModelFor(slot) plus the sections in MemdOptions.Config; it applies MemdOptions.Env on

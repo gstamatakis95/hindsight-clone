@@ -390,9 +390,6 @@ and `{base}/rerank` (Cohere/Jina style). The base URL (`MEMD_GATEWAY_URL`) inclu
   pair is `<op>_system` + `<op>_user`. Response schemas sit next to the system template
   (`<system>.schema.json`); tool declarations are JSON files mapping 1:1 to tool specs. Go code never builds
   prompt text inline.
-- `prompts.Version` is the first 16 hex digits of a SHA-256 over the system template, its schema and its
-  operation's tool files. No call site records it yet (see
-  [known-limitations.md](known-limitations.md#platform)).
 - Most templates are ported from Hindsight (MIT, notice kept in `templates/NOTICE`); each template's header names
   its source or says it is new. Extraction keeps Hindsight's `world | assistant` fact labels (`assistant` maps to
   experience).

@@ -605,7 +605,7 @@ func TestReflectHonoursTypes(t *testing.T) {
 			h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"), obs)
 			h.turns(calls(tc.offered[0], `{"query":"alice"}`), calls(tc.withheld[0], `{"query":"alice"}`),
 				doneCall("tea"))
-			if _, err := h.reflect(func(r *rf.Request) { r.Types = tc.types }); err != nil {
+			if _, err := h.reflect(func(r *rf.Request) { r.FactTypes = tc.types }); err != nil {
 				t.Fatal(err)
 			}
 			first := h.loopCalls()[0]

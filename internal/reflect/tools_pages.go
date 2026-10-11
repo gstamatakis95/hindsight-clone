@@ -92,7 +92,7 @@ func (t *searchPagesTool) Call(ctx context.Context, st *agentState, args json.Ra
 	}
 	hits, err := t.pages.SearchMentalModels(ctx, recall.SearchMentalModelsRequest{
 		Bank: st.Request.Bank, Query: a.Query,
-		Limit: limit,
+		MaxResults: limit,
 	})
 	if err != nil {
 		return retrievalError(ctx, ToolSearchMentalModels, err)

@@ -91,7 +91,7 @@ func (t *expandTool) visibleUnits(
 	unbounded := seq.After == 0 && seq.UpTo == nil
 	out := make(map[domain.UnitID]domain.Unit, len(us))
 	for _, u := range us {
-		typed := len(st.Request.Types) == 0 || slices.Contains(st.Request.Types, u.Type)
+		typed := len(st.Request.FactTypes) == 0 || slices.Contains(st.Request.FactTypes, u.Type)
 		if typed && domain.MatchFilter(u.Tags, st.Request.Tags) && (unbounded || seq.Contains(u.Seq)) {
 			out[u.ID] = u
 		}

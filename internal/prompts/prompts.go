@@ -2,9 +2,7 @@ package prompts
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -23,11 +21,10 @@ import (
 var templatesFS embed.FS
 
 const (
-	dir        = "templates"
-	tmplExt    = ".tmpl"
-	schemaExt  = ".schema.json"
-	jsonExt    = ".json"
-	versionLen = 16
+	dir       = "templates"
+	tmplExt   = ".tmpl"
+	schemaExt = ".schema.json"
+	jsonExt   = ".json"
 )
 
 var (
@@ -110,47 +107,6 @@ func Render(name string, data any) (string, error) {
 		return "", fmt.Errorf("prompts: render %s: %w", name, err)
 	}
 	return buf.String(), nil
-}
-
-// Version is the content hash of template name: the first 16 hex digits of the SHA-256 of its file
-// bytes, then its response schema when it has one, then every tool file of its operation
-// (templates/<op>_tool*.json and <op>_tool*.tmpl in name order, where <op> is the name up to the first
-// underscore, e.g. reflect_tools.json for reflect_system), since tool descriptions are prompt text too.
-// It is recorded on every LLM call so traces and scripted fakes can tell prompt revisions apart. An
-// unknown name returns "".
-func Version(name string) string {
-	raw, err := templatesFS.ReadFile(path.Join(dir, name+tmplExt))
-	if err != nil {
-		return ""
-	}
-	h := sha256.New()
-	h.Write(raw)
-	if schema, err := templatesFS.ReadFile(path.Join(dir, name+schemaExt)); err == nil {
-		h.Write(schema)
-	}
-	for _, file := range toolFiles(name) {
-		if b, err := templatesFS.ReadFile(file); err == nil {
-			h.Write(b)
-		}
-	}
-	return hex.EncodeToString(h.Sum(nil))[:versionLen]
-}
-
-// toolFiles lists the tool declarations and tool templates of name's operation, sorted.
-func toolFiles(name string) []string {
-	op, _, _ := strings.Cut(name, "_")
-	matches, err := fs.Glob(templatesFS, path.Join(dir, op+"_tool*"))
-	if err != nil {
-		return nil
-	}
-	var files []string
-	for _, m := range matches {
-		if strings.HasSuffix(m, jsonExt) || strings.HasSuffix(m, tmplExt) {
-			files = append(files, m)
-		}
-	}
-	sort.Strings(files)
-	return files
 }
 
 // Schema returns the JSON Schema in templates/<name>.schema.json, the response format of a structured

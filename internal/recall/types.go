@@ -33,7 +33,7 @@ type armScore struct {
 	Score float64
 }
 
-// Request mirrors memory.v1.Request with domain types.
+// Request mirrors memory.v1.RecallRequest with domain types.
 type Request struct {
 	// Bank is the bank searched.
 	Bank domain.BankRef
@@ -105,7 +105,7 @@ type Scores struct {
 	Arms map[string]float64
 }
 
-// Trace mirrors memory.v1.Trace.
+// Trace mirrors memory.v1.RecallTrace.
 type Trace struct {
 	// Arms has one entry per arm that ran, in fusion order (an arm that returned ErrSkip has none).
 	Arms []ArmTrace

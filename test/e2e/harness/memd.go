@@ -77,39 +77,35 @@ var (
 	buildOnce sync.Once
 	buildBin  string
 	buildErr  error
-	buildSkip string
 )
 
-// BuildMemd builds ./cmd/memd once per test binary and returns its path. It skips the test, with the reason,
-// when the binary can't be built.
+// BuildMemd builds ./cmd/memd once per test binary and returns its path. A build failure (a compile error
+// included) fails the test with the compiler output.
 func BuildMemd(t testing.TB) string {
 	t.Helper()
 	root := RepoRoot(t)
-	buildOnce.Do(func() { buildBin, buildSkip, buildErr = build(root) })
+	buildOnce.Do(func() { buildBin, buildErr = build(root) })
 	if buildErr != nil {
 		t.Fatalf("harness: %v", buildErr)
-	}
-	if buildSkip != "" {
-		t.Skip(buildSkip)
 	}
 	return buildBin
 }
 
-// build compiles memd into a temporary directory. A non-empty skip says why e2e can't run memd.
-func build(root string) (bin, skip string, err error) {
+// build compiles memd into a temporary directory.
+func build(root string) (string, error) {
 	dir, err := os.MkdirTemp("", "memd-e2e-bin-")
 	if err != nil {
-		return "", "", fmt.Errorf("temp dir: %w", err)
+		return "", fmt.Errorf("temp dir: %w", err)
 	}
-	bin = filepath.Join(dir, "memd")
+	bin := filepath.Join(dir, "memd")
 	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/memd") //nolint:gosec // bin is our temp dir
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Sprintf("harness: memd can't be built: %v\n%s", err, out), nil
+		return "", fmt.Errorf("memd can't be built: %w\n%s", err, out)
 	}
-	return bin, "", nil
+	return bin, nil
 }
 
 // StartEmulator starts the emulated gateway and closes it with the test (after memd processes started later).

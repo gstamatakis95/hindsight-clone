@@ -28,9 +28,9 @@ func (e *env) addPage(t *testing.T, id, folder, name, content string, embed bool
 	})
 }
 
-// TestSearchPages checks ranking, the folder filter, snippets, the empty query, and that a failing embedder falls
+// TestSearchMentalModels checks ranking, the folder filter, snippets, the empty query, and that a failing embedder falls
 // back to term ranking; ReadPages returns pages in id order, skipping unknown ids.
-func TestSearchPages(t *testing.T) {
+func TestSearchMentalModels(t *testing.T) {
 	e := newEnv(t, envOpts{})
 	e.addPage(t, "deploy", "ops", "Deploy process", "# Deploy\n\nWe deploy with Argo every Tuesday.", true)
 	e.addPage(t, "hiring", "people", "Hiring", "# Hiring\n\nInterviews take two rounds.", true)
