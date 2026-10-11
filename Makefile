@@ -7,6 +7,7 @@
 #   make up       docker compose: postgres, minio
 #   make migrate  alembic upgrade head, then dump schema/schema.sql
 #   make run      memd all
+#   make examples build and run every example against a running memd (examples/README.md)
 #   make bench    run a benchmark against memd (eval/README.md)
 
 SHELL := /bin/bash
@@ -26,7 +27,7 @@ export MEMD_PG_PORT ?= 55432
 export MEMD_DSN ?= postgresql+psycopg://memd:memd@localhost:$(MEMD_PG_PORT)/memd
 
 .PHONY: help gen gen-proto gen-sqlc gen-mocks lint lint-go lint-ifacedoc lint-txcheck lint-proto lint-py ruff fmt test e2e \
-	up down migrate migrate-check downgrade run tools venv bench bench-resume bench-compare bench-list
+	up down migrate migrate-check downgrade run examples tools venv bench bench-resume bench-compare bench-list
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -128,6 +129,19 @@ downgrade: venv ## alembic downgrade base
 
 run: ## memd all
 	go run ./cmd/memd all
+
+# Runs every scenario of examples/ in turn against a memd that is already up (see examples/README.md); the first
+# failing example stops the run. ADDR and TENANT pick the server and the x-tenant-id the examples send.
+ADDR   ?= localhost:50051
+TENANT ?= examples
+
+examples: ## build and run every example against a running memd (ADDR=host:port TENANT=name)
+	go build ./examples/...
+	for dir in examples/*/; do \
+		case $$dir in examples/internal/) continue;; esac; \
+		echo "==> $$dir"; \
+		go run ./$$dir -addr $(ADDR) -tenant $(TENANT) || exit 1; \
+	done
 
 # ---------- benchmarks (eval/README.md) ----------
 
