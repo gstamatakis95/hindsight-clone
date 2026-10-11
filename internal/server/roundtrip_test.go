@@ -72,7 +72,7 @@ const samples = 200
 // TestRoundTripEveryMessage round-trips random values of every memory.v1 message that has a counterpart,
 // and fails when a message has neither a round trip nor an exemption.
 func TestRoundTripEveryMessage(t *testing.T) {
-	_ = pb.File_memory_v1_common_proto
+	_ = pb.File_memory_v1_memory_proto
 	names := memoryV1Messages()
 	if len(names) < 100 {
 		t.Fatalf("found only %d memory.v1 messages; is the registry loaded?", len(names))
