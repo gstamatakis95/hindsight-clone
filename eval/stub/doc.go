@@ -1,7 +1,7 @@
 // Package stub is a deterministic in-process stand-in for the part of memd's gRPC API the eval uses (Retain, Recall,
-// Reflect, GetBankStats, ListOperations), so the eval harness and its targets can be tested end to end, and the eval
-// command's -stub flag can smoke-test a run, without Postgres, a model gateway or a memd process. It says nothing about
-// memd's answer quality.
+// Reflect, GetBankStats, GetBankConfig, ListOperations), so the eval harness and its targets can be tested end to end,
+// and the eval command's -stub flag can smoke-test a run, without Postgres, a model gateway or a memd process. It says
+// nothing about memd's answer quality.
 //
 // # Usage
 //
@@ -30,6 +30,7 @@
 //     line order.
 //   - Reflect answers with the top 3 recalled lines joined by newlines, or "I don't know.", and reports REFLECT usage
 //     of 100 input and 20 output tokens.
+//   - GetBankConfig reports EXTRACT, CONSOLIDATE and REFLECT bound to the stub's model, for the run metadata.
 //   - ListOperations returns the bank's recorded operations in one page, filtered by status and kind; Options.FailedOps
 //     seeds that many FAILED consolidate operations into each new bank.
 //

@@ -1,21 +1,88 @@
-// Package recall answers the Recall RPC and is the retrieval core reused by reflect, consolidation and
-// mental-model refreshes, so it is built first and never imports those engines.
+// Package recall answers the Recall RPC and is the retrieval core reused by reflect and mental-model
+// refreshes, so it never imports those engines.
 //
-// Recall resolves the effective config (an unknown bank is NOT_FOUND), then parses the request into a
-// ParsedQuery: the query embedding, the time window (explicit, else from timex, which calls TIME_PARSE only
-// for a cue its rules can't resolve), the tag filter compiled once into a port.SQLPredicate (fuzzy leaves
-// resolved by trigram similarity) and the per-arm limit from BudgetLimit. The enabled Retrievers run
-// concurrently against port.Reader: semantic (HNSW cosine, min_scores.semantic, default 0.3), keyword (BM25,
-// min_scores.keyword), graph (semantic and causal links from its own semantic seeds) and temporal
-// (occurrence overlap; skipped without a window). The Fuser merges their lists by reciprocal-rank fusion
-// (k = 60). The top reranker_max_candidates (strategy boosts decide that cut, in rank space) are hydrated
-// and handed to the Scorer, which takes the
-// cross-encoder score (RERANK slot) as the base, or an RRF-rank base when rerank is off, and multiplies in the
-// recency, temporal and proof boosts. The ScoreGate applies the result floors; the Packer (or, with
-// prefer_observations, the ObservationPreference) fits the result into max_tokens, skipping items that don't
-// fit; and the Includer attaches chunks, source facts and entity state within their own budgets. Recall is
-// read-only: it never writes, and it reads config in a short transaction of its own.
+// # Where it sits
 //
-// Fuzzy tag leaves read the bank's tags with Reader.TagCounts, include.chunks and include.entities use
-// Reader.GetChunks and Reader.EntityStates, and Memory.Stale comes from Reader.StaleScopes.
+// recall is an engine package: it imports domain, port and timex and must never import adapters, server,
+// worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Everything it reads goes through port.Reader
+// (the four searches, unit hydration, chunks, entity state, tag counts, stale scopes), port.Embedder,
+// port.Reranker and port.ConfigResolver. cmd/memd/wire.go builds one [Recaller] with [NewRecaller]; the
+// server's Recall RPC, reflect (its recall and search_observations tools) and the single-shot mental-model
+// synthesizer call [Recaller.Recall]; consolidation searches port.Reader directly and only shares
+// [TokenCounter]. The pipeline stages are exported interfaces
+// ([Retriever], [Fuser], [Scorer], [ScoreGate], [Packer], [ObservationPreference], [Includer],
+// [TagFilterCompiler]) so they can be tested one by one.
+//
+// # Usage
+//
+//	res, err := recaller.Recall(ctx, recall.RecallRequest{
+//		Bank: b, Query: "what does Alice eat?", Budget: domain.BudgetMid, MaxTokens: 2048,
+//		Tags: domain.TagFilter{...}, Include: domain.RecallInclude{...},
+//	})
+//
+// [RecallRequest.Seq] is for internal callers: a mental-model refresh bounds every read to its snapshot so
+// a unit rewritten after the snapshot is not used.
+//
+// # Flow
+//
+//  1. Validate (an empty query is domain.ErrInvalidArgument) and resolve the effective config with the
+//     request overrides. The resolver reads config in its own short transaction; an unknown or tombstoned
+//     bank is domain.ErrNotFound.
+//  2. Parse into a [ParsedQuery]: the query cut to [MaxQueryTokens] (500) tokens; the reference time
+//     (query_time, else port.Clock); the per-arm limit from [BudgetLimit]; the tag filter compiled once into
+//     a port.SQLPredicate shared by every arm (fuzzy leaves are expanded against the bank's tags, read with
+//     Reader.TagCounts, by trigram similarity >= recall.fuzzy_tag_min_similarity); the time window (an
+//     explicit window is used as given with no time analysis, else timex derives one, calling TIME_PARSE
+//     only for a cue its rules cannot resolve); and the query embedding.
+//  3. Retrieve: the enabled arms run concurrently (errgroup), each its own query with no shared snapshot:
+//     semantic (HNSW cosine, floor min_scores.semantic, default 0.3, an explicit 0 disables it), keyword
+//     (BM25, floor min_scores.keyword when set), graph (its own top 20 semantic seeds at cosine >= 0.3, then
+//     expansion over semantic and causal links, never temporal, up to graph_max_hops) and temporal (units
+//     whose occurrence overlaps the window, spread over temporal_buckets, dropping those with cosine < 0.1 to
+//     the query; skipped when there is no window). Any arm error fails the call.
+//  4. Fuse by reciprocal-rank fusion: score = sum over arms of 1 / (k + rank), k = recall.rrf_k.
+//  5. Keep the top reranker_max_candidates. Only when the pool exceeds that cap do strategy_boosts decide the
+//     cut, in rank space (a boost w makes the arm contribute 1 / (k + rank / w)); the stored RRF score stays
+//     unboosted.
+//  6. Hydrate the kept ids with Reader.GetUnits, dropping units that are gone or whose seq is outside
+//     [RecallRequest.Seq].
+//  7. Score: with recall.rerank on and a reranker wired, the cross-encoder score (RERANK slot) of the text
+//     "[Date: ...] context: text" is the base; otherwise the base runs from 1.0 down to 0.1 by unboosted RRF
+//     rank. The base is multiplied by three boosts, each 1 + alpha * (signal - 0.5): recency (recency_alpha,
+//     linear decay over recency_horizon_days), temporal (temporal_alpha, proximity to the window's middle)
+//     and proof (proof_alpha, the log of an observation's proof count). Ties break by RRF, then id.
+//  8. Gate with the result floors (min_scores.reranker for reranked candidates, min_scores.final).
+//  9. Pack into max_tokens: walk the ranking and keep each unit whose text still fits, skipping one that
+//     does not. With prefer_observations, observations within the first 2 x limit candidates first drop the
+//     raw facts they cite, and the freed budget backfills from lower-ranked candidates.
+//  10. Enrich, each within its own budget: include.chunks (chunks_max_tokens, the chunk that crosses the
+//     budget is cut and marked truncated), include.source_facts (facts cited by returned observations,
+//     bounded by Seq; one that does not fit is skipped and SourceFactsTruncated is set) and include.entities.
+//  11. Mark returned observations Stale when their scope still has unconsolidated facts
+//     (Reader.StaleScopes), and fill [RecallTrace] (per-arm counts, timings and top ids, fused, reranked
+//     and packed counts, tokens, window) when trace is set.
+//
+// A recall that finds nothing is not an error. A failing arm, embedder or reranker fails the call (the
+// server maps domain.ErrUnavailable to UNAVAILABLE). Recall never writes, so it must not be called inside an
+// open Store.InTx.
+//
+// # Config knobs and defaults
+//
+// From the effective RecallConfig (the server level sets the starred ones; recall applies the same values
+// when unset): budget_function* fixed, budget_low / mid / high* 100 / 300 / 1000 (adaptive: scaled by
+// max_tokens / 4096 and clamped to budget_min*..budget_max*, 20..2000), reranker_max_candidates* 300,
+// rerank* true (the server level turns it off when no RERANK model is bound), rrf_k* 60, recency_alpha* 0.2,
+// temporal_alpha* 0.2, proof_alpha* 0.1, recency_horizon_days 365, graph_max_hops 1 (clamped to 1..2),
+// temporal_buckets 4, fuzzy_tag_min_similarity 0.45, strategy_boosts none, enabled_strategies all four.
+// Request-level: max_tokens 0 = [DefaultMaxTokens] (4096); include budgets [DefaultChunksMaxTokens] (8192)
+// and [DefaultSourceFactsMaxTokens] (4096).
+//
+// # Tests
+//
+// Unit tests cover each stage (fusion and boosted trimming, budgets, packing, observation preference,
+// includes, score boosts, gates, tag compilation and fuzzy expansion, trigram similarity). Pipeline tests in
+// recaller_test.go run on a pgtest database with fake.Embedder, fake.Reranker and fake.LLM: arms and trace, the
+// default semantic floor, rerank on and off, the seq snapshot, stale observations, no TIME_PARSE call
+// without a cue or with an explicit window, a failing arm, a golden fusion order, and an unknown bank.
+// SPEC "Recall pipeline", "Engines" (recall) and "gRPC surface" (RecallRequest).
 package recall

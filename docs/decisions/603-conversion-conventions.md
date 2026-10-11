@@ -13,8 +13,8 @@ fuzzed with random values. The spec doesn't say:
     number and an invalid Timestamp, both INVALID_ARGUMENT.
   - domain → proto never fails. An unknown domain enum string becomes `*_UNSPECIFIED`.
 - **Enums** go through one descriptor-driven helper pair. The domain string is the lowercase value name
-  without the enum prefix (decision 010). `TestEnumMapping` pins every value to its domain constant, so a
-  descriptor change can't silently remap one.
+  without the enum prefix (decision 010). The mapping is derived from the descriptor, so
+  no value is mapped by hand; `TestUnknownEnumRejected` pins the rejection of undefined numbers.
 - **Map keys** named "fact type name" or "kind" (`BankStats`, `Document.units_by_fact_type`) are the domain
   enum strings, for example `world` and `retain_document`.
 - **Scope strings** (`StrategyMatch.matched_scopes` / `shadowed_scopes`) use the canonical length-prefixed

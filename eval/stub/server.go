@@ -179,6 +179,29 @@ func (s *Server) GetBankStats(
 	}}, nil
 }
 
+// GetBankConfig reports a resolved config that binds every LLM slot the stub reports usage for to the
+// stub's model name.
+func (s *Server) GetBankConfig(
+	ctx context.Context, req *memoryv1.GetBankConfigRequest,
+) (*memoryv1.GetBankConfigResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.lookup(ctx, req.GetBankId()); err != nil {
+		return nil, err
+	}
+	resolved := &memoryv1.BankConfig{}
+	for _, slot := range []memoryv1.ModelSlot{
+		memoryv1.ModelSlot_MODEL_SLOT_EXTRACT,
+		memoryv1.ModelSlot_MODEL_SLOT_CONSOLIDATE,
+		memoryv1.ModelSlot_MODEL_SLOT_REFLECT,
+	} {
+		resolved.Models = append(resolved.Models, &memoryv1.SlotBinding{
+			Slot: slot, Binding: &memoryv1.ModelBinding{Model: stubModel},
+		})
+	}
+	return &memoryv1.GetBankConfigResponse{Resolved: resolved}, nil
+}
+
 // Recall returns the stored lines that share the most query words, best first.
 func (s *Server) Recall(ctx context.Context, req *memoryv1.RecallRequest) (*memoryv1.RecallResponse, error) {
 	s.mu.Lock()

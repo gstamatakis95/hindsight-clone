@@ -3,6 +3,7 @@ package target
 import (
 	"context"
 	"fmt"
+	"math"
 	"memd/eval/harness"
 	"strings"
 	"time"
@@ -20,7 +21,10 @@ const tenantHeader = "x-tenant-id"
 // operationsPageSize is the page size Background lists operations with.
 const operationsPageSize = 100
 
-var _ harness.Target = (*Memd)(nil)
+var (
+	_ harness.Target        = (*Memd)(nil)
+	_ harness.ModelReporter = (*Memd)(nil)
+)
 
 // Memd is the harness.Target for memd's gRPC API. Every call carries the tenant in the x-tenant-id header.
 type Memd struct {
@@ -76,19 +80,83 @@ func (m *Memd) PendingOperations(ctx context.Context, bank string) (map[string]i
 	return pending, nil
 }
 
-// Recall returns the texts of the recalled memories in result order.
-func (m *Memd) Recall(ctx context.Context, bank, query string, at time.Time) ([]string, error) {
-	resp, err := m.memory.Recall(m.out(ctx), &memoryv1.RecallRequest{
-		BankId: bank, Query: query, QueryTime: timestamp(at),
-	})
+// budgets maps RecallOptions.Budget to memd's Budget.
+var budgets = map[string]memoryv1.Budget{
+	"": memoryv1.Budget_BUDGET_UNSPECIFIED, "low": memoryv1.Budget_BUDGET_LOW,
+	"mid": memoryv1.Budget_BUDGET_MID, "high": memoryv1.Budget_BUDGET_HIGH,
+}
+
+// Recall returns the recalled memories in result order, with their source chunks when opts asks for them.
+func (m *Memd) Recall(
+	ctx context.Context, bank, query string, at time.Time, opts harness.RecallOptions,
+) (harness.Recalled, error) {
+	budget, ok := budgets[strings.ToLower(opts.Budget)]
+	if !ok {
+		return harness.Recalled{}, fmt.Errorf("memd: unknown recall budget %q (want low, mid or high)", opts.Budget)
+	}
+	req := &memoryv1.RecallRequest{
+		BankId: bank, Query: query, QueryTime: timestamp(at), Budget: budget, MaxTokens: clampInt32(opts.MaxTokens),
+	}
+	if opts.ChunkTokens > 0 {
+		chunks, limit := true, clampInt32(opts.ChunkTokens)
+		req.Include = &memoryv1.RecallInclude{Chunks: &chunks, ChunksMaxTokens: &limit}
+	}
+	resp, err := m.memory.Recall(m.out(ctx), req)
 	if err != nil {
-		return nil, fmt.Errorf("memd: recall %s: %w", bank, err)
+		return harness.Recalled{}, fmt.Errorf("memd: recall %s: %w", bank, err)
 	}
-	texts := make([]string, 0, len(resp.GetResults()))
+	out := harness.Recalled{Results: make([]harness.Memory, 0, len(resp.GetResults()))}
 	for _, r := range resp.GetResults() {
-		texts = append(texts, r.GetText())
+		out.Results = append(out.Results, harness.Memory{
+			ID: r.GetId(), Text: r.GetText(),
+			Type:     strings.ToLower(strings.TrimPrefix(r.GetType().String(), "FACT_TYPE_")),
+			Entities: r.GetEntities(), Context: r.GetContext(),
+			OccurredStart: protoTime(r.GetOccurredStart()), OccurredEnd: protoTime(r.GetOccurredEnd()),
+			MentionedAt: protoTime(r.GetMentionedAt()), DocumentID: r.GetDocumentId(), ChunkID: r.GetChunkId(),
+		})
 	}
-	return texts, nil
+	if len(resp.GetChunks()) > 0 {
+		out.Chunks = make(map[string]harness.Chunk, len(resp.GetChunks()))
+		for id, c := range resp.GetChunks() {
+			out.Chunks[id] = harness.Chunk{
+				ID: c.GetId(), Text: c.GetText(), ChunkIndex: int(c.GetChunkIndex()), Truncated: c.GetTruncated(),
+			}
+		}
+	}
+	return out, nil
+}
+
+// Models returns the model of every slot bound in bank's resolved config (server < tenant < bank).
+func (m *Memd) Models(ctx context.Context, bank string) (map[string]string, error) {
+	resp, err := m.banks.GetBankConfig(m.out(ctx), &memoryv1.GetBankConfigRequest{BankId: bank})
+	if err != nil {
+		return nil, fmt.Errorf("memd: bank config %s: %w", bank, err)
+	}
+	models := map[string]string{}
+	for _, b := range resp.GetResolved().GetModels() {
+		models[strings.TrimPrefix(b.GetSlot().String(), "MODEL_SLOT_")] = b.GetBinding().GetModel()
+	}
+	return models, nil
+}
+
+// protoTime formats a proto timestamp as RFC 3339; nil becomes "".
+func protoTime(t *timestamppb.Timestamp) string {
+	if t == nil {
+		return ""
+	}
+	return t.AsTime().UTC().Format(time.RFC3339)
+}
+
+// clampInt32 converts a configured token budget to int32, clamped to [0, MaxInt32].
+func clampInt32(n int) int32 {
+	switch {
+	case n <= 0:
+		return 0
+	case n >= math.MaxInt32:
+		return math.MaxInt32
+	default:
+		return int32(n)
+	}
 }
 
 // Reflect returns the reflect answer and its per-slot usage.

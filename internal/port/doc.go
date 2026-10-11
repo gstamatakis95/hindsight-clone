@@ -20,8 +20,8 @@
 //
 // # Implementations
 //
-//   - Store, Tx, Reader, every repository, Queue and Claimer: internal/adapter/postgres (production) and
-//     internal/fake.Store.
+//   - Store, Tx, Reader, every repository, Queue and Claimer: internal/adapter/postgres only (tests use it too,
+//     through internal/adapter/postgres/pgtest).
 //   - Blob: internal/adapter/s3 and internal/fake.Blob.
 //   - LLM, Embedder, Reranker: internal/adapter/gateway and the scripted fakes in internal/fake.
 //   - ModelRouter: internal/engine/routing (and a slot router in cmd/memd); ConfigResolver: internal/config; Clock: a

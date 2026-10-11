@@ -5,7 +5,7 @@ The spec is the source of truth for behaviour; this file is the source of truth 
 The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 
 ## Layout
-- api/memory/v1: proto, the contract. Run `make gen` after any change.
+- api/memory/v1/memory.proto: the whole API, one file (rules in api/AGENTS.md). Run `make gen` after any change.
 - internal/domain: plain types. internal/port: interfaces only.
 - internal/engine/*: business logic, depends on port only.
 - internal/adapter/*: Postgres (store + job queue), S3, gateway.
@@ -27,7 +27,7 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 
 ## Commands
 - make gen      # buf generate, sqlc, mockery
-- make lint     # golangci-lint, buf lint + breaking, ruff (BREAKING_AGAINST=contracts-v1 checks the frozen tag)
+- make lint     # golangci-lint, ifacedoc, buf lint, ruff
 - make test     # go test -race ./... (needs Docker, or MEMD_TEST_DATABASE_URL; see internal/adapter/postgres/pgtest)
 - make up       # docker compose: postgres, minio
 - make migrate  # alembic upgrade head, then dump schema/schema.sql
@@ -37,9 +37,8 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - make gen && make lint && make test pass, with no diff left in gen/, schema/ or internal/mocks/.
 - Store code is tested against real Postgres: pgtest.NewStore(t) gives each test its own migrated database.
   Fakes (internal/fake) exist only for the LLM, embedder, reranker, blob and clock.
-- A proto change passes buf breaking and comments every new element.
+- A proto change comments every new element.
 
-## Frozen contracts
-After WP-00 merges, api/**, internal/port/**, internal/domain/**, migrations/**, schema/**, .golangci.yml and
-buf.yaml change only through an approved contract change request (docs/ccr/<WP>-<n>.md). Ambiguities are
-resolved with the simplest reading of the spec and recorded in docs/decisions/<nnn>-<slug>.md.
+## API changes
+Until the first release tag, the API may change freely, including renames and renumbering; make lint runs
+buf lint only. After the first release, buf breaking runs against that tag.

@@ -24,6 +24,9 @@ flowchart TB
   API & W --> GW["AI gateway (OpenAI-compatible)"]
 ```
 
+The whole gRPC API is one file, [`api/memory/v1/memory.proto`](api/memory/v1/memory.proto): the shared
+conventions first, then every service, then each service's messages.
+
 ## Quick start
 
 From a clean checkout (Go, Docker, Python 3.12 and `grpcurl` installed):
@@ -104,6 +107,19 @@ removed when it ends. Environment:
 - `MEMD_ALEMBIC`: the alembic binary that migrates the template (default `.venv/bin/alembic`, built by
   `make tools`).
 
+## Benchmarks
+
+`eval/` runs LoCoMo, LongMemEval and the golden fixtures against a running memd. It downloads the datasets,
+writes a report per run, resumes interrupted runs and compares runs. LoCoMo is scored the way Hindsight's
+published LoCoMo numbers are, so the two compare directly. [eval/README.md](eval/README.md) has the full flow
+against a real AI gateway.
+
+```sh
+make bench BENCH=golden ARGS=-stub                  # smoke test, no server
+make bench CONFIG=eval/configs/locomo.yaml          # LoCoMo against memd on :50051
+make bench-compare A=eval-results/<run> B=eval-results/<run>
+```
+
 ## Configuration and overrides
 
 One `BankConfig` shape is used at every level and merged server < tenant < bank < strategy < request
@@ -175,3 +191,6 @@ In Kubernetes, set `DD_AGENT_HOST` from the node IP (`status.hostIP`) to reach t
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) first: layout, rules and the `make gen && make lint && make test` gate.
+
+The API may change freely until the first release, so `make lint` runs `buf lint` only; after the first release,
+`buf breaking` runs against that tag. Proto rules are in [api/AGENTS.md](api/AGENTS.md).

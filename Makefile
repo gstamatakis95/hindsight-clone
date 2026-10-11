@@ -1,12 +1,13 @@
 # memd developer targets. See AGENTS.md ("Commands") and docs/SPEC.md.
 #
 #   make gen      buf generate, sqlc, mockery
-#   make lint     golangci-lint, interface-doc check, buf lint + breaking, ruff
+#   make lint     golangci-lint, interface-doc check, buf lint, ruff
 #   make test     go test -race ./... (needs Docker or MEMD_TEST_DATABASE_URL)
 #   make e2e      opt-in end-to-end tests (docker compose stack + emulated gateway)
 #   make up       docker compose: postgres, minio
 #   make migrate  alembic upgrade head, then dump schema/schema.sql
 #   make run      memd all
+#   make bench    run a benchmark against memd (eval/README.md)
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -19,13 +20,12 @@ ALEMBIC := $(VENV)/bin/alembic
 RUFF    := $(VENV)/bin/ruff
 MOCKERY := $(ROOT)/.bin/mockery
 COMPOSE := docker compose -f $(ROOT)/docker-compose.yml
-BREAKING_AGAINST ?= main
 
 export MEMD_PG_PORT ?= 55432
 export MEMD_DSN ?= postgresql+psycopg://memd:memd@localhost:$(MEMD_PG_PORT)/memd
 
 .PHONY: help gen gen-proto gen-sqlc gen-mocks lint lint-go lint-ifacedoc lint-proto lint-py ruff fmt test e2e \
-	up down migrate migrate-check downgrade run tools venv
+	up down migrate migrate-check downgrade run tools venv bench bench-resume bench-compare bench-list
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -51,7 +51,7 @@ tools: $(MOCKERY) venv ## build mockery and the alembic venv
 
 # ---------- lint ----------
 
-lint: lint-go lint-ifacedoc lint-proto lint-py ## golangci-lint, ifacedoc, buf lint + breaking, ruff
+lint: lint-go lint-ifacedoc lint-proto lint-py ## golangci-lint, ifacedoc, buf lint, ruff
 
 lint-go:
 	golangci-lint run ./...
@@ -59,18 +59,10 @@ lint-go:
 lint-ifacedoc:
 	go run ./tools/ifacedoc .
 
-# buf breaking runs against BREAKING_AGAINST (default main; after the contracts merge, use
-# BREAKING_AGAINST=contracts-v1 to check against the frozen tag). An unresolvable ref fails the target; the
-# check is skipped only when the ref exists but has no protos yet (the WP-00 branch against an empty main).
+# The API may change freely until the first release, so only buf lint runs here. The first release tag
+# becomes the buf breaking baseline: add `buf breaking --against '.git#tag=<that tag>'` to this target then.
 lint-proto:
 	buf lint
-	@git rev-parse --verify --quiet '$(BREAKING_AGAINST)^{commit}' >/dev/null || \
-		{ echo "buf breaking: ref '$(BREAKING_AGAINST)' does not resolve" >&2; exit 1; }
-	@if git cat-file -e '$(BREAKING_AGAINST):api/memory/v1' 2>/dev/null; then \
-		buf breaking --against '.git#ref=$(BREAKING_AGAINST)'; \
-	else \
-		echo "buf breaking: skipped ($(BREAKING_AGAINST) has no api/memory/v1 yet)"; \
-	fi
 
 ruff: lint-py ## ruff check + format --check over migrations
 
@@ -129,3 +121,22 @@ downgrade: venv ## alembic downgrade base
 
 run: ## memd all
 	go run ./cmd/memd all
+
+# ---------- benchmarks (eval/README.md) ----------
+
+BENCH  ?=
+CONFIG ?=
+ARGS   ?=
+EVAL   := go run ./eval/cmd/eval
+
+bench: ## run a benchmark: make bench BENCH=locomo CONFIG=eval/configs/locomo.yaml [ARGS='-limit 1']
+	$(EVAL) run $(if $(CONFIG),-config $(CONFIG)) $(if $(BENCH),-benchmark $(BENCH)) $(ARGS)
+
+bench-resume: ## finish an interrupted run: make bench-resume RUN=eval-results/locomo-<time>
+	$(EVAL) run -resume $(RUN) $(ARGS)
+
+bench-compare: ## compare two runs: make bench-compare A=eval-results/<run> B=eval-results/<run>
+	$(EVAL) compare $(A) $(B)
+
+bench-list: ## list the registered benchmarks
+	$(EVAL) list
