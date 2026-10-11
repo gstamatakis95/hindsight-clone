@@ -50,7 +50,7 @@ func TestRetainResumeAfterCrashReextractsOnlyRemainingChunks(t *testing.T) {
 	if got := e.extractCalls(); got != 4 {
 		t.Fatalf("first run made %d extract calls, want 4 (3 ok + the crash)", got)
 	}
-	if n := e.document("d1").UnitCount; n != 3 {
+	if n := e.document("d1").MemoryCount; n != 3 {
 		t.Fatalf("after crash: %d units, want 3", n)
 	}
 
@@ -62,13 +62,13 @@ func TestRetainResumeAfterCrashReextractsOnlyRemainingChunks(t *testing.T) {
 	if got := e.extractCalls(); got != 3 {
 		t.Errorf("retry made %d extract calls, want 3 (chunks 4-6)", got)
 	}
-	if res.ChunksTotal != 6 || res.ChunksSkipped != 3 || res.UnitsCreated != 3 {
+	if res.ChunksTotal != 6 || res.ChunksSkipped != 3 || res.MemoriesCreated != 3 {
 		t.Errorf("retry result = total %d skipped %d created %d, want 6 / 3 / 3",
-			res.ChunksTotal, res.ChunksSkipped, res.UnitsCreated)
+			res.ChunksTotal, res.ChunksSkipped, res.MemoriesCreated)
 	}
 	d := e.document("d1")
-	if d.UnitCount != 6 || d.ExtractedAt == nil {
-		t.Errorf("document: %d units, extracted_at %v; want 6 units and extracted_at set", d.UnitCount, d.ExtractedAt)
+	if d.MemoryCount != 6 || d.ExtractedAt == nil {
+		t.Errorf("document: %d units, extracted_at %v; want 6 units and extracted_at set", d.MemoryCount, d.ExtractedAt)
 	}
 }
 
@@ -81,7 +81,7 @@ func TestRetainChangedDocumentCrashResumeKeepsAllFacts(t *testing.T) {
 	v1 := paragraphs(6, "one")
 	e.scriptChunks(6, false)
 	e.ingest(RetainRequest{Items: []RetainItem{{DocumentID: "d1", Content: v1, Overrides: chunkTokens(12)}}})
-	if n := e.document("d1").UnitCount; n != 6 {
+	if n := e.document("d1").MemoryCount; n != 6 {
 		t.Fatalf("v1: %d units, want 6", n)
 	}
 
@@ -91,7 +91,7 @@ func TestRetainChangedDocumentCrashResumeKeepsAllFacts(t *testing.T) {
 	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); !errors.Is(err, errExtract) {
 		t.Fatalf("first run: err = %v, want the scripted crash", err)
 	}
-	if n := e.document("d1").UnitCount; n != 3 {
+	if n := e.document("d1").MemoryCount; n != 3 {
 		t.Fatalf("after crash: %d units, want 3 (old units replaced, batch 1 committed)", n)
 	}
 
@@ -106,7 +106,7 @@ func TestRetainChangedDocumentCrashResumeKeepsAllFacts(t *testing.T) {
 	if res.ChunksSkipped != 3 {
 		t.Errorf("resume skipped %d chunks, want 3", res.ChunksSkipped)
 	}
-	if n := e.document("d1").UnitCount; n != 6 {
+	if n := e.document("d1").MemoryCount; n != 6 {
 		t.Errorf("after resume: %d units, want 6 (no fact lost)", n)
 	}
 }
@@ -131,7 +131,7 @@ func TestRetainForceReextractCrashResume(t *testing.T) {
 	if got := e.extractCalls(); got != 3 {
 		t.Errorf("resume made %d extract calls, want 3", got)
 	}
-	if n := e.document("d1").UnitCount; n != 6 {
+	if n := e.document("d1").MemoryCount; n != 6 {
 		t.Errorf("after resume: %d units, want 6", n)
 	}
 }
@@ -151,7 +151,7 @@ func TestRetainCompletedJobReplayIsNoop(t *testing.T) {
 	if got := e.extractCalls(); got != 1 {
 		t.Errorf("%d extract calls, want 1", got)
 	}
-	if n := e.document("d1").UnitCount; n != 1 {
+	if n := e.document("d1").MemoryCount; n != 1 {
 		t.Errorf("%d units, want 1", n)
 	}
 }
@@ -163,7 +163,7 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("Alice likes tea")))
 	a := e.ingest(RetainRequest{SkipConsolidation: true, Items: []RetainItem{{DocumentID: "a", Content: "Alice tea"}}})
 	b := e.ingest(RetainRequest{SkipConsolidation: true, Items: []RetainItem{{DocumentID: "b", Content: "Bob tea"}}})
-	if a.Documents[0].UnitsCreated != 1 || b.Documents[0].UnitsCreated != 1 {
+	if a.Documents[0].MemoriesCreated != 1 || b.Documents[0].MemoriesCreated != 1 {
 		t.Fatalf("setup: %+v %+v", a, b)
 	}
 	aUnit, bUnit := e.docUnit("a"), e.docUnit("b")
@@ -196,7 +196,7 @@ func TestRetainReplacementDeletesObservationsAndResetsCoSources(t *testing.T) {
 	if len(got) != 1 || got[0].ConsolidatedAt != nil {
 		t.Errorf("co-source b = %+v, want live with consolidated_at reset", got)
 	}
-	if n := e.document("a").UnitCount; n != 1 {
+	if n := e.document("a").MemoryCount; n != 1 {
 		t.Errorf("document a has %d units, want 1 (the replacement)", n)
 	}
 	if ops := e.operations(domain.OperationKindGraphMaintenance); len(ops) != 1 {
@@ -311,7 +311,7 @@ func TestRetainStampsSeqAndEnqueuesConsolidate(t *testing.T) {
 	e := newEnv(t, 0)
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("Alice likes tea")))
 	res := e.ingest(RetainRequest{Items: []RetainItem{{DocumentID: "d1", Content: "Alice likes tea"}}})
-	if res.Documents[0].UnitsCreated != 1 || len(res.Usage) != 1 || res.Usage[0].Slot != domain.ModelSlotExtract {
+	if res.Documents[0].MemoriesCreated != 1 || len(res.Usage) != 1 || res.Usage[0].Slot != domain.ModelSlotExtract {
 		t.Fatalf("result = %+v", res)
 	}
 	u := e.units([]domain.UnitID{e.onlyUnit("d1")})[0]

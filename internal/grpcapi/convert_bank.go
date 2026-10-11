@@ -40,13 +40,13 @@ func configViewToProto(v configsvc.View) *pb.ConfigView {
 // bankStatsToProto converts BankStats; map keys are the domain enum strings as-is.
 func bankStatsToProto(s domain.BankStats) *pb.BankStats {
 	return &pb.BankStats{
-		MemoriesByFactType:      mapToProto(s.UnitsByFactType),
-		InvalidatedMemories:     s.InvalidatedUnits,
+		MemoriesByFactType:      mapToProto(s.MemoriesByFactType),
+		InvalidatedMemories:     s.InvalidatedMemories,
 		Documents:               s.Documents,
 		Entities:                s.Entities,
 		MentalModels:            s.MentalModels,
 		PendingOperationsByKind: mapToProto(s.PendingOperationsByKind),
-		UnconsolidatedMemories:  s.UnconsolidatedUnits,
+		UnconsolidatedMemories:  s.UnconsolidatedMemories,
 		LastMemoryWriteAt:       tsPtrToProto(s.LastMemoryWriteAt),
 		ChangeSeq:               s.ChangeSeq,
 	}
@@ -87,7 +87,8 @@ func tagPageToProto(p bank.TagPage) *pb.ListTagsResponse {
 // promptBlockToProto converts a PromptBlock.
 func promptBlockToProto(b domain.PromptBlock) *pb.PromptBlock {
 	return &pb.PromptBlock{
-		Text: b.Text, Source: toEnum[pb.PromptSource](b.Source), Field: b.Field, Section: b.Section, Active: b.Active,
+		Text: b.Text, Source: toEnum[pb.PromptBlock_PromptSource](b.Source), Field: b.Field, Section: b.Section,
+		Active: b.Active,
 	}
 }
 
@@ -100,7 +101,7 @@ func promptMessageToProto(m domain.PromptMessage) *pb.PromptMessage {
 			blocks[i] = promptBlockToProto(m.Blocks[i])
 		}
 	}
-	return &pb.PromptMessage{Role: toEnum[pb.PromptRole](m.Role), Blocks: blocks}
+	return &pb.PromptMessage{Role: toEnum[pb.PromptMessage_PromptRole](m.Role), Blocks: blocks}
 }
 
 // promptPreviewToProto converts a PromptPreview.

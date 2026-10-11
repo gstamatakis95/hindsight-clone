@@ -30,7 +30,9 @@ func (k *killAt) Report(context.Context, domain.Progress) error {
 // no duplicate observations, and it is stamped once (by the replay, in its last scope's transaction).
 func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{
-		Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+		Retain: &domain.RetainConfig{
+			DefaultObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModePerTag},
+		},
 	})
 	e.fact("f1", "Alice moved to Paris in May", "a", "b", "c")
 	e.script(e.createEach("f1"))

@@ -130,15 +130,15 @@ type Document struct {
 	Tags []string
 	// BlobKey is where the original text lives.
 	BlobKey string
-	// ObservationScopes is the retain item's observation_scopes, kept across reprocess; nil = none (the
+	// ObservationScopeModes is the retain item's observation_scope_modes, kept across reprocess; nil = none (the
 	// stored overrides' or the bank's default applies).
-	ObservationScopes *ObservationScopes
+	ObservationScopeModes *ObservationScopeModes
 	// ExtractedAt is set when the last retain committed its last chunk; nil while in flight or failed.
 	ExtractedAt *time.Time
-	// UnitCount is the number of live units (filled by readers).
-	UnitCount int64
-	// UnitsByFactType counts live units per fact type (filled by readers).
-	UnitsByFactType map[FactType]int64
+	// MemoryCount is the number of live memories (filled by readers).
+	MemoryCount int64
+	// MemoriesByFactType counts live units per fact type (filled by readers).
+	MemoriesByFactType map[FactType]int64
 	// CreatedAt is the creation time.
 	CreatedAt time.Time
 	// UpdatedAt is the last update time.
@@ -197,17 +197,17 @@ const (
 	TimeFieldOccurredEnd TimeField = "occurred_end"
 )
 
-// DocTimeField selects the timestamp ListDocuments filters on.
-type DocTimeField string
+// DocumentTimeField selects the timestamp ListDocuments filters on.
+type DocumentTimeField string
 
 // Document time fields, mirroring memory.v1.ListDocumentsRequest.TimeField.
 const (
-	// DocTimeFieldUnspecified is the zero value (created_at).
-	DocTimeFieldUnspecified DocTimeField = ""
-	// DocTimeFieldCreatedAt filters on created_at.
-	DocTimeFieldCreatedAt DocTimeField = "created_at"
-	// DocTimeFieldUpdatedAt filters on updated_at.
-	DocTimeFieldUpdatedAt DocTimeField = "updated_at"
+	// DocumentTimeFieldUnspecified is the zero value (created_at).
+	DocumentTimeFieldUnspecified DocumentTimeField = ""
+	// DocumentTimeFieldCreatedAt filters on created_at.
+	DocumentTimeFieldCreatedAt DocumentTimeField = "created_at"
+	// DocumentTimeFieldUpdatedAt filters on updated_at.
+	DocumentTimeFieldUpdatedAt DocumentTimeField = "updated_at"
 )
 
 // ObservationVersion is one entry of an observation's history, written on every create and update.
@@ -216,10 +216,10 @@ type ObservationVersion struct {
 	Version int64
 	// Text is the observation text at that version.
 	Text string
-	// SourceIDs are the facts cited at that version.
-	SourceIDs []UnitID
-	// At is when the version was written.
-	At time.Time
+	// SourceFactIDs are the facts cited at that version.
+	SourceFactIDs []UnitID
+	// CreatedAt is when the version was written.
+	CreatedAt time.Time
 }
 
 // CurationAction names what a curation audit row records.

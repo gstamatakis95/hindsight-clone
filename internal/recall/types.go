@@ -39,8 +39,8 @@ type Request struct {
 	Bank domain.BankRef
 	// Query is the query text (max 500 tokens).
 	Query string
-	// Types limits fact types; empty = all.
-	Types []domain.FactType
+	// FactTypes limits fact types; empty = all.
+	FactTypes []domain.FactType
 	// Tags is the tag filter: flat tags with a match mode, or tag groups.
 	Tags domain.TagFilter
 	// Budget is the effort level; unspecified = the RPC default.

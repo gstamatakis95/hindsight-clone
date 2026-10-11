@@ -22,11 +22,19 @@
 // that does work takes its own *Overrides message holding only what that RPC can change; the server turns it
 // into a BankConfig level. Model routing: see ModelBindings.
 //
+// Deadlines. A call that arrives without a deadline gets the server's default deadline (a server setting, so
+// set your own for anything slower). A call that runs out of time fails with DEADLINE_EXCEEDED; work already
+// committed stays. Recall, Reflect and PreviewMentalModelRefresh run within the call's deadline.
+//
+// Recall arms. A recall retrieves candidates with several named arms (built in: vector, text, graph, temporal)
+// and fuses them. Arms are open-ended, so anything per arm is keyed by arm name, never a field per arm;
+// ListRecallArms lists the names a server accepts. An unknown arm name is INVALID_ARGUMENT.
+//
 // Async work. Background work runs as operations. An RPC whose requested work runs in the background returns
 // the Operation it enqueued, in a field named operation (or operations, batch_operation,
 // mental_model_operations), never a bare id; OperationService reports its status and progress. Follow-up jobs
 // an RPC triggers on its own (such as consolidation after a retain) are not returned. Retain is synchronous by
-// default, returning once units are committed; run_async=true makes it return the enqueued operations instead.
+// default, returning once the memories are committed; run_async=true makes it return the enqueued operations instead.
 // Recall and Reflect are synchronous.
 //
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
@@ -45,7 +53,8 @@
 // Errors. Every error carries a canonical gRPC code and a google.rpc.ErrorInfo detail with domain "memd" and
 // a stable reason; INVALID_ARGUMENT also carries a google.rpc.BadRequest detail whose field violations name
 // the offending request fields (for a config, the BankConfig path, for example reflect.disposition.empathy)
-// when the server knows them. Clients branch on the code, then the reason; the message is for humans. The reasons, by code:
+// when the server knows them. Clients branch on the code, then the reason; the message is for humans. The
+// reasons, by code:
 //   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
 //                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
 //   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
@@ -179,15 +188,15 @@ service BankService {
   rpc GetBank(GetBankRequest) returns (GetBankResponse);
   // ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
   rpc ListBanks(ListBanksRequest) returns (ListBanksResponse);
-  // DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one transaction, and
-  // returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
+  // DeleteBank marks the bank as being deleted, cancels its pending operations and enqueues delete_bank, all
+  // at once, and returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
   // (BANK_DELETING) and reads NOT_FOUND (BANK_NOT_FOUND), except GetOperation of the bank's delete_bank
   // operations. To observe completion, poll GetOperation with the returned operation id: it answers while the
   // delete runs, and NOT_FOUND once the bank is gone, because the delete's last step removes the bank with all
   // its operations and events. A large delete runs in bounded steps, so the returned operation may end
   // COMPLETED while a later step finishes the work. Once the bank is gone, a write creates a new, empty bank.
   rpc DeleteBank(DeleteBankRequest) returns (DeleteBankResponse);
-  // GetBankStats returns counts from indexed COUNT queries; poll pending_operations_by_kind as an eval
+  // GetBankStats returns counts of the bank's contents; poll pending_operations_by_kind as an eval
   // barrier.
   rpc GetBankStats(GetBankStatsRequest) returns (GetBankStatsResponse);
   // ListTags pages through the bank's tags with usage counts.
@@ -234,11 +243,11 @@ service OperationService {
   // ListOperations pages through the bank's operations, optionally filtered by status and kind.
   rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
   // CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
-  // A processing one stays PROCESSING with the cancel recorded (its serial key stays held) until its
-  // handler stops at the next checkpoint, then becomes CANCELLED; committed work stays.
+  // A processing one stays PROCESSING with the cancel recorded until it
+  // stops at its next checkpoint, then becomes CANCELLED; committed work stays.
   rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse);
-  // RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
-  // next_run_at = now. Other states are rejected.
+  // RetryOperation re-queues a FAILED or CANCELLED operation: it sets it back to PENDING to run
+  // again at once. Other states are rejected.
   rpc RetryOperation(RetryOperationRequest) returns (RetryOperationResponse);
   // ListEvents polls the bank's lifecycle events by sequence number.
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
@@ -270,13 +279,11 @@ message RetainRequest {
 
 // RetainResponse reports per-document outcomes.
 message RetainResponse {
-  reserved 2;
-  reserved "parent_operation_id";
   // One entry per item. Sync: fully filled; async: document ids, unchanged flags and operations only.
   repeated RetainedDocument documents = 1;
   // The retain_batch parent operation; set when run_async enqueued more than one document. Its status
   // aggregates the retain_document children.
-  Operation batch_operation = 4;
+  Operation batch_operation = 2;
   // Token usage per slot and model of the LLM and embedding calls a synchronous retain made; empty when
   // run_async (the usage is then on the retain_document operations).
   repeated SlotUsage usage = 3;
@@ -296,8 +303,8 @@ message RetainItem {
   string document_id = 5;
   // Tags of the document's memories, added to the request's document_tags.
   repeated string tags = 6;
-  // Observation scopes for this item; unset = retain.default_observation_scopes of the config.
-  ObservationScopes observation_scopes = 7;
+  // Observation scopes for this item; unset = retain.default_observation_scope_modes of the config.
+  ObservationScopeModes observation_scope_modes = 7;
   // Metadata copied onto every memory of the document.
   map<string, string> metadata = 8;
   // Entities the extractor should link.
@@ -321,57 +328,53 @@ message EntityHint {
 
 // RetainedDocument reports the outcome for one retained document.
 message RetainedDocument {
-  reserved 2, 4;
-  reserved "units_created", "operation_id";
   // Document id (given or generated).
   string document_id = 1;
   // Memories created; 0 when unchanged or async.
-  int32 memories_created = 6;
+  int32 memories_created = 2;
   // Same content and overrides hash as the last completed retain: nothing was re-extracted.
   bool unchanged = 3;
   // The retain_document operation; set when run_async and the document changed.
-  Operation operation = 5;
+  Operation operation = 4;
 }
 
 // ---- Recall ----
 
 // RecallRequest retrieves memories for a query.
 message RecallRequest {
-  reserved 3, 5, 6;
-  reserved "types", "tags_match", "tag_groups";
   // Bank to search; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Query text, at most 500 tokens.
   string query = 2;
   // Fact types to return; empty = all.
-  repeated FactType fact_types = 18;
+  repeated FactType fact_types = 3;
   // Tag filter on the memories' tags; unset = no filter. Flat tags or groups; tags.match unset =
   // TAGS_MATCH_ANY.
   TagFilter tags = 4;
   // Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
-  Budget budget = 7;
+  Budget budget = 5;
   // Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
-  int32 max_tokens = 8;
+  int32 max_tokens = 6;
   // Reference time for relative expressions and recency; unset = now.
-  google.protobuf.Timestamp query_time = 9;
+  google.protobuf.Timestamp query_time = 7;
   // Explicit time window start; when set, the query is not parsed for a window.
-  google.protobuf.Timestamp time_window_start = 10;
+  google.protobuf.Timestamp time_window_start = 8;
   // Explicit time window end.
-  google.protobuf.Timestamp time_window_end = 11;
+  google.protobuf.Timestamp time_window_end = 9;
   // Prefer observations: drop raw facts covered by a returned observation and backfill the budget.
-  bool prefer_observations = 12;
+  bool prefer_observations = 10;
   // Score floors.
-  MinScores min_scores = 13;
+  MinScores min_scores = 11;
   // Extra material to attach.
-  RecallInclude include = 14;
+  RecallInclude include = 12;
   // Return a RecallTrace.
-  bool trace = 15;
+  bool trace = 13;
   // Overrides for this call only.
-  RecallOverrides overrides = 16;
+  RecallOverrides overrides = 14;
   // Recall arms to run, by name (ListRecallArms), e.g. ["graph", "vector"] runs only those two; empty = the
   // effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
   // INVALID_ARGUMENT.
-  repeated string arms = 17;
+  repeated string arms = 15;
 }
 
 // RecallResponse carries ranked memories and any requested attachments.
@@ -418,8 +421,6 @@ message EntityState {
 
 // ReflectRequest asks the reflect agent a question.
 message ReflectRequest {
-  reserved 4, 5;
-  reserved "tags_match", "tag_groups";
   // Bank to reason over; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // The question to answer in natural language.
@@ -428,25 +429,25 @@ message ReflectRequest {
   // Flat tags or groups; tags.match unset = TAGS_MATCH_ANY.
   TagFilter tags = 3;
   // Size class scaling iterations and recall budgets, default BUDGET_LOW.
-  Budget budget = 6;
+  Budget budget = 4;
   // Token cap on the final answer; overrides ReflectConfig.max_answer_tokens.
-  optional int32 max_tokens = 7;
+  optional int32 max_tokens = 5;
   // JSON Schema for a structured second pass (STRUCTURED_OUTPUT slot); empty = prose only.
-  string response_schema_json = 8;
+  string response_schema_json = 6;
   // Apply every active directive, not only those matching the request tags.
-  bool apply_all_directives = 9;
+  bool apply_all_directives = 7;
   // Directives added for this call only; stored directives can never be removed by a request.
-  repeated Directive extra_directives = 10;
+  repeated Directive extra_directives = 8;
   // What to return beside the answer.
-  ReflectInclude include = 11;
+  ReflectInclude include = 9;
   // Reference time for relative expressions; unset = now.
-  google.protobuf.Timestamp query_time = 12;
+  google.protobuf.Timestamp query_time = 10;
   // Overrides for this call only. Extra directives come through extra_directives.
-  ReflectOverrides overrides = 13;
+  ReflectOverrides overrides = 11;
   // Recall arms the agent's recall and search_observations tools run, by name (ListRecallArms); empty = the
   // effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
   // INVALID_ARGUMENT.
-  repeated string arms = 14;
+  repeated string arms = 12;
 }
 
 // ReflectResponse carries the answer and its provenance.
@@ -467,12 +468,10 @@ message ReflectResponse {
 
 // ReflectInclude picks what Reflect returns beside the answer.
 message ReflectInclude {
-  reserved 1, 2;
-  reserved "facts", "tool_calls";
   // Return based_on (the memories, models and directives used); unset = true.
-  optional bool based_on = 4;
+  optional bool based_on = 1;
   // Return the trace with tool calls.
-  bool trace = 5;
+  bool trace = 2;
   // Include tool outputs in the trace; unset = true when trace.
   optional bool tool_outputs = 3;
 }
@@ -515,14 +514,12 @@ message RecallArm {
 
 // ListMemoriesRequest filters and pages the bank's memories.
 message ListMemoriesRequest {
-  reserved 2, 3, 11;
-  reserved "types", "q", "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Fact types; empty = all.
-  repeated FactType fact_types = 14;
+  repeated FactType fact_types = 2;
   // Case-insensitive substring the memory text must contain; empty = no filter.
-  string text_contains = 15;
+  string text_contains = 3;
   // Only memories of this document.
   string document_id = 4;
   // Only live memories linked to this entity.
@@ -539,9 +536,9 @@ message ListMemoriesRequest {
   // TAGS_MATCH_ANY.
   TagFilter tags = 10;
   // Maximum memories per page; 0 = 100, at most 1000.
-  int32 page_size = 12;
+  int32 page_size = 11;
   // Token from a previous response; empty = first page.
-  string page_token = 13;
+  string page_token = 12;
 
   // TimeField picks the memory timestamp the time range applies to.
   enum TimeField {
@@ -562,10 +559,8 @@ message ListMemoriesRequest {
 
 // ListMemoriesResponse is one page of memories.
 message ListMemoriesResponse {
-  reserved 1;
-  reserved "items";
   // Memories on this page, newest first.
-  repeated Memory memories = 3;
+  repeated Memory memories = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
 }
@@ -588,41 +583,36 @@ message GetMemoryResponse {
 
 // ---- UpdateMemory ----
 
-// UpdateMemoryRequest edits one live raw fact. The edit commits with an audit row, clears the embedding until
+// UpdateMemoryRequest edits one live raw fact. The edit is recorded in the memory's history, clears the embedding until
 // the rederive_memory job writes a new one, deletes the observations citing the fact and queues refreshes of
 // the mental models that cite one of those observations.
 message UpdateMemoryRequest {
-  reserved 3, 4, 5, 6, 7, 8, 9, 11;
-  reserved "text", "context", "occurred_start", "occurred_end", "clear_occurred", "fact_type", "entities",
-    "state";
   // Bank owning the memory.
   string bank_id = 1;
   // Memory id; must be a live raw fact. An observation = INVALID_ARGUMENT (reason MEMORY_IS_OBSERVATION); an
   // invalidated or unknown memory = NOT_FOUND.
   string memory_id = 2;
   // The new values; only the fields update_mask names are applied.
-  MemoryEdit memory = 14;
+  MemoryEdit memory = 3;
   // Fields of memory to apply: text, context, occurred_start, occurred_end, fact_type, entities. Empty = the
   // populated fields of memory. A named field left unset clears it, so clearing a field (the entities, or
   // both occurred bounds to make the fact timeless) needs it named here. Any other path, or nothing to
   // apply, = INVALID_ARGUMENT.
-  google.protobuf.FieldMask update_mask = 15;
+  google.protobuf.FieldMask update_mask = 4;
   // false = take the new entity names literally instead of resolving them to existing entities; unset = true.
-  optional bool resolve_entities = 10;
-  // Why the change was made; stored on the audit row.
-  string reason = 12;
+  optional bool resolve_entities = 5;
+  // Why the change was made; recorded with the edit.
+  string reason = 6;
   // Overrides for re-deriving; kept on the rederive operation.
-  RederiveOverrides overrides = 13;
+  RederiveOverrides overrides = 7;
 }
 
 // UpdateMemoryResponse carries the edited memory and its rederive operation.
 message UpdateMemoryResponse {
-  reserved 2;
-  reserved "operation_id";
   // The memory after the edit.
   Memory memory = 1;
   // The rederive_memory operation, which re-embeds and re-links the fact.
-  Operation operation = 3;
+  Operation operation = 2;
 }
 
 // MemoryEdit holds the curated fields of a raw fact that UpdateMemory can change.
@@ -652,7 +642,7 @@ message InvalidateMemoryRequest {
   // Memory id; must be a live raw fact. An observation = INVALID_ARGUMENT (reason MEMORY_IS_OBSERVATION); an
   // invalidated or unknown memory = NOT_FOUND.
   string memory_id = 2;
-  // Why the fact is invalidated; stored on the audit row.
+  // Why the fact is invalidated; recorded with the change.
   string reason = 3;
 }
 
@@ -672,7 +662,7 @@ message RestoreMemoryRequest {
   // Memory id. An unknown memory = NOT_FOUND; an observation = INVALID_ARGUMENT (reason
   // MEMORY_IS_OBSERVATION); a live fact is left unchanged.
   string memory_id = 2;
-  // Why the fact is restored; stored on the audit row.
+  // Why the fact is restored; recorded with the change.
   string reason = 3;
   // false = re-attach the fact's entity names literally instead of resolving them to existing entities;
   // unset = true.
@@ -693,12 +683,10 @@ message RestoreMemoryResponse {
 
 // Memory is the read model of one memory: a raw fact or an observation.
 message Memory {
-  reserved 2;
-  reserved "type";
   // Memory id.
   string id = 1;
   // World, experience or observation.
-  FactType fact_type = 19;
+  FactType fact_type = 2;
   // The fact or observation text.
   string text = 3;
   // Context given at retain (or by curation).
@@ -745,7 +733,7 @@ enum MemoryState {
 
 // ======================= DocumentService =======================
 
-// A document is one retained item: its original text lives in object storage and its memories in Postgres.
+// A document is one retained item: its original text is kept in the blob store and its memories are kept alongside it.
 // Documents are upserted by Retain (keyed by document_id), retagged by RetagDocument and re-extracted by
 // ReprocessDocument. There is no single-document delete; DeleteBank removes everything.
 
@@ -753,25 +741,23 @@ enum MemoryState {
 
 // ListDocumentsRequest filters and pages the bank's documents.
 message ListDocumentsRequest {
-  reserved 2, 4;
-  reserved "q", "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Case-insensitive substring the document id must contain; empty = no filter.
-  string document_id_contains = 10;
+  string document_id_contains = 2;
   // Tag filter on the documents' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
   // TAGS_MATCH_ANY_STRICT.
   TagFilter tags = 3;
   // Inclusive start of the time range on time_field.
-  google.protobuf.Timestamp start = 5;
+  google.protobuf.Timestamp start = 4;
   // Exclusive end of the time range on time_field.
-  google.protobuf.Timestamp end = 6;
+  google.protobuf.Timestamp end = 5;
   // Timestamp the range applies to.
-  TimeField time_field = 7;
+  TimeField time_field = 6;
   // Maximum documents per page; 0 = 100, at most 1000.
-  int32 page_size = 8;
+  int32 page_size = 7;
   // Token from a previous response; empty = first page.
-  string page_token = 9;
+  string page_token = 8;
 
   // TimeField picks the document timestamp the time range applies to.
   enum TimeField {
@@ -852,8 +838,6 @@ message ReprocessDocumentResponse {
 
 // Document is the read model of one retained document.
 message Document {
-  reserved 4, 5;
-  reserved "memory_unit_count", "units_by_fact_type";
   // Document id (the upsert key).
   string id = 1;
   // Hash of the original content; with the overrides hash, decides whether a retain is a no-op.
@@ -861,10 +845,10 @@ message Document {
   // Document tags, applied to its memories.
   repeated string tags = 3;
   // Live memories extracted from the document (count).
-  int64 memory_count = 11;
+  int64 memory_count = 4;
   // Live memory counts keyed by lowercase fact type: "world" and "experience" (a document has no
   // observations). A type with no memories is absent.
-  map<string, int64> memories_by_fact_type = 12;
+  map<string, int64> memories_by_fact_type = 5;
   // Retain overrides stored with the document (the request's merged with the item's); ReprocessDocument
   // replays them.
   RetainOverrides retain_overrides = 6;
@@ -882,7 +866,7 @@ message Document {
 
 // Observations are derived memories that consolidation writes per tag scope from raw facts. An observation
 // is a Memory with fact_type = FACT_TYPE_OBSERVATION, so GetMemory and ListMemories read it too; a field is
-// named observation_id only where nothing but an observation is accepted. A consolidate job runs one at a
+// named observation_id only where nothing but an observation is accepted. A consolidate operation runs one at a
 // time per bank; automatic runs use bank config plus any matching consolidation strategy, never the
 // overrides of the retain that triggered them.
 
@@ -894,7 +878,7 @@ message ConsolidateRequest {
   string bank_id = 1;
   // Scopes to consolidate; empty = every scope.
   repeated TagSet scopes = 2;
-  // Overrides for this run only; kept on the operation row.
+  // Overrides for this run only; kept on the operation.
   ConsolidateOverrides overrides = 3;
 }
 
@@ -958,38 +942,35 @@ message ListObservationHistoryResponse {
 
 // ObservationVersion is one version of an observation, written on every create and update.
 message ObservationVersion {
-  reserved 3, 4;
-  reserved "source_ids", "at";
   // Version number, increasing per observation.
   int64 version = 1;
   // Observation text at this version.
   string text = 2;
   // Ids of the raw facts the observation cited at this version.
-  repeated string source_fact_ids = 5;
+  repeated string source_fact_ids = 3;
   // When the version was written.
-  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp created_at = 4;
 }
 
 // ---- ClearObservations ----
 
 // ClearObservationsRequest selects the observations to delete: exactly one target.
 message ClearObservationsRequest {
-  reserved 2;
   // Bank to clear.
   string bank_id = 1;
   // What to clear. Required: no target, an empty scope list or all = false is INVALID_ARGUMENT.
   oneof target {
     // Every observation of exactly these scopes (tag sets, compared as sets); other scopes, supersets and
     // subsets included, are kept.
-    TagSetList scopes = 4;
+    TagSetList scopes = 2;
     // Every observation citing this memory (unknown = NOT_FOUND); a raw fact then consolidates again.
-    string memory_id = 5;
+    string memory_id = 3;
     // true clears every observation of the bank.
-    bool all = 6;
+    bool all = 4;
   }
   // Enqueue a consolidation of what was cleared afterwards: the same scopes, or every scope for memory_id
   // and all.
-  bool reconsolidate = 3;
+  bool reconsolidate = 5;
 }
 
 // TagSetList is a list of tag sets, so that a oneof can carry several scopes.
@@ -1058,26 +1039,22 @@ message CreateMentalModelRequest {
 
 // CreateMentalModelResponse carries the new model and its first build.
 message CreateMentalModelResponse {
-  reserved 2;
-  reserved "build";
   // The model, with no content yet.
   MentalModel mental_model = 1;
   // The refresh_mental_model operation building the first version.
-  Operation operation = 3;
+  Operation operation = 2;
 }
 
 // ---- GetMentalModel ----
 
 // GetMentalModelRequest names one model.
 message GetMentalModelRequest {
-  reserved 3;
-  reserved "detail";
   // Bank owning the model; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Model id.
   string mental_model_id = 2;
   // How much to return; unset = MENTAL_MODEL_VIEW_FULL.
-  MentalModelView view = 4;
+  MentalModelView view = 3;
 }
 
 // GetMentalModelResponse carries the model.
@@ -1102,21 +1079,19 @@ enum MentalModelView {
 
 // ListMentalModelsRequest filters and pages the bank's models.
 message ListMentalModelsRequest {
-  reserved 3, 5;
-  reserved "detail", "tags_match";
   // Bank to list; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Only models whose folder path starts with this; empty = all.
   string folder_prefix = 2;
   // How much of each model to return; unset = MENTAL_MODEL_VIEW_BASIC.
-  MentalModelView view = 8;
+  MentalModelView view = 3;
   // Tag filter on the models' own tags (MentalModelSpec.tags); unset or empty tags = no filter. Flat form
   // only; tags.match unset = TAGS_MATCH_ANY.
   TagFilter tags = 4;
   // Maximum models per page; 0 = 100, at most 1000.
-  int32 page_size = 6;
+  int32 page_size = 5;
   // Token from a previous response; empty = first page.
-  string page_token = 7;
+  string page_token = 6;
 }
 
 // ListMentalModelsResponse is one page of models.
@@ -1210,12 +1185,10 @@ message PreviewMentalModelRefreshResponse {
 
 // ResolvedScope is the effective filter a refresh reads with, after defaults.
 message ResolvedScope {
-  reserved 2, 3;
-  reserved "tags_match", "tag_groups";
   // Effective tag filter: the scope's groups, or the model's tags under the effective match mode.
   TagFilter tags = 1;
   // Effective fact types; empty = all.
-  repeated FactType fact_types = 4;
+  repeated FactType fact_types = 2;
 }
 
 // ---- ListMentalModelHistory ----
@@ -1244,8 +1217,6 @@ message ListMentalModelHistoryResponse {
 
 // MentalModelHistoryEntry is one history row of a model.
 message MentalModelHistoryEntry {
-  reserved 3;
-  reserved "changed_at";
   // Kind separates content versions from refresh failures; each is capped separately
   // (MentalModelConfig.history_max_entries).
   enum Kind {
@@ -1261,7 +1232,7 @@ message MentalModelHistoryEntry {
   // Content before the change (KIND_VERSION).
   string previous_content = 2;
   // When the entry was recorded.
-  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp created_at = 3;
   // Outcome of the refresh behind the entry.
   RefreshOutcome outcome = 4;
   // Machine-readable failure reason (KIND_REFRESH_FAILED).
@@ -1303,8 +1274,6 @@ message DeleteMentalModelFolderResponse {
 
 // SearchMentalModelsRequest searches the bank's mental models by content.
 message SearchMentalModelsRequest {
-  reserved 4;
-  reserved "limit";
   // Bank to search; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Search text.
@@ -1312,7 +1281,7 @@ message SearchMentalModelsRequest {
   // Only models whose folder path starts with this; empty = all.
   string folder_prefix = 3;
   // Maximum hits; 0 = 10, at most 100, negative = INVALID_ARGUMENT.
-  int32 max_results = 5;
+  int32 max_results = 4;
 }
 
 // SearchMentalModelsResponse lists matching models.
@@ -1339,43 +1308,39 @@ message MentalModelHit {
 
 // MentalModel is a stored mental model with its content and refresh state.
 message MentalModel {
-  reserved 2, 6, 11;
-  reserved "bank_id", "is_stale", "source_ids";
   // The writable spec.
   MentalModelSpec spec = 1;
   // Page content in Markdown.
-  string content_md = 3;
+  string content_md = 2;
   // Structured output matching spec.response_schema_json; empty when none.
-  string structured_output_json = 4;
+  string structured_output_json = 3;
   // Content version, incremented on every write.
-  int64 version = 5;
+  int64 version = 4;
   // True when an in-scope memory or observation changed after last_seq_seen, or a source was retracted;
   // computed in MENTAL_MODEL_VIEW_FULL only (false otherwise).
-  bool stale = 14;
+  bool stale = 5;
   // Wall clock of the last completed refresh, including no-op refreshes.
-  google.protobuf.Timestamp last_refreshed_at = 7;
+  google.protobuf.Timestamp last_refreshed_at = 6;
   // The bank change_seq the last successful refresh read up to (its watermark): the same counter as
   // LifecycleEvent.seq and BankStats.change_seq.
-  int64 last_seq_seen = 8;
+  int64 last_seq_seen = 7;
   // When the last refresh failed; unset if none has.
-  google.protobuf.Timestamp last_refresh_failed_at = 9;
+  google.protobuf.Timestamp last_refresh_failed_at = 8;
   // Set by a failed refresh; automatic refreshes skip the model until a manual refresh succeeds.
-  bool auto_refresh_paused = 10;
+  bool auto_refresh_paused = 9;
   // Ids of the memories the content cites, accumulated across refreshes; pruned on full refresh and on
   // invalidate. MENTAL_MODEL_VIEW_FULL only.
-  repeated string source_memory_ids = 15;
+  repeated string source_memory_ids = 10;
   // Trace of the last refresh when spec.keep_trace; MENTAL_MODEL_VIEW_FULL only.
-  RefreshTrace last_trace = 12;
+  RefreshTrace last_trace = 11;
   // When the model was created.
-  google.protobuf.Timestamp created_at = 13;
+  google.protobuf.Timestamp created_at = 12;
 }
 
 // MentalModelSpec is the writable part of a mental model: what it answers, when it refreshes (schedule),
 // what it reads (scope), how a refresh runs, and its stored overrides. Unset run settings fall back to
 // BankConfig.mental_models.
 message MentalModelSpec {
-  reserved 7;
-  reserved "trigger";
   // Model id: lowercase alphanumerics and hyphens, unique per (tenant, bank).
   string id = 1;
   // Display name.
@@ -1388,36 +1353,36 @@ message MentalModelSpec {
   // and when it goes stale (see MentalModelScope.tags).
   repeated string tags = 5;
   // When the model refreshes on its own; unset = manual refreshes only.
-  RefreshSchedule schedule = 9;
+  RefreshSchedule schedule = 6;
   // What the model reads; unset = everything its tags select.
-  MentalModelScope scope = 10;
+  MentalModelScope scope = 7;
   // Full or delta; unset = MentalModelConfig.default_mode.
-  RefreshMode mode = 11;
+  RefreshMode mode = 8;
   // Agentic or single-shot; unset = MentalModelConfig.default_strategy. RefreshMentalModelRequest.strategy
   // wins for one call.
-  RefreshStrategy strategy = 12;
+  RefreshStrategy strategy = 9;
   // Size class of a refresh; unset = BUDGET_MID.
-  Budget budget = 13;
+  Budget budget = 10;
   // Token cap on the content; unset = MentalModelConfig.max_content_tokens.
-  optional int32 max_tokens = 6;
+  optional int32 max_tokens = 11;
   // Include source chunks in the refresh's recall results; unset = no chunks.
-  optional bool include_chunks = 14;
+  optional bool include_chunks = 12;
   // Token cap on chunks attached to a recall during refresh; unset = the recall default.
-  optional int32 recall_chunks_max_tokens = 15;
+  optional int32 recall_chunks_max_tokens = 13;
   // Do not read other mental models while refreshing (agentic refresh).
-  bool exclude_mental_models = 16;
+  bool exclude_mental_models = 14;
   // Mental models never read while refreshing (agentic refresh); the model itself is always excluded.
-  repeated string exclude_mental_model_ids = 17;
+  repeated string exclude_mental_model_ids = 15;
   // JSON Schema for structured output projected from the page (MentalModel.structured_output_json); empty =
   // none.
-  string response_schema_json = 18;
+  string response_schema_json = 16;
   // Keep the last refresh trace on the model (MentalModel.last_trace).
-  bool keep_trace = 19;
+  bool keep_trace = 17;
   // Overrides stored on the model and applied to every refresh; the reflect loop's caps
   // (reflect.recall_max_tokens, reflect.search_observations_max_tokens,
   // reflect.search_observations_include_entities) are set here. In an update_mask, paths go inside it
   // (overrides.reflect.mission, overrides.mental_model_model).
-  RefreshOverrides overrides = 8;
+  RefreshOverrides overrides = 18;
 }
 
 // RefreshSchedule decides when a model refreshes on its own. Manual refreshes (RefreshMentalModel) are always
@@ -1628,15 +1593,13 @@ message GetBankStatsResponse {
   BankStats stats = 1;
 }
 
-// BankStats summarizes a bank, read with indexed COUNT queries (no counter tables).
+// BankStats summarizes a bank, as a snapshot of its counts.
 message BankStats {
-  reserved 1, 2, 7;
-  reserved "units_by_fact_type", "invalidated_units", "unconsolidated_units";
   // Live memory counts keyed by lowercase fact type: "world", "experience" and "observation". A type with no
   // memories is absent.
-  map<string, int64> memories_by_fact_type = 10;
+  map<string, int64> memories_by_fact_type = 1;
   // Memories archived by invalidation (count).
-  int64 invalidated_memories = 11;
+  int64 invalidated_memories = 2;
   // Documents retained in the bank (count).
   int64 documents = 3;
   // Entities (free-form and label) in the bank (count).
@@ -1647,7 +1610,7 @@ message BankStats {
   // "retain_document"); a kind with none is absent. Eval barrier: poll until empty.
   map<string, int64> pending_operations_by_kind = 6;
   // Live facts not yet consolidated (count).
-  int64 unconsolidated_memories = 12;
+  int64 unconsolidated_memories = 7;
   // Time of the last write to memory content.
   google.protobuf.Timestamp last_memory_write_at = 8;
   // The bank's commit-ordered change counter: the same counter as LifecycleEvent.seq and
@@ -1669,6 +1632,18 @@ message ListTagsRequest {
   int32 page_size = 4;
   // Token from a previous response; empty = first page.
   string page_token = 5;
+
+  // TagSource picks which objects ListTags counts tags on.
+  enum TagSource {
+    // Not set; same as TAG_SOURCE_MEMORIES.
+    TAG_SOURCE_UNSPECIFIED = 0;
+    // Tags of memories.
+    TAG_SOURCE_MEMORIES = 1;
+    // Tags of mental models.
+    TAG_SOURCE_MENTAL_MODELS = 2;
+    // Tags of documents.
+    TAG_SOURCE_DOCUMENTS = 3;
+  }
 }
 
 // ListTagsResponse is one page of tags.
@@ -1677,18 +1652,6 @@ message ListTagsResponse {
   repeated TagCount tags = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
-}
-
-// TagSource picks which objects ListTags counts tags on.
-enum TagSource {
-  // Not set; same as TAG_SOURCE_MEMORIES.
-  TAG_SOURCE_UNSPECIFIED = 0;
-  // Tags of memories.
-  TAG_SOURCE_MEMORIES = 1;
-  // Tags of mental models.
-  TAG_SOURCE_MENTAL_MODELS = 2;
-  // Tags of documents.
-  TAG_SOURCE_DOCUMENTS = 3;
 }
 
 // TagCount is one tag with its usage count.
@@ -1717,14 +1680,12 @@ message ExportBankTemplateResponse {
 
 // Bank is a memory bank. Its config is read and written through ConfigService.
 message Bank {
-  reserved 3, 5;
-  reserved "config", "deleting";
   // Bank id, unique within the tenant.
   string id = 1;
   // Display name.
   string name = 2;
   // When the bank was created.
-  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp created_at = 3;
 }
 
 // ======================= ConfigService =======================
@@ -1742,9 +1703,8 @@ message GetTenantConfigRequest {}
 
 // GetTenantConfigResponse carries the tenant's config.
 message GetTenantConfigResponse {
-  reserved 1;
   // own: the tenant's overrides (unset fields inherit server defaults); effective: server < tenant.
-  ConfigView config = 2;
+  ConfigView config = 1;
 }
 
 // ---- UpdateTenantConfig ----
@@ -1760,9 +1720,8 @@ message UpdateTenantConfigRequest {
 
 // UpdateTenantConfigResponse carries the tenant config after the patch.
 message UpdateTenantConfigResponse {
-  reserved 1;
   // The tenant's config after the patch.
-  ConfigView config = 2;
+  ConfigView config = 1;
 }
 
 // ---- ResetTenantConfig ----
@@ -1790,10 +1749,8 @@ message GetBankConfigRequest {
 
 // GetBankConfigResponse carries the bank's config.
 message GetBankConfigResponse {
-  reserved 1, 2;
-  reserved "resolved", "overrides";
   // own: only what the bank itself sets; effective: server < tenant < bank, merged.
-  ConfigView config = 3;
+  ConfigView config = 1;
 }
 
 // ---- UpdateBankConfig ----
@@ -1812,31 +1769,25 @@ message UpdateBankConfigRequest {
 
 // UpdateBankConfigResponse carries the bank's config after the patch.
 message UpdateBankConfigResponse {
-  reserved 1;
-  reserved "bank";
   // The bank's config after the patch.
-  ConfigView config = 2;
+  ConfigView config = 1;
 }
 
 // ---- ResetBankConfig ----
 
 // ResetBankConfigRequest removes some or all of the bank's own overrides.
 message ResetBankConfigRequest {
-  reserved 2;
-  reserved "paths";
   // Bank id.
   string bank_id = 1;
   // BankConfig paths to reset, so they inherit again; the single path "*" resets everything. Empty =
   // INVALID_ARGUMENT.
-  google.protobuf.FieldMask reset_mask = 3;
+  google.protobuf.FieldMask reset_mask = 2;
 }
 
 // ResetBankConfigResponse carries the bank's config after the reset.
 message ResetBankConfigResponse {
-  reserved 1;
-  reserved "bank";
   // The bank's config after the reset.
-  ConfigView config = 2;
+  ConfigView config = 1;
 }
 
 // ---- PreviewPrompt ----
@@ -1852,37 +1803,36 @@ message PreviewPromptRequest {
   // SYNTHESIZE); a mismatch is INVALID_ARGUMENT. Unset = none.
   oneof overrides {
     // Overrides of a Retain.
-    RetainOverrides retain = 4;
+    RetainOverrides retain = 3;
     // Overrides of a Consolidate.
-    ConsolidateOverrides consolidation = 5;
+    ConsolidateOverrides consolidation = 4;
     // Overrides of a Reflect.
-    ReflectOverrides reflect = 6;
+    ReflectOverrides reflect = 5;
     // Overrides of a RefreshMentalModel.
-    RefreshOverrides mental_model = 7;
+    RefreshOverrides mental_model = 6;
   }
-  reserved 3;
+
+  // PromptOperation picks which operation's prompt to preview.
+  enum PromptOperation {
+    // Not set; rejected with INVALID_ARGUMENT.
+    PROMPT_OPERATION_UNSPECIFIED = 0;
+    // Retain extraction.
+    PROMPT_OPERATION_RETAIN = 1;
+    // Consolidation decisions.
+    PROMPT_OPERATION_CONSOLIDATION = 2;
+    // Reflect system prompt.
+    PROMPT_OPERATION_REFLECT = 3;
+    // Delta mental-model refresh.
+    PROMPT_OPERATION_MENTAL_MODEL_DELTA = 4;
+    // Single-shot full mental-model synthesis.
+    PROMPT_OPERATION_SYNTHESIZE = 5;
+  }
 }
 
 // PreviewPromptResponse carries the rendering.
 message PreviewPromptResponse {
   // The rendered messages and response schema.
   PromptPreview preview = 1;
-}
-
-// PromptOperation picks which operation's prompt to preview.
-enum PromptOperation {
-  // Not set; rejected with INVALID_ARGUMENT.
-  PROMPT_OPERATION_UNSPECIFIED = 0;
-  // Retain extraction.
-  PROMPT_OPERATION_RETAIN = 1;
-  // Consolidation decisions.
-  PROMPT_OPERATION_CONSOLIDATION = 2;
-  // Reflect system prompt.
-  PROMPT_OPERATION_REFLECT = 3;
-  // Delta mental-model refresh.
-  PROMPT_OPERATION_MENTAL_MODEL_DELTA = 4;
-  // Single-shot full mental-model synthesis.
-  PROMPT_OPERATION_SYNTHESIZE = 5;
 }
 
 // PromptPreview is the full rendering for one operation.
@@ -1901,16 +1851,16 @@ message PromptMessage {
   PromptRole role = 1;
   // Blocks in order; their texts concatenate into the message.
   repeated PromptBlock blocks = 2;
-}
 
-// PromptRole is the chat role of a rendered message.
-enum PromptRole {
-  // Not set; never returned.
-  PROMPT_ROLE_UNSPECIFIED = 0;
-  // System message.
-  PROMPT_ROLE_SYSTEM = 1;
-  // User message.
-  PROMPT_ROLE_USER = 2;
+  // PromptRole is the chat role of a rendered message.
+  enum PromptRole {
+    // Not set; never returned.
+    PROMPT_ROLE_UNSPECIFIED = 0;
+    // System message.
+    PROMPT_ROLE_SYSTEM = 1;
+    // User message.
+    PROMPT_ROLE_USER = 2;
+  }
 }
 
 // PromptBlock is one block of a rendered message, attributed to its source.
@@ -1925,16 +1875,16 @@ message PromptBlock {
   string section = 4;
   // Whether the block is rendered with the current config.
   bool active = 5;
-}
 
-// PromptSource says where a prompt block's text comes from.
-enum PromptSource {
-  // Not set; never returned.
-  PROMPT_SOURCE_UNSPECIFIED = 0;
-  // Built-in template text.
-  PROMPT_SOURCE_BUILTIN = 1;
-  // Text from the effective BankConfig (a mission, disposition, custom prompt, ...).
-  PROMPT_SOURCE_CONFIG = 2;
+  // PromptSource says where a prompt block's text comes from.
+  enum PromptSource {
+    // Not set; never returned.
+    PROMPT_SOURCE_UNSPECIFIED = 0;
+    // Built-in template text.
+    PROMPT_SOURCE_BUILTIN = 1;
+    // Text from the effective BankConfig (a mission, disposition, custom prompt, ...).
+    PROMPT_SOURCE_CONFIG = 2;
+  }
 }
 
 // ---- CreateDirective ----
@@ -2041,11 +1991,9 @@ message Directive {
 
 // ======================= OperationService =======================
 
-// There is no broker: every background job is a row in the operations table, inserted in the same
-// transaction as the state change that causes it, and claimed by workers with FOR UPDATE SKIP LOCKED.
-// The operation id is the job id, so status, progress, cancel, retry, overrides and the owning bank all
-// live on one row. Lifecycle events are rows in the lifecycle_events table, written in the same
-// transaction as the state change they describe and numbered by the bank's change sequence.
+// Every piece of background work is an Operation, created together with the state change that causes it. Its
+// status, progress, overrides and cancel or retry state are all read through its id. Lifecycle events record
+// the bank's state changes, numbered by the bank's change sequence.
 
 // ---- GetOperation ----
 
@@ -2126,8 +2074,6 @@ message RetryOperationResponse {
 
 // ListEventsRequest polls a bank's lifecycle events after a known sequence number.
 message ListEventsRequest {
-  reserved 3;
-  reserved "limit";
   // Bank to read; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Return only events with seq greater than this (the previous response's next_after_seq); 0 = from the
@@ -2135,27 +2081,23 @@ message ListEventsRequest {
   int64 after_seq = 2;
   // Soft maximum of events per page; 0 = 100, at most 1000, negative = INVALID_ARGUMENT. A page never
   // splits a seq group: it is extended past page_size to finish the last seq it includes.
-  int32 page_size = 5;
+  int32 page_size = 3;
   // Only these event types; empty = all types.
   repeated EventType types = 4;
 }
 
 // ListEventsResponse returns events in seq order.
 message ListEventsResponse {
-  reserved 2;
-  reserved "last_seq";
   // Events with seq > after_seq, ascending.
   repeated LifecycleEvent events = 1;
   // Seq to pass as after_seq on the next poll: the highest seq scanned for this page, including events
   // the types filter dropped, and never below the request's after_seq (so a filter over non-matching
   // events still advances). An integer cursor a consumer can persist.
-  int64 next_after_seq = 3;
+  int64 next_after_seq = 2;
 }
 
-// LifecycleEvent is one row of the lifecycle_events table, written in the state change's transaction.
+// LifecycleEvent records one state change of a bank.
 message LifecycleEvent {
-  reserved 4;
-  reserved "at";
   // The bank's change_seq for the change: commit-ordered within the bank, so polling by seq never skips.
   // All events written by one transaction share its seq.
   int64 seq = 1;
@@ -2164,7 +2106,7 @@ message LifecycleEvent {
   // Bank the event belongs to.
   string bank_id = 3;
   // Commit time of the change.
-  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp created_at = 4;
   // Operation that caused the change, if any.
   string operation_id = 5;
   // Document, memory or mental-model id the event is about.
@@ -2175,52 +2117,48 @@ message LifecycleEvent {
 
 // Operation is one background job: what it does, where it is, and what it used.
 message Operation {
-  reserved 5;
-  reserved "result";
   // Operation (job) id.
   string id = 1;
   // Bank the operation belongs to; GetOperation, CancelOperation and RetryOperation take it with id.
-  string bank_id = 15;
+  string bank_id = 2;
   // Job type.
-  OperationKind kind = 2;
+  OperationKind kind = 3;
   // Lifecycle state.
-  OperationStatus status = 3;
+  OperationStatus status = 4;
   // Last error message; set when FAILED.
-  string error = 4;
+  string error = 5;
   // A kind-specific summary of the outcome as a JSON object, for people and logs. It is NOT a stable
   // contract: keys may change in any release, so never parse it in client logic.
-  string debug_summary = 16;
+  string debug_summary = 6;
   // Token usage per slot and model of every LLM call the job made.
-  repeated SlotUsage usage = 6;
+  repeated SlotUsage usage = 7;
   // The overrides the run actually used (request, strategy and stored overrides merged).
-  BankConfig effective_overrides = 7;
+  BankConfig effective_overrides = 8;
   // Parent operation (a retain_batch); empty for top-level operations.
-  string parent_id = 8;
+  string parent_id = 9;
   // Last reported checkpoint.
-  Progress progress = 9;
+  Progress progress = 10;
   // When the operation was enqueued.
-  google.protobuf.Timestamp created_at = 10;
-  // Last change to the row.
-  google.protobuf.Timestamp updated_at = 11;
-  // When a parked job becomes claimable: backoff, debounce or refresh interval floor.
-  google.protobuf.Timestamp next_run_at = 12;
+  google.protobuf.Timestamp created_at = 11;
+  // Last change to the operation.
+  google.protobuf.Timestamp updated_at = 12;
+  // When a parked operation becomes runnable: backoff, debounce or refresh interval floor.
+  google.protobuf.Timestamp next_run_at = 13;
   // Earlier attempts that failed with a retry or were reclaimed (0 on the first run); transient failures
   // retry with backoff up to the kind's limit (consolidate: unbounded). With next_run_at it tells a
   // retrying operation from a parked one.
-  int32 attempts = 13;
-  // Last sign of life from the worker while PROCESSING; an old value means the operation is stalled and
-  // will be reclaimed.
-  google.protobuf.Timestamp heartbeat_at = 14;
+  int32 attempts = 14;
+  // Last sign of life from the server while PROCESSING; an old value means the operation is stalled and
+  // will be picked up again.
+  google.protobuf.Timestamp heartbeat_at = 15;
 }
 
-// Progress is the last checkpoint a handler reported.
+// Progress is the last checkpoint an operation reported.
 message Progress {
-  reserved 2;
-  reserved "at";
-  // Handler-defined stage name.
+  // Stage name; its values depend on the operation kind.
   string stage = 1;
   // When the checkpoint was written.
-  google.protobuf.Timestamp recorded_at = 5;
+  google.protobuf.Timestamp recorded_at = 2;
   // Items done so far in this stage.
   int64 processed = 3;
   // Items in this stage, if known; 0 = unknown.
@@ -2237,19 +2175,19 @@ message TagSet {
   repeated string tags = 1;
 }
 
-// ObservationScopes decides which tag scopes a unit consolidates under.
-message ObservationScopes {
-  // Mode is how a unit's tags expand into observation scopes.
+// ObservationScopeModes decides which tag scopes a memory consolidates under.
+message ObservationScopeModes {
+  // Mode is how a memory's tags expand into observation scopes.
   enum Mode {
-    // Not set; inherit the bank's default_observation_scopes.
+    // Not set; inherit the bank's default_observation_scope_modes.
     MODE_UNSPECIFIED = 0;
-    // One scope: the unit's full tag set.
+    // One scope: the memory's full tag set.
     MODE_COMBINED = 1;
     // The shared (untagged) scope only.
     MODE_SHARED = 2;
     // One scope per individual tag.
     MODE_PER_TAG = 3;
-    // One scope per non-empty combination of the unit's tags, capped by max_combinations.
+    // One scope per non-empty combination of the memory's tags, capped by max_combinations.
     MODE_ALL_COMBINATIONS = 4;
     // Exactly the scopes listed in custom.
     MODE_CUSTOM = 5;
@@ -2341,7 +2279,7 @@ message MinScores {
   optional double final = 3;
 }
 
-// Chunk is a slice of a retained document that units were extracted from.
+// Chunk is a slice of a retained document that memories were extracted from.
 message Chunk {
   // Chunk id.
   string id = 1;
@@ -2363,6 +2301,38 @@ message SlotUsage {
   int64 input_tokens = 3;
   // Completion tokens.
   int64 output_tokens = 4;
+
+  // ModelSlot names one model-backed step that can be routed to its own gateway model (see ModelBindings). Usage
+  // is recorded per slot.
+  enum ModelSlot {
+    // Not set; never recorded in usage.
+    MODEL_SLOT_UNSPECIFIED = 0;
+    // Retain fact, entity and label extraction. Overridable on Retain, ReprocessDocument, UpdateMemory and
+    // RestoreMemory (re-deriving).
+    MODEL_SLOT_EXTRACT = 1;
+    // Relative dates at retain, and query time windows at recall (only when a cue is found and the rules
+    // fail). Overridable on Retain, Recall, ReprocessDocument, UpdateMemory and RestoreMemory.
+    MODEL_SLOT_TIME_PARSE = 2;
+    // Create / update / none decisions per observation scope. Overridable on a manual Consolidate request
+    // or the matching consolidation strategy, never by the retain that triggered the consolidation.
+    MODEL_SLOT_CONSOLIDATE = 3;
+    // Merge-or-keep check for near-duplicate observations. Overridable like MODEL_SLOT_CONSOLIDATE.
+    MODEL_SLOT_DEDUP_CHECK = 4;
+    // Tool-calling turns of the reflect loop and of agentic mental-model refresh. Overridable on Reflect and
+    // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+    MODEL_SLOT_REFLECT = 5;
+    // Second pass projecting prose into a JSON Schema (response_schema_json). Overridable on Reflect and
+    // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+    MODEL_SLOT_STRUCTURED_OUTPUT = 6;
+    // Single-shot mental-model refresh: the full page synthesis and the delta edit ops. Overridable on
+    // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+    MODEL_SLOT_MENTAL_MODEL = 7;
+    // Cross-encoder scores in recall. Overridable on Recall and Reflect.
+    MODEL_SLOT_RERANK = 8;
+    // Embeddings of memories, observations, queries and mental models. Bound only in the server config file (one vector
+    // space per database, 768 dimensions).
+    MODEL_SLOT_EMBED = 9;
+  }
 }
 
 // RecallTrace explains a recall: per-arm results, fusion, rerank and packing. Returned when
@@ -2448,19 +2418,18 @@ message ReflectTrace {
 // BankConfig is the full set of behaviour knobs, grouped by phase and identical at every config level. Unset
 // fields inherit from the next less specific level.
 message BankConfig {
-  reserved 1 to 12, 18 to 23;
   // Retain: mission, extraction, labels, default scopes, chunking, entity matching and linking.
-  RetainConfig retain = 15;
+  RetainConfig retain = 1;
   // Observations: whether and how consolidation runs, its strategies.
-  ObservationConfig observations = 24;
+  ObservationConfig observations = 2;
   // Recall tuning, also used by reflect, consolidation and single-shot refresh.
-  RecallConfig recall = 13;
+  RecallConfig recall = 3;
   // Reflect: mission, disposition and loop tuning.
-  ReflectConfig reflect = 16;
+  ReflectConfig reflect = 4;
   // Bank-level mental-model defaults.
-  MentalModelConfig mental_models = 17;
+  MentalModelConfig mental_models = 5;
   // Model bindings; see "Model routing" above.
-  ModelBindings models = 14;
+  ModelBindings models = 6;
 }
 
 // RetainConfig tunes retain: what it extracts, how it chunks, resolves entities and builds links.
@@ -2471,9 +2440,9 @@ message RetainConfig {
   optional int32 chunk_overlap_tokens = 2;
   // Minimum resolver score (name similarity + co-occurrence + temporal proximity) to reuse an entity.
   optional double entity_match_threshold = 3;
-  // Window in hours within which units get temporal links.
+  // Window in hours within which memories get temporal links.
   optional int32 temporal_link_window_hours = 4;
-  // Nearest neighbours considered for semantic links; also the semantic link cap per unit.
+  // Nearest neighbours considered for semantic links; also the semantic link cap per memory.
   optional int32 semantic_link_k = 5;
   // Minimum cosine similarity for a semantic link.
   optional double semantic_link_min_similarity = 6;
@@ -2481,7 +2450,7 @@ message RetainConfig {
   optional bool extract_causal_links = 7;
   // Keep a JSONL line or chat turn whole in one chunk up to this many tokens.
   optional int32 structured_chunk_max_tokens = 8;
-  // Temporal link cap per unit, default 20.
+  // Temporal link cap per memory, default 20.
   optional int32 temporal_link_cap = 9;
   // Mission injected into retain extraction prompts.
   string mission = 10;
@@ -2494,14 +2463,30 @@ message RetainConfig {
   // false = only label entities are created (no free-form entities); unset = inherited.
   optional bool entities_allow_free_form = 14;
   // Observation scopes used when a retained item does not set its own.
-  ObservationScopes default_observation_scopes = 15;
+  ObservationScopeModes default_observation_scope_modes = 15;
+
+  // ExtractionMode picks how retain turns content into facts.
+  enum ExtractionMode {
+    // Not set; inherit, ending at the server default.
+    EXTRACTION_MODE_UNSPECIFIED = 0;
+    // Short, deduplicated facts.
+    EXTRACTION_MODE_CONCISE = 1;
+    // Detailed facts keeping more of the source's wording and context.
+    EXTRACTION_MODE_VERBOSE = 2;
+    // Facts that quote the source verbatim.
+    EXTRACTION_MODE_VERBATIM = 3;
+    // No LLM call: chunks are stored as memories as they are.
+    EXTRACTION_MODE_CHUNKS = 4;
+    // Extraction driven by BankConfig.custom_extraction_prompt.
+    EXTRACTION_MODE_CUSTOM = 5;
+  }
 }
 
 // ObservationConfig tunes consolidation, which turns raw facts into observations per tag scope.
 message ObservationConfig {
   // false = no consolidation at all; unset = inherited.
   optional bool enabled = 1;
-  // Enqueue consolidation automatically after retain, and let the maintenance tick catch up on facts left
+  // Enqueue consolidation automatically after retain, and let periodic maintenance catch up on facts left
   // behind; unset = inherited.
   optional bool auto_consolidation = 2;
   // Mission injected into consolidation prompts; a matching strategy's mission wins.
@@ -2516,12 +2501,12 @@ message ObservationConfig {
   optional int32 source_facts_max_tokens_per_observation = 7;
   // Facts per consolidation LLM call, default 8. A failing batch is halved and retried.
   optional int32 llm_batch_size = 8;
-  // Units one consolidation run takes before the job re-enqueues itself, default 100.
+  // Memories one consolidation run takes before it re-enqueues itself, default 100.
   optional int32 max_units_per_run = 9;
   // Per-scope consolidation strategies; the first whose patterns match a scope wins.
   repeated ConsolidationStrategy strategies = 10;
-  // Seconds a fact may wait unconsolidated before the maintenance tick consolidates its bank, default 600.
-  // Keeps the tick from pre-empting a manual Consolidate after a retain with skip_consolidation.
+  // Seconds a fact may wait unconsolidated before periodic maintenance consolidates its bank, default 600.
+  // Keeps maintenance from pre-empting a manual Consolidate after a retain with skip_consolidation.
   optional int32 reconcile_grace_seconds = 11;
 }
 
@@ -2565,7 +2550,7 @@ message EntityLabel {
   map<string, EntityLabel> fields = 5;
   // Whether a fact may omit the label, default true.
   optional bool optional = 6;
-  // Also copy extracted values into the unit's tags.
+  // Also copy extracted values into the memory's tags.
   bool write_to_tags = 7;
 }
 
@@ -2581,7 +2566,6 @@ message LabelValue {
 // between bank and request in the config hierarchy, and it is the only source of CONSOLIDATE /
 // DEDUP_CHECK overrides for automatic consolidation.
 message ConsolidationStrategy {
-  reserved 7;
   // Strategy name, unique within the list.
   string name = 1;
   // Scope patterns, each a tag filter on the scope's tag set; the strategy applies to a scope matching any
@@ -2598,9 +2582,9 @@ message ConsolidationStrategy {
   // Token budget for the source facts shown per existing observation.
   optional int32 source_facts_max_tokens_per_observation = 6;
   // CONSOLIDATE model for matched scopes; unset = the bank's.
-  ModelBinding consolidate_model = 8;
+  ModelBinding consolidate_model = 7;
   // DEDUP_CHECK model for matched scopes; unset = the bank's.
-  ModelBinding dedup_check_model = 9;
+  ModelBinding dedup_check_model = 8;
 }
 
 // RecallConfig tunes the recall pipeline: the arms, RRF fusion, rerank, boosts and packing.
@@ -2643,6 +2627,16 @@ message RecallConfig {
   optional int32 budget_min = 17;
   // Upper clamp of the adaptive candidate cap, default 2000.
   optional int32 budget_max = 18;
+
+  // BudgetFunction picks how a recall Budget becomes the per-arm candidate cap.
+  enum BudgetFunction {
+    // Not set; inherit, ending at the server default.
+    BUDGET_FUNCTION_UNSPECIFIED = 0;
+    // Use budget_low / budget_mid / budget_high as fixed candidate caps.
+    BUDGET_FUNCTION_FIXED = 1;
+    // Scale the cap with the request's max_tokens, clamped to [budget_min, budget_max].
+    BUDGET_FUNCTION_ADAPTIVE = 2;
+  }
 }
 
 // ReflectConfig tunes reflect: its mission and disposition, and the agent loop.
@@ -2791,7 +2785,7 @@ message ConsolidateOverrides {
   optional int32 source_facts_max_tokens_per_observation = 4;
   // Facts per consolidation LLM call.
   optional int32 llm_batch_size = 5;
-  // Units one consolidation run takes before the job re-enqueues itself.
+  // Memories one consolidation run takes before it re-enqueues itself.
   optional int32 max_units_per_run = 6;
   // Near-duplicate cosine threshold.
   optional double dedup_threshold = 7;
@@ -2903,66 +2897,6 @@ enum RefreshStrategy {
   REFRESH_STRATEGY_SINGLE_SHOT = 2;
 }
 
-// ExtractionMode picks how retain turns content into facts.
-enum ExtractionMode {
-  // Not set; inherit, ending at the server default.
-  EXTRACTION_MODE_UNSPECIFIED = 0;
-  // Short, deduplicated facts.
-  EXTRACTION_MODE_CONCISE = 1;
-  // Detailed facts keeping more of the source's wording and context.
-  EXTRACTION_MODE_VERBOSE = 2;
-  // Facts that quote the source verbatim.
-  EXTRACTION_MODE_VERBATIM = 3;
-  // No LLM call: chunks are stored as units as they are.
-  EXTRACTION_MODE_CHUNKS = 4;
-  // Extraction driven by BankConfig.custom_extraction_prompt.
-  EXTRACTION_MODE_CUSTOM = 5;
-}
-
-// BudgetFunction picks how a recall Budget becomes the per-arm candidate cap.
-enum BudgetFunction {
-  // Not set; inherit, ending at the server default.
-  BUDGET_FUNCTION_UNSPECIFIED = 0;
-  // Use budget_low / budget_mid / budget_high as fixed candidate caps.
-  BUDGET_FUNCTION_FIXED = 1;
-  // Scale the cap with the request's max_tokens, clamped to [budget_min, budget_max].
-  BUDGET_FUNCTION_ADAPTIVE = 2;
-}
-
-// ModelSlot names one model-backed step that can be routed to its own gateway model (see ModelBindings). Usage
-// is recorded per slot.
-enum ModelSlot {
-  reserved 10;
-  reserved "MODEL_SLOT_SYNTHESIZE", "MODEL_SLOT_MENTAL_MODEL_DELTA";
-  // Not set; never recorded in usage.
-  MODEL_SLOT_UNSPECIFIED = 0;
-  // Retain fact, entity and label extraction. Overridable on Retain, ReprocessDocument, UpdateMemory and
-  // RestoreMemory (re-deriving).
-  MODEL_SLOT_EXTRACT = 1;
-  // Relative dates at retain, and query time windows at recall (only when a cue is found and the rules
-  // fail). Overridable on Retain, Recall, ReprocessDocument, UpdateMemory and RestoreMemory.
-  MODEL_SLOT_TIME_PARSE = 2;
-  // Create / update / none decisions per observation scope. Overridable on a manual Consolidate request
-  // or the matching consolidation strategy, never by the retain that triggered the consolidation.
-  MODEL_SLOT_CONSOLIDATE = 3;
-  // Merge-or-keep check for near-duplicate observations. Overridable like MODEL_SLOT_CONSOLIDATE.
-  MODEL_SLOT_DEDUP_CHECK = 4;
-  // Tool-calling turns of the reflect loop and of agentic mental-model refresh. Overridable on Reflect and
-  // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
-  MODEL_SLOT_REFLECT = 5;
-  // Second pass projecting prose into a JSON Schema (response_schema_json). Overridable on Reflect and
-  // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
-  MODEL_SLOT_STRUCTURED_OUTPUT = 6;
-  // Single-shot mental-model refresh: the full page synthesis and the delta edit ops. Overridable on
-  // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
-  MODEL_SLOT_MENTAL_MODEL = 7;
-  // Cross-encoder scores in recall. Overridable on Recall and Reflect.
-  MODEL_SLOT_RERANK = 8;
-  // Embeddings of units, observations, queries and pages. Bound only in the server config file (one vector
-  // space per database, 768 dimensions).
-  MODEL_SLOT_EMBED = 9;
-}
-
 // OperationKind is the job type of an operation.
 enum OperationKind {
   // Not set; in ListOperations it means no kind filter.
@@ -2971,17 +2905,17 @@ enum OperationKind {
   OPERATION_KIND_RETAIN_BATCH = 1;
   // Extract, embed, resolve and link one document; resumes by chunk hash; enqueues consolidation.
   OPERATION_KIND_RETAIN_DOCUMENT = 2;
-  // Consolidate the bank's oldest unconsolidated units into observations; one at a time per bank.
+  // Consolidate the bank's oldest unconsolidated memories into observations; one at a time per bank.
   OPERATION_KIND_CONSOLIDATE = 3;
-  // Re-embed, re-resolve and re-link a curated unit, then enqueue consolidation.
+  // Re-embed, re-resolve and re-link a curated memory, then enqueue consolidation.
   OPERATION_KIND_REDERIVE_MEMORY = 4;
-  // Rewrite a document's unit tags, clear their observations and enqueue consolidation.
+  // Rewrite a document's memory tags, clear their observations and enqueue consolidation.
   OPERATION_KIND_RETAG_DOCUMENT = 5;
   // Refresh one mental model (agentic or single-shot, delta or full) and write a version.
   OPERATION_KIND_REFRESH_MENTAL_MODEL = 6;
-  // Refill links of neighbours of removed units and prune orphaned entities; one at a time per bank.
+  // Refill links of neighbours of removed memories and prune orphaned entities; one at a time per bank.
   OPERATION_KIND_GRAPH_MAINTENANCE = 7;
-  // Delete all of a tombstoned bank's rows and blobs, then the bank row.
+  // Delete everything the bank holds, then the bank itself.
   OPERATION_KIND_DELETE_BANK = 8;
 }
 
@@ -2991,7 +2925,7 @@ enum OperationStatus {
   OPERATION_STATUS_UNSPECIFIED = 0;
   // Queued, possibly parked until next_run_at.
   OPERATION_STATUS_PENDING = 1;
-  // Claimed by a worker, which heartbeats it; reclaimed to PENDING if the worker stops heartbeating.
+  // Running; if the server running it stops reporting progress, it goes back to PENDING.
   OPERATION_STATUS_PROCESSING = 2;
   // Finished successfully. Terminal; pruned after the retention period.
   OPERATION_STATUS_COMPLETED = 3;
@@ -3006,7 +2940,7 @@ enum OperationStatus {
 enum EventType {
   // Not set; never stored. In a ListEvents filter it is ignored.
   EVENT_TYPE_UNSPECIFIED = 0;
-  // A document's retain finished and its units are committed.
+  // A document's retain finished and its memories are committed.
   EVENT_TYPE_RETAIN_COMPLETED = 1;
   // A consolidation run finished writing observations.
   EVENT_TYPE_CONSOLIDATION_COMPLETED = 2;

@@ -151,7 +151,7 @@ func enqueueRetagJob(
 // (domain.ErrBankDeleting) fails from Tx.Seq, and an error after ctx ended is domain.ErrCancelled. It never
 // creates a bank. Running it twice repeats only the stamp reset.
 func (s *Service) RunRetagJob(ctx context.Context, run *jobs.Run) error {
-	p := domain.Progress{Stage: string(run.Job.Kind), At: s.d.Clock.Now(), Total: 1}
+	p := domain.Progress{Stage: string(run.Job.Kind), RecordedAt: s.d.Clock.Now(), Total: 1}
 	if err := run.Report(ctx, p); err != nil {
 		return fmt.Errorf("%s: checkpoint: %w", run.Job.Kind, err)
 	}

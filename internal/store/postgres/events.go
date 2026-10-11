@@ -23,7 +23,7 @@ func (r *eventRepo) Append(ctx context.Context, e domain.LifecycleEvent) error {
 		return err
 	}
 	err = r.q.EventAppend(ctx, db.EventAppendParams{
-		TenantID: e.Bank.Tenant, BankID: e.Bank.Bank, Seq: e.Seq, Type: string(e.Type), At: orNow(e.At),
+		TenantID: e.Bank.Tenant, BankID: e.Bank.Bank, Seq: e.Seq, Type: string(e.Type), At: orNow(e.CreatedAt),
 		OperationID: op, SubjectID: e.SubjectID,
 	})
 	return mapErr("append event", err)
@@ -66,7 +66,7 @@ func eventOf(b domain.BankRef, row db.EventListRow) domain.LifecycleEvent {
 		OperationID: nullIDOf[domain.OperationID](row.EventOperationID), SubjectID: textOf[string](row.EventSubjectID),
 	}
 	if row.EventAt != nil {
-		e.At = *row.EventAt
+		e.CreatedAt = *row.EventAt
 	}
 	return e
 }

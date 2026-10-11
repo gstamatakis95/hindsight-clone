@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// refreshSettings is the JSON of the trigger column: the spec fields that have no column of their own (the
+// refreshSettings is the JSON of the refresh_settings column: the spec fields that have no column of their own (the
 // schedule, the scope and the run settings).
 type refreshSettings struct {
 	Schedule              domain.RefreshSchedule  `json:"schedule,omitzero"`
@@ -42,11 +42,11 @@ func (r refreshSettings) apply(s *domain.MentalModelSpec) {
 	s.ResponseSchemaJSON, s.KeepTrace = r.ResponseSchemaJSON, r.KeepTrace
 }
 
-// modelParams maps a mental model onto its columns: the spec's refreshSettings (in the trigger column) and
+// modelParams maps a mental model onto its columns: the spec's refreshSettings (in the refresh_settings column) and
 // overrides become JSON, refresh_cron mirrors schedule.cron, and empty optional values become NULL. Stale is not
 // stored (readers compute it). A malformed source id is domain.ErrInvalidArgument.
 func modelParams(m domain.MentalModel) (db.MentalModelCreateParams, error) {
-	trigger, err := marshal("mental model settings", settingsOf(m.Spec))
+	settings, err := marshal("mental model settings", settingsOf(m.Spec))
 	if err != nil {
 		return db.MentalModelCreateParams{}, err
 	}
@@ -74,7 +74,7 @@ func modelParams(m domain.MentalModel) (db.MentalModelCreateParams, error) {
 	return db.MentalModelCreateParams{
 		TenantID: m.Bank.Tenant, BankID: m.Bank.Bank, ID: string(m.Spec.ID), Name: m.Spec.Name,
 		SourceQuery: m.Spec.SourceQuery, FolderPath: m.Spec.FolderPath, Tags: tagsOrEmpty(m.Spec.Tags),
-		MaxTokens: maxTokens, Trigger: trigger, Overrides: overrides, ContentMd: m.ContentMD,
+		MaxTokens: maxTokens, RefreshSettings: settings, Overrides: overrides, ContentMd: m.ContentMD,
 		StructuredOutputJson: structured, Version: m.Version, LastRefreshedAt: m.LastRefreshedAt,
 		LastSeqSeen: m.LastSeqSeen, LastRefreshFailedAt: m.LastRefreshFailedAt, AutoRefreshPaused: m.AutoRefreshPaused,
 		SourceIds: sources, LastTrace: trace, Embedding: vec(m.Embedding), RefreshCron: textPtr(m.Spec.Schedule.Cron),
@@ -113,7 +113,7 @@ func modelOf(r db.MentalModel) (domain.MentalModel, error) {
 		m.Spec.MaxTokens = &v
 	}
 	var settings refreshSettings
-	if err := unmarshal("mental model settings", r.Trigger, &settings); err != nil {
+	if err := unmarshal("mental model settings", r.RefreshSettings, &settings); err != nil {
 		return domain.MentalModel{}, err
 	}
 	settings.apply(&m.Spec)

@@ -83,7 +83,7 @@ func (s *singleShot) recall(
 ) ([]domain.Unit, error) {
 	scope := resolveScope(m)
 	req := recall.Request{
-		Bank: m.Bank, Query: m.Spec.SourceQuery, Types: scope.FactTypes, Tags: scope.tagFilter(),
+		Bank: m.Bank, Query: m.Spec.SourceQuery, FactTypes: scope.FactTypes, Tags: scope.tagFilter(),
 		Budget: budget(m), PreferObservations: true, Overrides: &cfg, Seq: window,
 	}
 	if cfg.Reflect != nil && cfg.Reflect.RecallMaxTokens != nil {

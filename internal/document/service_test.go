@@ -78,7 +78,7 @@ func TestGetDocument(t *testing.T) {
 	}
 	s := document.New(document.Deps{DB: f.store, Blob: blob, Clock: f.clock})
 	v, err := s.GetDocument(ctx, testBank, "d1", false)
-	if err != nil || v.Document.ID != "d1" || v.OriginalText != "" || v.Document.UnitCount != 2 {
+	if err != nil || v.Document.ID != "d1" || v.OriginalText != "" || v.Document.MemoryCount != 2 {
 		t.Fatalf("GetDocument without text = %+v, %v", v, err)
 	}
 	if v, err = s.GetDocument(ctx, testBank, "d1", true); err != nil || v.OriginalText != "hello world" {

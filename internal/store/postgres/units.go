@@ -120,7 +120,7 @@ func (r *unitRepo) RecordObservationVersion(
 	}
 	err = r.q.UnitRecordObservationVersion(ctx, db.UnitRecordObservationVersionParams{
 		TenantID: b.Tenant, BankID: b.Bank, ObservationID: id, Version: v.Version, Text: v.Text,
-		SourceIds: parseIDs(v.SourceIDs), At: orNow(v.At),
+		SourceIds: parseIDs(v.SourceFactIDs), At: orNow(v.CreatedAt),
 	})
 	return mapErr("record observation version", err)
 }

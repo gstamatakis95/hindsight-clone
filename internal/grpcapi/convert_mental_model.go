@@ -141,7 +141,7 @@ func historyEntryToProto(e domain.MentalModelHistoryEntry) *pb.MentalModelHistor
 	return &pb.MentalModelHistoryEntry{
 		Kind:            toEnum[pb.MentalModelHistoryEntry_Kind](e.Kind),
 		PreviousContent: e.PreviousContent,
-		CreatedAt:       tsToProto(e.ChangedAt),
+		CreatedAt:       tsToProto(e.CreatedAt),
 		Outcome:         toEnum[pb.RefreshOutcome](e.Outcome),
 		FailureReason:   e.FailureReason,
 		ErrorMessage:    e.ErrorMessage,
@@ -211,8 +211,8 @@ func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (mentalmodel.Refre
 }
 
 // searchFromProto converts a SearchMentalModelsRequest; Bank.Bank carries bank_id.
-func searchFromProto(r *pb.SearchMentalModelsRequest) recall.SearchPagesRequest {
-	return recall.SearchPagesRequest{
+func searchFromProto(r *pb.SearchMentalModelsRequest) recall.SearchMentalModelsRequest {
+	return recall.SearchMentalModelsRequest{
 		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		Query:        r.GetQuery(),
 		FolderPrefix: r.GetFolderPrefix(),
@@ -220,8 +220,8 @@ func searchFromProto(r *pb.SearchMentalModelsRequest) recall.SearchPagesRequest 
 	}
 }
 
-// hitToProto converts a PageHit.
-func hitToProto(h domain.PageHit) *pb.MentalModelHit {
+// hitToProto converts a MentalModelHit.
+func hitToProto(h domain.MentalModelHit) *pb.MentalModelHit {
 	return &pb.MentalModelHit{
 		MentalModelId: string(h.MentalModelID),
 		FolderPath:    h.FolderPath,
@@ -232,7 +232,7 @@ func hitToProto(h domain.PageHit) *pb.MentalModelHit {
 }
 
 // hitsToProto converts search hits; nil stays nil.
-func hitsToProto(in []domain.PageHit) []*pb.MentalModelHit {
+func hitsToProto(in []domain.MentalModelHit) []*pb.MentalModelHit {
 	if in == nil {
 		return nil
 	}

@@ -67,7 +67,7 @@ LIMIT @lim::int;
 SELECT * FROM mental_models
 WHERE tenant_id = @tenant_id AND bank_id = @bank_id
   AND (@folder::text = '' OR folder_path = @folder::text OR folder_path LIKE @folder_like::text)
-  AND (NOT @refresh_after::bool OR COALESCE((trigger -> 'schedule' ->> 'after_consolidation')::boolean, false))
+  AND (NOT @refresh_after::bool OR COALESCE((refresh_settings -> 'schedule' ->> 'after_consolidation')::boolean, false))
   AND (@after_id::text = '' OR id COLLATE "C" > @after_id::text)
   AND (CASE @tags_match::text
       WHEN 'exact' THEN tags @> @filter_tags::text[] AND tags <@ @filter_tags::text[]

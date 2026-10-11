@@ -99,7 +99,7 @@ func unitListParams(q store.UnitQuery) (db.ReadsListUnitsParams, error) {
 	for _, t := range q.Types {
 		p.Types = append(p.Types, string(t))
 	}
-	p.TextLike = containsPattern(q.Q)
+	p.TextLike = containsPattern(q.TextContains)
 	p.DocumentID = textPtr(q.DocumentID)
 	p.StartAt, p.EndAt = q.Start, q.End
 	p.TagsMatch, p.FilterTags = tagFilterArgs(q.Tags, q.TagsMatch)

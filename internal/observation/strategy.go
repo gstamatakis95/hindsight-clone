@@ -35,7 +35,7 @@ type StrategyMatch struct {
 func (s *Service) PreviewConsolidationStrategies(
 	ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy,
 ) (StrategyPreview, error) {
-	infos, err := s.d.DB.Read().ListScopes(ctx, b, "", previewScopeLimit+1)
+	infos, err := s.d.DB.Read().ListObservationScopes(ctx, b, "", previewScopeLimit+1)
 	if err != nil {
 		return StrategyPreview{}, fmt.Errorf("consolidate: list scopes: %w", err)
 	}

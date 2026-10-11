@@ -41,7 +41,7 @@
 //
 // [ServerDefaults](file) merges the server config file's defaults block over the defaults the spec states:
 //
-//   - retain: extraction_mode concise, entities_allow_free_form true, default_observation_scopes combined
+//   - retain: extraction_mode concise, entities_allow_free_form true, default_observation_scope_modes combined
 //     with max_combinations 15, temporal_link_cap 20, entity_match_threshold 0.6;
 //   - observations: enabled and auto_consolidation true, dedup_threshold 0.97, llm_batch_size 8,
 //     source_facts_max_tokens_per_observation 256, max_units_per_run 100, reconcile_grace_seconds 600;

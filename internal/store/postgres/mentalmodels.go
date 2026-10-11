@@ -45,8 +45,9 @@ func (r *mentalModelRepo) Update(ctx context.Context, m domain.MentalModel) erro
 	}
 	n, err := r.q.MentalModelUpdate(ctx, db.MentalModelUpdateParams{
 		Name: p.Name, SourceQuery: p.SourceQuery, FolderPath: p.FolderPath, Tags: p.Tags, MaxTokens: p.MaxTokens,
-		Trigger: p.Trigger, Overrides: p.Overrides, ContentMd: p.ContentMd, StructuredOutputJson: p.StructuredOutputJson,
-		Version: p.Version, LastRefreshedAt: p.LastRefreshedAt, LastSeqSeen: p.LastSeqSeen,
+		RefreshSettings: p.RefreshSettings, Overrides: p.Overrides, ContentMd: p.ContentMd,
+		StructuredOutputJson: p.StructuredOutputJson,
+		Version:              p.Version, LastRefreshedAt: p.LastRefreshedAt, LastSeqSeen: p.LastSeqSeen,
 		LastRefreshFailedAt: p.LastRefreshFailedAt, AutoRefreshPaused: p.AutoRefreshPaused, SourceIds: p.SourceIds,
 		LastTrace: p.LastTrace, Embedding: p.Embedding, RefreshCron: p.RefreshCron,
 		TenantID: p.TenantID, BankID: p.BankID, ID: p.ID,
@@ -72,7 +73,7 @@ func (r *mentalModelRepo) AppendHistory(
 	err := r.q.MentalModelAppendHistory(ctx, db.MentalModelAppendHistoryParams{
 		TenantID: b.Tenant, BankID: b.Bank, MentalModelID: string(id), Kind: string(e.Kind), Version: version,
 		PreviousContent: e.PreviousContent, Outcome: string(e.Outcome), FailureReason: e.FailureReason,
-		ErrorMessage: e.ErrorMessage, ChangedAt: orNow(e.ChangedAt),
+		ErrorMessage: e.ErrorMessage, ChangedAt: orNow(e.CreatedAt),
 	})
 	if err != nil {
 		return mapErr(fmt.Sprintf("append history of mental model %s", id), err)
@@ -100,7 +101,7 @@ func (r *mentalModelRepo) History(
 	out := make([]domain.MentalModelHistoryEntry, len(rows))
 	for i, row := range rows {
 		out[i] = domain.MentalModelHistoryEntry{
-			Kind: domain.HistoryKind(row.Kind), PreviousContent: row.PreviousContent, ChangedAt: row.ChangedAt,
+			Kind: domain.HistoryKind(row.Kind), PreviousContent: row.PreviousContent, CreatedAt: row.ChangedAt,
 			Outcome: domain.RefreshOutcome(row.Outcome), FailureReason: row.FailureReason, ErrorMessage: row.ErrorMessage,
 		}
 		if row.Version != nil {

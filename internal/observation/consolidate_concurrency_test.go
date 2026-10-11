@@ -15,7 +15,9 @@ import (
 // perTag is a bank config fanning units out one scope per tag.
 func perTag() domain.BankConfig {
 	return domain.BankConfig{
-		Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+		Retain: &domain.RetainConfig{
+			DefaultObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModePerTag},
+		},
 	}
 }
 
@@ -233,7 +235,7 @@ func TestRunDoubleUpdateLeavesBatchUnstamped(t *testing.T) {
 	}
 }
 
-// TestRunItemScopesBeatOverrides: a document's item-level observation_scopes (Document.ObservationScopes,
+// TestRunItemScopesBeatOverrides: a document's item-level observation_scopes (Document.ObservationScopeModes,
 // stored by DocumentRepo.Upsert) beat its overrides' default.
 func TestRunItemScopesBeatOverrides(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
@@ -241,9 +243,11 @@ func TestRunItemScopesBeatOverrides(t *testing.T) {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
 			Overrides: &domain.BankConfig{
-				Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+				Retain: &domain.RetainConfig{
+					DefaultObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModePerTag},
+				},
 			},
-			ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared},
+			ObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModeShared},
 		})
 	})
 	e.texts["f1"] = "Ivy hikes"
@@ -281,7 +285,7 @@ func TestRunVersionsAndQuotesRecorded(t *testing.T) {
 	e.run(autoJob())
 	var got []string
 	for _, v := range rec.versions {
-		got = append(got, fmt.Sprintf("%d|%s|%s", v.Version, v.Text, idsString(v.SourceIDs)))
+		got = append(got, fmt.Sprintf("%d|%s|%s", v.Version, v.Text, idsString(v.SourceFactIDs)))
 	}
 	want := []string{"2|Bob plays chess every Sunday|f0,f1", "1|Carol bakes bread|f2"}
 	if !slices.Equal(got, want) {

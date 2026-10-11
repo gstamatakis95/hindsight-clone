@@ -6,7 +6,8 @@
 // reflect is a library: it imports domain, the store and ai boundaries, config, prompts, jsonschema and recall and
 // never a service, an adapter, gen, pgx, net/http, the S3 SDK or Datadog (depguard). cmd/memd/wire.go builds one
 // [Agent] with [New]; the agent builds its tools from the *recall.Engine (recall, search_observations, and the page
-// tools over recall's SearchPages and ReadPages) and the store's reader (expand). The Reflect RPC and the agentic
+// tools over recall's SearchMentalModels and ReadPages) and the store's reader (expand). The Reflect RPC and the
+// agentic
 // mental-model synthesizer call [Agent.Reflect]; the refresh runner calls [Agent.Project].
 //
 // # Flow of Reflect

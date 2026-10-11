@@ -56,7 +56,7 @@ func (q *Queries) MentalModelAppendHistory(ctx context.Context, arg MentalModelA
 
 const mentalModelCreate = `-- name: MentalModelCreate :exec
 INSERT INTO mental_models (
-    tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md,
+    tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md,
     structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at,
     auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron
 ) VALUES (
@@ -75,7 +75,7 @@ type MentalModelCreateParams struct {
 	FolderPath           string
 	Tags                 []string
 	MaxTokens            *int32
-	Trigger              json.RawMessage
+	RefreshSettings      json.RawMessage
 	Overrides            json.RawMessage
 	ContentMd            string
 	StructuredOutputJson json.RawMessage
@@ -101,7 +101,7 @@ func (q *Queries) MentalModelCreate(ctx context.Context, arg MentalModelCreatePa
 		arg.FolderPath,
 		arg.Tags,
 		arg.MaxTokens,
-		arg.Trigger,
+		arg.RefreshSettings,
 		arg.Overrides,
 		arg.ContentMd,
 		arg.StructuredOutputJson,
@@ -138,7 +138,7 @@ func (q *Queries) MentalModelDelete(ctx context.Context, arg MentalModelDeletePa
 }
 
 const mentalModelGet = `-- name: MentalModelGet :one
-SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
 `
 
 type MentalModelGetParams struct {
@@ -160,7 +160,7 @@ func (q *Queries) MentalModelGet(ctx context.Context, arg MentalModelGetParams) 
 		&i.FolderPath,
 		&i.Tags,
 		&i.MaxTokens,
-		&i.Trigger,
+		&i.RefreshSettings,
 		&i.Overrides,
 		&i.ContentMd,
 		&i.StructuredOutputJson,
@@ -270,7 +270,7 @@ func (q *Queries) MentalModelTrimHistory(ctx context.Context, arg MentalModelTri
 const mentalModelUpdate = `-- name: MentalModelUpdate :execrows
 UPDATE mental_models SET
     name = $1, source_query = $2, folder_path = $3, tags = $4,
-    max_tokens = $5, trigger = $6, overrides = $7, content_md = $8,
+    max_tokens = $5, refresh_settings = $6, overrides = $7, content_md = $8,
     structured_output_json = $9, version = $10, last_refreshed_at = $11,
     last_seq_seen = $12, last_refresh_failed_at = $13,
     auto_refresh_paused = $14, source_ids = $15, last_trace = $16,
@@ -284,7 +284,7 @@ type MentalModelUpdateParams struct {
 	FolderPath           string
 	Tags                 []string
 	MaxTokens            *int32
-	Trigger              json.RawMessage
+	RefreshSettings      json.RawMessage
 	Overrides            json.RawMessage
 	ContentMd            string
 	StructuredOutputJson json.RawMessage
@@ -310,7 +310,7 @@ func (q *Queries) MentalModelUpdate(ctx context.Context, arg MentalModelUpdatePa
 		arg.FolderPath,
 		arg.Tags,
 		arg.MaxTokens,
-		arg.Trigger,
+		arg.RefreshSettings,
 		arg.Overrides,
 		arg.ContentMd,
 		arg.StructuredOutputJson,

@@ -172,7 +172,9 @@ func TestRunEmptyPayloadDisabledAndBadPayload(t *testing.T) {
 // belongs to before stamping it.
 func TestRunManualScopes(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{
-		Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+		Retain: &domain.RetainConfig{
+			DefaultObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModePerTag},
+		},
 	})
 	e.fact("f1", "Gina codes", "a", "b")
 	e.fact("f2", "Hank reads", "c")
@@ -198,7 +200,9 @@ func TestRunDocumentScopeMode(t *testing.T) {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
 			Overrides: &domain.BankConfig{
-				Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared}},
+				Retain: &domain.RetainConfig{
+					DefaultObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModeShared},
+				},
 			},
 		})
 	})

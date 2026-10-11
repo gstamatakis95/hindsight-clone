@@ -382,7 +382,7 @@ func (c *curator) event(
 	ctx context.Context, tx store.Tx, b domain.BankRef, seq int64, id domain.UnitID, op domain.OperationID,
 ) error {
 	return tx.Events().Append(ctx, domain.LifecycleEvent{
-		Seq: seq, Type: domain.EventTypeMemoryCurated, Bank: b, At: c.d.Clock.Now(), OperationID: op,
+		Seq: seq, Type: domain.EventTypeMemoryCurated, Bank: b, CreatedAt: c.d.Clock.Now(), OperationID: op,
 		SubjectID: string(id),
 	})
 }

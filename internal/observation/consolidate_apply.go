@@ -217,7 +217,7 @@ func writeObservation(
 	if err := tx.Evidence().Add(ctx, obs.ID, a.Evidence); err != nil {
 		return fmt.Errorf("evidence of %s: %w", obs.ID, err)
 	}
-	v := domain.ObservationVersion{Version: obs.Version, Text: obs.Text, SourceIDs: sources, At: now}
+	v := domain.ObservationVersion{Version: obs.Version, Text: obs.Text, SourceFactIDs: sources, CreatedAt: now}
 	if err := tx.Units().RecordObservationVersion(ctx, obs.Bank, obs.ID, v); err != nil {
 		return fmt.Errorf("version of %s: %w", obs.ID, err)
 	}

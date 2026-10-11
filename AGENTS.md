@@ -22,7 +22,7 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
   kind's payload, serial key and Enqueue helper.
 - Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, Arms, CheckArms, CompileTags,
-  SearchPages, ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking
+  SearchMentalModels, ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking
   (Linker, Resolver, LabelResolver). Recall arms are the one extension point inside a library: the recall.Arm
   interface, the built-in vector, text, graph and temporal arms in internal/recall/arms (one file each), and their
   contract suite in internal/recall/armtest.

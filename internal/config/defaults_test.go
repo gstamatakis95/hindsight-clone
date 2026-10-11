@@ -45,7 +45,7 @@ func TestServerDefaults(t *testing.T) {
 		"debounce 30":           *cfg.MentalModels.RefreshDebounceSeconds == 30,
 		"history 50":            *cfg.MentalModels.HistoryMaxEntries == 50,
 		"agentic":               cfg.MentalModels.DefaultStrategy == domain.RefreshStrategyAgentic,
-		"max combinations 15":   *cfg.Retain.DefaultObservationScopes.MaxCombinations == 15,
+		"max combinations 15":   *cfg.Retain.DefaultObservationScopeModes.MaxCombinations == 15,
 	}
 	for name, ok := range checks {
 		if !ok {

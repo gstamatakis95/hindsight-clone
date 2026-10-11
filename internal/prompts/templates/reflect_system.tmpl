@@ -87,12 +87,12 @@ You have access to ONE level of knowledge:
 - HIGHEST quality - manually created and maintained
 - Search returns the best match in full and a SNIPPET of the others{{if .ReadMentalModels}}; call read_mental_models on any id whose snippet looks like it answers the question, and read it before answering from it{{end}}
 - A FRESH mental model may fully answer the question — but only if it actually STATES the answer. One that shares the question's topic without stating the answer (e.g. it describes a process, or names the thing without its status) has not answered it: go to the next level
-- Check `is_stale` field - if stale, also verify with lower levels
+- Check `stale` field - if stale, also verify with lower levels
 {{end}}
 {{- if .Observations}}{{$level = add $level 1}}
 ### {{$level}}. OBSERVATIONS (search_observations){{if .SearchMentalModels}} - Second Priority{{else}} - Try First{{end}}
 - Auto-consolidated knowledge from memories
-- Check `is_stale` field - if stale{{if .Recall}}, ALSO use recall() to verify{{else}}, say so in the answer{{end}}
+- Check `stale` field - if stale{{if .Recall}}, ALSO use recall() to verify{{else}}, say so in the answer{{end}}
 - Good for understanding patterns and summaries
 {{end}}
 {{- if .Recall}}{{$level = add $level 1}}

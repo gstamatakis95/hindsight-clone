@@ -167,7 +167,7 @@ func (e *env) claimRetain() store.Job {
 	return jobs[0]
 }
 
-// document reads a document (with UnitCount filled).
+// document reads a document (with MemoryCount filled).
 func (e *env) document(id domain.DocumentID) domain.Document {
 	e.t.Helper()
 	var d domain.Document

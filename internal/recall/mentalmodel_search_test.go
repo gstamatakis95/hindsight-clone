@@ -36,24 +36,27 @@ func TestSearchPages(t *testing.T) {
 	e.addPage(t, "hiring", "people", "Hiring", "# Hiring\n\nInterviews take two rounds.", true)
 	e.addPage(t, "oncall", "ops", "On-call", "# On-call\n\nThe on-call rotation is weekly.", true)
 	ctx := context.Background()
-	hits, err := e.rc.SearchPages(ctx, SearchPagesRequest{Bank: testBank, Query: "how do we deploy?"})
+	hits, err := e.rc.SearchMentalModels(ctx, SearchMentalModelsRequest{Bank: testBank, Query: "how do we deploy?"})
 	if err != nil || len(hits) == 0 || hits[0].MentalModelID != "deploy" ||
 		hits[0].Snippet != "We deploy with Argo every Tuesday." {
 		t.Fatalf("hits %+v %v", hits, err)
 	}
-	hits, _ = e.rc.SearchPages(ctx, SearchPagesRequest{Bank: testBank, Query: "interviews", FolderPrefix: "ops"})
+	hits, _ = e.rc.SearchMentalModels(ctx, SearchMentalModelsRequest{
+		Bank: testBank, Query: "interviews",
+		FolderPrefix: "ops",
+	})
 	for _, h := range hits {
 		if h.FolderPath != "ops" {
 			t.Fatalf("folder filter leaked %+v", h)
 		}
 	}
-	if _, err := e.rc.SearchPages(ctx, SearchPagesRequest{Bank: testBank, Query: " ? "}); !errors.Is(err,
+	if _, err := e.rc.SearchMentalModels(ctx, SearchMentalModelsRequest{Bank: testBank, Query: " ? "}); !errors.Is(err,
 		domain.ErrInvalidArgument) {
 		t.Fatalf("empty query: %v", err)
 	}
 	down := e.deps
 	down.Embedder = downEmbedder{}
-	hits, err = New(down).SearchPages(ctx, SearchPagesRequest{Bank: testBank, Query: "how do we deploy?"})
+	hits, err = New(down).SearchMentalModels(ctx, SearchMentalModelsRequest{Bank: testBank, Query: "how do we deploy?"})
 	if err != nil || len(hits) != 1 || hits[0].MentalModelID != "deploy" {
 		t.Fatalf("embedder down: hits %+v: %v", hits, err)
 	}

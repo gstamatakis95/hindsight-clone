@@ -54,7 +54,7 @@
 //
 // # retain_document
 //
-// [Service.RunRetainJob] runs the retainer and records its result (document_id, units_created, unchanged,
+// [Service.RunRetainJob] runs the retainer and records its result (document_id, memories_created, unchanged,
 // superseded, chunks_total, chunks_skipped) and EXTRACT usage on the jobs.Run. The retainer:
 //
 //  1. Decodes the payload and resolves the effective config with the job's overrides.

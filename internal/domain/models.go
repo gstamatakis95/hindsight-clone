@@ -3,7 +3,7 @@ package domain
 // ModelSlot names one model-backed step; each slot binds to its own gateway model and parameters.
 type ModelSlot string
 
-// Model slots, mirroring memory.v1.ModelSlot.
+// Model slots, mirroring memory.v1.SlotUsage.ModelSlot.
 const (
 	// ModelSlotUnspecified is the zero value.
 	ModelSlotUnspecified ModelSlot = ""

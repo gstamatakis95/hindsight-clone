@@ -85,8 +85,8 @@ DOCUMENTS = [
         extracted_at   timestamptz NULL,
         created_at     timestamptz NOT NULL DEFAULT now(),
         updated_at     timestamptz NOT NULL DEFAULT now(),
-        -- The retain item's observation scopes; NULL = the item set none.
-        observation_scopes jsonb   NULL,
+        -- The retain item's observation scope modes; NULL = the item set none.
+        observation_scope_modes jsonb NULL,
         PRIMARY KEY (tenant_id, bank_id, id),
         FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE
     )
@@ -279,7 +279,7 @@ OBSERVATIONS = [
     )
     """,
     "CREATE INDEX observation_evidence_unit_idx ON observation_evidence (unit_id)",
-    # The scopes (canonical tag sets) a bank has observations in, for ListScopes.
+    # The scopes (canonical tag sets) a bank has observations in, for ListObservationScopes.
     """
     CREATE TABLE observation_scopes (
         tenant_id  text        NOT NULL,
@@ -377,7 +377,7 @@ MENTAL_MODELS = [
         tags                   text[]      NOT NULL DEFAULT '{}',
         max_tokens             integer     NULL,
         -- The spec's schedule, scope and run settings (the spec fields without a column of their own).
-        trigger                jsonb       NOT NULL DEFAULT '{}',
+        refresh_settings         jsonb       NOT NULL DEFAULT '{}',
         overrides              jsonb       NULL,
         content_md             text        NOT NULL DEFAULT '',
         structured_output_json jsonb       NULL,
@@ -391,7 +391,7 @@ MENTAL_MODELS = [
         source_ids             uuid[]      NOT NULL DEFAULT '{}',
         last_trace             jsonb       NULL,
         embedding              vector(768) NULL,
-        -- Copy of trigger.schedule.cron, so the cron tick can use an index.
+        -- Copy of refresh_settings.schedule.cron, so the cron tick can use an index.
         refresh_cron           text        NULL,
         created_at             timestamptz NOT NULL DEFAULT now(),
         updated_at             timestamptz NOT NULL DEFAULT now(),

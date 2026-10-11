@@ -31,8 +31,8 @@ func (f fixture) seedRetained(t *testing.T) {
 	tx(func(tx store.Tx) error {
 		return tx.Documents().Upsert(ctx, domain.Document{
 			ID: "r1", Bank: testBank, Tags: []string{"a"}, BlobKey: blob.Key(testBank, "r1", "hash1"),
-			ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag},
-			Overrides:         &domain.BankConfig{Retain: &domain.RetainConfig{Mission: "stored"}},
+			ObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModePerTag},
+			Overrides:             &domain.BankConfig{Retain: &domain.RetainConfig{Mission: "stored"}},
 		})
 	})
 	at := reprocessAt
@@ -112,7 +112,7 @@ func TestReprocessDocument(t *testing.T) {
 func checkReprocessPayload(t *testing.T, p jobs.RetainPayload) {
 	t.Helper()
 	if !p.ForceReextract || p.ContentHash != "hash1" || p.BlobKey != blob.Key(testBank, "r1", "hash1") ||
-		p.ObservationScopes == nil || p.ObservationScopes.Mode != domain.ScopeModePerTag || len(p.Tags) != 1 {
+		p.ObservationScopeModes == nil || p.ObservationScopeModes.Mode != domain.ScopeModePerTag || len(p.Tags) != 1 {
 		t.Errorf("payload %+v, want forced, the stored text and per_tag scopes", p)
 	}
 	if p.Context != "chat" || p.Timeless || p.Metadata["k"] != "v" || p.Timestamp == nil ||
@@ -141,7 +141,7 @@ func checkNewOverrides(t *testing.T, f fixture, s *document.Service) {
 		t.Fatal(err)
 	}
 	if d.Overrides.GetRetain().Mission != "new" || j.Overrides.GetRetain().Mission != "new" ||
-		d.ObservationScopes == nil || d.ObservationScopes.Mode != domain.ScopeModePerTag {
+		d.ObservationScopeModes == nil || d.ObservationScopeModes.Mode != domain.ScopeModePerTag {
 		t.Errorf("new overrides: document %+v, job overrides %+v", d, j.Overrides)
 	}
 }

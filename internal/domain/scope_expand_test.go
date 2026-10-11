@@ -12,32 +12,32 @@ func TestExpandScopesModes(t *testing.T) {
 	tests := []struct {
 		name string
 		tags []string
-		mode ObservationScopes
+		mode ObservationScopeModes
 		want [][]string
 	}{
-		{"unspecified is combined", tags, ObservationScopes{}, [][]string{{"a", "b", "c"}}},
-		{"combined", tags, ObservationScopes{Mode: ScopeModeCombined}, [][]string{{"a", "b", "c"}}},
-		{"combined untagged", nil, ObservationScopes{Mode: ScopeModeCombined}, [][]string{{}}},
-		{"shared", tags, ObservationScopes{Mode: ScopeModeShared}, [][]string{{}}},
-		{"per_tag", tags, ObservationScopes{Mode: ScopeModePerTag}, [][]string{{"a"}, {"b"}, {"c"}}},
-		{"per_tag untagged", nil, ObservationScopes{Mode: ScopeModePerTag}, [][]string{{}}},
+		{"unspecified is combined", tags, ObservationScopeModes{}, [][]string{{"a", "b", "c"}}},
+		{"combined", tags, ObservationScopeModes{Mode: ScopeModeCombined}, [][]string{{"a", "b", "c"}}},
+		{"combined untagged", nil, ObservationScopeModes{Mode: ScopeModeCombined}, [][]string{{}}},
+		{"shared", tags, ObservationScopeModes{Mode: ScopeModeShared}, [][]string{{}}},
+		{"per_tag", tags, ObservationScopeModes{Mode: ScopeModePerTag}, [][]string{{"a"}, {"b"}, {"c"}}},
+		{"per_tag untagged", nil, ObservationScopeModes{Mode: ScopeModePerTag}, [][]string{{}}},
 		{
 			"all_combinations",
 			[]string{"a", "b"},
-			ObservationScopes{Mode: ScopeModeAllCombinations},
+			ObservationScopeModes{Mode: ScopeModeAllCombinations},
 			[][]string{{"a"}, {"a", "b"}, {"b"}},
 		},
-		{"all_combinations untagged", nil, ObservationScopes{Mode: ScopeModeAllCombinations}, [][]string{{}}},
+		{"all_combinations untagged", nil, ObservationScopeModes{Mode: ScopeModeAllCombinations}, [][]string{{}}},
 		{
 			"custom", tags,
-			ObservationScopes{Mode: ScopeModeCustom, Custom: []TagSet{
+			ObservationScopeModes{Mode: ScopeModeCustom, Custom: []TagSet{
 				{Tags: []string{"Team"}}, {Tags: []string{"team"}}, {Tags: nil},
 			}},
 			[][]string{{}, {"team"}},
 		},
 		{
 			"custom without sets is combined", tags,
-			ObservationScopes{Mode: ScopeModeCustom},
+			ObservationScopeModes{Mode: ScopeModeCustom},
 			[][]string{{"a", "b", "c"}},
 		},
 	}
@@ -65,21 +65,21 @@ func TestExpandScopesModes(t *testing.T) {
 // (INVALID_ARGUMENT); an unknown mode is INVALID_ARGUMENT too.
 func TestExpandScopesTooManyCombinations(t *testing.T) {
 	four := []string{"a", "b", "c", "d"} // 15 subsets: exactly the default cap
-	if keys, err := ExpandScopes(bank, four, ObservationScopes{Mode: ScopeModeAllCombinations}); err != nil ||
+	if keys, err := ExpandScopes(bank, four, ObservationScopeModes{Mode: ScopeModeAllCombinations}); err != nil ||
 		len(keys) != 15 {
 		t.Fatalf("4 tags at the default cap: %d scopes, %v", len(keys), err)
 	}
-	_, err := ExpandScopes(bank, append(four, "e"), ObservationScopes{Mode: ScopeModeAllCombinations})
+	_, err := ExpandScopes(bank, append(four, "e"), ObservationScopeModes{Mode: ScopeModeAllCombinations})
 	if !errors.Is(err, ErrTooManyScopes) || !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("5 tags: err = %v, want ErrTooManyScopes", err)
 	}
-	_, err = ExpandScopes(bank, []string{"a", "b"}, ObservationScopes{
+	_, err = ExpandScopes(bank, []string{"a", "b"}, ObservationScopeModes{
 		Mode: ScopeModeAllCombinations, MaxCombinations: ptr(2),
 	})
 	if !errors.Is(err, ErrTooManyScopes) {
 		t.Fatalf("custom cap 2 with 3 subsets: err = %v", err)
 	}
-	_, err = ExpandScopes(bank, four, ObservationScopes{Mode: "bogus"})
+	_, err = ExpandScopes(bank, four, ObservationScopeModes{Mode: "bogus"})
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Fatalf("unknown mode: err = %v", err)
 	}
@@ -113,7 +113,7 @@ func TestCombinations(t *testing.T) {
 // TestExpandScopesRejectsNonPositiveCap: max_combinations <= 0 is INVALID_ARGUMENT.
 func TestExpandScopesRejectsNonPositiveCap(t *testing.T) {
 	for _, n := range []int{0, -1} {
-		s := ObservationScopes{Mode: ScopeModeAllCombinations, MaxCombinations: ptr(n)}
+		s := ObservationScopeModes{Mode: ScopeModeAllCombinations, MaxCombinations: ptr(n)}
 		_, err := ExpandScopes(bank, []string{"a"}, s)
 		if !errors.Is(err, ErrInvalidArgument) {
 			t.Errorf("max_combinations %d: err = %v", n, err)

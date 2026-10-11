@@ -3,7 +3,7 @@ package domain
 // PromptOperation names an LLM operation whose prompt can be previewed.
 type PromptOperation string
 
-// Prompt operations, mirroring memory.v1.PromptOperation.
+// Prompt operations, mirroring memory.v1.PreviewPromptRequest.PromptOperation.
 const (
 	// PromptOperationUnspecified is the zero value.
 	PromptOperationUnspecified PromptOperation = ""
@@ -22,7 +22,7 @@ const (
 // PromptRole is a chat message role.
 type PromptRole string
 
-// Prompt roles, mirroring memory.v1.PromptRole.
+// Prompt roles, mirroring memory.v1.PromptMessage.PromptRole.
 const (
 	// PromptRoleUnspecified is the zero value.
 	PromptRoleUnspecified PromptRole = ""
@@ -35,7 +35,7 @@ const (
 // PromptSource says where a prompt block's text came from.
 type PromptSource string
 
-// Prompt sources, mirroring memory.v1.PromptSource.
+// Prompt sources, mirroring memory.v1.PromptBlock.PromptSource.
 const (
 	// PromptSourceUnspecified is the zero value.
 	PromptSourceUnspecified PromptSource = ""

@@ -12,7 +12,7 @@ func observationScopeToProto(s domain.ScopeInfo) *pb.ObservationScope {
 	return &pb.ObservationScope{
 		Scope:                  &pb.TagSet{Tags: s.Scope.Tags},
 		Observations:           s.Observations,
-		UnconsolidatedMemories: s.UnconsolidatedUnits,
+		UnconsolidatedMemories: s.UnconsolidatedMemories,
 	}
 }
 
@@ -31,7 +31,7 @@ func scopePageToProto(p observation.ScopePage) *pb.ListObservationScopesResponse
 // observationVersionToProto converts an ObservationVersion.
 func observationVersionToProto(v domain.ObservationVersion) *pb.ObservationVersion {
 	return &pb.ObservationVersion{
-		Version: v.Version, Text: v.Text, SourceFactIds: strs[string](v.SourceIDs), CreatedAt: tsToProto(v.At),
+		Version: v.Version, Text: v.Text, SourceFactIds: strs[string](v.SourceFactIDs), CreatedAt: tsToProto(v.CreatedAt),
 	}
 }
 

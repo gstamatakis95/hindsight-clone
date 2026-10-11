@@ -259,7 +259,7 @@ func TestRunnerCancelledJobStopsAtCheckpoint(t *testing.T) {
 		r := testRunner(ops, clock, Config{})
 		r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, run *Run) error {
 			for i := 1; ; i++ {
-				p := domain.Progress{Stage: "chunks", Processed: int64(i), At: clock.Now()}
+				p := domain.Progress{Stage: "chunks", Processed: int64(i), RecordedAt: clock.Now()}
 				if err := run.Report(ctx, p); err != nil {
 					return fmt.Errorf("checkpoint: %w", err)
 				}

@@ -62,7 +62,7 @@ func TestRecallExtraArm(t *testing.T) {
 		domain.Unit{ID: uid("obs"), Bank: testBank, Type: domain.FactTypeObservation, Text: "x obs"})
 	fresh.hits = arm("fresh", "x", "obs", "secret", "c").hits
 	res = e.recall(t, Request{
-		Query: "x", Types: []domain.FactType{domain.FactTypeWorld},
+		Query: "x", FactTypes: []domain.FactType{domain.FactTypeWorld},
 		Tags:      domain.TagFilter{Groups: []domain.TagGroup{gNoneOf(gLeaf(domain.TagsMatchAnyStrict, "secret"))}},
 		Overrides: recallCfg(domain.RecallConfig{Arms: []string{armVector, "fresh"}}), Trace: true,
 	})

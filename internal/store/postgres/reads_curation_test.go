@@ -316,10 +316,10 @@ func crUnitFilterCases(f crUnitFixture) []crUnitCase {
 		{"Types world+experience", store.UnitQuery{
 			Types: []domain.FactType{domain.FactTypeWorld, domain.FactTypeExperience},
 		}, u(f.a, f.b, f.c, f.p, f.q)},
-		{"Q COFFEE (case-insensitive)", store.UnitQuery{Q: "COFFEE"}, u(f.a, f.c, f.obs)},
-		{"Q % (literal)", store.UnitQuery{Q: "%"}, u(f.a)},
-		{"Q _ (literal)", store.UnitQuery{Q: "_"}, nil},
-		{"Q coffee, State valid", store.UnitQuery{Q: "coffee", State: domain.MemoryStateValid}, u(f.a, f.obs)},
+		{"Q COFFEE (case-insensitive)", store.UnitQuery{TextContains: "COFFEE"}, u(f.a, f.c, f.obs)},
+		{"Q % (literal)", store.UnitQuery{TextContains: "%"}, u(f.a)},
+		{"Q _ (literal)", store.UnitQuery{TextContains: "_"}, nil},
+		{"Q coffee, State valid", store.UnitQuery{TextContains: "coffee", State: domain.MemoryStateValid}, u(f.a, f.obs)},
 		{"DocumentID", store.UnitQuery{DocumentID: "doc-1"}, u(f.a, f.c)},
 		{"EntityID (live units only)", store.UnitQuery{EntityID: f.ent}, u(f.a)},
 		{"Tags red any_strict", tags(domain.TagsMatchAnyStrict, "red"), u(f.a, f.c, f.obs)},
@@ -419,7 +419,7 @@ func testCrObservationHistory(t *testing.T, s store.DB) {
 	inTx(t, s, func(tx store.Tx) error {
 		for _, n := range []int64{2, 1, 3} {
 			v := domain.ObservationVersion{
-				Version: n, Text: fmt.Sprintf("obs v%d", n), SourceIDs: []domain.UnitID{f.ID}, At: day(int(n)),
+				Version: n, Text: fmt.Sprintf("obs v%d", n), SourceFactIDs: []domain.UnitID{f.ID}, CreatedAt: day(int(n)),
 			}
 			versions[n] = v
 			if err := tx.Units().RecordObservationVersion(t.Context(), bankA, o.ID, v); err != nil {
@@ -436,10 +436,10 @@ func testCrObservationHistory(t *testing.T, s store.DB) {
 	for _, v := range got {
 		nums = append(nums, v.Version)
 		want := versions[v.Version]
-		if v.Text != want.Text || !v.At.Equal(want.At) {
-			t.Errorf("version %d = %q %v, want %q %v", v.Version, v.Text, v.At, want.Text, want.At)
+		if v.Text != want.Text || !v.CreatedAt.Equal(want.CreatedAt) {
+			t.Errorf("version %d = %q %v, want %q %v", v.Version, v.Text, v.CreatedAt, want.Text, want.CreatedAt)
 		}
-		wantSet(t, fmt.Sprintf("version %d source ids", v.Version), v.SourceIDs, want.SourceIDs)
+		wantSet(t, fmt.Sprintf("version %d source ids", v.Version), v.SourceFactIDs, want.SourceFactIDs)
 	}
 	wantSeq(t, "ObservationHistory versions", nums, []int64{3, 2, 1})
 	// The keyset: below version 3, one row; below the oldest version, an empty result rather than NotFound.
@@ -463,15 +463,18 @@ func testCrObservationHistory(t *testing.T, s store.DB) {
 // crWantStats fails the test unless got equals want field by field (nil and empty maps are equal).
 func crWantStats(t *testing.T, what string, got, want domain.BankStats) {
 	t.Helper()
-	if !maps.Equal(got.UnitsByFactType, want.UnitsByFactType) {
-		t.Errorf("%s: UnitsByFactType = %v, want %v", what, got.UnitsByFactType, want.UnitsByFactType)
+	if !maps.Equal(got.MemoriesByFactType, want.MemoriesByFactType) {
+		t.Errorf("%s: MemoriesByFactType = %v, want %v", what, got.MemoriesByFactType, want.MemoriesByFactType)
 	}
 	if !maps.Equal(got.PendingOperationsByKind, want.PendingOperationsByKind) {
 		t.Errorf("%s: PendingOperationsByKind = %v, want %v", what, got.PendingOperationsByKind,
 			want.PendingOperationsByKind)
 	}
 	counts := func(st domain.BankStats) []int64 {
-		return []int64{st.InvalidatedUnits, st.Documents, st.Entities, st.MentalModels, st.UnconsolidatedUnits, st.ChangeSeq}
+		return []int64{
+			st.InvalidatedMemories, st.Documents, st.Entities, st.MentalModels, st.UnconsolidatedMemories,
+			st.ChangeSeq,
+		}
 	}
 	gotN, wantN := counts(got), counts(want)
 	if !slices.Equal(gotN, wantN) {
@@ -513,14 +516,14 @@ func testCrBankStats(t *testing.T, s store.DB) {
 	crCreateModels(t, s, bankA, crModelSeeds()[:2])
 	crEnqueue(t, s, doc("doc-1"), doc("doc-2"), job(bankA, domain.OperationKindConsolidate, "consolidate", `{}`))
 	want := crWithBankRow(t, s, bankA, domain.BankStats{
-		UnitsByFactType: map[domain.FactType]int64{
+		MemoriesByFactType: map[domain.FactType]int64{
 			domain.FactTypeWorld: 2, domain.FactTypeExperience: 1, domain.FactTypeObservation: 1,
 		},
-		InvalidatedUnits: 1, Documents: 2, Entities: 2, MentalModels: 2,
+		InvalidatedMemories: 1, Documents: 2, Entities: 2, MentalModels: 2,
 		PendingOperationsByKind: map[domain.OperationKind]int64{
 			domain.OperationKindRetainDocument: 2, domain.OperationKindConsolidate: 1,
 		},
-		UnconsolidatedUnits: 1,
+		UnconsolidatedMemories: 1,
 	})
 	if want.LastMemoryWriteAt == nil || want.ChangeSeq == 0 {
 		t.Errorf("bank A after writes: LastMemoryWriteAt %v, ChangeSeq %d; want both set", want.LastMemoryWriteAt,
@@ -536,12 +539,12 @@ func testCrBankStats(t *testing.T, s store.DB) {
 type crDocSeed struct {
 	id     domain.DocumentID
 	tags   []string
-	scopes *domain.ObservationScopes
+	scopes *domain.ObservationScopeModes
 }
 
 // crDocSeeds are list_documents' documents in creation order.
 func crDocSeeds() []crDocSeed {
-	scopes := &domain.ObservationScopes{Mode: domain.ScopeModeCustom, Custom: []domain.TagSet{{Tags: []string{"x"}}}}
+	scopes := &domain.ObservationScopeModes{Mode: domain.ScopeModeCustom, Custom: []domain.TagSet{{Tags: []string{"x"}}}}
 	return []crDocSeed{
 		{"Doc-Alpha", []string{"red"}, nil},
 		{"doc-beta", []string{"blue"}, nil},
@@ -560,7 +563,7 @@ func crSeedDocuments(t *testing.T, s store.DB) []domain.Document {
 		inTx(t, s, func(tx store.Tx) error {
 			return tx.Documents().Upsert(t.Context(), domain.Document{
 				ID: sd.id, Bank: bankA, Tags: sd.tags, BlobKey: blob.Key(bankA, sd.id, "h0"),
-				ObservationScopes: sd.scopes,
+				ObservationScopeModes: sd.scopes,
 			})
 		})
 	}
@@ -634,10 +637,11 @@ func crDocFilterCases(docs []domain.Document) []crDocCase {
 	cStart, cEnd, alpha := byID["doc-beta"].CreatedAt, byID["doc-delta"].CreatedAt, byID["Doc-Alpha"].UpdatedAt
 	in := func(ids ...domain.DocumentID) []domain.DocumentID { return crDocsIn(docs, ids...) }
 	return []crDocCase{
-		{"Q DOC- (case-insensitive)", store.DocumentQuery{Q: "DOC-"}, in("Doc-Alpha", "doc-beta", "doc-delta")},
-		{"Q % (literal)", store.DocumentQuery{Q: "%"}, in("other_100%")},
-		{"Q _ (literal)", store.DocumentQuery{Q: "_"}, in("other_100%")},
-		{"Q alpha", store.DocumentQuery{Q: "alpha"}, in("Doc-Alpha")},
+		{"Q DOC- (case-insensitive)", store.DocumentQuery{DocumentIDContains: "DOC-"}, in("Doc-Alpha", "doc-beta",
+			"doc-delta")},
+		{"Q % (literal)", store.DocumentQuery{DocumentIDContains: "%"}, in("other_100%")},
+		{"Q _ (literal)", store.DocumentQuery{DocumentIDContains: "_"}, in("other_100%")},
+		{"Q alpha", store.DocumentQuery{DocumentIDContains: "alpha"}, in("Doc-Alpha")},
 		{
 			"Tags red any_strict",
 			store.DocumentQuery{Tags: []string{"red"}, TagsMatch: domain.TagsMatchAnyStrict},
@@ -655,17 +659,17 @@ func crDocFilterCases(docs []domain.Document) []crDocCase {
 			func(d domain.Document) bool { return !d.CreatedAt.Before(cStart) && d.CreatedAt.Before(cEnd) })},
 		{
 			"created_at >= beta",
-			store.DocumentQuery{TimeField: domain.DocTimeFieldCreatedAt, Start: &cStart},
+			store.DocumentQuery{TimeField: domain.DocumentTimeFieldCreatedAt, Start: &cStart},
 			crDocKeep(docs, func(d domain.Document) bool { return !d.CreatedAt.Before(cStart) }),
 		},
 		{
 			"updated_at >= alpha's retag",
-			store.DocumentQuery{TimeField: domain.DocTimeFieldUpdatedAt, Start: &alpha},
+			store.DocumentQuery{TimeField: domain.DocumentTimeFieldUpdatedAt, Start: &alpha},
 			crDocKeep(docs, func(d domain.Document) bool { return !d.UpdatedAt.Before(alpha) }),
 		},
 		{
 			"updated_at < alpha's retag",
-			store.DocumentQuery{TimeField: domain.DocTimeFieldUpdatedAt, End: &alpha},
+			store.DocumentQuery{TimeField: domain.DocumentTimeFieldUpdatedAt, End: &alpha},
 			crDocKeep(docs, func(d domain.Document) bool { return d.UpdatedAt.Before(alpha) }),
 		},
 	}
@@ -686,13 +690,13 @@ func crWantDocument(t *testing.T, got, want domain.Document, counts map[domain.F
 			want.ContentHash, want.OverridesHash)
 	}
 	wantJSON(t, "document "+string(want.ID)+" overrides", got.Overrides, want.Overrides)
-	wantJSON(t, "document "+string(want.ID)+" observation scopes", got.ObservationScopes, want.ObservationScopes)
+	wantJSON(t, "document "+string(want.ID)+" observation scopes", got.ObservationScopeModes, want.ObservationScopeModes)
 	var total int64
 	for _, n := range counts {
 		total += n
 	}
-	if got.UnitCount != total || !maps.Equal(got.UnitsByFactType, counts) {
-		t.Errorf("document %s counts = %d %v, want %d %v", want.ID, got.UnitCount, got.UnitsByFactType, total, counts)
+	if got.MemoryCount != total || !maps.Equal(got.MemoriesByFactType, counts) {
+		t.Errorf("document %s counts = %d %v, want %d %v", want.ID, got.MemoryCount, got.MemoriesByFactType, total, counts)
 	}
 }
 
@@ -733,8 +737,8 @@ func testCrListDocuments(t *testing.T, s store.DB) {
 		}
 	}
 	for _, d := range all {
-		if (d.ObservationScopes != nil) != (d.ID == "doc-delta") {
-			t.Errorf("document %s ObservationScopes = %+v, want set only on doc-delta", d.ID, d.ObservationScopes)
+		if (d.ObservationScopeModes != nil) != (d.ID == "doc-delta") {
+			t.Errorf("document %s ObservationScopeModes = %+v, want set only on doc-delta", d.ID, d.ObservationScopeModes)
 		}
 	}
 	for _, c := range crDocFilterCases(docs) {
@@ -996,9 +1000,9 @@ func crSeedTenant(t *testing.T, s store.DB, b domain.BankRef, extra bool) crTena
 	}
 	live := int64(len(facts) - 1)
 	sd.stats = domain.BankStats{
-		UnitsByFactType:  map[domain.FactType]int64{domain.FactTypeWorld: live, domain.FactTypeObservation: 1},
-		InvalidatedUnits: 1, Documents: int64(len(docs)), Entities: 1, MentalModels: int64(len(models)),
-		PendingOperationsByKind: pending, UnconsolidatedUnits: live,
+		MemoriesByFactType:  map[domain.FactType]int64{domain.FactTypeWorld: live, domain.FactTypeObservation: 1},
+		InvalidatedMemories: 1, Documents: int64(len(docs)), Entities: 1, MentalModels: int64(len(models)),
+		PendingOperationsByKind: pending, UnconsolidatedMemories: live,
 	}
 	return sd
 }
@@ -1022,18 +1026,18 @@ func crCheckTenant(t *testing.T, s store.DB, b domain.BankRef, mine, theirs crTe
 		mine.docs)
 	ms, _ := crListModels(t, s, store.ModelQuery{Bank: b})
 	wantSet(t, "ListMentalModels("+what+")", crModelIDs(ms), mine.models)
-	crWantDocCounts(t, s, b, "doc-1", mine.stats.UnitsByFactType[domain.FactTypeWorld])
+	crWantDocCounts(t, s, b, "doc-1", mine.stats.MemoriesByFactType[domain.FactTypeWorld])
 }
 
 // crWantDocCounts fails the test unless ListDocuments reports exactly world live world facts for document id
 // of bank b (the other tenant's document with the same id holds a different number).
 func crWantDocCounts(t *testing.T, s store.DB, b domain.BankRef, id domain.DocumentID, world int64) {
 	t.Helper()
-	ds := crListDocs(t, s, store.DocumentQuery{Bank: b, Q: string(id), Limit: 50})
+	ds := crListDocs(t, s, store.DocumentQuery{Bank: b, DocumentIDContains: string(id), Limit: 50})
 	want := map[domain.FactType]int64{domain.FactTypeWorld: world}
 	for _, d := range ds {
-		if d.ID == id && (d.UnitCount != world || !maps.Equal(d.UnitsByFactType, want)) {
-			t.Errorf("ListDocuments(%v) %s counts = %d %v, want %d %v", b, id, d.UnitCount, d.UnitsByFactType, world,
+		if d.ID == id && (d.MemoryCount != world || !maps.Equal(d.MemoriesByFactType, want)) {
+			t.Errorf("ListDocuments(%v) %s counts = %d %v, want %d %v", b, id, d.MemoryCount, d.MemoriesByFactType, world,
 				want)
 		}
 	}

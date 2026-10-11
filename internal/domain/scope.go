@@ -93,7 +93,7 @@ type TagSet struct {
 // ScopeMode decides which scopes a unit consolidates under, from its tags.
 type ScopeMode string
 
-// Scope modes, mirroring memory.v1.ObservationScopes.Mode.
+// Scope modes, mirroring memory.v1.ObservationScopeModes.Mode.
 const (
 	// ScopeModeUnspecified is the zero value (inherit the bank default).
 	ScopeModeUnspecified ScopeMode = ""
@@ -112,8 +112,8 @@ const (
 // DefaultMaxCombinations is the ALL_COMBINATIONS fan-out cap when unset.
 const DefaultMaxCombinations = 15
 
-// ObservationScopes configures a unit's scope fan-out.
-type ObservationScopes struct {
+// ObservationScopeModes configures a unit's scope fan-out.
+type ObservationScopeModes struct {
 	// Mode picks the fan-out rule.
 	Mode ScopeMode `json:"mode,omitempty"`
 	// Custom holds the scopes of ScopeModeCustom.
@@ -122,12 +122,12 @@ type ObservationScopes struct {
 	MaxCombinations *int `json:"max_combinations,omitempty"`
 }
 
-// ScopeInfo summarizes one scope for ListScopes.
+// ScopeInfo summarizes one scope for ListObservationScopes.
 type ScopeInfo struct {
 	// Scope is the scope's tags.
 	Scope TagSet
 	// Observations is the number of observations in the scope.
 	Observations int64
-	// UnconsolidatedUnits is the number of units in the scope still waiting for consolidation.
-	UnconsolidatedUnits int64
+	// UnconsolidatedMemories is the number of units in the scope still waiting for consolidation.
+	UnconsolidatedMemories int64
 }

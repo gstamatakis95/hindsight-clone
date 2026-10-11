@@ -13,7 +13,7 @@ import (
 
 // TestReads runs the contract tests of the id-keyed Reader lookups and small reads:
 // GetChunks, EntityStates, StaleScopes, TagCounts, CountObservations, NewestSeqInScope, ModelsCiting, the
-// temporal relevance filter and Document.ObservationScopes. It asserts the semantics pinned in
+// temporal relevance filter and Document.ObservationScopeModes. It asserts the semantics pinned in
 // docs/decisions/1500-wp15-read-semantics.md, including tenant isolation for every method.
 func TestReads(t *testing.T) {
 	t.Parallel()
@@ -715,31 +715,33 @@ func testRdTemporalRelevance(t *testing.T, s store.DB) {
 	wantSeq(t, "SearchTemporal(other tenant, filter on)", hitIDs(searchTemporal(t, s, q)), []domain.UnitID{other.ID})
 }
 
-// ---------- Document.ObservationScopes ----------
+// ---------- Document.ObservationScopeModes ----------
 
 // rdUpsertScopedDoc upserts document id of bank b with the given observation scopes.
-func rdUpsertScopedDoc(t *testing.T, s store.DB, b domain.BankRef, id domain.DocumentID, sc *domain.ObservationScopes) {
+func rdUpsertScopedDoc(t *testing.T, s store.DB, b domain.BankRef, id domain.DocumentID,
+	sc *domain.ObservationScopeModes,
+) {
 	t.Helper()
 	d := domain.Document{
-		ID: id, Bank: b, Tags: []string{}, BlobKey: blob.Key(b, id, "h0"), ObservationScopes: sc,
+		ID: id, Bank: b, Tags: []string{}, BlobKey: blob.Key(b, id, "h0"), ObservationScopeModes: sc,
 	}
 	inTx(t, s, func(tx store.Tx) error { return tx.Documents().Upsert(t.Context(), d) })
 }
 
 // rdWantDocScopes fails the test unless document id of bank b carries want (nil = none).
 func rdWantDocScopes(t *testing.T, s store.DB, what string, b domain.BankRef, id domain.DocumentID,
-	want *domain.ObservationScopes,
+	want *domain.ObservationScopeModes,
 ) {
 	t.Helper()
 	d, err := getDocument(t, s, b, id)
 	d = rdMust(t, what, d, err)
-	if want == nil || d.ObservationScopes == nil {
-		if want != d.ObservationScopes {
-			t.Errorf("%s: ObservationScopes = %+v, want %+v", what, d.ObservationScopes, want)
+	if want == nil || d.ObservationScopeModes == nil {
+		if want != d.ObservationScopeModes {
+			t.Errorf("%s: ObservationScopeModes = %+v, want %+v", what, d.ObservationScopeModes, want)
 		}
 		return
 	}
-	wantJSON(t, what, d.ObservationScopes, want)
+	wantJSON(t, what, d.ObservationScopeModes, want)
 }
 
 // testRdDocumentObservationScopes: Upsert stores the scopes and Get returns them; a second Upsert with nil
@@ -747,14 +749,14 @@ func rdWantDocScopes(t *testing.T, s store.DB, what string, b domain.BankRef, id
 // keeps its own scopes.
 func testRdDocumentObservationScopes(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA, bankOtherTenant)
-	custom := &domain.ObservationScopes{
+	custom := &domain.ObservationScopeModes{
 		Mode: domain.ScopeModeCustom,
 		Custom: []domain.TagSet{
 			{Tags: domain.NormalizeTags([]string{"a", "b"})}, {Tags: []string{"c"}},
 		},
 		MaxCombinations: ptr(3),
 	}
-	perTag := &domain.ObservationScopes{Mode: domain.ScopeModePerTag, Custom: []domain.TagSet{}}
+	perTag := &domain.ObservationScopeModes{Mode: domain.ScopeModePerTag, Custom: []domain.TagSet{}}
 	rdUpsertScopedDoc(t, s, bankA, "doc-1", custom)
 	rdUpsertScopedDoc(t, s, bankA, "doc-2", nil)
 	rdUpsertScopedDoc(t, s, bankOtherTenant, "doc-1", perTag)

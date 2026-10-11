@@ -38,7 +38,7 @@ func (s *Service) reprocess(
 		}
 		if err := tx.Documents().Upsert(ctx, domain.Document{
 			ID: doc.ID, Bank: b, Overrides: doc.Overrides, Tags: doc.Tags, BlobKey: doc.BlobKey,
-			ObservationScopes: doc.ObservationScopes,
+			ObservationScopeModes: doc.ObservationScopeModes,
 		}); err != nil {
 			return err
 		}
@@ -66,7 +66,7 @@ func reprocessPayload(
 	}
 	p := jobs.RetainPayload{
 		DocumentID: doc.ID, ContentHash: hash, BlobKey: doc.BlobKey, Tags: domain.NormalizeTags(doc.Tags),
-		ObservationScopes: doc.ObservationScopes, ForceReextract: true,
+		ObservationScopeModes: doc.ObservationScopeModes, ForceReextract: true,
 	}
 	us, err := tx.ListUnits(ctx, store.UnitQuery{Bank: b, DocumentID: doc.ID, Limit: reprocessScanLimit})
 	if err != nil || len(us) == 0 {

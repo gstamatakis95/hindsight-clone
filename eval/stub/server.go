@@ -152,12 +152,12 @@ func (s *Server) Retain(ctx context.Context, req *memoryv1.RetainRequest) (*memo
 		s.retains++
 		resp.Documents = append(resp.Documents, &memoryv1.RetainedDocument{DocumentId: id, MemoriesCreated: 1})
 		resp.Usage = append(resp.Usage, &memoryv1.SlotUsage{
-			Slot: memoryv1.ModelSlot_MODEL_SLOT_EXTRACT, Model: stubModel, InputTokens: 20, OutputTokens: 4,
+			Slot: memoryv1.SlotUsage_MODEL_SLOT_EXTRACT, Model: stubModel, InputTokens: 20, OutputTokens: 4,
 		})
 	}
 	b.pending = s.opts.PendingPolls
 	b.ops = append(b.ops, s.newOp(memoryv1.OperationStatus_OPERATION_STATUS_COMPLETED, []*memoryv1.SlotUsage{{
-		Slot: memoryv1.ModelSlot_MODEL_SLOT_CONSOLIDATE, Model: stubModel, InputTokens: 10, OutputTokens: 5,
+		Slot: memoryv1.SlotUsage_MODEL_SLOT_CONSOLIDATE, Model: stubModel, InputTokens: 10, OutputTokens: 5,
 	}}))
 	return resp, nil
 }
@@ -231,7 +231,7 @@ func (s *Server) Reflect(ctx context.Context, req *memoryv1.ReflectRequest) (*me
 		text = strings.Join(lines, "\n")
 	}
 	return &memoryv1.ReflectResponse{Text: text, Usage: []*memoryv1.SlotUsage{{
-		Slot: memoryv1.ModelSlot_MODEL_SLOT_REFLECT, Model: stubModel, InputTokens: 100, OutputTokens: 20,
+		Slot: memoryv1.SlotUsage_MODEL_SLOT_REFLECT, Model: stubModel, InputTokens: 100, OutputTokens: 20,
 	}}}, nil
 }
 

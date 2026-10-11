@@ -337,7 +337,7 @@ type ScopeUnconsolidatedRow struct {
 	N   int64
 }
 
-// ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
+// ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListObservationScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
 func (q *Queries) ScopeUnconsolidated(ctx context.Context, arg ScopeUnconsolidatedParams) ([]ScopeUnconsolidatedRow, error) {
 	rows, err := q.db.Query(ctx, scopeUnconsolidated, arg.TenantID, arg.BankID, arg.Scopes)
 	if err != nil {

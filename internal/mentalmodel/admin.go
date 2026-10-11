@@ -404,16 +404,18 @@ func (s *Service) PreviewMentalModelRefresh(
 	return s.refresh(ctx, b, id, refreshOptions{Manual: true, Preview: true, Strategy: strategy})
 }
 
-// SearchMentalModels ranks the bank's pages by fused full-text and semantic scores (recall.Engine.SearchPages),
+// SearchMentalModels ranks the bank's pages by fused full-text and semantic scores (recall.Engine.SearchMentalModels),
 // returning at most req.Limit hits under domain.SearchResults (0 = 10, capped at 100, negative =
 // domain.ErrInvalidArgument).
-func (s *Service) SearchMentalModels(ctx context.Context, req recall.SearchPagesRequest) ([]domain.PageHit, error) {
+func (s *Service) SearchMentalModels(ctx context.Context,
+	req recall.SearchMentalModelsRequest,
+) ([]domain.MentalModelHit, error) {
 	limit, err := domain.SearchResults.Size(req.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("mentalmodel: search: %w", err)
 	}
 	req.Limit = limit
-	hits, err := s.d.Recall.SearchPages(ctx, req)
+	hits, err := s.d.Recall.SearchMentalModels(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("mentalmodel: search: %w", err)
 	}

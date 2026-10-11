@@ -11,7 +11,7 @@
 // chunks, entity state, tag counts, stale scopes and page listings, and calls ai.Embedder and ai.Reranker.
 // cmd/memd/wire.go builds one [Engine] with [New], registering the arms through [Deps.Arms]. Besides
 // [Engine.Recall] it exposes [Engine.Arms] (ListRecallArms), [Engine.CheckArms] (reflect's request check),
-// [Engine.CompileTags] (the tag-filter compiler mental models use for their scope), [Engine.SearchPages] and
+// [Engine.CompileTags] (the tag-filter compiler mental models use for their scope), [Engine.SearchMentalModels] and
 // [Engine.ReadPages] (mental-model page search and reads). The pipeline stages (fusion, scoring, gates, packing,
 // observation preference, includes) are unexported types tested one by one.
 //

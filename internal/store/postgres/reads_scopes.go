@@ -8,8 +8,8 @@ import (
 	"memd/internal/store/postgres/db"
 )
 
-// Reader methods over chunks, entities, observation scopes and consolidation candidates (CCR WP-15-1,
-// decision 1500). Each runs on the reader's connection, so on a Tx it sees the transaction's own writes.
+// Reader methods over chunks, entities, observation scopes and consolidation candidates.
+// Each runs on the reader's connection, so on a Tx it sees the transaction's own writes.
 
 // GetChunks returns b's chunks with the given ids in the order of ids; unknown, malformed and other-bank ids
 // are skipped and a repeated id is returned once.
@@ -65,7 +65,7 @@ func (r *reader) EntityStates(
 }
 
 // unconsolidatedCounts returns, per scope and in scope order, how many of b's unconsolidated facts are in it
-// (CCR §0: tags contain every tag of the scope). The scopes' own banks are ignored.
+// (tags contain every tag of the scope). The scopes' own banks are ignored.
 func (r *reader) unconsolidatedCounts(ctx context.Context, b domain.BankRef, scopes [][]string) ([]int64, error) {
 	out := make([]int64, len(scopes))
 	if len(scopes) == 0 {
@@ -127,10 +127,10 @@ func (r *reader) CountObservations(ctx context.Context, s domain.ScopeKey) (int,
 	return int(n), nil
 }
 
-// ListScopes returns up to limit of b's observation_scopes rows with a key strictly after after ("" = from
+// ListObservationScopes returns up to limit of b's observation_scopes rows with a key strictly after after ("" = from
 // the start), in byte order, with their live observation and unconsolidated fact counts. limit <= 0 is
 // domain.ErrInvalidArgument; an unknown or tombstoned bank is domain.ErrNotFound.
-func (r *reader) ListScopes(
+func (r *reader) ListObservationScopes(
 	ctx context.Context, b domain.BankRef, after string, limit int,
 ) ([]domain.ScopeInfo, error) {
 	if limit <= 0 {
@@ -156,7 +156,7 @@ func (r *reader) ListScopes(
 	out := make([]domain.ScopeInfo, len(rows))
 	for i, row := range rows {
 		out[i] = domain.ScopeInfo{
-			Scope: domain.TagSet{Tags: tags[i]}, Observations: row.Observations, UnconsolidatedUnits: counts[i],
+			Scope: domain.TagSet{Tags: tags[i]}, Observations: row.Observations, UnconsolidatedMemories: counts[i],
 		}
 	}
 	return out, nil

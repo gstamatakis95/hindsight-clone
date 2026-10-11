@@ -28,10 +28,10 @@ func (b Bank) Deleting() bool { return b.DeletingAt != nil }
 
 // BankStats answers GetBankStats from indexed COUNT queries.
 type BankStats struct {
-	// UnitsByFactType counts live units per fact type.
-	UnitsByFactType map[FactType]int64
-	// InvalidatedUnits counts archived units.
-	InvalidatedUnits int64
+	// MemoriesByFactType counts live units per fact type.
+	MemoriesByFactType map[FactType]int64
+	// InvalidatedMemories counts archived units.
+	InvalidatedMemories int64
 	// Documents counts documents.
 	Documents int64
 	// Entities counts entities.
@@ -40,8 +40,8 @@ type BankStats struct {
 	MentalModels int64
 	// PendingOperationsByKind counts pending and processing operations per kind (the eval barrier).
 	PendingOperationsByKind map[OperationKind]int64
-	// UnconsolidatedUnits counts units not yet consolidated or parked.
-	UnconsolidatedUnits int64
+	// UnconsolidatedMemories counts units not yet consolidated or parked.
+	UnconsolidatedMemories int64
 	// LastMemoryWriteAt is when memory content last changed.
 	LastMemoryWriteAt *time.Time
 	// ChangeSeq is the bank's latest committed change sequence.
@@ -51,7 +51,7 @@ type BankStats struct {
 // TagSource selects where ListTags counts tags.
 type TagSource string
 
-// Tag sources, mirroring memory.v1.TagSource.
+// Tag sources, mirroring memory.v1.ListTagsRequest.TagSource.
 const (
 	// TagSourceUnspecified is the zero value (memories).
 	TagSourceUnspecified TagSource = ""

@@ -34,26 +34,26 @@ func (r *documentRepo) Get(ctx context.Context, b domain.BankRef, id domain.Docu
 		return domain.Document{}, mapErr("document unit counts", err)
 	}
 	for _, c := range counts {
-		d.UnitsByFactType[domain.FactType(c.FactType)] = c.N
-		d.UnitCount += c.N
+		d.MemoriesByFactType[domain.FactType(c.FactType)] = c.N
+		d.MemoryCount += c.N
 	}
 	return d, nil
 }
 
-// documentOf builds a domain.Document from its row, without the unit counts (UnitsByFactType is empty).
+// documentOf builds a domain.Document from its row, without the unit counts (MemoriesByFactType is empty).
 func documentOf(row db.Document) (domain.Document, error) {
 	d := domain.Document{
 		ID: domain.DocumentID(row.ID), Bank: domain.BankRef{Tenant: row.TenantID, Bank: row.BankID},
 		ContentHash: row.ContentHash, OverridesHash: row.OverridesHash, Tags: row.Tags, BlobKey: row.BlobKey,
 		ExtractedAt: row.ExtractedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
-		UnitsByFactType: map[domain.FactType]int64{},
+		MemoriesByFactType: map[domain.FactType]int64{},
 	}
 	var err error
 	if d.Overrides, err = unmarshalPtr[domain.BankConfig]("document overrides", row.Overrides); err != nil {
 		return domain.Document{}, err
 	}
-	d.ObservationScopes, err = unmarshalPtr[domain.ObservationScopes]("document observation scopes",
-		row.ObservationScopes)
+	d.ObservationScopeModes, err = unmarshalPtr[domain.ObservationScopeModes]("document observation scopes",
+		row.ObservationScopeModes)
 	if err != nil {
 		return domain.Document{}, err
 	}
@@ -61,7 +61,7 @@ func documentOf(row db.Document) (domain.Document, error) {
 }
 
 // Upsert inserts the document or replaces its tags, overrides, observation scopes and blob key, and clears
-// extracted_at; the hashes of the last completed retain stay until Complete. A nil ObservationScopes is
+// extracted_at; the hashes of the last completed retain stay until Complete. A nil ObservationScopeModes is
 // stored as NULL. An unknown bank is domain.ErrNotFound.
 func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
 	if err := checkTags(d.Tags); err != nil {
@@ -71,13 +71,13 @@ func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
 	if err != nil {
 		return err
 	}
-	scopes, err := marshalPtr("document observation scopes", d.ObservationScopes)
+	scopes, err := marshalPtr("document observation scopes", d.ObservationScopeModes)
 	if err != nil {
 		return err
 	}
 	err = r.q.DocumentUpsert(ctx, db.DocumentUpsertParams{
 		TenantID: d.Bank.Tenant, BankID: d.Bank.Bank, ID: string(d.ID), Overrides: overrides,
-		Tags: tagsOrEmpty(d.Tags), BlobKey: d.BlobKey, ObservationScopes: scopes,
+		Tags: tagsOrEmpty(d.Tags), BlobKey: d.BlobKey, ObservationScopeModes: scopes,
 	})
 	return mapErr(fmt.Sprintf("upsert document %s", d.ID), err)
 }

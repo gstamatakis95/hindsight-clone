@@ -55,21 +55,21 @@ func (d *decoder) retainConfig(t *pb.RetainConfig) *domain.RetainConfig {
 		return nil
 	}
 	return &domain.RetainConfig{
-		Mission:                   t.GetMission(),
-		ExtractionMode:            fromEnum[domain.ExtractionMode](d, t.GetExtractionMode()),
-		CustomExtractionPrompt:    t.GetCustomExtractionPrompt(),
-		EntityLabels:              d.labels(t.GetEntityLabels()),
-		EntitiesAllowFreeForm:     optCopy(t.EntitiesAllowFreeForm),
-		DefaultObservationScopes:  d.scopes(t.GetDefaultObservationScopes()),
-		ChunkMaxTokens:            optInt(t.ChunkMaxTokens),
-		ChunkOverlapTokens:        optInt(t.ChunkOverlapTokens),
-		EntityMatchThreshold:      optCopy(t.EntityMatchThreshold),
-		TemporalLinkWindowHours:   optInt(t.TemporalLinkWindowHours),
-		SemanticLinkK:             optInt(t.SemanticLinkK),
-		SemanticLinkMinSimilarity: optCopy(t.SemanticLinkMinSimilarity),
-		ExtractCausalLinks:        optCopy(t.ExtractCausalLinks),
-		StructuredChunkMaxTokens:  optInt(t.StructuredChunkMaxTokens),
-		TemporalLinkCap:           optInt(t.TemporalLinkCap),
+		Mission:                      t.GetMission(),
+		ExtractionMode:               fromEnum[domain.ExtractionMode](d, t.GetExtractionMode()),
+		CustomExtractionPrompt:       t.GetCustomExtractionPrompt(),
+		EntityLabels:                 d.labels(t.GetEntityLabels()),
+		EntitiesAllowFreeForm:        optCopy(t.EntitiesAllowFreeForm),
+		DefaultObservationScopeModes: d.scopes(t.GetDefaultObservationScopeModes()),
+		ChunkMaxTokens:               optInt(t.ChunkMaxTokens),
+		ChunkOverlapTokens:           optInt(t.ChunkOverlapTokens),
+		EntityMatchThreshold:         optCopy(t.EntityMatchThreshold),
+		TemporalLinkWindowHours:      optInt(t.TemporalLinkWindowHours),
+		SemanticLinkK:                optInt(t.SemanticLinkK),
+		SemanticLinkMinSimilarity:    optCopy(t.SemanticLinkMinSimilarity),
+		ExtractCausalLinks:           optCopy(t.ExtractCausalLinks),
+		StructuredChunkMaxTokens:     optInt(t.StructuredChunkMaxTokens),
+		TemporalLinkCap:              optInt(t.TemporalLinkCap),
 	}
 }
 
@@ -79,21 +79,21 @@ func retainConfigToProto(t *domain.RetainConfig) *pb.RetainConfig {
 		return nil
 	}
 	return &pb.RetainConfig{
-		Mission:                   t.Mission,
-		ExtractionMode:            toEnum[pb.ExtractionMode](t.ExtractionMode),
-		CustomExtractionPrompt:    t.CustomExtractionPrompt,
-		EntityLabels:              labelsToProto(t.EntityLabels),
-		EntitiesAllowFreeForm:     optCopy(t.EntitiesAllowFreeForm),
-		DefaultObservationScopes:  scopesToProto(t.DefaultObservationScopes),
-		ChunkMaxTokens:            optInt32(t.ChunkMaxTokens),
-		ChunkOverlapTokens:        optInt32(t.ChunkOverlapTokens),
-		EntityMatchThreshold:      optCopy(t.EntityMatchThreshold),
-		TemporalLinkWindowHours:   optInt32(t.TemporalLinkWindowHours),
-		SemanticLinkK:             optInt32(t.SemanticLinkK),
-		SemanticLinkMinSimilarity: optCopy(t.SemanticLinkMinSimilarity),
-		ExtractCausalLinks:        optCopy(t.ExtractCausalLinks),
-		StructuredChunkMaxTokens:  optInt32(t.StructuredChunkMaxTokens),
-		TemporalLinkCap:           optInt32(t.TemporalLinkCap),
+		Mission:                      t.Mission,
+		ExtractionMode:               toEnum[pb.RetainConfig_ExtractionMode](t.ExtractionMode),
+		CustomExtractionPrompt:       t.CustomExtractionPrompt,
+		EntityLabels:                 labelsToProto(t.EntityLabels),
+		EntitiesAllowFreeForm:        optCopy(t.EntitiesAllowFreeForm),
+		DefaultObservationScopeModes: scopesToProto(t.DefaultObservationScopeModes),
+		ChunkMaxTokens:               optInt32(t.ChunkMaxTokens),
+		ChunkOverlapTokens:           optInt32(t.ChunkOverlapTokens),
+		EntityMatchThreshold:         optCopy(t.EntityMatchThreshold),
+		TemporalLinkWindowHours:      optInt32(t.TemporalLinkWindowHours),
+		SemanticLinkK:                optInt32(t.SemanticLinkK),
+		SemanticLinkMinSimilarity:    optCopy(t.SemanticLinkMinSimilarity),
+		ExtractCausalLinks:           optCopy(t.ExtractCausalLinks),
+		StructuredChunkMaxTokens:     optInt32(t.StructuredChunkMaxTokens),
+		TemporalLinkCap:              optInt32(t.TemporalLinkCap),
 	}
 }
 
@@ -318,7 +318,7 @@ func recallConfigToProto(r *domain.RecallConfig) *pb.RecallConfig {
 		return nil
 	}
 	return &pb.RecallConfig{
-		BudgetFunction:        toEnum[pb.BudgetFunction](r.BudgetFunction),
+		BudgetFunction:        toEnum[pb.RecallConfig_BudgetFunction](r.BudgetFunction),
 		BudgetLow:             optInt32(r.BudgetLow),
 		BudgetMid:             optInt32(r.BudgetMid),
 		BudgetHigh:            optInt32(r.BudgetHigh),

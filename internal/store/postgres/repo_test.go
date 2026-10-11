@@ -76,7 +76,10 @@ func upsertObservation(t *testing.T, s store.DB, o *domain.Unit) int64 {
 		if err := tx.Units().UpsertObservation(t.Context(), *o); err != nil {
 			return err
 		}
-		v := domain.ObservationVersion{Version: o.Version, Text: o.Text, SourceIDs: o.SourceIDs, At: day(int(o.Version))}
+		v := domain.ObservationVersion{
+			Version: o.Version, Text: o.Text, SourceFactIDs: o.SourceIDs,
+			CreatedAt: day(int(o.Version)),
+		}
 		return tx.Units().RecordObservationVersion(t.Context(), o.Bank, o.ID, v)
 	})
 	return o.Seq
@@ -673,7 +676,7 @@ func appendEvents(t *testing.T, s store.DB, b domain.BankRef, subjects ...string
 		}
 		for _, sub := range subjects {
 			ev := domain.LifecycleEvent{
-				Seq: seq, Type: domain.EventTypeRetainCompleted, Bank: b, SubjectID: sub, At: nowMicro(),
+				Seq: seq, Type: domain.EventTypeRetainCompleted, Bank: b, SubjectID: sub, CreatedAt: nowMicro(),
 			}
 			if err := tx.Events().Append(t.Context(), ev); err != nil {
 				return err

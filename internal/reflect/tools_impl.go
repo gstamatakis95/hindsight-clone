@@ -152,7 +152,7 @@ type memoryOut struct {
 	OccurredEnd   *time.Time        `json:"occurred_end,omitempty"`
 	MentionedAt   *time.Time        `json:"mentioned_at,omitempty"`
 	SourceFactIDs []domain.UnitID   `json:"source_fact_ids,omitempty"`
-	IsStale       *bool             `json:"is_stale,omitempty"`
+	Stale         *bool             `json:"stale,omitempty"`
 }
 
 // toMemoryOut converts a unit for a tool output.
@@ -183,7 +183,7 @@ func recallRequest(st *agentState, query string, types []domain.FactType, maxTok
 	}
 	qt := st.QueryTime
 	return recall.Request{
-		Bank: st.Request.Bank, Query: query, Types: types, Tags: st.Request.Tags, Budget: budget,
+		Bank: st.Request.Bank, Query: query, FactTypes: types, Tags: st.Request.Tags, Budget: budget,
 		MaxTokens: maxTokens, QueryTime: &qt, Include: st.Request.RecallInclude, Overrides: st.Request.Overrides,
 		Seq: st.Request.Seq, Arms: st.Request.Arms,
 	}
@@ -304,11 +304,11 @@ func observationsOutput(st *agentState, query string, res recall.Result) (toolRe
 		remember(st, m.Unit)
 		o := toMemoryOut(m.Unit)
 		stale := m.Stale
-		o.IsStale = &stale
+		o.Stale = &stale
 		anyStale = anyStale || stale
 		obs = append(obs, o)
 	}
-	out := map[string]any{"query": query, "count": len(obs), "observations": obs, "is_stale": anyStale}
+	out := map[string]any{"query": query, "count": len(obs), "observations": obs, "stale": anyStale}
 	if len(res.Entities) > 0 {
 		ents := make([]map[string]any, 0, len(res.Entities))
 		for _, e := range res.Entities {
