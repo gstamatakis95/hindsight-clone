@@ -62,12 +62,14 @@ func bankRoundTrips() {
 		return promptPreviewToProto(d.promptPreview(m)), d.err
 	}, nil)
 	// The handler passes bank, operation and overrides as separate arguments.
+	// The operation is aligned with the overrides kind first (a mismatch is rejected).
 	addRT(func(m *pb.PreviewPromptRequest) (*pb.PreviewPromptRequest, error) {
+		matchPreviewOperation(m)
 		op, o, err := previewPromptFromProto(m)
-		return &pb.PreviewPromptRequest{
-			BankId: m.GetBankId(), Operation: toEnum[pb.PromptOperation](op), Overrides: configToProto(o),
-		}, err
-	}, nil)
+		out := &pb.PreviewPromptRequest{BankId: m.GetBankId(), Operation: toEnum[pb.PromptOperation](op)}
+		previewPromptToProto(out, op, o)
+		return out, err
+	}, matchPreviewOperation)
 	// BankTemplate.config is a value in domain.BankTemplate.
 	addRT(func(m *pb.BankTemplate) (*pb.BankTemplate, error) {
 		t, err := bankTemplateFromProto(m)
@@ -115,10 +117,11 @@ func documentRoundTrips() {
 	})
 	// The handler passes bank, document id and overrides as separate arguments.
 	addRT(func(m *pb.ReprocessDocumentRequest) (*pb.ReprocessDocumentRequest, error) {
-		o, err := configFromProto(m.GetOverrides())
+		var d decoder
+		o := d.retainOverrides(m.GetOverrides())
 		return &pb.ReprocessDocumentRequest{
-			BankId: m.GetBankId(), DocumentId: m.GetDocumentId(), Overrides: configToProto(o),
-		}, err
+			BankId: m.GetBankId(), DocumentId: m.GetDocumentId(), Overrides: retainOverridesToProto(o),
+		}, d.err
 	}, nil)
 }
 
@@ -153,10 +156,12 @@ func observationRoundTrips() {
 	}, nil)
 	// The handlers pass bank, scopes, overrides and flags as separate arguments.
 	addRT(func(m *pb.ConsolidateRequest) (*pb.ConsolidateRequest, error) {
-		o, err := configFromProto(m.GetOverrides())
+		var d decoder
+		o := d.consolidateOverrides(m.GetOverrides())
 		return &pb.ConsolidateRequest{
-			BankId: m.GetBankId(), Scopes: tagSetsToProto(tagSetsFromProto(m.GetScopes())), Overrides: configToProto(o),
-		}, err
+			BankId: m.GetBankId(), Scopes: tagSetsToProto(tagSetsFromProto(m.GetScopes())),
+			Overrides: consolidateOverridesToProto(o),
+		}, d.err
 	}, nil)
 	addRT(func(m *pb.ClearObservationsRequest) (*pb.ClearObservationsRequest, error) {
 		return &pb.ClearObservationsRequest{
@@ -284,6 +289,22 @@ func TestStrategyMatchBadScope(t *testing.T) {
 		d.strategyMatch(&pb.StrategyMatch{Strategy: "s", ShadowedScopes: []string{"3:foo", s}})
 		if !errors.Is(d.err, domain.ErrInvalidArgument) {
 			t.Fatalf("scope %q: err = %v, want ErrInvalidArgument", s, d.err)
+		}
+	}
+}
+
+// matchPreviewOperation sets m's operation to the one its overrides kind previews (keeping a delta refresh).
+func matchPreviewOperation(m *pb.PreviewPromptRequest) {
+	switch m.GetOverrides().(type) {
+	case *pb.PreviewPromptRequest_Retain:
+		m.Operation = pb.PromptOperation_PROMPT_OPERATION_RETAIN
+	case *pb.PreviewPromptRequest_Consolidation:
+		m.Operation = pb.PromptOperation_PROMPT_OPERATION_CONSOLIDATION
+	case *pb.PreviewPromptRequest_Reflect:
+		m.Operation = pb.PromptOperation_PROMPT_OPERATION_REFLECT
+	case *pb.PreviewPromptRequest_MentalModel:
+		if m.Operation != pb.PromptOperation_PROMPT_OPERATION_MENTAL_MODEL_DELTA {
+			m.Operation = pb.PromptOperation_PROMPT_OPERATION_SYNTHESIZE
 		}
 	}
 }

@@ -115,11 +115,13 @@ func (s *documentServer) ReprocessDocument(
 	if err := requireID("document_id", req.GetDocumentId()); err != nil {
 		return nil, toStatus(err)
 	}
-	overrides, err := configFromProto(req.GetOverrides())
+	var d decoder
+	overrides := d.retainOverrides(req.GetOverrides())
+	err = d.err
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	if err := s.d.validate("ReprocessDocument", overrides); err != nil {
+	if err := validate(overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	op, err := s.d.Documents.ReprocessDocument(ctx, b, domain.DocumentID(req.GetDocumentId()), overrides)

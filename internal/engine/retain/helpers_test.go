@@ -39,12 +39,9 @@ type env struct {
 // newEnv builds the engine; batch is RetainerDeps.BatchChunks (0 = default).
 func newEnv(t *testing.T, batch int) *env {
 	t.Helper()
-	server, err := config.ServerDefaults(func(k string) string {
-		if k == ai.EnvModel {
-			return "test-model"
-		}
-		return ""
-	})
+	server, err := config.ServerDefaults(domain.BankConfig{Models: &domain.ModelBindings{
+		Default: &domain.ModelBinding{Model: "test-model"},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +137,7 @@ func paragraphs(n int, variant string) string {
 
 // chunkTokens is an item override setting the chunk budget.
 func chunkTokens(n int) *domain.BankConfig {
-	return &domain.BankConfig{Retain: &domain.RetainTuning{ChunkMaxTokens: &n}}
+	return &domain.BankConfig{Retain: &domain.RetainConfig{ChunkMaxTokens: &n}}
 }
 
 // ingest runs Ingest and fails the test on error.

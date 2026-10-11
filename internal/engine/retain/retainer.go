@@ -392,8 +392,9 @@ func scopeMode(item *domain.ObservationScopes, cfg domain.BankConfig) domain.Obs
 	switch {
 	case item != nil && item.Mode != domain.ScopeModeUnspecified:
 		return *item
-	case cfg.DefaultObservationScopes != nil && cfg.DefaultObservationScopes.Mode != domain.ScopeModeUnspecified:
-		return *cfg.DefaultObservationScopes
+	case cfg.GetRetain().DefaultObservationScopes != nil &&
+		cfg.GetRetain().DefaultObservationScopes.Mode != domain.ScopeModeUnspecified:
+		return *cfg.GetRetain().DefaultObservationScopes
 	default:
 		return domain.ObservationScopes{Mode: domain.ScopeModeCombined}
 	}

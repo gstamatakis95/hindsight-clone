@@ -135,17 +135,17 @@ func extractTemplate(mode domain.ExtractionMode) (string, bool) {
 
 // previewRetain renders the extraction call of the effective extraction mode.
 func previewRetain(cfg domain.BankConfig) (domain.PromptPreview, error) {
-	name, ok := extractTemplate(cfg.ExtractionMode)
+	name, ok := extractTemplate(cfg.GetRetain().ExtractionMode)
 	if !ok {
 		return domain.PromptPreview{SkippedReason: "extraction_mode chunks stores each chunk as a unit with no LLM call"},
 			nil
 	}
 	data := prompts.ExtractData{
-		CustomPrompt:     cfg.CustomExtractionPrompt,
+		CustomPrompt:     cfg.GetRetain().CustomExtractionPrompt,
 		CausalLinks:      cfg.Retain == nil || deref(cfg.Retain.ExtractCausalLinks, true),
-		FreeFormEntities: deref(cfg.EntitiesAllowFreeForm, true),
-		Labels:           cfg.EntityLabels,
-		Mission:          cfg.RetainMission,
+		FreeFormEntities: deref(cfg.GetRetain().EntitiesAllowFreeForm, true),
+		Labels:           cfg.GetRetain().EntityLabels,
+		Mission:          cfg.GetRetain().Mission,
 		Context:          phContext,
 		Text:             phChunk,
 	}
@@ -155,22 +155,22 @@ func previewRetain(cfg domain.BankConfig) (domain.PromptPreview, error) {
 	}
 	custom := ""
 	if name == prompts.ExtractCustom {
-		custom = cfg.CustomExtractionPrompt
+		custom = cfg.GetRetain().CustomExtractionPrompt
 	}
 	return build(name, prompts.ExtractUser, data, schema,
-		cfgBlock("retain_mission", "mission", cfg.RetainMission),
-		cfgBlock("custom_extraction_prompt", "custom_prompt", custom),
-		cfgBlock("entity_labels", "labels", jsonText(cfg.EntityLabels)))
+		cfgBlock("retain.mission", "mission", cfg.GetRetain().Mission),
+		cfgBlock("retain.custom_extraction_prompt", "custom_prompt", custom),
+		cfgBlock("retain.entity_labels", "labels", jsonText(cfg.GetRetain().EntityLabels)))
 }
 
 // previewConsolidation renders one CONSOLIDATE call over a placeholder fact and observation.
 func previewConsolidation(cfg domain.BankConfig) (domain.PromptPreview, error) {
 	data := prompts.ConsolidateData{
-		Mission:      cfg.ObservationsMission,
+		Mission:      cfg.GetObservations().Mission,
 		Facts:        []prompts.SourceFact{{ID: phFactID, Text: phFact}},
 		Observations: []prompts.ConsolidateObservation{{ID: phObsID, Text: phObservation, ProofCount: 1}},
 	}
-	if n := cfg.MaxObservationsPerScope; n != nil {
+	if n := cfg.GetObservations().MaxObservationsPerScope; n != nil {
 		data.Capacity = &prompts.ConsolidateCapacity{Max: *n, Remaining: *n}
 	}
 	schema, err := prompts.Schema(prompts.ConsolidateSystem)
@@ -178,19 +178,19 @@ func previewConsolidation(cfg domain.BankConfig) (domain.PromptPreview, error) {
 		return domain.PromptPreview{}, fmt.Errorf("consolidation schema: %w", err)
 	}
 	return build(prompts.ConsolidateSystem, prompts.ConsolidateUser, data, schema,
-		cfgBlock("observations_mission", "mission", cfg.ObservationsMission))
+		cfgBlock("observations.mission", "mission", cfg.GetObservations().Mission))
 }
 
 // previewReflect renders the reflect loop's system prompt and the question turn.
 func previewReflect(cfg domain.BankConfig, dirs []domain.Directive) (domain.PromptPreview, error) {
 	data := prompts.ReflectData{
-		Mission: cfg.ReflectMission, Disposition: cfg.Disposition, Directives: dirs,
+		Mission: cfg.GetReflect().Mission, Disposition: cfg.GetReflect().Disposition, Directives: dirs,
 		SearchMentalModels: true, ReadMentalModels: true, Observations: true, Recall: true, Expand: true,
 		Budget: string(domain.BudgetLow), Query: phQuery,
 	}
 	s, err := message(domain.PromptRoleSystem, prompts.ReflectSystem, data,
-		cfgBlock("reflect_mission", "mission", cfg.ReflectMission),
-		cfgBlock("disposition", "disposition", jsonText(cfg.Disposition)),
+		cfgBlock("reflect.mission", "mission", cfg.GetReflect().Mission),
+		cfgBlock("reflect.disposition", "disposition", jsonText(cfg.GetReflect().Disposition)),
 		cfgBlock("", "directives", directiveText(dirs)))
 	if err != nil {
 		return domain.PromptPreview{}, err
@@ -201,20 +201,20 @@ func previewReflect(cfg domain.BankConfig, dirs []domain.Directive) (domain.Prom
 	return domain.PromptPreview{Messages: []domain.PromptMessage{s, u}}, nil
 }
 
-// previewSynthesize renders the single-shot SYNTHESIZE call.
+// previewSynthesize renders the single-shot synthesize call.
 func previewSynthesize(cfg domain.BankConfig, dirs []domain.Directive) (domain.PromptPreview, error) {
 	data := prompts.SynthesizeData{
-		Name: phModelName, SourceQuery: phSourceQuery, Mission: cfg.ReflectMission, Directives: dirs,
+		Name: phModelName, SourceQuery: phSourceQuery, Mission: cfg.GetReflect().Mission, Directives: dirs,
 		Observations: []prompts.SourceFact{{ID: phObsID, Text: phObservation}},
 		Facts:        []prompts.SourceFact{{ID: phFactID, Text: phFact}},
 		MaxTokens:    maxContentTokens(cfg),
 	}
 	return build(prompts.SynthesizeSystem, prompts.SynthesizeUser, data, nil,
-		cfgBlock("reflect_mission", "mission", cfg.ReflectMission),
+		cfgBlock("reflect.mission", "mission", cfg.GetReflect().Mission),
 		cfgBlock("", "directives", directiveText(dirs)))
 }
 
-// previewDelta renders the structured MENTAL_MODEL_DELTA call over a one-section placeholder document.
+// previewDelta renders the structured delta call over a one-section placeholder document.
 func previewDelta(cfg domain.BankConfig) (domain.PromptPreview, error) {
 	data := prompts.DeltaData{
 		Name: phModelName, SourceQuery: phSourceQuery,

@@ -13,14 +13,14 @@ func TestDeltaEmptyRetryAfterAllRejectedFails(t *testing.T) {
 	e := newEnv(t)
 	before, _ := builtModel(e, domain.RefreshStrategySingleShot)
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	e.llm.Script(domain.ModelSlotMentalModelDelta, deltaPrompt,
+	e.llm.Script(domain.ModelSlotMentalModel, deltaPrompt,
 		fakeJSON(opsJSON(map[string]any{"kind": "append_block", "section_id": "nope", "blocks_md": []string{"Bob."}})),
 		fakeJSON(opsJSON()))
 	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
 	if !errors.Is(err, ErrAllOpsRejected) || out.Trace.Outcome != domain.RefreshOutcomeFailed {
 		t.Fatalf("err %v outcome %s", err, out.Trace.Outcome)
 	}
-	if n := len(e.llm.CallsFor(domain.ModelSlotMentalModelDelta, deltaPrompt)); n != 2 {
+	if n := len(e.llm.CallsFor(domain.ModelSlotMentalModel, deltaPrompt)); n != 2 {
 		t.Fatalf("delta calls = %d, want 2", n)
 	}
 	if after := e.model("status"); after.ContentMD != before.ContentMD || after.Version != before.Version {
@@ -41,7 +41,7 @@ func TestDeltaRetryOnBadReferenceAfterPartialApply(t *testing.T) {
 		before, _ := builtModel(e, domain.RefreshStrategySingleShot)
 		alice := splitMarkdown(before.ContentMD).Sections[0].Blocks[0].ID
 		e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-		e.llm.Script(domain.ModelSlotMentalModelDelta, deltaPrompt, fakeJSON(first), fakeJSON(opsJSON(
+		e.llm.Script(domain.ModelSlotMentalModel, deltaPrompt, fakeJSON(first), fakeJSON(opsJSON(
 			map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob joined."}},
 			map[string]any{"kind": "remove_block", "section_id": "status", "block_id": alice},
 		)))
@@ -49,7 +49,7 @@ func TestDeltaRetryOnBadReferenceAfterPartialApply(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		calls := e.llm.CallsFor(domain.ModelSlotMentalModelDelta, deltaPrompt)
+		calls := e.llm.CallsFor(domain.ModelSlotMentalModel, deltaPrompt)
 		if len(calls) != 2 || !strings.Contains(calls[1].Structured.User, "unknown block_id: bnope") ||
 			strings.Contains(calls[1].Structured.User, `"blocks_md":["Bob joined."]`) {
 			t.Fatalf("want one retry listing only the bad op, got %d calls", len(calls))
@@ -68,7 +68,7 @@ func TestDeltaRetryOnBadReferenceAfterPartialApply(t *testing.T) {
 			e := newEnv(t)
 			before, _ := builtModel(e, domain.RefreshStrategySingleShot)
 			bob := e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-			e.llm.Script(domain.ModelSlotMentalModelDelta, deltaPrompt, fakeJSON(first), fakeJSON(retry))
+			e.llm.Script(domain.ModelSlotMentalModel, deltaPrompt, fakeJSON(first), fakeJSON(retry))
 			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
 			if err != nil {
 				t.Fatal(err)

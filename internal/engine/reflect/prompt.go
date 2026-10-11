@@ -15,8 +15,8 @@ func promptData(
 	cfg domain.BankConfig, directives []domain.Directive, tools map[string]bool, now time.Time,
 ) prompts.ReflectData {
 	return prompts.ReflectData{
-		Mission:            strings.TrimSpace(cfg.ReflectMission),
-		Disposition:        cfg.Disposition,
+		Mission:            strings.TrimSpace(cfg.GetReflect().Mission),
+		Disposition:        cfg.GetReflect().Disposition,
 		Directives:         directives,
 		SearchMentalModels: tools[ToolSearchMentalModels],
 		ReadMentalModels:   tools[ToolReadMentalModels],

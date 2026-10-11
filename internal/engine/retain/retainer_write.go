@@ -154,7 +154,7 @@ func (r *retainer) writeUnits(ctx context.Context, tx store.Tx, rn *run, pb *pre
 	units := make([]domain.Unit, len(pb.facts))
 	ents := make([][]domain.EntityID, len(pb.facts))
 	for i, pf := range pb.facts {
-		labelIDs, labelTags, err := r.d.Labels.Resolve(ctx, tx, b, rn.cfg.EntityLabels, pf.fact.Labels)
+		labelIDs, labelTags, err := r.d.Labels.Resolve(ctx, tx, b, rn.cfg.GetRetain().EntityLabels, pf.fact.Labels)
 		if err != nil {
 			return fmt.Errorf("retain: labels: %w", err)
 		}
@@ -301,6 +301,6 @@ func (r *retainer) complete(ctx context.Context, rn *run) error {
 // consolidates reports whether the retain queues the bank's automatic consolidation: not with
 // skip_consolidation, nor when observations or automatic consolidation are disabled.
 func consolidates(rn *run) bool {
-	return !rn.p.SkipConsolidation && boolOr(rn.cfg.EnableObservations, true) &&
-		boolOr(rn.cfg.AutoConsolidation, true)
+	return !rn.p.SkipConsolidation && boolOr(rn.cfg.GetObservations().Enabled, true) &&
+		boolOr(rn.cfg.GetObservations().AutoConsolidation, true)
 }

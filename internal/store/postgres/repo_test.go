@@ -310,7 +310,9 @@ func testDocumentLifecycle(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA)
 	d := domain.Document{
 		ID: "doc-1", Bank: bankA, Tags: []string{"a", "b"}, BlobKey: blob.Key(bankA, "doc-1", "h1"),
-		Overrides: &domain.BankConfig{RetainMission: "extract recipes", ExtractionMode: domain.ExtractionModeVerbose},
+		Overrides: &domain.BankConfig{
+			Retain: &domain.RetainConfig{Mission: "extract recipes", ExtractionMode: domain.ExtractionModeVerbose},
+		},
 	}
 	inTx(t, s, func(tx store.Tx) error { return tx.Documents().Upsert(t.Context(), d) })
 	compareDocument(t, "after Upsert", mustDocument(t, s, d.ID), d)

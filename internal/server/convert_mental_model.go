@@ -366,7 +366,7 @@ func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (mentalmodel.Refre
 		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		ID:        domain.MentalModelID(r.GetMentalModelId()),
 		ForceFull: r.GetForceFull(),
-		Overrides: d.configPtr(r.GetOverrides()),
+		Overrides: d.refreshOverrides(r.GetOverrides()),
 		Strategy:  fromEnum[domain.RefreshStrategy](&d, r.GetStrategy()),
 	}
 	return out, d.err
@@ -378,7 +378,7 @@ func refreshRequestToProto(r mentalmodel.RefreshRequest) *pb.RefreshMentalModelR
 		BankId:        r.Bank.Bank,
 		MentalModelId: string(r.ID),
 		ForceFull:     r.ForceFull,
-		Overrides:     configToProto(r.Overrides),
+		Overrides:     refreshOverridesToProto(r.Overrides),
 		Strategy:      toEnum[pb.RefreshStrategy](r.Strategy),
 	}
 }

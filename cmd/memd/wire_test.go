@@ -8,6 +8,7 @@ import (
 	"memd/internal/ai/gateway"
 	"memd/internal/clock"
 	"memd/internal/config"
+	"memd/internal/domain"
 	"memd/internal/fake"
 	"memd/internal/observability"
 	"memd/internal/server"
@@ -96,26 +97,24 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	g := &txGuard{}
 	db := pgtest.NewStore(t)
 	gw := gateway.NewClient(gateway.Config{
-		BaseURL: ts.URL + gatewayemu.BasePath, EmbedModel: defaultEmbedModel, TraceCall: tel.GatewayHook(),
+		BaseURL: ts.URL + gatewayemu.BasePath, EmbedModel: config.DefaultEmbedModel, TraceCall: tel.GatewayHook(),
 	}, tel.HTTPClient(&http.Client{Transport: guardTransport{g: g}}))
-	env := map[string]string{}
-	for _, slot := range []string{
-		"extract", "time_parse", "consolidate", "dedup_check", "reflect", "structured_output",
-		"mental_model_delta", "synthesize", "rerank",
-	} {
-		env[ai.EnvModelPrefix+strings.ToUpper(slot)] = gatewayemu.ModelFor(slot)
+	models := &domain.ModelBindings{}
+	for _, slot := range append(append([]domain.ModelSlot{}, domain.LLMSlots...), domain.ModelSlotRerank) {
+		*models.Slot(slot) = &domain.ModelBinding{Model: gatewayemu.ModelFor(string(slot))}
 	}
-	serverCfg, err := config.ServerDefaults(func(k string) string { return env[k] })
+	cfg := Config{WorkerSlots: 1, GatewayURL: ts.URL, File: ServerFile{
+		Defaults: domain.BankConfig{Models: models},
+		Worker:   WorkerFile{PollInterval: Duration(10 * time.Millisecond), HeartbeatInterval: Duration(time.Second)},
+	}}
+	cfg.File.withDefaults()
+	serverCfg, err := cfg.File.validate()
 	if err != nil {
 		t.Fatal(err)
 	}
 	tok, err := ai.NewTokenizer()
 	if err != nil {
 		t.Fatal(err)
-	}
-	cfg := Config{
-		WorkerSlots: 1, PollInterval: 10 * time.Millisecond, HeartbeatInterval: time.Second,
-		StaleAfter: time.Minute, MaintenanceInterval: time.Minute, GatewayURL: ts.URL,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	in := infra{db: guardStore{DB: db, g: g}, claimer: db, maint: db, blob: fake.NewBlob(), gw: gw}

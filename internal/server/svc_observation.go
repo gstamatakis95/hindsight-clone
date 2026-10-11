@@ -30,11 +30,13 @@ func (s *observationServer) Consolidate(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	overrides, err := configFromProto(req.GetOverrides())
+	var d decoder
+	overrides := d.consolidateOverrides(req.GetOverrides())
+	err = d.err
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	if err := s.d.validate("Consolidate", overrides); err != nil {
+	if err := validate(overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	op, err := s.d.Observations.Consolidate(ctx, b, tagSetsFromProto(req.GetScopes()), overrides)

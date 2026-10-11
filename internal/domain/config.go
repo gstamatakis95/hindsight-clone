@@ -120,24 +120,39 @@ type ScopePattern struct {
 
 // ConsolidationStrategy overrides consolidation settings for the scopes its patterns match.
 type ConsolidationStrategy struct {
-	// Name identifies the strategy.
+	// Name identifies the strategy; unique within one strategy list.
 	Name string `json:"name"`
 	// Scopes are the patterns; the first strategy with a matching pattern wins.
 	Scopes []ScopePattern `json:"scopes,omitempty"`
-	// ObservationsMission replaces the bank's observations mission for matched scopes.
-	ObservationsMission string `json:"observations_mission,omitempty"`
+	// Mission replaces the observations mission for matched scopes.
+	Mission string `json:"mission,omitempty"`
 	// MaxObservationsPerScope caps observations per matched scope.
 	MaxObservationsPerScope *int `json:"max_observations_per_scope,omitempty"`
 	// SourceFactsMaxTokens caps source facts sent per consolidation call.
 	SourceFactsMaxTokens *int `json:"source_facts_max_tokens,omitempty"`
 	// SourceFactsMaxTokensPerObservation caps source facts shown per observation.
 	SourceFactsMaxTokensPerObservation *int `json:"source_facts_max_tokens_per_observation,omitempty"`
-	// Models binds CONSOLIDATE / DEDUP_CHECK for matched scopes.
-	Models []SlotBinding `json:"models,omitempty"`
+	// ConsolidateModel binds the consolidate slot for matched scopes.
+	ConsolidateModel *ModelBinding `json:"consolidate_model,omitempty"`
+	// DedupCheckModel binds the dedup_check slot for matched scopes.
+	DedupCheckModel *ModelBinding `json:"dedup_check_model,omitempty"`
 }
 
-// RetainTuning holds chunking, entity matching and linking knobs.
-type RetainTuning struct {
+// RetainConfig holds everything retain reads: the mission, extraction, labels, default scopes, chunking, entity
+// matching and linking.
+type RetainConfig struct {
+	// Mission steers extraction.
+	Mission string `json:"mission,omitempty"`
+	// ExtractionMode selects the extraction strategy.
+	ExtractionMode ExtractionMode `json:"extraction_mode,omitempty"`
+	// CustomExtractionPrompt is used by the custom extraction mode.
+	CustomExtractionPrompt string `json:"custom_extraction_prompt,omitempty"`
+	// EntityLabels declares typed labels.
+	EntityLabels []EntityLabel `json:"entity_labels"`
+	// EntitiesAllowFreeForm false restricts entities to labels.
+	EntitiesAllowFreeForm *bool `json:"entities_allow_free_form,omitempty"`
+	// DefaultObservationScopes is the scope mode for items that set none.
+	DefaultObservationScopes *ObservationScopes `json:"default_observation_scopes,omitempty"`
 	// ChunkMaxTokens is the chunk size.
 	ChunkMaxTokens *int `json:"chunk_max_tokens,omitempty"`
 	// ChunkOverlapTokens is the overlap between chunks.
@@ -156,6 +171,33 @@ type RetainTuning struct {
 	StructuredChunkMaxTokens *int `json:"structured_chunk_max_tokens,omitempty"`
 	// TemporalLinkCap caps temporal links per unit (default 20).
 	TemporalLinkCap *int `json:"temporal_link_cap,omitempty"`
+}
+
+// ObservationConfig holds consolidation: whether it runs, its mission, its limits and its per-scope strategies.
+type ObservationConfig struct {
+	// Enabled false disables consolidation entirely.
+	Enabled *bool `json:"enabled,omitempty"`
+	// AutoConsolidation enqueues consolidation after retain and lets the maintenance tick catch up.
+	AutoConsolidation *bool `json:"auto_consolidation,omitempty"`
+	// Mission steers consolidation.
+	Mission string `json:"mission,omitempty"`
+	// DedupThreshold is the cosine floor for near-duplicate observations (default 0.97).
+	DedupThreshold *float64 `json:"dedup_threshold,omitempty"`
+	// MaxObservationsPerScope caps observations per scope.
+	MaxObservationsPerScope *int `json:"max_observations_per_scope,omitempty"`
+	// SourceFactsMaxTokens caps source facts per consolidation call.
+	SourceFactsMaxTokens *int `json:"source_facts_max_tokens,omitempty"`
+	// SourceFactsMaxTokensPerObservation caps source facts shown per observation (default 256).
+	SourceFactsMaxTokensPerObservation *int `json:"source_facts_max_tokens_per_observation,omitempty"`
+	// LLMBatchSize is facts per consolidation call (default 8).
+	LLMBatchSize *int `json:"llm_batch_size,omitempty"`
+	// MaxUnitsPerRun bounds one consolidation run, then it re-enqueues (default 100).
+	MaxUnitsPerRun *int `json:"max_units_per_run,omitempty"`
+	// Strategies are per-scope overrides; the first match wins.
+	Strategies []ConsolidationStrategy `json:"strategies"`
+	// ReconcileGraceSeconds is how old an unconsolidated fact must be before the maintenance tick consolidates
+	// its bank (default 600).
+	ReconcileGraceSeconds *int `json:"reconcile_grace_seconds,omitempty"`
 }
 
 // RecallConfig holds recall's budgets, boosts and arm settings.
@@ -198,8 +240,12 @@ type RecallConfig struct {
 	BudgetMax *int `json:"budget_max,omitempty"`
 }
 
-// ReflectConfig holds the reflect loop's limits and observation-search knobs.
+// ReflectConfig holds reflect's mission and disposition, the loop's limits and its observation-search knobs.
 type ReflectConfig struct {
+	// Mission steers reflect.
+	Mission string `json:"mission,omitempty"`
+	// Disposition shapes reflect's tone.
+	Disposition *Disposition `json:"disposition,omitempty"`
 	// MaxIterations at BUDGET_MID (default 10); LOW halves, HIGH doubles.
 	MaxIterations *int `json:"max_iterations,omitempty"`
 	// EnabledTools lists the tools the agent may call; nil = all.
@@ -238,64 +284,54 @@ type MentalModelConfig struct {
 	DefaultStrategy RefreshStrategy `json:"default_strategy,omitempty"`
 }
 
-// BankConfig is the one configuration shape used at every level:
-// server < tenant < bank < strategy < request (< item). Scalars: set replaces unset. Models: merged per
-// slot. Other lists: set replaces (no append); a non-nil empty slice clears.
+// BankConfig is the one configuration shape used at every level, grouped by phase:
+// server < tenant < bank < strategy < request (< item). Scalars: set replaces unset. Groups merge field by field.
+// A ModelBinding is atomic. Lists: set replaces (no append); a non-nil empty slice clears.
 type BankConfig struct {
-	// RetainMission steers extraction.
-	RetainMission string `json:"retain_mission,omitempty"`
-	// ObservationsMission steers consolidation.
-	ObservationsMission string `json:"observations_mission,omitempty"`
-	// ReflectMission steers reflect.
-	ReflectMission string `json:"reflect_mission,omitempty"`
-	// Disposition shapes reflect's tone.
-	Disposition *Disposition `json:"disposition,omitempty"`
-	// ExtractionMode selects the extraction strategy.
-	ExtractionMode ExtractionMode `json:"extraction_mode,omitempty"`
-	// CustomExtractionPrompt is used by the custom extraction mode.
-	CustomExtractionPrompt string `json:"custom_extraction_prompt,omitempty"`
-	// EntityLabels declares typed labels.
-	EntityLabels []EntityLabel `json:"entity_labels"`
-	// AutoConsolidation enqueues consolidation after retain.
-	AutoConsolidation *bool `json:"auto_consolidation,omitempty"`
-	// DedupThreshold is the cosine floor for near-duplicate observations (default 0.97).
-	DedupThreshold *float64 `json:"dedup_threshold,omitempty"`
-	// MaxObservationsPerScope caps observations per scope.
-	MaxObservationsPerScope *int `json:"max_observations_per_scope,omitempty"`
-	// ConsolidationSourceFactsMaxTokens caps source facts per consolidation call.
-	ConsolidationSourceFactsMaxTokens *int `json:"consolidation_source_facts_max_tokens,omitempty"`
-	// ConsolidationStrategies are per-scope overrides; the first match wins.
-	ConsolidationStrategies []ConsolidationStrategy `json:"consolidation_strategies"`
+	// Retain holds extraction, labels, chunking and linking.
+	Retain *RetainConfig `json:"retain,omitempty"`
+	// Observations holds consolidation.
+	Observations *ObservationConfig `json:"observations,omitempty"`
 	// Recall holds recall settings.
 	Recall *RecallConfig `json:"recall,omitempty"`
-	// Models binds slots to models; merged per slot across levels.
-	Models []SlotBinding `json:"models,omitempty"`
-	// Retain holds retain tuning.
-	Retain *RetainTuning `json:"retain,omitempty"`
 	// Reflect holds reflect settings.
 	Reflect *ReflectConfig `json:"reflect,omitempty"`
 	// MentalModels holds mental-model defaults.
 	MentalModels *MentalModelConfig `json:"mental_models,omitempty"`
-	// DefaultObservationScopes is the scope mode for items that set none.
-	DefaultObservationScopes *ObservationScopes `json:"default_observation_scopes,omitempty"`
-	// EnableObservations false disables consolidation entirely.
-	EnableObservations *bool `json:"enable_observations,omitempty"`
-	// ConsolidationLLMBatchSize is facts per consolidation call (default 8).
-	ConsolidationLLMBatchSize *int `json:"consolidation_llm_batch_size,omitempty"`
-	// ConsolidationSourceTokensPerObs caps source facts per observation (default 256).
-	ConsolidationSourceTokensPerObs *int `json:"consolidation_source_facts_max_tokens_per_observation,omitempty"`
-	// EntitiesAllowFreeForm false restricts entities to labels.
-	EntitiesAllowFreeForm *bool `json:"entities_allow_free_form,omitempty"`
-	// ConsolidationMaxUnitsPerRun bounds one consolidation run, then it re-enqueues (default 100).
-	ConsolidationMaxUnitsPerRun *int `json:"consolidation_max_units_per_run,omitempty"`
+	// Models binds model slots to gateway models.
+	Models *ModelBindings `json:"models,omitempty"`
 }
 
-// Binding returns the binding for slot from cfg.Models and whether one is set. It does not merge levels.
-func (c BankConfig) Binding(slot ModelSlot) (ModelBinding, bool) {
-	for _, sb := range c.Models {
-		if sb.Slot == slot {
-			return sb.Binding, true
-		}
+// GetRetain returns the retain group, or the zero group when c leaves it unset.
+func (c BankConfig) GetRetain() RetainConfig {
+	if c.Retain == nil {
+		return RetainConfig{}
 	}
-	return ModelBinding{}, false
+	return *c.Retain
+}
+
+// GetObservations returns the observations group, or the zero group when c leaves it unset.
+func (c BankConfig) GetObservations() ObservationConfig {
+	if c.Observations == nil {
+		return ObservationConfig{}
+	}
+	return *c.Observations
+}
+
+// GetReflect returns the reflect group, or the zero group when c leaves it unset.
+func (c BankConfig) GetReflect() ReflectConfig {
+	if c.Reflect == nil {
+		return ReflectConfig{}
+	}
+	return *c.Reflect
+}
+
+// Binding returns the binding c.Models yields for slot (ModelBindings.For) and whether it names a model. It reads
+// one level, or an already-merged config; it does not merge levels.
+func (c BankConfig) Binding(slot ModelSlot) (ModelBinding, bool) {
+	b := c.Models.For(slot)
+	if b == nil || b.Model == "" {
+		return ModelBinding{}, false
+	}
+	return *b, true
 }

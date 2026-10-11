@@ -8,7 +8,7 @@
 // reconcile), the cross-bank scans of store.Maintenance and the jobs catalogue, and never an adapter. No
 // engine imports it. cmd/memd builds it and runs [Service.Run] beside the job runner in the worker and all
 // modes. Its [Config] holds the operator settings (tick interval, reclaim age, retention of terminal
-// operations and lifecycle events, consolidation grace, stranded retry delay, graph budget); zero values take
+// operations and lifecycle events, stranded retry delay, graph budget); zero values take
 // the defaults.
 //
 // # Tick
@@ -23,8 +23,9 @@
 //  3. refresh_failures: mentalmodel's reconciler pauses models whose latest refresh failed for good.
 //  4. cron_refresh: enqueues mental-model refreshes whose refresh_cron fired.
 //  5. consolidation_reconcile: enqueues the automatic consolidate for banks with a fact left unconsolidated
-//     longer than ConsolidationGrace (default 10 min, so skip_consolidation followed by a manual Consolidate
-//     is not pre-empted), unless the bank turns auto_consolidation or enable_observations off.
+//     longer than the bank's observations.reconcile_grace_seconds (default 600, so skip_consolidation followed
+//     by a manual Consolidate is not pre-empted), unless the bank turns observations.auto_consolidation or
+//     observations.enabled off.
 //  6. graph_reconcile: enqueues graph_maintenance for banks with graph_dirty or entity_maintenance rows.
 //  7. rederive_stranded: re-enqueues rederive_memory for facts whose rederive ended FAILED or CANCELLED and
 //     left them without an embedding, StrandedRetryAfter (default 10 min) after it ended.

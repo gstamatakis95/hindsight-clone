@@ -172,6 +172,8 @@ func fillRequest(m protoreflect.Message) {
 	for i := range fields.Len() {
 		fd := fields.Get(i)
 		switch {
+		case fd.IsList() && fd.Name() == "paths": // a reset needs a mask
+			m.Mutable(fd).List().Append(protoreflect.ValueOfString("*"))
 		case fd.IsList() || fd.IsMap():
 		case fd.Kind() == protoreflect.StringKind && (strings.HasSuffix(string(fd.Name()), "id") ||
 			strings.HasSuffix(string(fd.Name()), "_path")):

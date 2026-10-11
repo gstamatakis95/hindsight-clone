@@ -1,46 +1,36 @@
 package config
 
 import (
+	"errors"
 	"fmt"
-	"memd/internal/ai"
 	"memd/internal/domain"
-	"strings"
 )
 
-// llmSlots are the slots ai.EnvModel binds; bindableSlots adds RERANK. EMBED is server-wide and never
-// part of a BankConfig.
-var (
-	llmSlots = []domain.ModelSlot{
-		domain.ModelSlotExtract, domain.ModelSlotTimeParse, domain.ModelSlotConsolidate,
-		domain.ModelSlotDedupCheck, domain.ModelSlotReflect, domain.ModelSlotStructuredOutput,
-		domain.ModelSlotMentalModelDelta, domain.ModelSlotSynthesize,
+// DefaultEmbedModel is the embedding model when the server config binds none (768 dimensions).
+const DefaultEmbedModel = "nomic-embed-text-v1.5"
+
+// ServerDefaults is the server level of the config hierarchy: every default the spec states, with the server
+// config file's defaults block (file) merged over them. Knobs whose default the spec leaves open stay unset;
+// the engine that reads them owns that default. Models come only from file: a chat-model slot with neither its
+// own binding nor models.default stays unbound, and ai.Router rejects calls on it. EMBED defaults to
+// DefaultEmbedModel. Without a RERANK binding recall.rerank defaults to false (recall skips the cross-encoder);
+// file setting recall.rerank true without one is an error. The result is checked with ValidateServer.
+func ServerDefaults(file domain.BankConfig) (domain.BankConfig, error) {
+	cfg := Merge(specDefaults(), file)
+	if cfg.Models == nil {
+		cfg.Models = &domain.ModelBindings{}
 	}
-	bindableSlots = append(append([]domain.ModelSlot{}, llmSlots...), domain.ModelSlotRerank)
-)
-
-// ServerDefaults is the server level of the config hierarchy: every default the spec states, plus the
-// model bindings from the environment (ai.EnvModel for every LLM slot, ai.EnvModelPrefix+SLOT per slot).
-// Knobs whose default the spec leaves open stay unset; the engine that reads them owns that default.
-// A slot with no model in the environment stays unbound, and ai.Router rejects calls on it;
-// without a RERANK binding, recall.rerank defaults to false.
-func ServerDefaults(env func(string) string) (domain.BankConfig, error) {
-	cfg := specDefaults()
-	def := strings.TrimSpace(env(ai.EnvModel))
-	for _, s := range bindableSlots {
-		model := strings.TrimSpace(env(ai.EnvModelPrefix + strings.ToUpper(string(s))))
-		if model == "" && s != domain.ModelSlotRerank {
-			model = def
-		}
-		if model != "" {
-			cfg.Models = append(cfg.Models, domain.SlotBinding{Slot: s, Binding: domain.ModelBinding{Model: model}})
-		}
+	if cfg.Models.Embed == nil {
+		cfg.Models.Embed = &domain.ModelBinding{Model: DefaultEmbedModel}
 	}
 	if _, ok := cfg.Binding(domain.ModelSlotRerank); !ok {
-		// No reranker in this deployment: recall skips the cross-encoder instead of failing on an unbound
-		// slot. A level that binds RERANK must also set recall.rerank = true.
+		if file.Recall != nil && file.Recall.Rerank != nil && *file.Recall.Rerank {
+			return domain.BankConfig{}, errors.New("config: server defaults: recall.rerank is true but " +
+				"models.rerank binds no model")
+		}
 		cfg.Recall.Rerank = ptr(false)
 	}
-	if err := ValidateOverrides(RPCBankConfig, cfg); err != nil {
+	if err := ValidateServer(cfg); err != nil {
 		return domain.BankConfig{}, fmt.Errorf("config: server defaults: %w", err)
 	}
 	return cfg, nil
@@ -49,20 +39,25 @@ func ServerDefaults(env func(string) string) (domain.BankConfig, error) {
 // specDefaults holds the defaults stated in the spec's BankConfig comments.
 func specDefaults() domain.BankConfig {
 	return domain.BankConfig{
-		Disposition:                     &domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3},
-		ExtractionMode:                  domain.ExtractionModeConcise,
-		AutoConsolidation:               ptr(true),
-		DedupThreshold:                  ptr(0.97),
-		Recall:                          recallDefaults(),
-		Retain:                          &domain.RetainTuning{TemporalLinkCap: ptr(20), EntityMatchThreshold: ptr(0.6)},
-		Reflect:                         reflectDefaults(),
-		MentalModels:                    mentalModelDefaults(),
-		DefaultObservationScopes:        &domain.ObservationScopes{Mode: domain.ScopeModeCombined, MaxCombinations: ptr(15)},
-		EnableObservations:              ptr(true),
-		ConsolidationLLMBatchSize:       ptr(8),
-		ConsolidationSourceTokensPerObs: ptr(256),
-		EntitiesAllowFreeForm:           ptr(true),
-		ConsolidationMaxUnitsPerRun:     ptr(100),
+		Retain: &domain.RetainConfig{
+			ExtractionMode:           domain.ExtractionModeConcise,
+			EntitiesAllowFreeForm:    ptr(true),
+			DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeCombined, MaxCombinations: ptr(15)},
+			TemporalLinkCap:          ptr(20),
+			EntityMatchThreshold:     ptr(0.6),
+		},
+		Observations: &domain.ObservationConfig{
+			Enabled:                            ptr(true),
+			AutoConsolidation:                  ptr(true),
+			DedupThreshold:                     ptr(0.97),
+			SourceFactsMaxTokensPerObservation: ptr(256),
+			LLMBatchSize:                       ptr(8),
+			MaxUnitsPerRun:                     ptr(100),
+			ReconcileGraceSeconds:              ptr(600),
+		},
+		Recall:       recallDefaults(),
+		Reflect:      reflectDefaults(),
+		MentalModels: mentalModelDefaults(),
 	}
 }
 
@@ -85,6 +80,7 @@ func recallDefaults() *domain.RecallConfig {
 
 func reflectDefaults() *domain.ReflectConfig {
 	return &domain.ReflectConfig{
+		Disposition:                       &domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3},
 		MaxIterations:                     ptr(10),
 		SearchObservationsMaxTokens:       ptr(5000),
 		SearchObservationsIncludeEntities: ptr(true),

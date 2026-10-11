@@ -136,7 +136,7 @@ func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (curate.UpdateMemor
 		ResolveEntities: optCopy(r.ResolveEntities),
 		State:           fromEnum[domain.MemoryState](&d, r.GetState()),
 		Reason:          r.GetReason(),
-		Overrides:       d.configPtr(r.GetOverrides()),
+		Overrides:       rederiveOverrides(r.GetOverrides()),
 	}
 	return out, d.err
 }
@@ -156,7 +156,7 @@ func updateMemoryRequestToProto(r curate.UpdateMemoryRequest) *pb.UpdateMemoryRe
 		ResolveEntities: optCopy(r.ResolveEntities),
 		State:           toEnum[pb.MemoryState](r.State),
 		Reason:          r.Reason,
-		Overrides:       configToProto(r.Overrides),
+		Overrides:       rederiveOverridesToProto(r.Overrides),
 	}
 }
 

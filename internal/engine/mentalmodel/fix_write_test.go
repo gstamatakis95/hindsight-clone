@@ -71,7 +71,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 	e := newEnv(t)
 	builtModel(e, domain.RefreshStrategySingleShot)
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt,
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt,
 		opsJSON(map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob."}}))
 	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
 	e.clock.Advance(time.Minute)

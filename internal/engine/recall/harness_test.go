@@ -85,11 +85,11 @@ func newEnv(t *testing.T, o envOpts) *env {
 		llm: fake.NewLLM(),
 	}
 	e.store = pgtest.NewStore(t)
-	vars := map[string]string{ai.EnvModel: "llm-1"}
+	models := &domain.ModelBindings{Default: &domain.ModelBinding{Model: "llm-1"}}
 	if o.rerank {
-		vars[ai.EnvModelPrefix+"RERANK"] = "rerank-1"
+		models.Rerank = &domain.ModelBinding{Model: "rerank-1"}
 	}
-	server, err := config.ServerDefaults(func(k string) string { return vars[k] })
+	server, err := config.ServerDefaults(domain.BankConfig{Models: models})
 	if err != nil {
 		t.Fatal(err)
 	}

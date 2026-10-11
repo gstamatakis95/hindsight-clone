@@ -47,11 +47,11 @@
 //     scope or window holding nothing completes as NO_NEW_FACTS and only advances last_refreshed_at.
 //  3. Draft. Agentic ([NewAgenticSynthesizer]): the reflect loop over the scope, bounded to the snapshot,
 //     answering as a document, with the model excluded from its own page tools; a delta runs the loop over
-//     the window only and integrates the memories it cites with MENTAL_MODEL_DELTA. Single-shot
+//     the window only and integrates the memories it cites with the delta call. Single-shot
 //     ([NewSingleShotSynthesizer]): one recall over the scope and window (observations first, the trigger's
-//     budget, default mid), then one SYNTHESIZE call (full) or one MENTAL_MODEL_DELTA call (delta). Both
+//     budget, default mid), then one synthesize call (full) or one delta call (delta). Both
 //     return [ErrNoNewFacts] before any model call when retrieval finds nothing.
-//  4. Delta edits: MENTAL_MODEL_DELTA proposes edit ops over the document's sections and blocks (ids derived
+//  4. Delta edits: the delta call proposes edit ops over the document's sections and blocks (ids derived
 //     from content), applied at once. One retry shows the model the rejected ops when none
 //     applied or any named an unknown id. If every op is still rejected the refresh fails and the document
 //     stays ([ErrAllOpsRejected]); a document is never replaced by a partial one. A delta that changes more
@@ -115,7 +115,7 @@
 //
 // mental_models: default_mode (full), default_strategy (agentic), refresh_debounce_seconds (30),
 // min_refresh_interval_seconds (0), history_max_entries (50), max_delta_ratio (unset = no limit) and
-// max_content_tokens; the reflect knobs and the REFLECT, SYNTHESIZE, MENTAL_MODEL_DELTA and STRUCTURED_OUTPUT
+// max_content_tokens; the reflect knobs and the REFLECT, MENTAL_MODEL and STRUCTURED_OUTPUT
 // bindings. A model's stored overrides and its trigger's reflect token knobs (recall_max_tokens,
 // search_observations_*) are config levels above the bank; the trigger's mode, strategy, interval floor,
 // budget and response schema are read from the trigger directly.
@@ -133,5 +133,5 @@
 // snapshot bound, no-LLM pre-checks, floor re-park, conflicts, dry runs), the planner (delta retry and
 // rejection), markdown splitting and edit application, diffs, scheduling and queuing, cron, failure
 // reconciliation, admin RPCs and page search. SPEC "Behavioural rules" (Mental models), "Engines" (mental
-// models), "Jobs" (refresh_mental_model) and "Model routing" (SYNTHESIZE, MENTAL_MODEL_DELTA).
+// models), "Jobs" (refresh_mental_model) and "Model routing" (MENTAL_MODEL).
 package mentalmodel

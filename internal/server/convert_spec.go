@@ -19,7 +19,7 @@ func (d *decoder) spec(s *pb.MentalModelSpec) domain.MentalModelSpec {
 		Tags:        s.GetTags(),
 		MaxTokens:   optInt(s.MaxTokens),
 		Trigger:     d.trigger(s.GetTrigger()),
-		Overrides:   d.configPtr(s.GetOverrides()),
+		Overrides:   d.refreshOverrides(s.GetOverrides()),
 	}
 }
 
@@ -33,7 +33,7 @@ func specToProto(s domain.MentalModelSpec) *pb.MentalModelSpec {
 		Tags:        s.Tags,
 		MaxTokens:   optInt32(s.MaxTokens),
 		Trigger:     triggerToProto(s.Trigger),
-		Overrides:   configToProto(s.Overrides),
+		Overrides:   refreshOverridesToProto(s.Overrides),
 	}
 }
 

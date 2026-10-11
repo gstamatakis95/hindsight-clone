@@ -51,11 +51,9 @@ func TestApplyTakesSeqFirst(t *testing.T) {
 // TestSettleProbesTheScopeBinding: a strategy routes scope x to a broken model while the bank's default is
 // healthy. The probe uses the broken binding, fails, and nothing is parked.
 func TestSettleProbesTheScopeBinding(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{
-		ConsolidationStrategies: []domain.ConsolidationStrategy{{
-			Name: "s", Scopes: []domain.ScopePattern{{Tags: []string{"x"}}}, Models: consolidateModel("broken"),
-		}},
-	})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{Strategies: []domain.ConsolidationStrategy{{
+		Name: "s", Scopes: []domain.ScopePattern{{Tags: []string{"x"}}}, ConsolidateModel: consolidateModel("broken"),
+	}}}})
 	e.fact("f1", "Fact one", "x")
 	e.script(ok(reply(nil, nil)))
 	var models []string
@@ -80,7 +78,7 @@ func TestSettleProbesTheScopeBinding(t *testing.T) {
 // TestSettleRetriesAloneBeforeParking: the whole batch fails, then the gateway recovers at the probe. Each
 // deferred unit is retried alone, succeeds, and none of the 4 is parked.
 func TestSettleRetriesAloneBeforeParking(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(4)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{LLMBatchSize: ptr(4)}})
 	for _, id := range []string{"f1", "f2", "f3", "f4"} {
 		e.fact(id, "Fact "+id, "x")
 	}
@@ -127,7 +125,7 @@ func TestParkSkipsChangedUnits(t *testing.T) {
 // TestCircuitBreakerAfterTwoDeadBatches: two top-level batches in a row in which every call fails, with no
 // success between them, fail the run instead of parking the second batch's units.
 func TestCircuitBreakerAfterTwoDeadBatches(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{ConsolidationLLMBatchSize: ptr(1)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{LLMBatchSize: ptr(1)}})
 	e.fact("f1", "One", "x")
 	e.fact("f2", "Two", "x")
 	e.script(fail(), ok(reply(nil, nil)), fail(), fail())

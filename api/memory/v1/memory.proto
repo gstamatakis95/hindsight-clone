@@ -14,13 +14,13 @@
 // Banks. A bank is an isolated memory store within a tenant. A write to an unknown bank creates it with
 // tenant defaults, and every read of an unknown bank returns NOT_FOUND.
 //
-// Configuration. BankConfig is the one config shape used at every level: server < tenant < bank < strategy <
-// request (< item, for retain; strategies only apply to consolidation). Scalars: a set value replaces an
-// unset one. models: merged per slot, where the most specific level that sets a slot supplies its whole
-// ModelBinding (unset binding fields mean the gateway / adapter default, not the less specific level's
-// value). Other lists: a set list replaces the inherited one (no append). Patch RPCs take a FieldMask, which
-// is also how a list is cleared. Every request that does work takes a full BankConfig as overrides; fields
-// the RPC cannot use are rejected with INVALID_ARGUMENT, never silently ignored.
+// Configuration. BankConfig is the one config shape used at every stored level: server (the defaults block of
+// the server config file) < tenant < bank, then a consolidation strategy and the request (< item, for retain).
+// It is grouped by phase: retain, observations, recall, reflect, mental_models, models. Scalars: a set value
+// replaces an unset one. Groups merge field by field. A ModelBinding is atomic. Lists: a set list replaces the
+// inherited one (no append). Patch RPCs take a FieldMask, which is also how a list is cleared. Each request
+// that does work takes its own *Overrides message holding only what that RPC can change; the server turns it
+// into a BankConfig level. Model routing: see ModelBindings.
 //
 // Async work. Background work runs as operations. An RPC whose requested work runs in the background returns
 // its Operation (or operation id), and OperationService reports its status and progress; follow-up jobs an RPC
@@ -208,10 +208,9 @@ message RetainRequest {
   repeated RetainItem items = 2;
   // Tags added to every item's units.
   repeated string document_tags = 3;
-  // Request-level overrides (extraction mode and prompt, retain mission, labels, retain tuning, EXTRACT
-  // and TIME_PARSE models); other fields = INVALID_ARGUMENT. Stored on each document (part of its no-op
-  // hash); never inherited by automatic consolidation.
-  BankConfig overrides = 4;
+  // Request-level overrides. Stored on each document (part of its no-op hash); never inherited by automatic
+  // consolidation.
+  RetainOverrides overrides = 4;
   // Do not enqueue consolidation after this retain, so a manual Consolidate can run with its own settings.
   bool skip_consolidation = 5;
   // false (default) = return after units commit; true = enqueue jobs and return operation ids.
@@ -243,7 +242,7 @@ message RetainItem {
   string document_id = 5;
   // Tags of the document's units, added to the request's document_tags.
   repeated string tags = 6;
-  // Observation scopes for this item; unset = BankConfig.default_observation_scopes.
+  // Observation scopes for this item; unset = retain.default_observation_scopes of the config.
   ObservationScopes observation_scopes = 7;
   // Metadata copied onto every unit of the document.
   map<string, string> metadata = 8;
@@ -251,10 +250,9 @@ message RetainItem {
   repeated EntityHint entities = 9;
   // false = take entity names literally instead of resolving them to existing entities; unset = true.
   optional bool resolve_entities = 10;
-  // Item-level overrides, the most specific level (over the request's). Same reach as
-  // RetainRequest.overrides; other fields = INVALID_ARGUMENT. Stored on the document and part of its
-  // no-op hash, so ReprocessDocument replays them unless given new overrides.
-  BankConfig overrides = 11;
+  // Item-level overrides, the most specific level (over the request's). Stored on the document and part of
+  // its no-op hash, so ReprocessDocument replays them unless given new overrides.
+  RetainOverrides overrides = 11;
   // Re-extract even when the content hash and overrides hash are unchanged.
   bool force_reextract = 12;
 }
@@ -314,9 +312,8 @@ message RecallRequest {
   RecallInclude include = 14;
   // Return a RecallTrace.
   bool trace = 15;
-  // Request-only overrides: every RecallConfig field and the TIME_PARSE / RERANK models; other fields =
-  // INVALID_ARGUMENT.
-  BankConfig overrides = 16;
+  // Overrides for this call only.
+  RecallOverrides overrides = 16;
 }
 
 // RecallResponse carries ranked memories and any requested attachments.
@@ -389,10 +386,8 @@ message ReflectRequest {
   ReflectInclude include = 11;
   // Reference time for relative expressions; unset = now.
   google.protobuf.Timestamp query_time = 12;
-  // Request-only overrides: missions, disposition, ReflectConfig, nested RecallConfig and the REFLECT,
-  // STRUCTURED_OUTPUT and RERANK models; other fields = INVALID_ARGUMENT. Extra directives come through
-  // extra_directives.
-  BankConfig overrides = 13;
+  // Overrides for this call only. Extra directives come through extra_directives.
+  ReflectOverrides overrides = 13;
 }
 
 // ReflectResponse carries the answer and its provenance.
@@ -619,9 +614,8 @@ message UpdateMemoryRequest {
   MemoryState state = 11;
   // Why the change was made; stored on the audit row.
   string reason = 12;
-  // Overrides for re-deriving (entity resolution, EXTRACT / TIME_PARSE models); other fields =
-  // INVALID_ARGUMENT. Kept on the rederive operation row.
-  BankConfig overrides = 13;
+  // Overrides for re-deriving; kept on the rederive operation row.
+  RederiveOverrides overrides = 13;
 }
 
 // UpdateMemoryResponse carries the curated unit.
@@ -730,9 +724,8 @@ message ReprocessDocumentRequest {
   string bank_id = 1;
   // Document id.
   string document_id = 2;
-  // New retain overrides, same reach as RetainRequest.overrides (other fields = INVALID_ARGUMENT); they
-  // replace the document's stored overrides. Unset = replay the stored overrides.
-  BankConfig overrides = 3;
+  // New retain overrides; they replace the document's stored overrides. Unset = replay the stored overrides.
+  RetainOverrides overrides = 3;
 }
 
 // ReprocessDocumentResponse carries the reprocess job.
@@ -755,8 +748,9 @@ message Document {
   int64 memory_unit_count = 4;
   // Live unit counts keyed by fact type name.
   map<string, int64> units_by_fact_type = 5;
-  // Retain overrides stored with the document; ReprocessDocument replays them.
-  BankConfig stored_overrides = 6;
+  // Retain overrides stored with the document (the request's merged with the item's); ReprocessDocument
+  // replays them.
+  RetainOverrides retain_overrides = 6;
   // When the document was first retained.
   google.protobuf.Timestamp created_at = 7;
   // When the document last changed.
@@ -781,9 +775,8 @@ message ConsolidateRequest {
   string bank_id = 1;
   // Scopes to consolidate; empty = every scope.
   repeated TagSet scopes = 2;
-  // Overrides for this run only (observations mission, caps, dedup threshold, strategies, CONSOLIDATE /
-  // DEDUP_CHECK models); other fields = INVALID_ARGUMENT. Kept on the operation row.
-  BankConfig overrides = 3;
+  // Overrides for this run only; kept on the operation row.
+  ConsolidateOverrides overrides = 3;
 }
 
 // ConsolidateResponse carries the consolidation job.
@@ -894,7 +887,7 @@ message StrategyMatch {
 
 // A mental model is a Markdown page synthesized from a bank's memories for a source query, organized in
 // folders and kept fresh by refresh jobs. A refresh is agentic (the reflect loop) or single-shot (one
-// recall plus one SYNTHESIZE / MENTAL_MODEL_DELTA call), and full or delta. Refreshes of one model never
+// recall plus one MENTAL_MODEL slot call), and full or delta. Refreshes of one model never
 // overlap; a model has at most one queued refresh, and a failed refresh pauses automatic triggers until a
 // manual refresh succeeds.
 
@@ -1004,10 +997,9 @@ message RefreshMentalModelRequest {
   string mental_model_id = 2;
   // Force a full refresh; OR-ed into a queued refresh this joins.
   bool force_full = 3;
-  // Overrides for this refresh only (reflect and mental-model config, refresh strategy, REFLECT /
-  // SYNTHESIZE / MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models); other fields = INVALID_ARGUMENT. Kept on
-  // the operation; they replace a queued refresh's overrides.
-  BankConfig overrides = 4;
+  // Overrides for this refresh only, over the model's stored ones. Kept on the operation; they replace a
+  // queued refresh's overrides.
+  RefreshOverrides overrides = 4;
   // Per-call override of the trigger's strategy; unset = the trigger's.
   RefreshStrategy strategy = 5;
 }
@@ -1243,10 +1235,9 @@ message MentalModelSpec {
   optional int32 max_tokens = 6;
   // Refresh trigger, mode, strategy and scope.
   RefreshTrigger trigger = 7;
-  // Overrides stored on the model and applied to every refresh (reflect and mental-model config, refresh
-  // strategy, REFLECT / SYNTHESIZE / MENTAL_MODEL_DELTA / STRUCTURED_OUTPUT models); other fields =
-  // INVALID_ARGUMENT.
-  BankConfig overrides = 8;
+  // Overrides stored on the model and applied to every refresh. In an update_mask, paths go inside it
+  // (overrides.reflect.mission, overrides.mental_model_model).
+  RefreshOverrides overrides = 8;
 }
 
 // RefreshTrigger decides when and how a model refreshes, and what scope it reads. Unset fields fall back
@@ -1428,7 +1419,9 @@ message UpdateBankConfigRequest {
   string bank_id = 1;
   // New values for the fields named in update_mask.
   BankConfig config = 2;
-  // BankConfig paths to replace; a path set to an empty value clears it (this is how a list is cleared).
+  // BankConfig paths to replace (for example observations.dedup_threshold or models.extract; a model binding
+  // is replaced whole). A path set to an empty value clears it (this is how a list is cleared). Unset = every
+  // populated field of config.
   google.protobuf.FieldMask update_mask = 3;
 }
 
@@ -1444,7 +1437,7 @@ message UpdateBankConfigResponse {
 message ResetBankConfigRequest {
   // Bank id.
   string bank_id = 1;
-  // BankConfig paths to reset; empty = reset everything.
+  // BankConfig paths to reset, so they inherit again; "*" resets everything. Empty = INVALID_ARGUMENT.
   repeated string paths = 2;
 }
 
@@ -1542,8 +1535,20 @@ message PreviewPromptRequest {
   string bank_id = 1;
   // Operation to render.
   PromptOperation operation = 2;
-  // Request-level overrides to render with, as a real request would.
-  BankConfig overrides = 3;
+  // Request-level overrides to render with, as a real request would. The kind must match operation (retain
+  // for RETAIN, consolidation for CONSOLIDATION, reflect for REFLECT, mental_model for MENTAL_MODEL_DELTA and
+  // SYNTHESIZE); a mismatch is INVALID_ARGUMENT. Unset = none.
+  oneof overrides {
+    // Overrides of a Retain.
+    RetainOverrides retain = 4;
+    // Overrides of a Consolidate.
+    ConsolidateOverrides consolidation = 5;
+    // Overrides of a Reflect.
+    ReflectOverrides reflect = 6;
+    // Overrides of a RefreshMentalModel.
+    RefreshOverrides mental_model = 7;
+  }
+  reserved 3;
 }
 
 // PreviewPromptResponse carries the rendering.
@@ -1602,7 +1607,7 @@ message PromptBlock {
   string text = 1;
   // Built-in or config text.
   PromptSource source = 2;
-  // BankConfig field behind the block, if any.
+  // BankConfig field path behind the block (for example retain.mission), if any.
   string field = 3;
   // Prompt section the block belongs to, for example disposition or directives.
   string section = 4;
@@ -2155,63 +2160,96 @@ message ReflectTrace {
 
 // ======================= Configuration =======================
 
-// BankConfig and its sub-messages, then the model bindings. Every LLM-backed operation has its own slot,
-// and each slot binds to any gateway model with its own parameters. Bindings merge per slot across
-// server < tenant < bank < strategy < request: the most specific level that sets a slot wins with its
-// whole binding, and setting one slot never clears the others. Fields left unset inside the winning
-// binding take the gateway / adapter default; they are never inherited from a less specific level's
-// binding of the same slot.
+// BankConfig and its phase groups, the model bindings, then the per-RPC override messages.
+//
+// Model routing. Every model-backed step has its own slot (ModelSlot), and ModelBindings binds slots to gateway
+// models with their own parameters. Each level (server config file < tenant < bank < consolidation strategy <
+// request < retain item) may set models.default and any slot. For each slot, the most specific level that yields
+// a binding wins, where a level yields its own binding for the slot, else its models.default (chat-model slots
+// only). So models.default on a bank swaps every chat step of that bank, even ones the server file binds by name,
+// and models.extract on a request changes one step for one call. A winning binding is used whole: fields it
+// leaves unset take the gateway / adapter default, never a less specific level's value. models.rerank and
+// models.embed are never filled by a default. models.embed can only be set in the server config file (every
+// stored embedding shares one 768-dimension vector space).
 
-// BankConfig is the full set of behaviour knobs, identical at every config level. Unset fields inherit
-// from the next less specific level.
+// BankConfig is the full set of behaviour knobs, grouped by phase and identical at every config level. Unset
+// fields inherit from the next less specific level.
 message BankConfig {
-  // Mission injected into retain extraction prompts.
-  string retain_mission = 1;
-  // Mission injected into consolidation prompts; a matching strategy's mission wins.
-  string observations_mission = 2;
-  // Mission injected into the reflect system prompt.
-  string reflect_mission = 3;
-  // Reflect disposition traits.
-  Disposition disposition = 4;
-  // How retain extracts facts.
-  ExtractionMode extraction_mode = 5;
-  // Extraction prompt used with EXTRACTION_MODE_CUSTOM.
-  string custom_extraction_prompt = 6;
-  // Typed entity labels extracted at retain as key:value label entities.
-  repeated EntityLabel entity_labels = 7;
-  // Enqueue consolidation automatically after retain; unset = inherited.
-  optional bool auto_consolidation = 8;
-  // Cosine similarity at or above which observations in one scope get a DEDUP_CHECK, default 0.97.
-  optional double dedup_threshold = 9;
-  // Cap on observations per scope.
-  optional int32 max_observations_per_scope = 10;
-  // Token budget for source facts shown to one consolidation call.
-  optional int32 consolidation_source_facts_max_tokens = 11;
-  // Per-scope consolidation strategies; the first whose patterns match a scope wins.
-  repeated ConsolidationStrategy consolidation_strategies = 12;
+  reserved 1 to 12, 18 to 23;
+  // Retain: mission, extraction, labels, default scopes, chunking, entity matching and linking.
+  RetainConfig retain = 15;
+  // Observations: whether and how consolidation runs, its strategies.
+  ObservationConfig observations = 24;
   // Recall tuning, also used by reflect, consolidation and single-shot refresh.
   RecallConfig recall = 13;
-  // Model bindings, merged per slot across levels: a slot set here replaces that slot's whole binding
-  // from less specific levels; slots not set here are kept. MODEL_SLOT_EMBED is rejected.
-  repeated SlotBinding models = 14;
-  // Retain chunking, entity resolution and linking tuning.
-  RetainTuning retain = 15;
-  // Reflect loop tuning.
+  // Reflect: mission, disposition and loop tuning.
   ReflectConfig reflect = 16;
   // Bank-level mental-model defaults.
   MentalModelConfig mental_models = 17;
-  // Observation scopes used when a retained item does not set its own.
-  ObservationScopes default_observation_scopes = 18;
-  // false = no consolidation at all; unset = inherited.
-  optional bool enable_observations = 19;
-  // Facts per consolidation LLM call, default 8. A failing batch is halved and retried.
-  optional int32 consolidation_llm_batch_size = 20;
-  // Token budget for the source facts shown per existing observation, default 256.
-  optional int32 consolidation_source_facts_max_tokens_per_observation = 21;
+  // Model bindings; see "Model routing" above.
+  ModelBindings models = 14;
+}
+
+// RetainConfig tunes retain: what it extracts, how it chunks, resolves entities and builds links.
+message RetainConfig {
+  // Maximum tokens per chunk.
+  optional int32 chunk_max_tokens = 1;
+  // Tokens shared by consecutive chunks.
+  optional int32 chunk_overlap_tokens = 2;
+  // Minimum resolver score (name similarity + co-occurrence + temporal proximity) to reuse an entity.
+  optional double entity_match_threshold = 3;
+  // Window in hours within which units get temporal links.
+  optional int32 temporal_link_window_hours = 4;
+  // Nearest neighbours considered for semantic links; also the semantic link cap per unit.
+  optional int32 semantic_link_k = 5;
+  // Minimum cosine similarity for a semantic link.
+  optional double semantic_link_min_similarity = 6;
+  // Ask extraction for causal links between facts of the same batch.
+  optional bool extract_causal_links = 7;
+  // Keep a JSONL line or chat turn whole in one chunk up to this many tokens.
+  optional int32 structured_chunk_max_tokens = 8;
+  // Temporal link cap per unit, default 20.
+  optional int32 temporal_link_cap = 9;
+  // Mission injected into retain extraction prompts.
+  string mission = 10;
+  // How retain extracts facts.
+  ExtractionMode extraction_mode = 11;
+  // Extraction prompt used with EXTRACTION_MODE_CUSTOM.
+  string custom_extraction_prompt = 12;
+  // Typed entity labels extracted at retain as key:value label entities.
+  repeated EntityLabel entity_labels = 13;
   // false = only label entities are created (no free-form entities); unset = inherited.
-  optional bool entities_allow_free_form = 22;
+  optional bool entities_allow_free_form = 14;
+  // Observation scopes used when a retained item does not set its own.
+  ObservationScopes default_observation_scopes = 15;
+}
+
+// ObservationConfig tunes consolidation, which turns raw facts into observations per tag scope.
+message ObservationConfig {
+  // false = no consolidation at all; unset = inherited.
+  optional bool enabled = 1;
+  // Enqueue consolidation automatically after retain, and let the maintenance tick catch up on facts left
+  // behind; unset = inherited.
+  optional bool auto_consolidation = 2;
+  // Mission injected into consolidation prompts; a matching strategy's mission wins.
+  string mission = 3;
+  // Cosine similarity at or above which observations in one scope get a DEDUP_CHECK, default 0.97.
+  optional double dedup_threshold = 4;
+  // Cap on observations per scope.
+  optional int32 max_observations_per_scope = 5;
+  // Token budget for source facts shown to one consolidation call.
+  optional int32 source_facts_max_tokens = 6;
+  // Token budget for the source facts shown per existing observation, default 256.
+  optional int32 source_facts_max_tokens_per_observation = 7;
+  // Facts per consolidation LLM call, default 8. A failing batch is halved and retried.
+  optional int32 llm_batch_size = 8;
   // Units one consolidation run takes before the job re-enqueues itself, default 100.
-  optional int32 consolidation_max_units_per_run = 23;
+  optional int32 max_units_per_run = 9;
+  // Per-scope consolidation strategies; the first whose patterns match a scope wins.
+  repeated ConsolidationStrategy strategies = 10;
+  // Seconds a fact may wait unconsolidated before the maintenance tick consolidates its bank, default 600.
+  // Keeps the tick from pre-empting a manual Consolidate after a retain with skip_consolidation.
+  optional int32 reconcile_grace_seconds = 11;
 }
 
 // Disposition sets reflect personality traits, each on a 1-5 scale, default 3. Rendered into the reflect
@@ -2270,21 +2308,23 @@ message LabelValue {
 // between bank and request in the config hierarchy, and it is the only source of CONSOLIDATE /
 // DEDUP_CHECK overrides for automatic consolidation.
 message ConsolidationStrategy {
-  // Strategy name, unique within the bank.
+  reserved 7;
+  // Strategy name, unique within the list.
   string name = 1;
   // Scope patterns; the strategy applies to a scope matching any of them.
   repeated ScopePattern scopes = 2;
   // Observations mission for matched scopes; empty = the bank's.
-  string observations_mission = 3;
+  string mission = 3;
   // Cap on observations per matched scope.
   optional int32 max_observations_per_scope = 4;
   // Token budget for source facts per consolidation call.
   optional int32 source_facts_max_tokens = 5;
   // Token budget for the source facts shown per existing observation.
   optional int32 source_facts_max_tokens_per_observation = 6;
-  // Model bindings for matched scopes, merged per slot over the bank's: a slot set here replaces the
-  // bank's whole binding for that slot; slots not set here keep the bank's.
-  repeated SlotBinding models = 7;
+  // CONSOLIDATE model for matched scopes; unset = the bank's.
+  ModelBinding consolidate_model = 8;
+  // DEDUP_CHECK model for matched scopes; unset = the bank's.
+  ModelBinding dedup_check_model = 9;
 }
 
 // ScopePattern matches observation scopes by tag.
@@ -2293,28 +2333,6 @@ message ScopePattern {
   repeated string tags = 1;
   // How the tags must match.
   TagsMatch tags_match = 2;
-}
-
-// RetainTuning tunes chunking, entity resolution and link building at retain.
-message RetainTuning {
-  // Maximum tokens per chunk.
-  optional int32 chunk_max_tokens = 1;
-  // Tokens shared by consecutive chunks.
-  optional int32 chunk_overlap_tokens = 2;
-  // Minimum resolver score (name similarity + co-occurrence + temporal proximity) to reuse an entity.
-  optional double entity_match_threshold = 3;
-  // Window in hours within which units get temporal links.
-  optional int32 temporal_link_window_hours = 4;
-  // Nearest neighbours considered for semantic links; also the semantic link cap per unit.
-  optional int32 semantic_link_k = 5;
-  // Minimum cosine similarity for a semantic link.
-  optional double semantic_link_min_similarity = 6;
-  // Ask extraction for causal links between facts of the same batch.
-  optional bool extract_causal_links = 7;
-  // Keep a JSONL line or chat turn whole in one chunk up to this many tokens.
-  optional int32 structured_chunk_max_tokens = 8;
-  // Temporal link cap per unit, default 20.
-  optional int32 temporal_link_cap = 9;
 }
 
 // RecallConfig tunes the recall pipeline: four arms, RRF fusion, rerank, boosts and packing.
@@ -2333,7 +2351,7 @@ message RecallConfig {
   repeated string enabled_strategies = 6;
   // Candidates sent to the cross-encoder, default 300.
   optional int32 reranker_max_candidates = 7;
-  // Whether to run the cross-encoder.
+  // Whether to run the cross-encoder (needs a models.rerank binding).
   optional bool rerank = 8;
   // RRF constant k, default 60.
   optional int32 rrf_k = 9;
@@ -2357,7 +2375,7 @@ message RecallConfig {
   optional int32 budget_max = 18;
 }
 
-// ReflectConfig tunes the reflect loop.
+// ReflectConfig tunes reflect: its mission and disposition, and the agent loop.
 message ReflectConfig {
   // Loop iterations at BUDGET_MID, default 10; BUDGET_LOW halves it, BUDGET_HIGH doubles it.
   optional int32 max_iterations = 1;
@@ -2377,6 +2395,10 @@ message ReflectConfig {
   optional int32 max_answer_tokens = 8;
   // Token budget for the whole call; exceeding it fails the call with RESOURCE_EXHAUSTED.
   optional int64 max_total_tokens = 9;
+  // Mission injected into the reflect system prompt (also used by mental-model refresh).
+  string mission = 10;
+  // Reflect disposition traits.
+  Disposition disposition = 11;
 }
 
 // MentalModelConfig holds bank-level mental-model defaults; a model's RefreshTrigger wins over them.
@@ -2398,21 +2420,38 @@ message MentalModelConfig {
   RefreshStrategy default_strategy = 7;
 }
 
-// SlotBinding binds one slot to a model. A list of them merges per slot across config levels: a slot set
-// at a more specific level replaces that slot's whole binding, and slots it does not set are kept.
-message SlotBinding {
-  // The slot being bound; MODEL_SLOT_EMBED is rejected in config.
-  ModelSlot slot = 1;
-  // The model and parameters for the slot, used as a whole (see ModelBinding).
-  ModelBinding binding = 2;
+// ModelBindings binds model slots at one config level: default for every chat-model slot the level leaves
+// unset, plus one optional binding per slot (see "Model routing" above). In a FieldMask each binding is one
+// path (models.default, models.extract, ...): it is set or reset whole.
+message ModelBindings {
+  // Binds every chat-model slot (all but rerank and embed) this level leaves unset.
+  ModelBinding default = 1;
+  // MODEL_SLOT_EXTRACT.
+  ModelBinding extract = 2;
+  // MODEL_SLOT_TIME_PARSE.
+  ModelBinding time_parse = 3;
+  // MODEL_SLOT_CONSOLIDATE.
+  ModelBinding consolidate = 4;
+  // MODEL_SLOT_DEDUP_CHECK.
+  ModelBinding dedup_check = 5;
+  // MODEL_SLOT_REFLECT.
+  ModelBinding reflect = 6;
+  // MODEL_SLOT_STRUCTURED_OUTPUT.
+  ModelBinding structured_output = 7;
+  // MODEL_SLOT_MENTAL_MODEL.
+  ModelBinding mental_model = 8;
+  // MODEL_SLOT_RERANK; never filled by default. Unbound = recall skips the cross-encoder.
+  ModelBinding rerank = 9;
+  // MODEL_SLOT_EMBED; server config file only (INVALID_ARGUMENT anywhere else); only its model is used, which
+  // must return 768 dimensions (checked at startup). Never filled by default.
+  ModelBinding embed = 10;
 }
 
 // ModelBinding is the gateway model and call parameters used for one slot. A binding is atomic: the
-// most specific level that sets the slot supplies the whole binding, and any field it leaves unset means
-// the gateway / adapter default. Unset fields are never inherited from a less specific level's binding of
-// the same slot.
+// level that supplies the slot supplies the whole binding, and any field it leaves unset means the gateway /
+// adapter default. Unset fields are never inherited from a less specific level's binding of the same slot.
 message ModelBinding {
-  // Gateway model name, as sent in the OpenAI-compatible request.
+  // Gateway model name, as sent in the OpenAI-compatible request; required.
   string model = 1;
   // Sampling temperature; unset = the gateway / adapter default.
   optional double temperature = 2;
@@ -2429,6 +2468,93 @@ message ModelBinding {
   // Free-form object passed through to the OpenAI-compatible request body untouched; unset = nothing
   // extra. Never merged with a less specific level's extra.
   google.protobuf.Struct extra = 8;
+}
+
+// RetainOverrides is what a Retain (request or item) and ReprocessDocument may override: the whole retain group
+// and the EXTRACT and TIME_PARSE models.
+message RetainOverrides {
+  // Retain settings for this call.
+  RetainConfig retain = 1;
+  // MODEL_SLOT_EXTRACT for this call.
+  ModelBinding extract_model = 2;
+  // MODEL_SLOT_TIME_PARSE for this call.
+  ModelBinding time_parse_model = 3;
+}
+
+// RecallOverrides is what a Recall may override: the recall group and the TIME_PARSE and RERANK models.
+message RecallOverrides {
+  // Recall settings for this call.
+  RecallConfig recall = 1;
+  // MODEL_SLOT_TIME_PARSE for this call (query time windows).
+  ModelBinding time_parse_model = 2;
+  // MODEL_SLOT_RERANK for this call.
+  ModelBinding rerank_model = 3;
+}
+
+// ReflectOverrides is what a Reflect may override: the reflect and recall groups and the REFLECT,
+// STRUCTURED_OUTPUT and RERANK models.
+message ReflectOverrides {
+  // Reflect settings for this call.
+  ReflectConfig reflect = 1;
+  // Recall settings of the agent's retrieval tools for this call.
+  RecallConfig recall = 2;
+  // MODEL_SLOT_REFLECT for this call.
+  ModelBinding reflect_model = 3;
+  // MODEL_SLOT_STRUCTURED_OUTPUT for this call.
+  ModelBinding structured_output_model = 4;
+  // MODEL_SLOT_RERANK for this call.
+  ModelBinding rerank_model = 5;
+}
+
+// ConsolidateOverrides is what a manual Consolidate may override: the observations group except enabled,
+// auto_consolidation and reconcile_grace_seconds, and the CONSOLIDATE and DEDUP_CHECK models.
+message ConsolidateOverrides {
+  // Observations mission for this run.
+  string mission = 1;
+  // Cap on observations per scope.
+  optional int32 max_observations_per_scope = 2;
+  // Token budget for source facts shown to one consolidation call.
+  optional int32 source_facts_max_tokens = 3;
+  // Token budget for the source facts shown per existing observation.
+  optional int32 source_facts_max_tokens_per_observation = 4;
+  // Facts per consolidation LLM call.
+  optional int32 llm_batch_size = 5;
+  // Units one consolidation run takes before the job re-enqueues itself.
+  optional int32 max_units_per_run = 6;
+  // Near-duplicate cosine threshold.
+  optional double dedup_threshold = 7;
+  // Strategies for this run; they replace the bank's list.
+  repeated ConsolidationStrategy strategies = 8;
+  // MODEL_SLOT_CONSOLIDATE for this run.
+  ModelBinding consolidate_model = 9;
+  // MODEL_SLOT_DEDUP_CHECK for this run.
+  ModelBinding dedup_check_model = 10;
+}
+
+// RederiveOverrides is what re-deriving an edited memory may override: entity matching and the EXTRACT and
+// TIME_PARSE models.
+message RederiveOverrides {
+  // Minimum resolver score to reuse an entity.
+  optional double entity_match_threshold = 1;
+  // MODEL_SLOT_EXTRACT for the rederive.
+  ModelBinding extract_model = 2;
+  // MODEL_SLOT_TIME_PARSE for the rederive.
+  ModelBinding time_parse_model = 3;
+}
+
+// RefreshOverrides is what a mental-model refresh may override, per call or stored on the model: the reflect
+// group, the delta ratio, and the REFLECT, MENTAL_MODEL and STRUCTURED_OUTPUT models.
+message RefreshOverrides {
+  // Reflect settings (mission, disposition, loop) for the refresh.
+  ReflectConfig reflect = 1;
+  // Largest share of the page a delta refresh may change before it falls back to a full refresh.
+  optional double max_delta_ratio = 2;
+  // MODEL_SLOT_REFLECT (agentic refresh).
+  ModelBinding reflect_model = 3;
+  // MODEL_SLOT_MENTAL_MODEL (single-shot refresh).
+  ModelBinding mental_model_model = 4;
+  // MODEL_SLOT_STRUCTURED_OUTPUT.
+  ModelBinding structured_output_model = 5;
 }
 
 // ======================= Shared enums =======================
@@ -2498,8 +2624,8 @@ enum RefreshStrategy {
   // The reflect loop with tools, answering as a document (Hindsight's behaviour, the default). Uses the
   // REFLECT slot.
   REFRESH_STRATEGY_AGENTIC = 1;
-  // One recall over the model's scope, observations first, then one SYNTHESIZE call (full) or one
-  // MENTAL_MODEL_DELTA call (delta); roughly 5-20x cheaper.
+  // One recall over the model's scope, observations first, then one MENTAL_MODEL slot call (a full page
+  // or delta edit ops); roughly 5-20x cheaper.
   REFRESH_STRATEGY_SINGLE_SHOT = 2;
 }
 
@@ -2529,39 +2655,38 @@ enum BudgetFunction {
   BUDGET_FUNCTION_ADAPTIVE = 2;
 }
 
-// ModelSlot names one LLM-backed operation that can be routed to its own gateway model. Each slot is
-// bound independently; per slot, the most specific config level that sets it supplies the whole binding.
+// ModelSlot names one model-backed step that can be routed to its own gateway model (see ModelBindings). Usage
+// is recorded per slot.
 enum ModelSlot {
-  // Not set; invalid in a SlotBinding and never recorded in usage.
+  reserved 10;
+  reserved "MODEL_SLOT_SYNTHESIZE", "MODEL_SLOT_MENTAL_MODEL_DELTA";
+  // Not set; never recorded in usage.
   MODEL_SLOT_UNSPECIFIED = 0;
-  // Retain fact, entity and label extraction. Overridable on RetainRequest / RetainItem,
-  // ReprocessDocument and UpdateMemory (re-deriving).
+  // Retain fact, entity and label extraction. Overridable on Retain, ReprocessDocument and UpdateMemory
+  // (re-deriving).
   MODEL_SLOT_EXTRACT = 1;
   // Relative dates at retain, and query time windows at recall (only when a cue is found and the rules
-  // fail). Overridable on RetainRequest / RetainItem, RecallRequest, ReprocessDocument and UpdateMemory.
+  // fail). Overridable on Retain, Recall, ReprocessDocument and UpdateMemory.
   MODEL_SLOT_TIME_PARSE = 2;
   // Create / update / none decisions per observation scope. Overridable on a manual Consolidate request
   // or the matching consolidation strategy, never by the retain that triggered the consolidation.
   MODEL_SLOT_CONSOLIDATE = 3;
   // Merge-or-keep check for near-duplicate observations. Overridable like MODEL_SLOT_CONSOLIDATE.
   MODEL_SLOT_DEDUP_CHECK = 4;
-  // Tool-calling turns of the reflect loop and of agentic mental-model refresh. Overridable on
-  // ReflectRequest, RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+  // Tool-calling turns of the reflect loop and of agentic mental-model refresh. Overridable on Reflect and
+  // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
   MODEL_SLOT_REFLECT = 5;
-  // Second pass projecting prose into a JSON Schema (response_schema_json). Overridable on ReflectRequest,
+  // Second pass projecting prose into a JSON Schema (response_schema_json). Overridable on Reflect and
   // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
   MODEL_SLOT_STRUCTURED_OUTPUT = 6;
-  // Edit ops for incremental (delta) mental-model page refresh. Overridable on RefreshMentalModel, or
-  // stored on the model (MentalModelSpec.overrides).
-  MODEL_SLOT_MENTAL_MODEL_DELTA = 7;
-  // Cross-encoder scores in recall. Overridable on RecallRequest and ReflectRequest.
+  // Single-shot mental-model refresh: the full page synthesis and the delta edit ops. Overridable on
+  // RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+  MODEL_SLOT_MENTAL_MODEL = 7;
+  // Cross-encoder scores in recall. Overridable on Recall and Reflect.
   MODEL_SLOT_RERANK = 8;
-  // Embeddings of units, observations, queries and pages. Usage accounting only: the embedding model is
-  // server-wide (nomic-embed-text-v1.5, 768 dims) and can never be bound in BankConfig.
+  // Embeddings of units, observations, queries and pages. Bound only in the server config file (one vector
+  // space per database, 768 dimensions).
   MODEL_SLOT_EMBED = 9;
-  // Single-shot (full) mental-model refresh. Overridable on RefreshMentalModel, or stored on the model
-  // (MentalModelSpec.overrides).
-  MODEL_SLOT_SYNTHESIZE = 10;
 }
 
 // OperationKind is the job type of an operation.

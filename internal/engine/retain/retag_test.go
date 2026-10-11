@@ -154,7 +154,9 @@ func TestRetainOverridesChangeMidRunSupersedes(t *testing.T) {
 	j := e.claimRetain()
 	e.scriptChunks(3, false)
 	newOverrides := chunkTokens(12)
-	newOverrides.RetainMission = "changed"
+	retGrp := newOverrides.GetRetain()
+	retGrp.Mission = "changed"
+	newOverrides.Retain = &retGrp
 	overtake := func() {
 		if _, err := NewReprocessor(e.store).Reprocess(e.ctx, testBank, "d1", newOverrides); err != nil {
 			t.Fatal(err)

@@ -85,24 +85,29 @@ func (q *Queries) StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesR
 }
 
 const unconsolidatedBanks = `-- name: UnconsolidatedBanks :many
-SELECT b.tenant_id, b.id FROM banks b
-WHERE b.deleting_at IS NULL AND EXISTS (
-    SELECT 1 FROM memory_units u
+SELECT b.tenant_id, b.id, o.created_at AS oldest FROM banks b
+CROSS JOIN LATERAL (
+    SELECT u.created_at FROM memory_units u
     WHERE u.tenant_id = b.tenant_id AND u.bank_id = b.id
       AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
       AND u.embedding IS NOT NULL AND u.created_at < $1::timestamptz
-)
+    ORDER BY u.created_at
+    LIMIT 1
+) o
+WHERE b.deleting_at IS NULL
 ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C"
 `
 
 type UnconsolidatedBanksRow struct {
 	TenantID string
 	ID       string
+	Oldest   time.Time
 }
 
 // UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
-// with an embedding created before @before (decision 2000): the §0 predicate as in ScopeUnconsolidated plus the
-// grace cut-off, over the partial index (tenant_id, bank_id, created_at).
+// with an embedding created before @before, each with its oldest such fact's created_at (the caller compares it
+// with the bank's own reconcile grace): the §0 predicate as in ScopeUnconsolidated, over the partial index
+// (tenant_id, bank_id, created_at).
 func (q *Queries) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBanksRow, error) {
 	rows, err := q.db.Query(ctx, unconsolidatedBanks, before)
 	if err != nil {
@@ -112,7 +117,7 @@ func (q *Queries) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]
 	items := []UnconsolidatedBanksRow{}
 	for rows.Next() {
 		var i UnconsolidatedBanksRow
-		if err := rows.Scan(&i.TenantID, &i.ID); err != nil {
+		if err := rows.Scan(&i.TenantID, &i.ID, &i.Oldest); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

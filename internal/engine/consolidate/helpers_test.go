@@ -122,12 +122,9 @@ func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 		t: t, clock: clock, store: db.Store(), pool: db.Pool, llm: fake.NewLLM(),
 		emb: fake.NewEmbedder(fake.EmbedSimilar), texts: map[domain.UnitID]string{},
 	}
-	server, err := config.ServerDefaults(func(k string) string {
-		if k == ai.EnvModel {
-			return "base-model"
-		}
-		return ""
-	})
+	server, err := config.ServerDefaults(domain.BankConfig{Models: &domain.ModelBindings{
+		Default: &domain.ModelBinding{Model: "base-model"},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,6 +397,6 @@ func scopeOf(tags ...string) domain.ScopeKey { return domain.NewScopeKey(bank, t
 func ptr[T any](v T) *T { return &v }
 
 // consolidateModel binds the CONSOLIDATE slot to model.
-func consolidateModel(model string) []domain.SlotBinding {
-	return []domain.SlotBinding{{Slot: domain.ModelSlotConsolidate, Binding: domain.ModelBinding{Model: model}}}
+func consolidateModel(model string) *domain.ModelBinding {
+	return &domain.ModelBinding{Model: model}
 }

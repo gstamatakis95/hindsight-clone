@@ -15,7 +15,8 @@
 // # Model routing
 //
 // Code never chooses a model itself. It resolves the effective config (server < tenant < bank < strategy < request,
-// merged per slot by package config), asks [Router.Resolve] for its slot's binding and passes that binding to the LLM
+// merged by package config: per slot, the most specific level yielding a binding, its own or its models.default,
+// wins), asks [Router.Resolve] for its slot's binding and passes that binding to the LLM
 // or the reranker:
 //
 //	b, err := router.Resolve(cfg, domain.ModelSlotExtract)
@@ -27,8 +28,9 @@
 // Resolve returns the whole domain.ModelBinding (model, temperature, max output tokens, reasoning effort and the
 // free-form extra object). A slot with no model bound is domain.ErrModelUnbound, which wraps
 // domain.ErrFailedPrecondition: the API answers FAILED_PRECONDITION and the job runner fails the job at once instead of
-// retrying. The message names the variables that bind it ([EnvModel], [EnvModelPrefix]+SLOT). EMBED (one server-wide
-// model) and the unspecified slot are domain.ErrInvalidArgument. The router is pure and safe for concurrent use.
+// retrying. The message names the config keys that bind it (models.default, models.<slot>). EMBED (the
+// server-wide embedder takes no binding) and the unspecified slot are domain.ErrInvalidArgument. The router is pure
+// and safe for concurrent use.
 //
 // # Tokens
 //

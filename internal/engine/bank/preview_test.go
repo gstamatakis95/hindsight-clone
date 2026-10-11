@@ -34,8 +34,9 @@ func configBlock(p domain.PromptPreview, section string) (domain.PromptBlock, bo
 
 func TestPreview(t *testing.T) {
 	base := domain.BankConfig{
-		RetainMission: "track tea", ObservationsMission: "group habits", ReflectMission: "answer kindly",
-		Disposition: &domain.Disposition{Skepticism: 4},
+		Retain:       &domain.RetainConfig{Mission: "track tea"},
+		Observations: &domain.ObservationConfig{Mission: "group habits"},
+		Reflect:      &domain.ReflectConfig{Mission: "answer kindly", Disposition: &domain.Disposition{Skepticism: 4}},
 	}
 	dirs := dirStub{{ID: "d1", Name: "polite", Rules: []string{"never swear"}, Active: true}}
 	p := NewPromptPreviewer(cfgStub{base: base}, dirs)
@@ -49,7 +50,7 @@ func TestPreview(t *testing.T) {
 	}{
 		{domain.PromptOperationRetain, domain.BankConfig{}, []string{"track tea", phChunk}, true, "mission"},
 		{domain.PromptOperationRetain, domain.BankConfig{
-			ExtractionMode: domain.ExtractionModeCustom, CustomExtractionPrompt: "only tea facts",
+			Retain: &domain.RetainConfig{ExtractionMode: domain.ExtractionModeCustom, CustomExtractionPrompt: "only tea facts"},
 		}, []string{"only tea facts"}, true, "custom_prompt"},
 		{domain.PromptOperationConsolidation, domain.BankConfig{}, []string{"group habits", phFact}, true, "mission"},
 		{
@@ -68,7 +69,7 @@ func TestPreview(t *testing.T) {
 		{domain.PromptOperationMentalModelDelta, domain.BankConfig{}, []string{phBlock, phFact}, true, ""},
 	}
 	for _, tc := range cases {
-		t.Run(string(tc.op)+"/"+string(tc.o.ExtractionMode), func(t *testing.T) {
+		t.Run(string(tc.op)+"/"+string(tc.o.GetRetain().ExtractionMode), func(t *testing.T) {
 			got, err := p.Preview(t.Context(), b, tc.op, tc.o)
 			if err != nil {
 				t.Fatal(err)
@@ -110,8 +111,8 @@ func TestPreviewRetainCausalLinksDefault(t *testing.T) {
 		want bool
 	}{
 		{"no retain tuning", domain.BankConfig{}, true},
-		{"retain tuning without the flag", domain.BankConfig{Retain: &domain.RetainTuning{}}, true},
-		{"explicitly off", domain.BankConfig{Retain: &domain.RetainTuning{ExtractCausalLinks: &off}}, false},
+		{"retain tuning without the flag", domain.BankConfig{Retain: &domain.RetainConfig{}}, true},
+		{"explicitly off", domain.BankConfig{Retain: &domain.RetainConfig{ExtractCausalLinks: &off}}, false},
 	} {
 		got, err := p.Preview(t.Context(), b, domain.PromptOperationRetain, tc.cfg)
 		if err != nil {
@@ -127,7 +128,7 @@ func TestPreviewChunksSkipsAndUnknownOp(t *testing.T) {
 	p := NewPromptPreviewer(cfgStub{}, dirStub{})
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	got, err := p.Preview(t.Context(), b, domain.PromptOperationRetain,
-		domain.BankConfig{ExtractionMode: domain.ExtractionModeChunks})
+		domain.BankConfig{Retain: &domain.RetainConfig{ExtractionMode: domain.ExtractionModeChunks}})
 	if err != nil || got.SkippedReason == "" || len(got.Messages) != 0 {
 		t.Errorf("chunks preview = %+v %v, want skipped with no messages", got, err)
 	}

@@ -66,9 +66,6 @@ type Deps struct {
 	// Operations serves GetOperation, ListOperations and ListEvents, and loads the operation an
 	// UpdateDocument started.
 	Operations OperationReader
-	// ValidateOverrides rejects override fields an RPC can't use (config.ValidateOverrides); rpc is the
-	// method name, e.g. "Recall". nil = no check here (the engines may still check).
-	ValidateOverrides func(rpc string, o domain.BankConfig) error
 	// DefaultDeadline applies to calls that arrive without a deadline; 0 = none.
 	DefaultDeadline time.Duration
 	// Probes are the readiness checks (Postgres, gateway) behind grpc.health.v1 Check.

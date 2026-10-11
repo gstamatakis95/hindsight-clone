@@ -307,8 +307,9 @@ type Querier interface {
 	// tenants row, so a first-ever write is covered too.
 	TenantConfigLock(ctx context.Context, tenantID string) error
 	// UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
-	// with an embedding created before @before (decision 2000): the §0 predicate as in ScopeUnconsolidated plus the
-	// grace cut-off, over the partial index (tenant_id, bank_id, created_at).
+	// with an embedding created before @before, each with its oldest such fact's created_at (the caller compares it
+	// with the bank's own reconcile grace): the §0 predicate as in ScopeUnconsolidated, over the partial index
+	// (tenant_id, bank_id, created_at).
 	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBanksRow, error)
 	// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
 	UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error

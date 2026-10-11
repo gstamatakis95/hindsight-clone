@@ -20,7 +20,7 @@
 //   - TestMemdSmoke runs memd as separate api and worker processes, checks the api serves, and kills and restarts the
 //     worker.
 //   - TestScenarios runs one stack, the emulator and separate api and worker processes with fast worker timings
-//     (MEMD_POLL_INTERVAL 100ms, MEMD_HEARTBEAT_INTERVAL 1s, MEMD_STALE_AFTER 6s, MEMD_MAINTENANCE_INTERVAL 2s, so a
+//     (the config file's worker section: poll 100ms, heartbeat 1s, stale_after 6s, maintenance 2s, so a
 //     crashed worker's job is reclaimed in seconds) through these scenarios, each on its own bank and one after another
 //     because emulator faults are global: RetainSync, RetainAsync, ConsolidationRecallReflect,
 //     MentalModelBothStrategies, ConsolidationTriggersRefresh, InvalidateRestore, RetagReprocess, CancelRetry,

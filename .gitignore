@@ -133,3 +133,6 @@ __pycache__/
 # Benchmark run directories and reports
 eval-results/
 eval-report.*
+
+# Local server config file (memd.example.yaml is the documented template)
+/memd.yaml

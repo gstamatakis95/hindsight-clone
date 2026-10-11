@@ -40,7 +40,13 @@ func newHarness() *harness {
 // cfg returns base with the harness's TIME_PARSE binding, if a test set one.
 func (h *harness) cfg(base domain.BankConfig) domain.BankConfig {
 	if h.bound != nil {
-		base.Models = append(base.Models, domain.SlotBinding{Slot: domain.ModelSlotTimeParse, Binding: *h.bound})
+		m := domain.ModelBindings{}
+		if base.Models != nil {
+			m = *base.Models
+		}
+		b := *h.bound
+		m.TimeParse = &b
+		base.Models = &m
 	}
 	return base
 }
@@ -132,7 +138,7 @@ func TestFallbackOnlyWhenCueAndNoRule(t *testing.T) {
 	h := newHarness()
 	binding := domain.ModelBinding{Model: "tp-override", ReasoningEffort: "low"}
 	h.scripted(binding, `{"start":"2025-12-20T00:00:00Z","end":"2026-01-03T00:00:00Z"}`)
-	cfg := domain.BankConfig{RetainMission: "request-level override"}
+	cfg := domain.BankConfig{Retain: &domain.RetainConfig{Mission: "request-level override"}}
 
 	got, err := h.tn.QueryWindow(context.Background(), h.cfg(cfg), "what did we do around the holidays?", testRef)
 	if err != nil {
@@ -386,7 +392,7 @@ func TestNormalizeFallback(t *testing.T) {
 	h := newHarness()
 	binding := domain.ModelBinding{Model: "tp-retain"}
 	h.scripted(binding, `{"start":"2026-07-03T00:00:00Z","end":"2026-07-06T00:00:00Z"}`)
-	cfg := domain.BankConfig{RetainMission: "m"}
+	cfg := domain.BankConfig{Retain: &domain.RetainConfig{Mission: "m"}}
 	f := &domain.ExtractedFact{TimeExpression: "the long weekend in the mountains"}
 	if err := h.tn.Normalize(context.Background(), h.cfg(cfg), f, testRef); err != nil {
 		t.Fatal(err)

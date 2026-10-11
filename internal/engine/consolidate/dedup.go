@@ -67,8 +67,8 @@ func (d *deduper) Check(
 	ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig, text string, emb []float32,
 ) (DedupVerdict, error) {
 	threshold := defaultDedupThreshold
-	if cfg.DedupThreshold != nil {
-		threshold = *cfg.DedupThreshold
+	if cfg.GetObservations().DedupThreshold != nil {
+		threshold = *cfg.GetObservations().DedupThreshold
 	}
 	if threshold >= 1 || len(emb) == 0 {
 		return DedupVerdict{}, nil

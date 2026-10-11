@@ -6,14 +6,15 @@ import (
 	"testing"
 )
 
-// TestResolve: bound slots return the whole binding; an unbound slot or an empty model is ErrModelUnbound (so
-// FAILED_PRECONDITION, never INVALID_ARGUMENT); EMBED and the unspecified slot are ErrInvalidArgument.
+// TestResolve: a slot's own binding wins over the default, which fills only chat-model slots; an unbound slot
+// or an empty model is ErrModelUnbound (so FAILED_PRECONDITION, never INVALID_ARGUMENT); EMBED and the
+// unspecified slot are ErrInvalidArgument.
 func TestResolve(t *testing.T) {
 	temp := 0.2
-	cfg := domain.BankConfig{Models: []domain.SlotBinding{
-		{Slot: domain.ModelSlotExtract, Binding: domain.ModelBinding{Model: "ext", Temperature: &temp}},
-		{Slot: domain.ModelSlotRerank, Binding: domain.ModelBinding{Model: "rr"}},
-		{Slot: domain.ModelSlotReflect, Binding: domain.ModelBinding{}},
+	cfg := domain.BankConfig{Models: &domain.ModelBindings{
+		Default: &domain.ModelBinding{Model: "def"},
+		Extract: &domain.ModelBinding{Model: "ext", Temperature: &temp},
+		Reflect: &domain.ModelBinding{},
 	}}
 	tests := []struct {
 		name  string
@@ -21,9 +22,9 @@ func TestResolve(t *testing.T) {
 		model string
 		err   error
 	}{
-		{"bound", domain.ModelSlotExtract, "ext", nil},
-		{"other slot bound", domain.ModelSlotRerank, "rr", nil},
-		{"unbound", domain.ModelSlotConsolidate, "", domain.ErrModelUnbound},
+		{"own binding", domain.ModelSlotExtract, "ext", nil},
+		{"default", domain.ModelSlotConsolidate, "def", nil},
+		{"default never binds rerank", domain.ModelSlotRerank, "", domain.ErrModelUnbound},
 		{"empty model", domain.ModelSlotReflect, "", domain.ErrModelUnbound},
 		{"embed", domain.ModelSlotEmbed, "", domain.ErrInvalidArgument},
 		{"unspecified", domain.ModelSlotUnspecified, "", domain.ErrInvalidArgument},
@@ -39,6 +40,9 @@ func TestResolve(t *testing.T) {
 				t.Fatalf("model = %q, want %q", b.Model, tc.model)
 			}
 		})
+	}
+	if _, err := r.Resolve(domain.BankConfig{}, domain.ModelSlotExtract); !errors.Is(err, domain.ErrModelUnbound) {
+		t.Fatalf("no models: err = %v, want ErrModelUnbound", err)
 	}
 	if b, _ := r.Resolve(cfg, domain.ModelSlotExtract); b.Temperature == nil || *b.Temperature != temp {
 		t.Fatal("binding parameters not returned")

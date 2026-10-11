@@ -62,7 +62,7 @@ func TestLinkerCapsHold(t *testing.T) {
 	e := newEnv(t, 0)
 	at := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 	capN := 3
-	cfg := domain.BankConfig{Retain: &domain.RetainTuning{
+	cfg := domain.BankConfig{Retain: &domain.RetainConfig{
 		TemporalLinkCap: &capN, SemanticLinkK: &capN, SemanticLinkMinSimilarity: ptr(0.1),
 	}}
 	kinds := []domain.LinkKind{domain.LinkSemantic, domain.LinkTemporal}
@@ -105,7 +105,7 @@ func TestLinkerTimelessAndBankConfig(t *testing.T) {
 	e := newEnv(t, 0)
 	one := 1
 	e.inTx(func(tx store.Tx) error {
-		return tx.Banks().SetConfig(e.ctx, testBank, domain.BankConfig{Retain: &domain.RetainTuning{TemporalLinkCap: &one}})
+		return tx.Banks().SetConfig(e.ctx, testBank, domain.BankConfig{Retain: &domain.RetainConfig{TemporalLinkCap: &one}})
 	})
 	us := e.seedUnits("t", 4, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
 	e.inTx(func(tx store.Tx) error { return NewLinker().Link(e.ctx, tx, testBank, us, nil) })

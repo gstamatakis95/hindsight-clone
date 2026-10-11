@@ -78,20 +78,6 @@ func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
 	}
 }
 
-// TestRunJobAcceptsLegacyModelIDKey: a refresh queued before the payload fix ({"model_id": ...}) still
-// runs; the current key wins when both are present.
-func TestRunJobAcceptsLegacyModelIDKey(t *testing.T) {
-	for _, raw := range []string{`{"model_id":"m1"}`, `{"mental_model_id":"m1","model_id":"other"}`} {
-		r := &recordingRunner{}
-		if _, err := RunJob(t.Context(), r, store.Job{Payload: json.RawMessage(raw)}); err != nil {
-			t.Fatalf("%s: %v", raw, err)
-		}
-		if len(r.calls) != 1 || r.calls[0].id != "m1" {
-			t.Fatalf("%s ran %+v, want model m1 once", raw, r.calls)
-		}
-	}
-}
-
 // addEmbeddedFact commits a world fact with an embedding (so consolidation picks it up) and tracks it.
 func (e *env) addEmbeddedFact(id domain.UnitID, text string, tags ...string) domain.Unit {
 	e.t.Helper()

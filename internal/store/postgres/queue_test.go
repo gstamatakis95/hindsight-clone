@@ -245,7 +245,9 @@ func testEnqueueClaim(t *testing.T, q queueEnv) {
 	parent := q.add(t, job(bankA, domain.OperationKindRetainBatch, "", `{"documents":2}`))
 	j := doc("d1")
 	j.Payload = json.RawMessage(`{"document_id": "d1", "flags": {"force": true, "n": 3}}`)
-	j.Overrides = &domain.BankConfig{RetainMission: "recipes", Recall: &domain.RecallConfig{BudgetLow: ptr(5)}}
+	j.Overrides = &domain.BankConfig{
+		Retain: &domain.RetainConfig{Mission: "recipes"}, Recall: &domain.RecallConfig{BudgetLow: ptr(5)},
+	}
 	j.ParentID = parent
 	id := q.add(t, j)
 	got := q.claimOne(t, id)
@@ -474,7 +476,7 @@ func testDedupeOverrides(t *testing.T, q queueEnv) {
 	plain := job(bankA, domain.OperationKindConsolidate, "consolidate", `{}`)
 	plain.Dedupe = store.DedupePending
 	withO := plain
-	withO.Overrides = &domain.BankConfig{ObservationsMission: "override"}
+	withO.Overrides = &domain.BankConfig{Observations: &domain.ObservationConfig{Mission: "override"}}
 	o1 := q.add(t, withO)
 	p1 := q.add(t, plain) // must not join the overrides row
 	if o1 == p1 {
@@ -492,7 +494,7 @@ func testDedupeOverrides(t *testing.T, q queueEnv) {
 // overrides joins its model's queued refresh, and a refresh queued with overrides is joined by a later one.
 func testDedupeRefreshOverrides(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
-	o := &domain.BankConfig{ReflectMission: "override"}
+	o := &domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "override"}}
 	plainA := refresh("a", `{"model_id":"a"}`)
 	first := q.add(t, plainA)
 	withO := plainA
@@ -599,13 +601,15 @@ func (q queueEnv) claimedByID(t *testing.T, want int) map[domain.OperationID]sto
 // is OR-ed so a true one survives a false one); nil overrides keep the row's, non-nil replace them.
 func testUpgradeMerge(t *testing.T, q queueEnv) {
 	ensureBanks(t, q.s, bankA)
-	oldO := &domain.BankConfig{ReflectMission: "old"}
+	oldO := &domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "old"}}
 	a := refresh("a", `{"model_id":"a","force_full":true}`)
 	a.Overrides = oldO
 	b := refresh("b", `{"model_id":"b","strategy":"delta"}`)
 	b.Overrides = oldO
 	aID, bID := q.add(t, a), q.add(t, b)
-	newO := &domain.BankConfig{ReflectMission: "new", Recall: &domain.RecallConfig{Rerank: ptr(false)}}
+	newO := &domain.BankConfig{
+		Recall: &domain.RecallConfig{Rerank: ptr(false)}, Reflect: &domain.ReflectConfig{Mission: "new"},
+	}
 	q.upgrade(t, aID, `{"force_full":false,"strategy":"single_shot"}`, nil)
 	q.upgrade(t, bID, `{}`, newO)
 	got := q.claimedByID(t, 2)

@@ -27,7 +27,7 @@ const (
 	RefreshStrategyUnspecified RefreshStrategy = ""
 	// RefreshStrategyAgentic runs the reflect loop answering as a document (Hindsight's behaviour).
 	RefreshStrategyAgentic RefreshStrategy = "agentic"
-	// RefreshStrategySingleShot runs one recall and one SYNTHESIZE or MENTAL_MODEL_DELTA call.
+	// RefreshStrategySingleShot runs one recall and one synthesize or delta call.
 	RefreshStrategySingleShot RefreshStrategy = "single_shot"
 )
 

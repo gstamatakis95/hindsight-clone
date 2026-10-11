@@ -20,9 +20,12 @@
 // non-nil empty = explicitly cleared).
 //
 // [BankConfig] is the one configuration shape used at every level, merged server < tenant < bank < strategy < request
-// (< item): a set scalar replaces an unset one, model bindings merge per slot, and other lists replace rather than
-// append. The merging itself lives in internal/config; [BankConfig.Binding] only reads one level. New behaviour knobs
-// go into BankConfig so they can be overridden per request.
+// (< item). It is grouped by phase ([RetainConfig], [ObservationConfig], [RecallConfig], [ReflectConfig],
+// [MentalModelConfig], [ModelBindings]): a set scalar replaces an unset one, groups merge field by field, a
+// [ModelBinding] is atomic, and lists replace rather than append. [ModelBindings] binds models.default for every
+// chat-model slot ([LLMSlots]) plus one optional binding per slot. The merging itself lives in internal/config;
+// [BankConfig.Binding] and [ModelBindings.For] only read one level. New behaviour knobs go into BankConfig, in their
+// phase group, so a level or a request override can set them.
 //
 // # Identity and scopes
 //

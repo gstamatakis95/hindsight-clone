@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
 
@@ -53,7 +52,7 @@ func (s *mentalModelServer) CreateMentalModel(
 	if d.err != nil {
 		return nil, toStatus(d.err)
 	}
-	if err := s.d.validate(config.RPCMentalModelSpec, spec.Overrides); err != nil {
+	if err := validate(spec.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	m, op, err := s.d.MentalModels.CreateMentalModel(ctx, b, spec)
@@ -124,7 +123,7 @@ func (s *mentalModelServer) UpdateMentalModel(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	patch, err := specPatch(req.GetSpec(), req.GetUpdateMask(), s.d.checker(config.RPCMentalModelSpec))
+	patch, err := specPatch(req.GetSpec(), req.GetUpdateMask())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -151,7 +150,7 @@ func (s *mentalModelServer) RefreshMentalModel(
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	if err := s.d.validate("RefreshMentalModel", in.Overrides); err != nil {
+	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
 	op, joined, err := s.d.MentalModels.RefreshMentalModel(ctx, in)

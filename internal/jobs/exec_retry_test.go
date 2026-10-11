@@ -33,7 +33,9 @@ func TestManualConsolidateRetriedDespitePending(t *testing.T) {
 		{"automatic no payload", ``, nil, false},
 		{"automatic empty scopes", `{"scopes":[]}`, nil, false},
 		{"manual scopes", `{"scopes":[{"tags":["a"]}]}`, nil, true},
-		{"manual overrides", `{}`, &domain.BankConfig{AutoConsolidation: ptrBool(true)}, true},
+		{"manual overrides", `{}`, &domain.BankConfig{
+			Observations: &domain.ObservationConfig{AutoConsolidation: ptrBool(true)},
+		}, true},
 		{"undecodable payload", `{"scopes":`, nil, true},
 	}
 	for _, tc := range tests {

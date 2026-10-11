@@ -1,56 +1,60 @@
 package config
 
 import (
+	"encoding/json"
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"reflect"
 	"testing"
 )
 
-func bind(slot domain.ModelSlot, model string) domain.SlotBinding {
-	return domain.SlotBinding{Slot: slot, Binding: domain.ModelBinding{Model: model}}
+// bindings returns a ModelBindings with default (when non-empty) and the given slot bindings, each to a model of
+// that name.
+func bindings(def string, slots map[domain.ModelSlot]string) *domain.ModelBindings {
+	m := &domain.ModelBindings{}
+	if def != "" {
+		m.Default = &domain.ModelBinding{Model: def}
+	}
+	for s, model := range slots {
+		*m.Slot(s) = &domain.ModelBinding{Model: model}
+	}
+	return m
 }
 
+// modelOf is the model ai.Router resolves for slot on cfg, or "" when the slot is unbound.
 func modelOf(t *testing.T, cfg domain.BankConfig, slot domain.ModelSlot) string {
 	t.Helper()
-	b, _ := cfg.Binding(slot)
+	b, err := ai.NewRouter().Resolve(cfg, slot)
+	if err != nil {
+		return ""
+	}
 	return b.Model
 }
 
-// TestMergePrecedence is the precedence table: server < tenant < bank < strategy < request (< item),
-// one row per field shape.
+// TestMergePrecedence is the precedence table: server < tenant < bank < strategy < request (< item), one row
+// per field shape.
 func TestMergePrecedence(t *testing.T) {
 	server := domain.BankConfig{
-		RetainMission:  "server mission",
-		ExtractionMode: domain.ExtractionModeConcise,
-		DedupThreshold: ptr(0.97),
-		EntityLabels:   []domain.EntityLabel{{Key: "server"}},
-		Recall:         &domain.RecallConfig{RRFK: ptr(60), BudgetLow: ptr(100), EnabledStrategies: []string{"a", "b"}},
-		Disposition:    &domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3},
-		Models: []domain.SlotBinding{
-			bind(domain.ModelSlotExtract, "s-ext"), bind(domain.ModelSlotRerank, "s-rr"),
-			bind(domain.ModelSlotConsolidate, "s-con"),
+		Retain: &domain.RetainConfig{
+			Mission: "server mission", ExtractionMode: domain.ExtractionModeConcise,
+			EntityLabels: []domain.EntityLabel{{Key: "server"}},
 		},
+		Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.97)},
+		Recall:       &domain.RecallConfig{RRFK: ptr(60), BudgetLow: ptr(100), EnabledStrategies: []string{"a", "b"}},
+		Reflect:      &domain.ReflectConfig{Disposition: &domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 3}},
 	}
 	tenant := domain.BankConfig{
-		RetainMission: "tenant mission",
-		Recall:        &domain.RecallConfig{BudgetLow: ptr(50)},
-		Models:        []domain.SlotBinding{bind(domain.ModelSlotExtract, "t-ext")},
+		Retain: &domain.RetainConfig{Mission: "tenant mission"},
+		Recall: &domain.RecallConfig{BudgetLow: ptr(50)},
 	}
 	bank := domain.BankConfig{
-		DedupThreshold: ptr(0.9),
-		EntityLabels:   []domain.EntityLabel{{Key: "bank1"}, {Key: "bank2"}},
-		Disposition:    &domain.Disposition{Empathy: 5},
-		Models:         []domain.SlotBinding{bind(domain.ModelSlotReflect, "b-ref"), bind(domain.ModelSlotRerank, "b-rr")},
+		Retain:       &domain.RetainConfig{EntityLabels: []domain.EntityLabel{{Key: "bank1"}, {Key: "bank2"}}},
+		Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.9)},
+		Reflect:      &domain.ReflectConfig{Disposition: &domain.Disposition{Empathy: 5}},
 	}
-	strategy := StrategyLevel(domain.ConsolidationStrategy{
-		ObservationsMission: "strategy obs",
-		Models:              []domain.SlotBinding{bind(domain.ModelSlotConsolidate, "st-con")},
-	})
-	request := domain.BankConfig{
-		Recall: &domain.RecallConfig{EnabledStrategies: []string{}},
-		Models: []domain.SlotBinding{bind(domain.ModelSlotRerank, "r-rr")},
-	}
-	item := domain.BankConfig{RetainMission: "item mission"}
+	strategy := StrategyLevel(domain.ConsolidationStrategy{Mission: "strategy obs"})
+	request := domain.BankConfig{Recall: &domain.RecallConfig{EnabledStrategies: []string{}}}
+	item := domain.BankConfig{Retain: &domain.RetainConfig{Mission: "item mission"}}
 
 	got := Merge(server, tenant, bank, strategy, request, item)
 	tests := []struct {
@@ -58,20 +62,18 @@ func TestMergePrecedence(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"most specific scalar wins", got.RetainMission, "item mission"},
-		{"unset scalar inherits", got.ExtractionMode, domain.ExtractionModeConcise},
-		{"optional scalar replaced", *got.DedupThreshold, 0.9},
-		{"strategy level applies", got.ObservationsMission, "strategy obs"},
-		{"list replaced, not appended", len(got.EntityLabels), 2},
+		{"most specific scalar wins", got.Retain.Mission, "item mission"},
+		{"unset scalar inherits", got.Retain.ExtractionMode, domain.ExtractionModeConcise},
+		{"optional scalar replaced", *got.Observations.DedupThreshold, 0.9},
+		{"strategy level applies", got.Observations.Mission, "strategy obs"},
+		{"list replaced, not appended", len(got.Retain.EntityLabels), 2},
 		{"nested field from tenant", *got.Recall.BudgetLow, 50},
 		{"nested field from server kept", *got.Recall.RRFK, 60},
 		{"empty list clears", got.Recall.EnabledStrategies, []string{}},
-		{"nested message merges by field", *got.Disposition, domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 5}},
-		{"slot from tenant", modelOf(t, got, domain.ModelSlotExtract), "t-ext"},
-		{"slot from bank", modelOf(t, got, domain.ModelSlotReflect), "b-ref"},
-		{"slot from strategy", modelOf(t, got, domain.ModelSlotConsolidate), "st-con"},
-		{"slot from request", modelOf(t, got, domain.ModelSlotRerank), "r-rr"},
-		{"slot count", len(got.Models), 4},
+		{
+			"nested message merges by field", *got.Reflect.Disposition,
+			domain.Disposition{Skepticism: 3, Literalism: 3, Empathy: 5},
+		},
 	}
 	for _, tc := range tests {
 		if !reflect.DeepEqual(tc.got, tc.want) {
@@ -80,61 +82,95 @@ func TestMergePrecedence(t *testing.T) {
 	}
 }
 
-// TestMergeRequestRerankOnlyKeepsBankSlots: a request setting only RERANK keeps the bank's other slots.
-func TestMergeRequestRerankOnlyKeepsBankSlots(t *testing.T) {
-	bank := domain.BankConfig{Models: []domain.SlotBinding{
-		bind(domain.ModelSlotExtract, "b-ext"), bind(domain.ModelSlotReflect, "b-ref"),
-		bind(domain.ModelSlotRerank, "b-rr"), bind(domain.ModelSlotTimeParse, "b-tp"),
-	}}
-	request := domain.BankConfig{Models: []domain.SlotBinding{bind(domain.ModelSlotRerank, "r-rr")}}
-	got := Merge(domain.BankConfig{}, domain.BankConfig{}, bank, request)
-	want := map[domain.ModelSlot]string{
-		domain.ModelSlotExtract: "b-ext", domain.ModelSlotReflect: "b-ref",
-		domain.ModelSlotRerank: "r-rr", domain.ModelSlotTimeParse: "b-tp",
+// TestModelResolution pins the model-routing rule: for each slot, the most specific level that yields a binding
+// wins, where a level yields its own binding for the slot, else its default (chat-model slots only). A binding is
+// used whole, and rerank and embed are never filled by a default.
+func TestModelResolution(t *testing.T) {
+	type level = *domain.ModelBindings
+	ext, ref, rr := domain.ModelSlotExtract, domain.ModelSlotReflect, domain.ModelSlotRerank
+	tests := []struct {
+		name   string
+		levels []level // least to most specific
+		slot   domain.ModelSlot
+		want   string
+	}{
+		{"default binds every chat slot", []level{bindings("d", nil)}, ref, "d"},
+		{
+			"a slot beats its own level's default",
+			[]level{bindings("d", map[domain.ModelSlot]string{ext: "e"})},
+			ext, "e",
+		},
+		{"a bank default beats a server slot", []level{
+			bindings("sd", map[domain.ModelSlot]string{ext: "se"}),
+			bindings("bd", nil),
+		}, ext, "bd"},
+		{"a request slot beats a bank default", []level{
+			bindings("bd", nil),
+			bindings("", map[domain.ModelSlot]string{ext: "re"}),
+		}, ext, "re"},
+		{"a request slot leaves the other slots", []level{
+			bindings("bd", nil),
+			bindings("", map[domain.ModelSlot]string{ext: "re"}),
+		}, ref, "bd"},
+		{"a level with neither inherits", []level{
+			bindings("sd", map[domain.ModelSlot]string{ref: "sr"}), nil,
+			bindings("", map[domain.ModelSlot]string{ext: "x"}),
+		}, ref, "sr"},
+		{"rerank is not filled by a default", []level{bindings("d", nil)}, rr, ""},
+		{"a bank default keeps the server's rerank", []level{
+			bindings("", map[domain.ModelSlot]string{rr: "r"}),
+			bindings("bd", nil),
+		}, rr, "r"},
 	}
-	if len(got.Models) != len(want) {
-		t.Fatalf("got %d slots, want %d", len(got.Models), len(want))
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var levels []domain.BankConfig
+			for _, m := range tc.levels {
+				levels = append(levels, domain.BankConfig{Models: m})
+			}
+			if got := modelOf(t, Merge(levels...), tc.slot); got != tc.want {
+				t.Fatalf("%s = %q, want %q", tc.slot, got, tc.want)
+			}
+		})
 	}
-	for slot, model := range want {
-		if m := modelOf(t, got, slot); m != model {
-			t.Errorf("slot %s = %q, want %q", slot, m, model)
+	t.Run("the winning binding is used whole", func(t *testing.T) {
+		bank := domain.BankConfig{Models: &domain.ModelBindings{
+			Reflect: &domain.ModelBinding{Model: "b", Temperature: ptr(0.7)},
+		}}
+		req := domain.BankConfig{Models: bindings("", map[domain.ModelSlot]string{ref: "r"})}
+		b, _ := Merge(bank, req).Binding(ref)
+		if b.Model != "r" || b.Temperature != nil {
+			t.Fatalf("binding = %+v, want model r with no inherited temperature", b)
 		}
-	}
-}
-
-// TestMergeBindingReplacedWhole: the most specific level supplies the whole binding (ruling R4).
-func TestMergeBindingReplacedWhole(t *testing.T) {
-	bank := domain.BankConfig{Models: []domain.SlotBinding{{
-		Slot: domain.ModelSlotReflect, Binding: domain.ModelBinding{Model: "b", Temperature: ptr(0.7)},
-	}}}
-	req := domain.BankConfig{Models: []domain.SlotBinding{bind(domain.ModelSlotReflect, "r")}}
-	b, _ := Merge(bank, req).Binding(domain.ModelSlotReflect)
-	if b.Model != "r" || b.Temperature != nil {
-		t.Fatalf("binding = %+v, want model r with no inherited temperature", b)
-	}
+	})
 }
 
 // TestMergeDoesNotAliasInputs: mutating the result never reaches the inputs, and inputs are unchanged.
 func TestMergeDoesNotAliasInputs(t *testing.T) {
 	server := domain.BankConfig{
-		Recall:       &domain.RecallConfig{RRFK: ptr(60), StrategyBoosts: map[string]float64{"semantic": 1}},
-		EntityLabels: []domain.EntityLabel{{Key: "k", Optional: ptr(true)}},
-		Models: []domain.SlotBinding{{
-			Slot: domain.ModelSlotExtract, Binding: domain.ModelBinding{Model: "m", Extra: map[string]any{"a": 1}},
-		}},
+		Recall: &domain.RecallConfig{RRFK: ptr(60), StrategyBoosts: map[string]float64{"semantic": 1}},
+		Retain: &domain.RetainConfig{EntityLabels: []domain.EntityLabel{{Key: "k", Optional: ptr(true)}}},
+		Models: &domain.ModelBindings{Default: &domain.ModelBinding{Model: "m", Extra: map[string]any{"a": 1}}},
 	}
 	bank := domain.BankConfig{Recall: &domain.RecallConfig{BudgetLow: ptr(5)}}
-	snapServer, snapBank := Merge(server), Merge(bank)
+	snap := func() string {
+		b, err := json.Marshal([]domain.BankConfig{server, bank})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	before := snap()
 
 	got := Merge(server, bank)
 	*got.Recall.RRFK = 1
 	*got.Recall.BudgetLow = 1
 	got.Recall.StrategyBoosts["semantic"] = 9
-	*got.EntityLabels[0].Optional = false
-	got.Models[0].Binding.Extra["a"] = 2
-	got.Models[0].Binding.Model = "x"
+	*got.Retain.EntityLabels[0].Optional = false
+	got.Models.Extract.Extra["a"] = 2
+	got.Models.Default.Model = "x"
 
-	if !reflect.DeepEqual(server, snapServer) || !reflect.DeepEqual(bank, snapBank) {
+	if snap() != before {
 		t.Fatal("Merge result aliases an input")
 	}
 }

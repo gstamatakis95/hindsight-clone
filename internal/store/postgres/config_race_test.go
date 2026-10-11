@@ -66,14 +66,14 @@ func TestConcurrentBankConfigPatchesKeepBoth(t *testing.T) {
 			return fmt.Errorf("update bank config: %w", err)
 		}
 		return nil
-	}, func(c *domain.BankConfig) { c.RetainMission = "A" }, func(c *domain.BankConfig) { c.ReflectMission = "B" })
+	}, setRetainMissionA, setReflectMissionB)
 	got, err := admin.GetBank(t.Context(), b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Config.RetainMission != "A" || got.Config.ReflectMission != "B" {
-		t.Fatalf("lost update: stored config is retain_mission=%q reflect_mission=%q, want A and B",
-			got.Config.RetainMission, got.Config.ReflectMission)
+	if got.Config.GetRetain().Mission != "A" || got.Config.GetReflect().Mission != "B" {
+		t.Fatalf("lost update: stored config is retain.mission=%q reflect.mission=%q, want A and B",
+			got.Config.GetRetain().Mission, got.Config.GetReflect().Mission)
 	}
 }
 
@@ -89,13 +89,27 @@ func TestConcurrentTenantConfigPatchesKeepBoth(t *testing.T) {
 			return fmt.Errorf("update tenant config: %w", err)
 		}
 		return nil
-	}, func(c *domain.BankConfig) { c.RetainMission = "A" }, func(c *domain.BankConfig) { c.ReflectMission = "B" })
+	}, setRetainMissionA, setReflectMissionB)
 	got, err := admin.TenantConfig(t.Context(), tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.RetainMission != "A" || got.ReflectMission != "B" {
-		t.Fatalf("lost update: stored tenant config is retain_mission=%q reflect_mission=%q, want A and B",
-			got.RetainMission, got.ReflectMission)
+	if got.GetRetain().Mission != "A" || got.GetReflect().Mission != "B" {
+		t.Fatalf("lost update: stored tenant config is retain.mission=%q reflect.mission=%q, want A and B",
+			got.GetRetain().Mission, got.GetReflect().Mission)
 	}
+}
+
+// setRetainMissionA is one racing patch: retain.mission = "A".
+func setRetainMissionA(c *domain.BankConfig) {
+	r := c.GetRetain()
+	r.Mission = "A"
+	c.Retain = &r
+}
+
+// setReflectMissionB is the other racing patch: reflect.mission = "B".
+func setReflectMissionB(c *domain.BankConfig) {
+	r := c.GetReflect()
+	r.Mission = "B"
+	c.Reflect = &r
 }

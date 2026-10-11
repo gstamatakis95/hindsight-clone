@@ -32,9 +32,10 @@
 // [BuildMemd] builds ./cmd/memd once per test binary into a temporary directory and probes it with a scrubbed
 // environment. It skips the test (rather than failing it) when the build fails or when the binary prints "not
 // implemented". [Stack.MemdEnv] is the environment memd needs for the stack: MEMD_DSN, the MEMD_S3_* settings
-// (path-style, the compose credentials), MEMD_GATEWAY_URL and MEMD_GATEWAY_API_KEY, and MEMD_MODEL_<SLOT> =
-// gatewayemu.ModelFor(slot) for every slot in [Slots]. [Stack.StartMemd] adds MEMD_GRPC_ADDR on a free port for api and
-// all, applies MemdOptions.Env on top, drops every inherited MEMD_* variable, writes the process's output to a log
+// (path-style, the compose credentials), MEMD_GATEWAY_URL and MEMD_GATEWAY_API_KEY. [Stack.StartMemd]
+// adds MEMD_GRPC_ADDR on a free port for api and all and MEMD_CONFIG, a server config file ([MemdConfig]) binding every
+// slot in [Slots] to gatewayemu.ModelFor(slot) plus the sections in MemdOptions.Config; it applies MemdOptions.Env on
+// top, drops every inherited MEMD_* variable, writes the process's output to a log
 // file, and waits until it is ready: the gRPC health check reports SERVING for api and all (up to 90s), or a worker is
 // still running after a 2s grace (it serves no health endpoint). An early exit fails the test with the log.
 //

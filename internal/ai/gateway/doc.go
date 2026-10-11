@@ -18,9 +18,9 @@
 //
 // [NewClient] takes a [Config] and an optional *http.Client (nil = a default client). cmd/memd/wire.go fills the config
 // from MEMD_GATEWAY_URL (BaseURL, including the version, e.g. http://gateway:4000/v1), MEMD_GATEWAY_API_KEY (sent as
-// "Authorization: Bearer <key>"), MEMD_EMBED_MODEL, MEMD_GATEWAY_MAX_CONCURRENT (cmd/memd default 32),
-// MEMD_GATEWAY_MAX_CONCURRENT_<SLOT> (SlotConcurrency) and MEMD_GATEWAY_TIMEOUT (cmd/memd default 120s); the package
-// itself reads no environment variables. Zero Config fields take the package defaults: [DefaultEmbedModel],
+// "Authorization: Bearer <key>") and the server config file: defaults.models.embed (EmbedModel) and the gateway
+// section (max_concurrent, default 32; slot_concurrency; timeout, default 120s). The package itself reads no
+// environment variables or files. Zero Config fields take the package defaults: [DefaultEmbedModel],
 // [DefaultEmbedBatchSize] (64), [DefaultRerankPath], [DefaultMaxConcurrent] (32), [DefaultTimeout] (60s),
 // [DefaultMaxRetries] (2) and [DefaultRetryBackoff] (500ms).
 //

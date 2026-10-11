@@ -18,7 +18,7 @@ const (
 	// reads ExtractData.
 	ExtractVerbatim = "extract_verbatim"
 	// ExtractCustom is the custom-mode extraction system prompt, built around
-	// BankConfig.CustomExtractionPrompt; reads ExtractData.
+	// retain.custom_extraction_prompt; reads ExtractData.
 	ExtractCustom = "extract_custom"
 	// ExtractUser is the extraction user message for every mode (mission, date, context, narrator, hints,
 	// chunk); reads ExtractData.
@@ -53,15 +53,15 @@ const (
 	// StructuredOutputData.
 	StructuredOutputUser = "structured_output_user"
 
-	// SynthesizeSystem is the SYNTHESIZE system prompt (single-shot full page); reads SynthesizeData.
+	// SynthesizeSystem is the synthesize system prompt (single-shot full page); reads SynthesizeData.
 	SynthesizeSystem = "synthesize_system"
-	// SynthesizeUser is the SYNTHESIZE user message (topic, observations, facts); reads SynthesizeData.
+	// SynthesizeUser is the synthesize user message (topic, observations, facts); reads SynthesizeData.
 	SynthesizeUser = "synthesize_user"
 
-	// MentalModelStructuredDeltaSystem is the MENTAL_MODEL_DELTA system prompt (edit ops over sections
+	// MentalModelStructuredDeltaSystem is the delta system prompt (edit ops over sections
 	// and blocks); reads DeltaData.
 	MentalModelStructuredDeltaSystem = "mm_structured_delta_system"
-	// MentalModelStructuredDeltaUser is the MENTAL_MODEL_DELTA user message (document JSON, new facts,
+	// MentalModelStructuredDeltaUser is the delta user message (document JSON, new facts,
 	// budgets, retry feedback); reads DeltaData.
 	MentalModelStructuredDeltaUser = "mm_structured_delta_user"
 	// MentalModelRefreshContext is the reflect context an agentic mental-model refresh passes; reads
@@ -102,7 +102,7 @@ const (
 
 // ExtractData is read by ExtractConcise, ExtractVerbose, ExtractVerbatim, ExtractCustom and ExtractUser.
 type ExtractData struct {
-	// CustomPrompt is BankConfig.CustomExtractionPrompt, the guidelines block of ExtractCustom.
+	// CustomPrompt is retain.custom_extraction_prompt, the guidelines block of ExtractCustom.
 	CustomPrompt string `json:"custom_prompt"`
 	// CausalLinks is RetainTuning.ExtractCausalLinks; true adds the causal-relations section. When false
 	// the section is omitted (as in Hindsight) and the engine ignores the schema's caused_by.
@@ -115,12 +115,12 @@ type ExtractData struct {
 	// AgentName is the narrator, the AI agent whose memory this is; non-empty adds Hindsight's narrator
 	// rule (first-person statements are the agent's own, fact_type "assistant") to ExtractUser.
 	AgentName string `json:"agent_name"`
-	// FreeFormEntities is BankConfig.EntitiesAllowFreeForm resolved (nil = true); false with labels set
+	// FreeFormEntities is retain.entities_allow_free_form resolved (nil = true); false with labels set
 	// is labels-only mode. It only matters when Labels is non-empty.
 	FreeFormEntities bool `json:"free_form_entities"`
-	// Labels are BankConfig.EntityLabels, rendered with their allowed values and descriptions.
+	// Labels are retain.entity_labels, rendered with their allowed values and descriptions.
 	Labels []domain.EntityLabel `json:"labels"`
-	// Mission is BankConfig.RetainMission; empty = no focus block.
+	// Mission is retain.mission; empty = no focus block.
 	Mission string `json:"mission"`
 	// MentionedAt is the item timestamp, the reference for relative dates; nil = unknown.
 	MentionedAt *time.Time `json:"mentioned_at"`
@@ -220,9 +220,9 @@ type DedupData struct {
 type ReflectData struct {
 	// BankName is the bank's display name; empty = not shown.
 	BankName string `json:"bank_name"`
-	// Mission is BankConfig.ReflectMission; empty = the built-in role.
+	// Mission is reflect.mission; empty = the built-in role.
 	Mission string `json:"mission"`
-	// Disposition is BankConfig.Disposition; nil = not shown. A 0 trait is unset and is not listed.
+	// Disposition is reflect.disposition; nil = not shown. A 0 trait is unset and is not listed.
 	Disposition *domain.Disposition `json:"disposition"`
 	// Directives are the active directives matching the request (rendered as Name + Rules).
 	Directives []domain.Directive `json:"directives"`
@@ -290,7 +290,7 @@ type SynthesizeData struct {
 	Name string `json:"name"`
 	// SourceQuery is the question the page answers.
 	SourceQuery string `json:"source_query"`
-	// Mission is BankConfig.ReflectMission; empty = the built-in role.
+	// Mission is reflect.mission; empty = the built-in role.
 	Mission string `json:"mission"`
 	// Directives are the active directives for the model's tags.
 	Directives []domain.Directive `json:"directives"`

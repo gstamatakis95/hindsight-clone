@@ -78,7 +78,11 @@ type deps struct {
 // server and the worker.
 func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observability.Telemetry,
 ) (*deps, func(), error) {
-	in, closer, err := openInfra(ctx, cfg, tel)
+	serverCfg, err := cfg.File.validate()
+	if err != nil {
+		return nil, nil, fmt.Errorf("memd: config file: %w", err)
+	}
+	in, closer, err := openInfra(ctx, cfg, serverCfg.Models.Embed.Model, tel)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -91,19 +95,16 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observabi
 		closer()
 		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
-	serverCfg, err := config.ServerDefaults(cfg.Env)
-	if err != nil {
-		closer()
-		return nil, nil, fmt.Errorf("memd: %w", err)
-	}
 	d := wireEngines(cfg, in, tok, serverCfg, clock.System{}, log)
 	d.tel = tel
 	return d, closer, nil
 }
 
-// openInfra opens the Postgres pool, the blob store and the gateway client. tel's instrumentation (no-ops when nil)
-// goes into each: the pgx query tracer, the S3 middleware, and the gateway's call hook and HTTP client.
-func openInfra(ctx context.Context, cfg Config, tel *observability.Telemetry) (infra, func(), error) {
+// openInfra opens the Postgres pool, the blob store and the gateway client, which embeds with embedModel. tel's
+// instrumentation (no-ops when nil) goes into each: the pgx query tracer, the S3 middleware, and the gateway's call
+// hook and HTTP client.
+func openInfra(ctx context.Context, cfg Config, embedModel string, tel *observability.Telemetry,
+) (infra, func(), error) {
 	pcfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
 		return infra{}, nil, fmt.Errorf("memd: %s: %w", envDSN, err)
@@ -126,8 +127,9 @@ func openInfra(ctx context.Context, cfg Config, tel *observability.Telemetry) (i
 		return infra{}, nil, err
 	}
 	gw := gateway.NewClient(gateway.Config{
-		BaseURL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey, EmbedModel: cfg.EmbedModel,
-		MaxConcurrent: cfg.GatewayMaxConcurrent, SlotConcurrency: cfg.SlotConcurrency, Timeout: cfg.GatewayTimeout,
+		BaseURL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey, EmbedModel: embedModel,
+		MaxConcurrent: cfg.File.Gateway.MaxConcurrent, SlotConcurrency: cfg.File.Gateway.SlotConcurrency,
+		Timeout:   time.Duration(cfg.File.Gateway.Timeout),
 		TraceCall: tel.GatewayHook(),
 	}, tel.HTTPClient(nil))
 	pg := postgres.New(pool)
@@ -171,8 +173,8 @@ func checkEmbedding(ctx context.Context, emb ai.Embedder) error {
 		return fmt.Errorf("memd: gateway embedding check: %w", err)
 	}
 	if len(vec) != domain.EmbeddingDim {
-		return fmt.Errorf("memd: gateway embedding model returns %d dimensions, want %d (%s)",
-			len(vec), domain.EmbeddingDim, envEmbedModel)
+		return fmt.Errorf("memd: gateway embedding model returns %d dimensions, want %d (defaults.models.embed "+
+			"in the server config file)", len(vec), domain.EmbeddingDim)
 	}
 	return nil
 }
@@ -205,7 +207,7 @@ func wireEngines(
 		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk,
 		handlers: handlers{db: in.db, clock: clk},
 		server: server.Deps{
-			DefaultDeadline: cfg.RPCDeadline,
+			DefaultDeadline: time.Duration(*cfg.File.API.RPCDeadline),
 			Probes: []server.ReadinessProbe{
 				postgresProbe{db: in.ping}, &gatewayProbe{url: cfg.GatewayURL, hc: &http.Client{}},
 			},
@@ -291,9 +293,11 @@ func newGRPCServer(d *deps) *grpc.Server {
 // grpc.health.v1 there.
 func runWorker(ctx context.Context, d *deps) error {
 	id := effectiveWorkerID(d.cfg.WorkerID, os.Hostname, uuid.NewString)
+	w := d.cfg.File.Worker
 	r := jobs.New(d.claimer, jobs.Config{
-		WorkerID: id, Clock: d.clock, Slots: d.cfg.WorkerSlots, PollInterval: d.cfg.PollInterval,
-		HeartbeatInterval: d.cfg.HeartbeatInterval, StaleAfter: d.cfg.StaleAfter, DB: d.db, Logger: d.log,
+		WorkerID: id, Clock: d.clock, Slots: d.cfg.WorkerSlots, PollInterval: time.Duration(w.PollInterval),
+		HeartbeatInterval: time.Duration(w.HeartbeatInterval), StaleAfter: time.Duration(w.StaleAfter), DB: d.db,
+		Logger:   d.log,
 		TraceJob: d.tel.JobHook(),
 	})
 	md := d.maintenance

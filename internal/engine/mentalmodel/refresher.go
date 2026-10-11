@@ -101,7 +101,7 @@ type ResolvedScope struct {
 // Synthesizer drafts a model's content. Two implementations, picked by RefreshStrategy:
 //
 //   - agentic: the reflect loop, answering as a document (Hindsight's behaviour);
-//   - single-shot: one recall over the scope, then one SYNTHESIZE (full) or MENTAL_MODEL_DELTA call.
+//   - single-shot: one recall over the scope, then one synthesize (full) or delta call.
 //
 // Both return ErrNoNewFacts when retrieval finds nothing, before any LLM call they would otherwise make.
 type Synthesizer interface {

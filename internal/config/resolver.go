@@ -67,7 +67,10 @@ func (r *resolver) ForScope(
 		req = append(req, *request)
 	}
 	if r.matcher != nil {
-		strategies := Merge(append(levels, req...)...).ConsolidationStrategies
+		var strategies []domain.ConsolidationStrategy
+		if o := Merge(append(levels, req...)...).Observations; o != nil {
+			strategies = o.Strategies
+		}
 		if st, ok := r.matcher.Match(strategies, s); ok && st != nil {
 			levels = append(levels, StrategyLevel(*st))
 		}
@@ -101,11 +104,14 @@ func (r *resolver) levels(ctx context.Context, b domain.BankRef) ([]domain.BankC
 
 // StrategyLevel turns a consolidation strategy into its config level (between bank and request).
 func StrategyLevel(s domain.ConsolidationStrategy) domain.BankConfig {
-	return Merge(domain.BankConfig{
-		ObservationsMission:               s.ObservationsMission,
-		MaxObservationsPerScope:           s.MaxObservationsPerScope,
-		ConsolidationSourceFactsMaxTokens: s.SourceFactsMaxTokens,
-		ConsolidationSourceTokensPerObs:   s.SourceFactsMaxTokensPerObservation,
-		Models:                            s.Models,
-	})
+	lvl := domain.BankConfig{Observations: &domain.ObservationConfig{
+		Mission:                            s.Mission,
+		MaxObservationsPerScope:            s.MaxObservationsPerScope,
+		SourceFactsMaxTokens:               s.SourceFactsMaxTokens,
+		SourceFactsMaxTokensPerObservation: s.SourceFactsMaxTokensPerObservation,
+	}}
+	if s.ConsolidateModel != nil || s.DedupCheckModel != nil {
+		lvl.Models = &domain.ModelBindings{Consolidate: s.ConsolidateModel, DedupCheck: s.DedupCheckModel}
+	}
+	return Merge(lvl)
 }

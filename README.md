@@ -37,28 +37,34 @@ make migrate   # alembic upgrade head (builds the Alembic venv on first use)
 
 # No AI gateway at hand? Run the deterministic emulator the e2e tests use (port 4000). It answers every
 # prompt with schema-valid output and 768-dimension embeddings, so it is for trying memd out, not for
-# real answers. To use a real OpenAI-compatible gateway instead, point MEMD_GATEWAY_URL at it and bind
-# MEMD_MODEL (every LLM slot), MEMD_MODEL_RERANK and MEMD_EMBED_MODEL (768 dimensions) to its models.
-go run ./test/e2e/gatewayemu/cmd/gatewayemu &
+# real answers. -write-config writes ./memd.yaml, binding every model slot to the emulator.
+go run ./test/e2e/gatewayemu/cmd/gatewayemu -write-config memd.yaml &
 
 export MEMD_GATEWAY_URL=http://127.0.0.1:4000/v1 \
   MEMD_S3_ENDPOINT=http://localhost:59000 MEMD_S3_BUCKET=memd MEMD_S3_ACCESS_KEY=memd \
-  MEMD_S3_SECRET_KEY=memd-secret MEMD_S3_PATH_STYLE=true \
-  MEMD_MODEL_EXTRACT=emu-extract MEMD_MODEL_TIME_PARSE=emu-time_parse MEMD_MODEL_CONSOLIDATE=emu-consolidate \
-  MEMD_MODEL_DEDUP_CHECK=emu-dedup_check MEMD_MODEL_REFLECT=emu-reflect \
-  MEMD_MODEL_STRUCTURED_OUTPUT=emu-structured_output MEMD_MODEL_MENTAL_MODEL_DELTA=emu-mental_model_delta \
-  MEMD_MODEL_SYNTHESIZE=emu-synthesize MEMD_MODEL_RERANK=emu-rerank
+  MEMD_S3_SECRET_KEY=memd-secret MEMD_S3_PATH_STYLE=true
 
 make run       # memd all (api + worker in one process) on :50051; MEMD_DSN comes from the Makefile
 ```
 
-`memd <api|worker|all>` reads its settings from `MEMD_*` environment variables or the matching flags
-(`MEMD_GRPC_ADDR` = `-grpc-addr`); run `go run ./cmd/memd` to list them all. At startup memd checks that the
-gateway's embedding model returns 768 dimensions, that EXTRACT and REFLECT have a model, and that the blob
-storage is configured. A worker's id is `<MEMD_WORKER_ID or hostname>-<uuid>`, unique per process; set
-`MEMD_WORKER_HEALTH_ADDR` to serve grpc.health from a worker. In production run `memd api` and `memd worker` as two
-Deployments over the same Postgres and bucket.
+To use a real OpenAI-compatible gateway instead, point `MEMD_GATEWAY_URL` (and `MEMD_GATEWAY_API_KEY`) at it,
+copy [memd.example.yaml](memd.example.yaml) to `memd.yaml` and bind its models (see "Model routing" below).
 
+memd has two kinds of settings:
+
+- **Environment variables** (or the matching flags, `MEMD_GRPC_ADDR` = `-grpc-addr`) hold only deployment,
+  infrastructure and secrets: the DSN, listen addresses, gateway URL and key, blob storage, worker id and
+  slots, log level and Datadog. Run `go run ./cmd/memd` to list them all.
+- **The server config file** holds the models and every behaviour and operator setting. memd reads
+  `MEMD_CONFIG`, or `./memd.yaml` when that is unset. Its `defaults:` block is the server level of the config
+  hierarchy, written like the API's `BankConfig`; the `gateway`, `worker`, `retention` and `api` sections hold
+  operator settings. [memd.example.yaml](memd.example.yaml) documents every key; unknown keys fail startup.
+
+At startup memd checks the config file, that the embedding model returns 768 dimensions, that the extract and
+reflect steps have a model, and that the blob storage is configured. A worker's id is
+`<MEMD_WORKER_ID or hostname>-<uuid>`, unique per process; set `MEMD_WORKER_HEALTH_ADDR` to serve grpc.health from
+a worker. In production run `memd api` and `memd worker` as two Deployments over the same Postgres, bucket and
+config file.
 Original document texts go to blob storage. `MEMD_BLOB_PROVIDER` picks the provider; `s3` (the default, and the
 only one today) works with AWS S3 and any S3-compatible store such as MinIO:
 
@@ -93,7 +99,7 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 
 ### Sync vs async retain
 
 `Retain` is synchronous by default. It returns once the units are committed, and the extraction LLM calls
-run inside the RPC. A call with no deadline of its own gets `MEMD_RPC_DEADLINE` (120s by default).
+run inside the RPC. A call with no deadline of its own gets `api.rpc_deadline` from the server config file (120s by default).
 
 A sync retain that fails part-way, for example on a deadline or an LLM outage, can leave the document
 partly replaced. Retrying it starts from scratch: an inline run never resumes (decision 801). So a document
@@ -138,16 +144,69 @@ make bench-compare A=eval-results/<run> B=eval-results/<run>
 
 ## Configuration and overrides
 
-One `BankConfig` shape is used at every level and merged server < tenant < bank < strategy < request
-(< item for retain). Scalars: set replaces unset; `models` merge per slot; other lists replace. Requests
-that can't use a field reject it with `INVALID_ARGUMENT`. See "Per-request overrides" in `docs/SPEC.md`.
+One `BankConfig` shape is used at every level and merged server < tenant < bank < consolidation strategy <
+request (< item for retain). It is grouped by phase: `retain`, `observations`, `recall`, `reflect`,
+`mental_models` and `models`. Scalars: set replaces unset; groups merge field by field; a model binding is used
+whole; lists replace. The server level is the `defaults:` block of the server config file; `TenantService` and
+`BankService` read and patch the tenant and bank levels with FieldMask paths such as
+`observations.dedup_threshold` or `models.extract`, and `ResetBankConfig` makes paths inherit again (`"*"` resets
+everything).
+
+Each RPC that does work takes its own overrides message, holding only what that call can change:
+
+| Message | RPCs | Fields |
+|---|---|---|
+| `RetainOverrides` | Retain (request and item), ReprocessDocument | `retain`, `extract_model`, `time_parse_model` |
+| `RecallOverrides` | Recall | `recall`, `time_parse_model`, `rerank_model` |
+| `ReflectOverrides` | Reflect | `reflect`, `recall`, `reflect_model`, `structured_output_model`, `rerank_model` |
+| `ConsolidateOverrides` | Consolidate | the observations group minus `enabled` / `auto_consolidation` / `reconcile_grace_seconds`, `consolidate_model`, `dedup_check_model` |
+| `RederiveOverrides` | UpdateMemory | `entity_match_threshold`, `extract_model`, `time_parse_model` |
+| `RefreshOverrides` | RefreshMentalModel, MentalModelSpec | `reflect`, `max_delta_ratio`, `reflect_model`, `mental_model_model`, `structured_output_model` |
+
+A document keeps its retain overrides (`Document.retain_overrides`) and ReprocessDocument replays them.
 
 ## Model routing
 
-Every LLM-backed operation has its own slot (EXTRACT, TIME_PARSE, CONSOLIDATE, DEDUP_CHECK, REFLECT,
-STRUCTURED_OUTPUT, SYNTHESIZE, MENTAL_MODEL_DELTA, RERANK). Embedding is server-wide:
-nomic-embed-text-v1.5 at 768 dimensions. See "Model routing" in `docs/SPEC.md`.
+Every model-backed step has its own slot: `extract`, `time_parse`, `consolidate`, `dedup_check`, `reflect`,
+`structured_output`, `mental_model` (single-shot mental-model refresh), `rerank` and `embed`. `models` binds them
+at any level: `models.default` binds every chat step the level leaves unset, `models.<slot>` binds one step. For
+each step the most specific level that yields a binding wins, its own slot or its default, and the winning binding
+is used whole (model, temperature, max output tokens, reasoning effort, timeout, retries, extra body fields).
+`rerank` and `embed` are never filled by a default; without a `rerank` binding recall skips the cross-encoder.
+`embed` can only be set in the server config file, and the model must return 768 dimensions.
 
+Swap every step to one model (server config file):
+
+```yaml
+defaults:
+  models:
+    default: {model: gpt-4o-mini}
+    rerank: {model: bge-reranker-v2-m3}
+```
+
+Use a stronger model for reflect and mental models only, for every bank:
+
+```yaml
+defaults:
+  models:
+    default: {model: gpt-4o-mini}
+    reflect: {model: gpt-4o}
+    mental_model: {model: gpt-4o}
+```
+
+Swap every step for one bank, then one step for one call:
+
+```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' \
+  -d '{"bank_id":"b1","config":{"models":{"default":{"model":"claude-sonnet"}}},"update_mask":"models.default"}' \
+  localhost:50051 memory.v1.BankService/UpdateBankConfig
+grpcurl -plaintext -H 'x-tenant-id: acme' \
+  -d '{"bank_id":"b1","query":"Where does Alice live?","overrides":{"reflect_model":{"model":"gpt-4o","temperature":0}}}' \
+  localhost:50051 memory.v1.MemoryService/Reflect
+```
+
+The bank's `models.default` beats a step the server file binds by name, so the first call moves every chat step
+of `b1` to `claude-sonnet`; the second changes only the reflect step of one call.
 ## Datadog (optional)
 
 memd can send traces, runtime metrics and (separately) profiles to a Datadog agent. It uses dd-trace-go v2

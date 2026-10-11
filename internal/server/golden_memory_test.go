@@ -50,11 +50,16 @@ func TestGoldenRetainRequest(t *testing.T) {
 			Metadata:        map[string]string{"meta-k": "meta-v"},
 			Entities:        []*pb.EntityHint{{Text: "Alice", Type: "person"}},
 			ResolveEntities: ptr(false),
-			Overrides:       &pb.BankConfig{RetainMission: "item-mission"},
-			ForceReextract:  false,
+			Overrides: &pb.RetainOverrides{
+				Retain: &pb.RetainConfig{Mission: "item-mission"}, ExtractModel: &pb.ModelBinding{Model: "item-extract"},
+			},
+			ForceReextract: false,
 		}},
-		DocumentTags:      []string{"doc-tag"},
-		Overrides:         &pb.BankConfig{RetainMission: "request-mission"},
+		DocumentTags: []string{"doc-tag"},
+		Overrides: &pb.RetainOverrides{
+			Retain:         &pb.RetainConfig{Mission: "request-mission", ChunkMaxTokens: ptr[int32](9)},
+			TimeParseModel: &pb.ModelBinding{Model: "request-time", Temperature: ptr(0.1)},
+		},
 		SkipConsolidation: true,
 		RunAsync:          false,
 	}
@@ -73,10 +78,16 @@ func TestGoldenRetainRequest(t *testing.T) {
 			Metadata:        map[string]string{"meta-k": "meta-v"},
 			Entities:        []domain.EntityHint{{Text: "Alice", Type: "person"}},
 			ResolveEntities: ptr(false),
-			Overrides:       &domain.BankConfig{RetainMission: "item-mission"},
+			Overrides: &domain.BankConfig{
+				Retain: &domain.RetainConfig{Mission: "item-mission"},
+				Models: &domain.ModelBindings{Extract: &domain.ModelBinding{Model: "item-extract"}},
+			},
 		}},
-		DocumentTags:      []string{"doc-tag"},
-		Overrides:         &domain.BankConfig{RetainMission: "request-mission"},
+		DocumentTags: []string{"doc-tag"},
+		Overrides: &domain.BankConfig{
+			Retain: &domain.RetainConfig{Mission: "request-mission", ChunkMaxTokens: ptr(9)},
+			Models: &domain.ModelBindings{TimeParse: &domain.ModelBinding{Model: "request-time", Temperature: ptr(0.1)}},
+		},
 		SkipConsolidation: true,
 	}
 	got, err := retainRequestFromProto(in)
@@ -109,8 +120,11 @@ func TestGoldenRecallRequest(t *testing.T) {
 			Chunks: ptr(true), ChunksMaxTokens: ptr[int32](11), SourceFacts: ptr(false),
 			SourceFactsMaxTokens: ptr[int32](22), Entities: ptr(true),
 		},
-		Trace:     false,
-		Overrides: &pb.BankConfig{ReflectMission: "recall-overrides"},
+		Trace: false,
+		Overrides: &pb.RecallOverrides{
+			Recall: &pb.RecallConfig{RrfK: ptr[int32](7)}, TimeParseModel: &pb.ModelBinding{Model: "recall-time"},
+			RerankModel: &pb.ModelBinding{Model: "recall-rerank"},
+		},
 	}
 	want := recall.RecallRequest{
 		Bank:  domain.BankRef{Bank: "bank-2"},
@@ -132,7 +146,12 @@ func TestGoldenRecallRequest(t *testing.T) {
 			Chunks: ptr(true), ChunksMaxTokens: ptr(11), SourceFacts: ptr(false), SourceFactsMaxTokens: ptr(22),
 			Entities: ptr(true),
 		},
-		Overrides: &domain.BankConfig{ReflectMission: "recall-overrides"},
+		Overrides: &domain.BankConfig{
+			Recall: &domain.RecallConfig{RRFK: ptr(7)},
+			Models: &domain.ModelBindings{
+				TimeParse: &domain.ModelBinding{Model: "recall-time"}, Rerank: &domain.ModelBinding{Model: "recall-rerank"},
+			},
+		},
 	}
 	got, err := recallRequestFromProto(in)
 	if err != nil {
@@ -160,7 +179,12 @@ func TestGoldenReflectRequest(t *testing.T) {
 		}},
 		Include:   &pb.ReflectInclude{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
 		QueryTime: timestamppb.New(goldenTime(5)),
-		Overrides: &pb.BankConfig{ReflectMission: "reflect-overrides"},
+		Overrides: &pb.ReflectOverrides{
+			Reflect: &pb.ReflectConfig{Mission: "reflect-overrides", Disposition: &pb.Disposition{Skepticism: 2}},
+			Recall:  &pb.RecallConfig{BudgetLow: ptr[int32](5)}, ReflectModel: &pb.ModelBinding{Model: "reflect-model"},
+			StructuredOutputModel: &pb.ModelBinding{Model: "reflect-structured"},
+			RerankModel:           &pb.ModelBinding{Model: "reflect-rerank"},
+		},
 	}
 	want := reflecteng.ReflectRequest{
 		Bank:  domain.BankRef{Bank: "bank-3"},
@@ -180,7 +204,15 @@ func TestGoldenReflectRequest(t *testing.T) {
 		}},
 		Include:   reflecteng.ReflectInclude{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
 		QueryTime: ptr(goldenTime(5)),
-		Overrides: &domain.BankConfig{ReflectMission: "reflect-overrides"},
+		Overrides: &domain.BankConfig{
+			Reflect: &domain.ReflectConfig{Mission: "reflect-overrides", Disposition: &domain.Disposition{Skepticism: 2}},
+			Recall:  &domain.RecallConfig{BudgetLow: ptr(5)},
+			Models: &domain.ModelBindings{
+				Reflect:          &domain.ModelBinding{Model: "reflect-model"},
+				StructuredOutput: &domain.ModelBinding{Model: "reflect-structured"},
+				Rerank:           &domain.ModelBinding{Model: "reflect-rerank"},
+			},
+		},
 	}
 	got, err := reflectRequestFromProto(in)
 	if err != nil {

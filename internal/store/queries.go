@@ -206,6 +206,14 @@ type ModelQuery struct {
 	PageToken string
 }
 
+// UnconsolidatedBank is a bank with facts waiting for consolidation, as the consolidation reconcile sees it.
+type UnconsolidatedBank struct {
+	// Bank is the bank.
+	Bank domain.BankRef
+	// Oldest is the created_at of its oldest fact waiting for consolidation.
+	Oldest time.Time
+}
+
 // CronModel is a model with a refresh_cron schedule, as the cron sweep sees it.
 type CronModel struct {
 	// Model is the model.

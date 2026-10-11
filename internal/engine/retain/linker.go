@@ -245,8 +245,8 @@ func absDuration(d time.Duration) time.Duration {
 }
 
 // mergeTuning merges RetainTuning levels field by field, later levels winning.
-func mergeTuning(levels ...*domain.RetainTuning) *domain.RetainTuning {
-	out := domain.RetainTuning{}
+func mergeTuning(levels ...*domain.RetainConfig) *domain.RetainConfig {
+	out := domain.RetainConfig{}
 	for _, l := range levels {
 		if l == nil {
 			continue

@@ -45,7 +45,7 @@ func structuredCases(t *testing.T) map[string]structuredCase {
 			prompts.DedupData{New: "Alice lives in Paris.", Existing: "Alice moved to Paris."})},
 		"time_parse_system": {domain.ModelSlotTimeParse, "Reference date-time: 2024-03-01T10:00:00Z\nlast week"},
 		prompts.MentalModelStructuredDeltaSystem: {
-			domain.ModelSlotMentalModelDelta,
+			domain.ModelSlotMentalModel,
 			render(t, prompts.MentalModelStructuredDeltaUser, delta),
 		},
 	}
@@ -309,7 +309,7 @@ func doneArgs(t *testing.T, resp ai.ChatResponse, tools []ai.ToolSpec) map[strin
 	return out
 }
 
-// TestSmokePlainChat covers the tool-less chats: SYNTHESIZE, the markdown delta and the reflect final answer.
+// TestSmokePlainChat covers the tool-less chats: synthesize, the markdown delta and the reflect final answer.
 func TestSmokePlainChat(t *testing.T) {
 	_, client := newEmu(t)
 	facts := sampleFacts()
@@ -318,7 +318,7 @@ func TestSmokePlainChat(t *testing.T) {
 		user string
 		want []string
 	}{
-		{domain.ModelSlotSynthesize, render(t, prompts.SynthesizeUser, prompts.SynthesizeData{
+		{domain.ModelSlotMentalModel, render(t, prompts.SynthesizeUser, prompts.SynthesizeData{
 			Name: "People", SourceQuery: "Who lives where?", Facts: facts,
 		}), []string{"## Who lives where?", facts[0].Text, facts[1].Text, facts[2].Text}},
 		{domain.ModelSlotReflect, render(t, prompts.ReflectFinalUser, prompts.ReflectData{

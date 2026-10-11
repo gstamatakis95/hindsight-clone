@@ -13,23 +13,27 @@
 // timex, retain's shared pieces, recall, reflect) and runs the two modes. Each wire_<area>.go (memory, document,
 // observation, mentalmodel, bank, config, operation, maintenance) builds one area's engines and fills its part of
 // the gRPC server's dependencies (internal/server), the job handlers (handlers.go adapts the engines to
-// jobs.Handler for the internal/jobs runner) and the maintenance service (internal/maintenance). probes.go holds
-// the readiness probes and the worker's health server, workerid.go the worker id, and glue.go the small adapters
-// no engine provides yet: the operation reader and the reflect page reader. Engines never import this package;
-// nothing here holds business logic.
+// jobs.Handler for the internal/jobs runner) and the maintenance service (internal/maintenance). config.go reads
+// the environment and flags, configfile.go the server config file; probes.go holds the readiness probes and the
+// worker's health server, workerid.go the worker id, and glue.go the small adapters no engine provides yet: the
+// operation reader and the reflect page reader. Engines never import this package; nothing here holds business
+// logic.
 //
 // # Startup
 //
-//  1. LoadConfig reads every setting from the environment, then from flags after the mode (a flag wins).
-//     Validate checks the mode, the required settings, positive timings, a heartbeat below 3/4 of the
-//     reclaim threshold, and that EXTRACT and REFLECT have a model (MEMD_MODEL or MEMD_MODEL_<SLOT>), so a
-//     bad deployment fails before anything connects. A missing or unknown mode prints the usage and exits 2;
-//     a bad flag or value, extra arguments or a failed validation prints the error and exits 1.
+//  1. LoadConfig reads every setting from the environment, then from flags after the mode (a flag wins), then the
+//     server config file (configfile.go). Validate checks the mode, the required settings and the file: its
+//     defaults block (config.ServerDefaults and config.ValidateServer), that EXTRACT and REFLECT have a model
+//     (defaults.models.default or defaults.models.<slot>), positive operator settings and a heartbeat below 3/4 of
+//     the reclaim threshold, so a bad deployment fails before anything connects. A missing or unknown mode prints
+//     the usage and exits 2; a bad flag or value, an unknown key in the file, extra arguments or a failed
+//     validation prints the error and exits 1.
 //  2. Optional Datadog instrumentation starts (internal/observability); disabled, it installs nothing.
-//  3. The adapters open: Postgres (pinged within 30 s), blob storage and the gateway. The gateway's embedding model
-//     must return 768 dimensions (memory_units.embedding is vector(768)), else startup fails.
-//  4. The tokenizer (tiktoken cl100k_base, embedded) and the server-level config (config.ServerDefaults)
-//     are built, then every engine.
+//  3. The adapters open: Postgres (pinged within 30 s), blob storage and the gateway. The embedding model
+//     (defaults.models.embed, default nomic-embed-text-v1.5) must return 768 dimensions (memory_units.embedding is
+//     vector(768)), else startup fails.
+//  4. The tokenizer (tiktoken cl100k_base, embedded) and the server level of the config hierarchy are built, then
+//     every engine.
 //  5. The mode runs until SIGINT or SIGTERM. The api stops gracefully within 20 s; the worker stops claiming,
 //     lets running jobs finish within the runner's shutdown grace and releases the rest. In mode all an error
 //     in either half stops both.
@@ -40,52 +44,47 @@
 //
 // # Settings
 //
-// Every setting is an environment variable with a flag of the same name, lower case, without the MEMD_ prefix
-// and with dashes (MEMD_GRPC_ADDR = -grpc-addr). Defaults:
+// The environment holds only deployment, infrastructure and secrets. Every variable has a flag of the same name,
+// lower case, without the MEMD_ prefix and with dashes (MEMD_GRPC_ADDR = -grpc-addr). Defaults:
 //
-//	MEMD_DSN                            Postgres URL; required. A SQLAlchemy driver suffix
-//	                                    ("postgresql+psycopg://") is dropped, so the Alembic DSN works too.
-//	MEMD_GRPC_ADDR                      ":50051"   gRPC listen address (api, all)
-//	MEMD_GATEWAY_URL                    AI gateway base URL including /v1; required
-//	MEMD_GATEWAY_API_KEY                ""         bearer key sent to the gateway
-//	MEMD_EMBED_MODEL                    "nomic-embed-text-v1.5"   server-wide embedding model (768 dims)
-//	MEMD_GATEWAY_MAX_CONCURRENT         32         in-flight gateway calls in this process
-//	MEMD_GATEWAY_TIMEOUT                120s       one gateway HTTP attempt, when the binding sets none
-//	MEMD_BLOB_PROVIDER                  "s3"       blob storage for original texts; s3 is the only provider
-//	MEMD_S3_ENDPOINT                    ""         S3 API URL; empty = AWS for the region
-//	MEMD_S3_BUCKET                      bucket for original document texts; required
-//	MEMD_S3_ACCESS_KEY                  static access key; required (no AWS credential chain)
-//	MEMD_S3_SECRET_KEY                  static secret key; required
-//	MEMD_S3_REGION                      "us-east-1"   signing region
-//	MEMD_S3_PATH_STYLE                  false      path-style addressing (MinIO)
-//	MEMD_WORKER_ID                      ""         worker id prefix; empty = hostname
-//	MEMD_WORKER_SLOTS                   10         jobs a worker runs at once (2 reserved for consolidate)
-//	MEMD_POLL_INTERVAL                  500ms      worker claim period
-//	MEMD_HEARTBEAT_INTERVAL             15s        worker heartbeat period; must be below 3/4 of STALE_AFTER
-//	MEMD_STALE_AFTER                    2m         heartbeat age after which a job is reclaimed
-//	MEMD_MAINTENANCE_INTERVAL           60s        maintenance tick period
-//	MEMD_CONSOLIDATION_RECONCILE_GRACE  10m        age of an unconsolidated fact before the tick consolidates
-//	MEMD_WORKER_HEALTH_ADDR             ""         where the worker serves grpc.health.v1; empty = nowhere
-//	MEMD_RPC_DEADLINE                   120s       deadline of calls that carry none; 0 = none
-//	MEMD_DB_MAX_CONNS                   0          Postgres pool size; 0 = max(2 x worker slots + 16, 32)
-//	MEMD_LOG_LEVEL                      "info"     debug, info, warn or error
-//	MEMD_DATADOG_ENABLED                false      Datadog tracing, log correlation and runtime metrics
-//	MEMD_DATADOG_PROFILER               false      Datadog continuous profiler; only with Datadog enabled
-//
-// Read from the environment only (no flag):
-//
-//	MEMD_MODEL                          gateway model of every LLM slot (all but RERANK and EMBED)
-//	MEMD_MODEL_<SLOT>                   model of one slot (EXTRACT, TIME_PARSE, CONSOLIDATE, DEDUP_CHECK, REFLECT,
-//	                                    STRUCTURED_OUTPUT, MENTAL_MODEL_DELTA, SYNTHESIZE, RERANK); wins over
-//	                                    MEMD_MODEL. RERANK is bound only this way; without it recall skips the
-//	                                    cross-encoder. EXTRACT and REFLECT must be bound.
-//	MEMD_GATEWAY_MAX_CONCURRENT_<SLOT>  in-flight gateway calls of one slot (any slot above, or EMBED); must be
-//	                                    positive; unset = only the process-wide cap applies
+//	MEMD_DSN                  Postgres URL; required. A SQLAlchemy driver suffix ("postgresql+psycopg://") is
+//	                          dropped, so the Alembic DSN works too.
+//	MEMD_CONFIG               ""         server config file; empty = ./memd.yaml when it exists
+//	MEMD_GRPC_ADDR            ":50051"   gRPC listen address (api, all)
+//	MEMD_GATEWAY_URL          AI gateway base URL including /v1; required
+//	MEMD_GATEWAY_API_KEY      ""         bearer key sent to the gateway
+//	MEMD_BLOB_PROVIDER        "s3"       blob storage for original texts; s3 is the only provider
+//	MEMD_S3_ENDPOINT          ""         S3 API URL; empty = AWS for the region
+//	MEMD_S3_BUCKET            bucket for original document texts; required
+//	MEMD_S3_ACCESS_KEY        static access key; required (no AWS credential chain)
+//	MEMD_S3_SECRET_KEY        static secret key; required
+//	MEMD_S3_REGION            "us-east-1"   signing region
+//	MEMD_S3_PATH_STYLE        false      path-style addressing (MinIO)
+//	MEMD_WORKER_ID            ""         worker id prefix; empty = hostname
+//	MEMD_WORKER_SLOTS         10         jobs a worker runs at once (2 reserved for consolidate)
+//	MEMD_WORKER_HEALTH_ADDR   ""         where the worker serves grpc.health.v1; empty = nowhere
+//	MEMD_DB_MAX_CONNS         0          Postgres pool size; 0 = max(2 x worker slots + 16, 32)
+//	MEMD_LOG_LEVEL            "info"     debug, info, warn or error
+//	MEMD_DATADOG_ENABLED      false      Datadog tracing, log correlation and runtime metrics
+//	MEMD_DATADOG_PROFILER     false      Datadog continuous profiler; only with Datadog enabled
 //
 // With MEMD_DATADOG_ENABLED the standard Datadog variables apply, read by dd-trace-go or
 // internal/observability: DD_AGENT_HOST, DD_TRACE_AGENT_PORT or DD_TRACE_AGENT_URL, DD_SERVICE (default
 // "memd"), DD_ENV, DD_VERSION, DD_TAGS, DD_RUNTIME_METRICS_ENABLED (default on), sampling settings and so on.
 // An unreachable agent never fails startup. The usage text (memd with no mode) lists the same settings.
+//
+// # Server config file
+//
+// Models and every behaviour or operator setting live in a YAML file (memd.example.yaml documents every key;
+// unknown keys are errors):
+//
+//	defaults:    the server level of the config hierarchy, shaped like BankConfig (retain, observations, recall,
+//	             reflect, mental_models, models). models.default binds every chat step, models.<slot> one step,
+//	             models.rerank the cross-encoder (unbound = no rerank), models.embed the embedding model.
+//	gateway:     max_concurrent (32), slot_concurrency (per slot, e.g. {extract: 8}), timeout (120s)
+//	worker:      poll_interval (500ms), heartbeat_interval (15s), stale_after (2m), maintenance_interval (60s)
+//	retention:   operations (168h), events (720h)
+//	api:         rpc_deadline (120s; 0s = none)
 //
 // # Wiring details
 //
@@ -103,7 +102,8 @@
 // # Tests
 //
 // config_test.go covers settings from the environment and flags, validation (the blob provider and S3 keys
-// included), required slots, per-slot concurrency, the worker id and health server, and the embedding check;
+// included), the server config file (its sections, required slots, unknown keys and bad values, the default
+// path), the worker id and health server, and the embedding check;
 // wire_test.go runs the fully wired stack over a pgtest database and the model fakes and checks that no model call
 // happens inside a store transaction; handlers_test.go pins each job's result keys and delete_bank's
 // continuations; glue_test.go checks ListEvents' default and cap; and

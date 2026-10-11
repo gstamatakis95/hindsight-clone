@@ -144,8 +144,9 @@ type Freshness interface {
 // transaction) outside any InTx and skips tombstoned banks unless it says otherwise.
 type Maintenance interface {
 	// UnconsolidatedBanks returns every bank that is not tombstoned and has at least one live fact with an
-	// embedding, consolidated_at and consolidation_failed_at unset, created before before.
-	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]domain.BankRef, error)
+	// embedding, consolidated_at and consolidation_failed_at unset, created before before, with the created_at of
+	// its oldest such fact.
+	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBank, error)
 	// StalledBankDeletes returns every tombstoned bank with no pending or processing delete_bank operation: its
 	// delete stopped (ReclaimStale or a shutdown release failed it at the attempt cap, or it failed for good).
 	StalledBankDeletes(ctx context.Context) ([]domain.BankRef, error)

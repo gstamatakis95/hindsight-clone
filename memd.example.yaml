@@ -1,0 +1,107 @@
+# memd server config file. memd reads MEMD_CONFIG, or ./memd.yaml when MEMD_CONFIG is unset (that file may be
+# absent, but then no model is bound and memd refuses to start). Copy this file to memd.yaml and edit it.
+#
+# The environment holds only deployment, infrastructure and secrets (MEMD_DSN, MEMD_GATEWAY_URL,
+# MEMD_GATEWAY_API_KEY, MEMD_S3_*, ...; run `memd` without a mode for the list). Everything else is here.
+# Unknown keys are errors. Durations are Go durations ("500ms", "90s", "2m", "168h").
+
+# defaults is the server level of the config hierarchy: server < tenant < bank < consolidation strategy <
+# request. It has the shape of the API's BankConfig; tenants, banks and requests override any field. Every
+# value below is the built-in default unless marked "example".
+defaults:
+  # Model routing. models.default binds every chat step (extract, time_parse, consolidate, dedup_check, reflect,
+  # structured_output, mental_model) that has no binding of its own; models.<slot> binds one step. For each step
+  # the most specific level that yields a binding wins, its own or its default: a bank setting models.default
+  # swaps every chat step of that bank, a request setting models.extract changes one step for one call. A binding
+  # is used whole (unset fields mean the gateway default). rerank and embed are never filled by default.
+  models:
+    default: {model: gpt-4o-mini}                     # example: one model for every chat step
+    # extract: {model: gpt-4o-mini, temperature: 0}   # example: retain fact extraction
+    # time_parse: {model: gpt-4o-mini}                # relative dates when the rules fail
+    # consolidate: {model: gpt-4o-mini}               # observation create / update decisions
+    # dedup_check: {model: gpt-4o-mini}               # near-duplicate observation check
+    reflect: {model: gpt-4o, max_output_tokens: 4096} # example: a stronger model for the reflect loop
+    # structured_output: {model: gpt-4o}              # projecting answers into a JSON Schema
+    # mental_model: {model: gpt-4o}                   # single-shot mental-model refresh (full page and delta)
+    # rerank: {model: bge-reranker-v2-m3}             # cross-encoder; unbound = recall skips reranking
+    # embed: {model: nomic-embed-text-v1.5}           # only model is used; 768 dimensions; server file only
+    # Every binding also takes: top_p, reasoning_effort, timeout_ms, max_retries and extra (an object passed
+    # through to the OpenAI-compatible request body).
+
+  retain:
+    # mission: ""                       # steers extraction
+    extraction_mode: EXTRACTION_MODE_CONCISE  # CONCISE, VERBOSE, VERBATIM, CHUNKS or CUSTOM
+    # custom_extraction_prompt: ""      # with EXTRACTION_MODE_CUSTOM
+    # entity_labels: []                 # typed key:value labels
+    entities_allow_free_form: true
+    default_observation_scopes: {mode: MODE_COMBINED, max_combinations: 15}
+    # chunk_max_tokens: 750
+    # chunk_overlap_tokens: 0
+    entity_match_threshold: 0.6
+    # temporal_link_window_hours: 24
+    temporal_link_cap: 20
+    # semantic_link_k: 50
+    # semantic_link_min_similarity: 0.7
+    # extract_causal_links: true
+    # structured_chunk_max_tokens: 750
+
+  observations:
+    enabled: true                       # false = no consolidation at all
+    auto_consolidation: true            # consolidate after retain and catch up from the maintenance tick
+    # mission: ""                       # steers consolidation
+    dedup_threshold: 0.97
+    # max_observations_per_scope: 0     # unset = uncapped
+    # source_facts_max_tokens: 0        # unset = no cap
+    source_facts_max_tokens_per_observation: 256
+    llm_batch_size: 8
+    max_units_per_run: 100
+    reconcile_grace_seconds: 600        # how long a fact may wait before the tick consolidates its bank
+    # strategies: []                    # per-scope overrides; see ConsolidationStrategy in the API
+
+  recall:
+    budget_function: BUDGET_FUNCTION_FIXED
+    budget_low: 100
+    budget_mid: 300
+    budget_high: 1000
+    budget_min: 20
+    budget_max: 2000
+    reranker_max_candidates: 300
+    # rerank: true                      # default true with models.rerank bound, false without (true needs it)
+    rrf_k: 60
+    recency_alpha: 0.2
+    temporal_alpha: 0.2
+    proof_alpha: 0.1
+
+  reflect:
+    # mission: ""                       # steers reflect and mental-model refresh
+    disposition: {skepticism: 3, literalism: 3, empathy: 3}
+    max_iterations: 10
+    search_observations_max_tokens: 5000
+    search_observations_include_entities: true
+    max_answer_tokens: 4096
+
+  mental_models:
+    default_mode: REFRESH_MODE_FULL
+    default_strategy: REFRESH_STRATEGY_AGENTIC
+    refresh_debounce_seconds: 30
+    min_refresh_interval_seconds: 0
+    history_max_entries: 50
+
+# Operator settings that are not per bank.
+gateway:
+  max_concurrent: 32                    # in-flight gateway calls in this process
+  # slot_concurrency: {extract: 8, embed: 16}  # per-slot caps; unset slots share max_concurrent
+  timeout: 120s                         # one gateway HTTP attempt, when the binding sets no timeout_ms
+
+worker:
+  poll_interval: 500ms
+  heartbeat_interval: 15s               # must be below 3/4 of stale_after
+  stale_after: 2m                       # heartbeat age after which a job is reclaimed
+  maintenance_interval: 60s
+
+retention:
+  operations: 168h                      # finished operations
+  events: 720h                          # lifecycle events
+
+api:
+  rpc_deadline: 120s                    # calls that carry no deadline; 0s = none

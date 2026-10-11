@@ -19,7 +19,7 @@ type Recaller interface {
 }
 
 // singleShot is the REFRESH_STRATEGY_SINGLE_SHOT Synthesizer: one recall over the scope (observations
-// first), then one SYNTHESIZE call (full) or one MENTAL_MODEL_DELTA call (delta).
+// first), then one synthesize call (full) or one delta call (delta).
 type singleShot struct {
 	rc      Recaller
 	d       ModelDeps
@@ -36,7 +36,7 @@ func NewSingleShotSynthesizer(rc Recaller, d ModelDeps) Synthesizer {
 // Strategy is REFRESH_STRATEGY_SINGLE_SHOT.
 func (*singleShot) Strategy() domain.RefreshStrategy { return domain.RefreshStrategySingleShot }
 
-// Full recalls everything in scope with seq <= upTo and writes the page in one SYNTHESIZE call.
+// Full recalls everything in scope with seq <= upTo and writes the page in one synthesize call.
 func (s *singleShot) Full(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (draft, error) {
@@ -47,7 +47,7 @@ func (s *singleShot) Full(
 	if len(units) == 0 {
 		return draft{}, ErrNoNewFacts
 	}
-	binding, err := s.d.Router.Resolve(cfg, domain.ModelSlotSynthesize)
+	binding, err := s.d.Router.Resolve(cfg, domain.ModelSlotMentalModel)
 	if err != nil {
 		return draft{}, fmt.Errorf("mentalmodel: synthesize model: %w", err)
 	}
@@ -56,7 +56,7 @@ func (s *singleShot) Full(
 		return draft{}, err
 	}
 	resp, err := s.d.LLM.Chat(ctx, ai.ChatRequest{
-		Slot: domain.ModelSlotSynthesize, Binding: binding, Name: prompts.SynthesizeSystem,
+		Slot: domain.ModelSlotMentalModel, Binding: binding, Name: prompts.SynthesizeSystem,
 		Messages: []ai.ChatMessage{
 			{Role: ai.ChatRoleSystem, Content: system}, {Role: ai.ChatRoleUser, Content: user},
 		},
@@ -70,7 +70,7 @@ func (s *singleShot) Full(
 	}, nil
 }
 
-// Delta recalls what changed in scope since LastSeqSeen and integrates it with MENTAL_MODEL_DELTA.
+// Delta recalls what changed in scope since LastSeqSeen and integrates it with delta.
 func (s *singleShot) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (deltaDraft, error) {
@@ -107,13 +107,13 @@ func (s *singleShot) recall(
 	return observationsFirst(units), nil
 }
 
-// render renders the SYNTHESIZE system and user messages.
+// render renders the synthesize system and user messages.
 func (s *singleShot) render(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, units []domain.Unit,
 ) (system, user string, err error) {
 	obs, facts := promptFacts(units)
 	data := prompts.SynthesizeData{
-		Name: m.Spec.Name, SourceQuery: m.Spec.SourceQuery, Mission: cfg.ReflectMission,
+		Name: m.Spec.Name, SourceQuery: m.Spec.SourceQuery, Mission: cfg.GetReflect().Mission,
 		Observations: obs, Facts: facts, MaxTokens: maxContentTokens(m, cfg), Now: s.d.Clock.Now(),
 	}
 	if s.d.Directives != nil {

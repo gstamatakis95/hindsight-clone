@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
 	"time"
@@ -209,12 +210,49 @@ func (d *decoder) promptPreview(m *pb.PromptPreview) domain.PromptPreview {
 	}
 }
 
-// previewPromptFromProto converts a PreviewPromptRequest's operation and overrides (nil = none).
+// previewPromptFromProto converts a PreviewPromptRequest's operation and overrides (nil = none). Overrides of
+// a kind that does not match the operation are domain.ErrInvalidArgument.
 func previewPromptFromProto(r *pb.PreviewPromptRequest) (domain.PromptOperation, *domain.BankConfig, error) {
 	var d decoder
 	op := fromEnum[domain.PromptOperation](&d, r.GetOperation())
-	o := d.configPtr(r.GetOverrides())
+	var o *domain.BankConfig
+	var want domain.PromptOperation
+	switch x := r.GetOverrides().(type) {
+	case *pb.PreviewPromptRequest_Retain:
+		o, want = d.retainOverrides(x.Retain), domain.PromptOperationRetain
+	case *pb.PreviewPromptRequest_Consolidation:
+		o, want = d.consolidateOverrides(x.Consolidation), domain.PromptOperationConsolidation
+	case *pb.PreviewPromptRequest_Reflect:
+		o, want = d.reflectOverrides(x.Reflect), domain.PromptOperationReflect
+	case *pb.PreviewPromptRequest_MentalModel:
+		o, want = d.refreshOverrides(x.MentalModel), domain.PromptOperationSynthesize
+		if op == domain.PromptOperationMentalModelDelta {
+			want = op
+		}
+	default:
+		return op, nil, d.err
+	}
+	if d.err == nil && op != want {
+		return op, nil, fmt.Errorf("%w: overrides do not match operation %s", domain.ErrInvalidArgument, op)
+	}
 	return op, o, d.err
+}
+
+// previewPromptToProto sets r's overrides from a level of op's kind (nil = none).
+func previewPromptToProto(r *pb.PreviewPromptRequest, op domain.PromptOperation, o *domain.BankConfig) {
+	if o == nil {
+		return
+	}
+	switch op {
+	case domain.PromptOperationRetain:
+		r.Overrides = &pb.PreviewPromptRequest_Retain{Retain: retainOverridesToProto(o)}
+	case domain.PromptOperationConsolidation:
+		r.Overrides = &pb.PreviewPromptRequest_Consolidation{Consolidation: consolidateOverridesToProto(o)}
+	case domain.PromptOperationReflect:
+		r.Overrides = &pb.PreviewPromptRequest_Reflect{Reflect: reflectOverridesToProto(o)}
+	case domain.PromptOperationMentalModelDelta, domain.PromptOperationSynthesize:
+		r.Overrides = &pb.PreviewPromptRequest_MentalModel{MentalModel: refreshOverridesToProto(o)}
+	}
 }
 
 // ---------- templates ----------

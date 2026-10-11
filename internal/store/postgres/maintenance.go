@@ -13,15 +13,15 @@ import (
 var _ store.Maintenance = (*DB)(nil)
 
 // UnconsolidatedBanks returns, ordered by (tenant, bank), every bank that is not tombstoned and holds an
-// unconsolidated fact with an embedding created before before.
-func (s *DB) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]domain.BankRef, error) {
+// unconsolidated fact with an embedding created before before, with its oldest such fact's created_at.
+func (s *DB) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]store.UnconsolidatedBank, error) {
 	rows, err := db.New(s.pool).UnconsolidatedBanks(ctx, before)
 	if err != nil {
 		return nil, mapErr("unconsolidated banks", err)
 	}
-	out := make([]domain.BankRef, len(rows))
+	out := make([]store.UnconsolidatedBank, len(rows))
 	for i, row := range rows {
-		out[i] = domain.BankRef{Tenant: row.TenantID, Bank: row.ID}
+		out[i] = store.UnconsolidatedBank{Bank: domain.BankRef{Tenant: row.TenantID, Bank: row.ID}, Oldest: row.Oldest}
 	}
 	return out, nil
 }

@@ -21,8 +21,12 @@ type fixedBanks struct {
 	banks []domain.BankRef
 }
 
-func (f fixedBanks) UnconsolidatedBanks(context.Context, time.Time) ([]domain.BankRef, error) {
-	return f.banks, nil
+func (f fixedBanks) UnconsolidatedBanks(context.Context, time.Time) ([]store.UnconsolidatedBank, error) {
+	out := make([]store.UnconsolidatedBank, len(f.banks))
+	for i, b := range f.banks {
+		out[i] = store.UnconsolidatedBank{Bank: b} // the zero time: waiting longer than any grace
+	}
+	return out, nil
 }
 
 // banksOf returns a fixedBanks over bs.
@@ -86,7 +90,7 @@ type loggingBanks struct {
 	log *stepLog
 }
 
-func (l loggingBanks) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]domain.BankRef, error) {
+func (l loggingBanks) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]store.UnconsolidatedBank, error) {
 	l.log.add("consolidation")
 	return l.fixedBanks.UnconsolidatedBanks(ctx, before)
 }

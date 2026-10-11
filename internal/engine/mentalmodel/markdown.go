@@ -56,7 +56,7 @@ type document struct {
 	Sections []docSection
 }
 
-// prompt converts the document to the shape the MENTAL_MODEL_DELTA prompt reads.
+// prompt converts the document to the shape the delta prompt reads.
 func (d document) prompt() prompts.DeltaDocument {
 	out := prompts.DeltaDocument{Sections: make([]prompts.DeltaSection, 0, len(d.Sections))}
 	for _, s := range d.Sections {

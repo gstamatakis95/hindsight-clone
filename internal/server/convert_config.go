@@ -6,11 +6,27 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// configFromProto converts a request's BankConfig overrides; nil = nil (no overrides).
-func configFromProto(c *pb.BankConfig) (*domain.BankConfig, error) {
+// BankConfigFromProto converts a whole BankConfig level, such as the defaults block of the server config file; an
+// unknown enum value is domain.ErrInvalidArgument.
+func BankConfigFromProto(c *pb.BankConfig) (domain.BankConfig, error) {
 	var d decoder
-	out := d.configPtr(c)
+	out := d.config(c)
 	return out, d.err
+}
+
+// config converts a BankConfig; nil = the zero config.
+func (d *decoder) config(c *pb.BankConfig) domain.BankConfig {
+	if c == nil {
+		return domain.BankConfig{}
+	}
+	return domain.BankConfig{
+		Retain:       d.retainConfig(c.GetRetain()),
+		Observations: d.observationConfig(c.GetObservations()),
+		Recall:       d.recallConfig(c.GetRecall()),
+		Reflect:      d.reflectConfig(c.GetReflect()),
+		MentalModels: d.mentalModelConfig(c.GetMentalModels()),
+		Models:       modelBindingsFromProto(c.GetModels()),
+	}
 }
 
 // configPtr converts a BankConfig; nil = nil.
@@ -20,38 +36,6 @@ func (d *decoder) configPtr(c *pb.BankConfig) *domain.BankConfig {
 	}
 	v := d.config(c)
 	return &v
-}
-
-// config converts a BankConfig; nil = the zero config.
-func (d *decoder) config(c *pb.BankConfig) domain.BankConfig {
-	if c == nil {
-		return domain.BankConfig{}
-	}
-	return domain.BankConfig{
-		RetainMission:                     c.GetRetainMission(),
-		ObservationsMission:               c.GetObservationsMission(),
-		ReflectMission:                    c.GetReflectMission(),
-		Disposition:                       dispositionFromProto(c.GetDisposition()),
-		ExtractionMode:                    fromEnum[domain.ExtractionMode](d, c.GetExtractionMode()),
-		CustomExtractionPrompt:            c.GetCustomExtractionPrompt(),
-		EntityLabels:                      d.labels(c.GetEntityLabels()),
-		AutoConsolidation:                 optCopy(c.AutoConsolidation),
-		DedupThreshold:                    optCopy(c.DedupThreshold),
-		MaxObservationsPerScope:           optInt(c.MaxObservationsPerScope),
-		ConsolidationSourceFactsMaxTokens: optInt(c.ConsolidationSourceFactsMaxTokens),
-		ConsolidationStrategies:           d.strategies(c.GetConsolidationStrategies()),
-		Recall:                            d.recallConfig(c.GetRecall()),
-		Models:                            d.slotBindings(c.GetModels()),
-		Retain:                            retainTuningFromProto(c.GetRetain()),
-		Reflect:                           d.reflectConfig(c.GetReflect()),
-		MentalModels:                      d.mentalModelConfig(c.GetMentalModels()),
-		DefaultObservationScopes:          d.scopes(c.GetDefaultObservationScopes()),
-		EnableObservations:                optCopy(c.EnableObservations),
-		ConsolidationLLMBatchSize:         optInt(c.ConsolidationLlmBatchSize),
-		ConsolidationSourceTokensPerObs:   optInt(c.ConsolidationSourceFactsMaxTokensPerObservation),
-		EntitiesAllowFreeForm:             optCopy(c.EntitiesAllowFreeForm),
-		ConsolidationMaxUnitsPerRun:       optInt(c.ConsolidationMaxUnitsPerRun),
-	}
 }
 
 // configToProto converts a BankConfig pointer; nil = nil.
@@ -65,29 +49,100 @@ func configToProto(c *domain.BankConfig) *pb.BankConfig {
 // configValueToProto converts a BankConfig; the zero config is an empty (non-nil) message.
 func configValueToProto(c domain.BankConfig) *pb.BankConfig {
 	return &pb.BankConfig{
-		RetainMission:                     c.RetainMission,
-		ObservationsMission:               c.ObservationsMission,
-		ReflectMission:                    c.ReflectMission,
-		Disposition:                       dispositionToProto(c.Disposition),
-		ExtractionMode:                    toEnum[pb.ExtractionMode](c.ExtractionMode),
-		CustomExtractionPrompt:            c.CustomExtractionPrompt,
-		EntityLabels:                      labelsToProto(c.EntityLabels),
-		AutoConsolidation:                 optCopy(c.AutoConsolidation),
-		DedupThreshold:                    optCopy(c.DedupThreshold),
-		MaxObservationsPerScope:           optInt32(c.MaxObservationsPerScope),
-		ConsolidationSourceFactsMaxTokens: optInt32(c.ConsolidationSourceFactsMaxTokens),
-		ConsolidationStrategies:           strategiesToProto(c.ConsolidationStrategies),
-		Recall:                            recallConfigToProto(c.Recall),
-		Models:                            slotBindingsToProto(c.Models),
-		Retain:                            retainTuningToProto(c.Retain),
-		Reflect:                           reflectConfigToProto(c.Reflect),
-		MentalModels:                      mentalModelConfigToProto(c.MentalModels),
-		DefaultObservationScopes:          scopesToProto(c.DefaultObservationScopes),
-		EnableObservations:                optCopy(c.EnableObservations),
-		ConsolidationLlmBatchSize:         optInt32(c.ConsolidationLLMBatchSize),
-		ConsolidationSourceFactsMaxTokensPerObservation: optInt32(c.ConsolidationSourceTokensPerObs),
-		EntitiesAllowFreeForm:                           optCopy(c.EntitiesAllowFreeForm),
-		ConsolidationMaxUnitsPerRun:                     optInt32(c.ConsolidationMaxUnitsPerRun),
+		Retain:       retainConfigToProto(c.Retain),
+		Observations: observationConfigToProto(c.Observations),
+		Recall:       recallConfigToProto(c.Recall),
+		Reflect:      reflectConfigToProto(c.Reflect),
+		MentalModels: mentalModelConfigToProto(c.MentalModels),
+		Models:       modelBindingsToProto(c.Models),
+	}
+}
+
+// retainConfig converts a RetainConfig; nil = nil.
+func (d *decoder) retainConfig(t *pb.RetainConfig) *domain.RetainConfig {
+	if t == nil {
+		return nil
+	}
+	return &domain.RetainConfig{
+		Mission:                   t.GetMission(),
+		ExtractionMode:            fromEnum[domain.ExtractionMode](d, t.GetExtractionMode()),
+		CustomExtractionPrompt:    t.GetCustomExtractionPrompt(),
+		EntityLabels:              d.labels(t.GetEntityLabels()),
+		EntitiesAllowFreeForm:     optCopy(t.EntitiesAllowFreeForm),
+		DefaultObservationScopes:  d.scopes(t.GetDefaultObservationScopes()),
+		ChunkMaxTokens:            optInt(t.ChunkMaxTokens),
+		ChunkOverlapTokens:        optInt(t.ChunkOverlapTokens),
+		EntityMatchThreshold:      optCopy(t.EntityMatchThreshold),
+		TemporalLinkWindowHours:   optInt(t.TemporalLinkWindowHours),
+		SemanticLinkK:             optInt(t.SemanticLinkK),
+		SemanticLinkMinSimilarity: optCopy(t.SemanticLinkMinSimilarity),
+		ExtractCausalLinks:        optCopy(t.ExtractCausalLinks),
+		StructuredChunkMaxTokens:  optInt(t.StructuredChunkMaxTokens),
+		TemporalLinkCap:           optInt(t.TemporalLinkCap),
+	}
+}
+
+// retainConfigToProto converts a RetainConfig; nil = nil.
+func retainConfigToProto(t *domain.RetainConfig) *pb.RetainConfig {
+	if t == nil {
+		return nil
+	}
+	return &pb.RetainConfig{
+		Mission:                   t.Mission,
+		ExtractionMode:            toEnum[pb.ExtractionMode](t.ExtractionMode),
+		CustomExtractionPrompt:    t.CustomExtractionPrompt,
+		EntityLabels:              labelsToProto(t.EntityLabels),
+		EntitiesAllowFreeForm:     optCopy(t.EntitiesAllowFreeForm),
+		DefaultObservationScopes:  scopesToProto(t.DefaultObservationScopes),
+		ChunkMaxTokens:            optInt32(t.ChunkMaxTokens),
+		ChunkOverlapTokens:        optInt32(t.ChunkOverlapTokens),
+		EntityMatchThreshold:      optCopy(t.EntityMatchThreshold),
+		TemporalLinkWindowHours:   optInt32(t.TemporalLinkWindowHours),
+		SemanticLinkK:             optInt32(t.SemanticLinkK),
+		SemanticLinkMinSimilarity: optCopy(t.SemanticLinkMinSimilarity),
+		ExtractCausalLinks:        optCopy(t.ExtractCausalLinks),
+		StructuredChunkMaxTokens:  optInt32(t.StructuredChunkMaxTokens),
+		TemporalLinkCap:           optInt32(t.TemporalLinkCap),
+	}
+}
+
+// observationConfig converts an ObservationConfig; nil = nil.
+func (d *decoder) observationConfig(o *pb.ObservationConfig) *domain.ObservationConfig {
+	if o == nil {
+		return nil
+	}
+	return &domain.ObservationConfig{
+		Enabled:                            optCopy(o.Enabled),
+		AutoConsolidation:                  optCopy(o.AutoConsolidation),
+		Mission:                            o.GetMission(),
+		DedupThreshold:                     optCopy(o.DedupThreshold),
+		MaxObservationsPerScope:            optInt(o.MaxObservationsPerScope),
+		SourceFactsMaxTokens:               optInt(o.SourceFactsMaxTokens),
+		SourceFactsMaxTokensPerObservation: optInt(o.SourceFactsMaxTokensPerObservation),
+		LLMBatchSize:                       optInt(o.LlmBatchSize),
+		MaxUnitsPerRun:                     optInt(o.MaxUnitsPerRun),
+		Strategies:                         d.strategies(o.GetStrategies()),
+		ReconcileGraceSeconds:              optInt(o.ReconcileGraceSeconds),
+	}
+}
+
+// observationConfigToProto converts an ObservationConfig; nil = nil.
+func observationConfigToProto(o *domain.ObservationConfig) *pb.ObservationConfig {
+	if o == nil {
+		return nil
+	}
+	return &pb.ObservationConfig{
+		Enabled:                            optCopy(o.Enabled),
+		AutoConsolidation:                  optCopy(o.AutoConsolidation),
+		Mission:                            o.Mission,
+		DedupThreshold:                     optCopy(o.DedupThreshold),
+		MaxObservationsPerScope:            optInt32(o.MaxObservationsPerScope),
+		SourceFactsMaxTokens:               optInt32(o.SourceFactsMaxTokens),
+		SourceFactsMaxTokensPerObservation: optInt32(o.SourceFactsMaxTokensPerObservation),
+		LlmBatchSize:                       optInt32(o.LLMBatchSize),
+		MaxUnitsPerRun:                     optInt32(o.MaxUnitsPerRun),
+		Strategies:                         strategiesToProto(o.Strategies),
+		ReconcileGraceSeconds:              optInt32(o.ReconcileGraceSeconds),
 	}
 }
 
@@ -187,11 +242,12 @@ func (d *decoder) strategy(s *pb.ConsolidationStrategy) domain.ConsolidationStra
 		}
 	}
 	return domain.ConsolidationStrategy{
-		Name: s.GetName(), Scopes: pats, ObservationsMission: s.GetObservationsMission(),
+		Name: s.GetName(), Scopes: pats, Mission: s.GetMission(),
 		MaxObservationsPerScope:            optInt(s.MaxObservationsPerScope),
 		SourceFactsMaxTokens:               optInt(s.SourceFactsMaxTokens),
 		SourceFactsMaxTokensPerObservation: optInt(s.SourceFactsMaxTokensPerObservation),
-		Models:                             d.slotBindings(s.GetModels()),
+		ConsolidateModel:                   bindingPtrFromProto(s.GetConsolidateModel()),
+		DedupCheckModel:                    bindingPtrFromProto(s.GetDedupCheckModel()),
 	}
 }
 
@@ -217,11 +273,12 @@ func strategyToProto(s domain.ConsolidationStrategy) *pb.ConsolidationStrategy {
 		}
 	}
 	return &pb.ConsolidationStrategy{
-		Name: s.Name, Scopes: pats, ObservationsMission: s.ObservationsMission,
+		Name: s.Name, Scopes: pats, Mission: s.Mission,
 		MaxObservationsPerScope:            optInt32(s.MaxObservationsPerScope),
 		SourceFactsMaxTokens:               optInt32(s.SourceFactsMaxTokens),
 		SourceFactsMaxTokensPerObservation: optInt32(s.SourceFactsMaxTokensPerObservation),
-		Models:                             slotBindingsToProto(s.Models),
+		ConsolidateModel:                   bindingPtrToProto(s.ConsolidateModel),
+		DedupCheckModel:                    bindingPtrToProto(s.DedupCheckModel),
 	}
 }
 
@@ -235,42 +292,6 @@ func strategiesToProto(in []domain.ConsolidationStrategy) []*pb.ConsolidationStr
 		out[i] = strategyToProto(in[i])
 	}
 	return out
-}
-
-// retainTuningFromProto converts RetainTuning; nil = nil.
-func retainTuningFromProto(t *pb.RetainTuning) *domain.RetainTuning {
-	if t == nil {
-		return nil
-	}
-	return &domain.RetainTuning{
-		ChunkMaxTokens:            optInt(t.ChunkMaxTokens),
-		ChunkOverlapTokens:        optInt(t.ChunkOverlapTokens),
-		EntityMatchThreshold:      optCopy(t.EntityMatchThreshold),
-		TemporalLinkWindowHours:   optInt(t.TemporalLinkWindowHours),
-		SemanticLinkK:             optInt(t.SemanticLinkK),
-		SemanticLinkMinSimilarity: optCopy(t.SemanticLinkMinSimilarity),
-		ExtractCausalLinks:        optCopy(t.ExtractCausalLinks),
-		StructuredChunkMaxTokens:  optInt(t.StructuredChunkMaxTokens),
-		TemporalLinkCap:           optInt(t.TemporalLinkCap),
-	}
-}
-
-// retainTuningToProto converts RetainTuning; nil = nil.
-func retainTuningToProto(t *domain.RetainTuning) *pb.RetainTuning {
-	if t == nil {
-		return nil
-	}
-	return &pb.RetainTuning{
-		ChunkMaxTokens:            optInt32(t.ChunkMaxTokens),
-		ChunkOverlapTokens:        optInt32(t.ChunkOverlapTokens),
-		EntityMatchThreshold:      optCopy(t.EntityMatchThreshold),
-		TemporalLinkWindowHours:   optInt32(t.TemporalLinkWindowHours),
-		SemanticLinkK:             optInt32(t.SemanticLinkK),
-		SemanticLinkMinSimilarity: optCopy(t.SemanticLinkMinSimilarity),
-		ExtractCausalLinks:        optCopy(t.ExtractCausalLinks),
-		StructuredChunkMaxTokens:  optInt32(t.StructuredChunkMaxTokens),
-		TemporalLinkCap:           optInt32(t.TemporalLinkCap),
-	}
 }
 
 // recallConfig converts a RecallConfig; nil = nil.
@@ -333,6 +354,8 @@ func (d *decoder) reflectConfig(r *pb.ReflectConfig) *domain.ReflectConfig {
 		return nil
 	}
 	return &domain.ReflectConfig{
+		Mission:                           r.GetMission(),
+		Disposition:                       dispositionFromProto(r.GetDisposition()),
 		MaxIterations:                     optInt(r.MaxIterations),
 		EnabledTools:                      r.GetEnabledTools(),
 		RequireEvidence:                   optCopy(r.RequireEvidence),
@@ -351,6 +374,8 @@ func reflectConfigToProto(r *domain.ReflectConfig) *pb.ReflectConfig {
 		return nil
 	}
 	return &pb.ReflectConfig{
+		Mission:                           r.Mission,
+		Disposition:                       dispositionToProto(r.Disposition),
 		MaxIterations:                     optInt32(r.MaxIterations),
 		EnabledTools:                      r.EnabledTools,
 		RequireEvidence:                   optCopy(r.RequireEvidence),
@@ -395,20 +420,23 @@ func mentalModelConfigToProto(m *domain.MentalModelConfig) *pb.MentalModelConfig
 	}
 }
 
-// modelBinding converts a ModelBinding; nil = the zero binding.
-func modelBindingFromProto(b *pb.ModelBinding) domain.ModelBinding {
+// bindingPtrFromProto converts a ModelBinding; nil = nil (unset).
+func bindingPtrFromProto(b *pb.ModelBinding) *domain.ModelBinding {
 	if b == nil {
-		return domain.ModelBinding{}
+		return nil
 	}
-	return domain.ModelBinding{
+	return &domain.ModelBinding{
 		Model: b.GetModel(), Temperature: optCopy(b.Temperature), TopP: optCopy(b.TopP),
 		MaxOutputTokens: optInt(b.MaxOutputTokens), ReasoningEffort: b.GetReasoningEffort(),
 		TimeoutMS: optInt(b.TimeoutMs), MaxRetries: optInt(b.MaxRetries), Extra: structFromProto(b.GetExtra()),
 	}
 }
 
-// modelBindingToProto converts a ModelBinding.
-func modelBindingToProto(b domain.ModelBinding) *pb.ModelBinding {
+// bindingPtrToProto converts a ModelBinding; nil = nil.
+func bindingPtrToProto(b *domain.ModelBinding) *pb.ModelBinding {
+	if b == nil {
+		return nil
+	}
 	return &pb.ModelBinding{
 		Model: b.Model, Temperature: optCopy(b.Temperature), TopP: optCopy(b.TopP),
 		MaxOutputTokens: optInt32(b.MaxOutputTokens), ReasoningEffort: b.ReasoningEffort,
@@ -416,28 +444,40 @@ func modelBindingToProto(b domain.ModelBinding) *pb.ModelBinding {
 	}
 }
 
-// slotBindings converts repeated SlotBindings; nil stays nil.
-func (d *decoder) slotBindings(in []*pb.SlotBinding) []domain.SlotBinding {
-	if in == nil {
+// modelBindingsFromProto converts ModelBindings; nil = nil.
+func modelBindingsFromProto(m *pb.ModelBindings) *domain.ModelBindings {
+	if m == nil {
 		return nil
 	}
-	out := make([]domain.SlotBinding, len(in))
-	for i, sb := range in {
-		out[i] = domain.SlotBinding{
-			Slot: fromEnum[domain.ModelSlot](d, sb.GetSlot()), Binding: modelBindingFromProto(sb.GetBinding()),
-		}
+	return &domain.ModelBindings{
+		Default:          bindingPtrFromProto(m.GetDefault()),
+		Extract:          bindingPtrFromProto(m.GetExtract()),
+		TimeParse:        bindingPtrFromProto(m.GetTimeParse()),
+		Consolidate:      bindingPtrFromProto(m.GetConsolidate()),
+		DedupCheck:       bindingPtrFromProto(m.GetDedupCheck()),
+		Reflect:          bindingPtrFromProto(m.GetReflect()),
+		StructuredOutput: bindingPtrFromProto(m.GetStructuredOutput()),
+		MentalModel:      bindingPtrFromProto(m.GetMentalModel()),
+		Rerank:           bindingPtrFromProto(m.GetRerank()),
+		Embed:            bindingPtrFromProto(m.GetEmbed()),
 	}
-	return out
 }
 
-// slotBindingsToProto converts slot bindings; nil stays nil.
-func slotBindingsToProto(in []domain.SlotBinding) []*pb.SlotBinding {
-	if in == nil {
+// modelBindingsToProto converts ModelBindings; nil = nil.
+func modelBindingsToProto(m *domain.ModelBindings) *pb.ModelBindings {
+	if m == nil {
 		return nil
 	}
-	out := make([]*pb.SlotBinding, len(in))
-	for i := range in {
-		out[i] = &pb.SlotBinding{Slot: toEnum[pb.ModelSlot](in[i].Slot), Binding: modelBindingToProto(in[i].Binding)}
+	return &pb.ModelBindings{
+		Default:          bindingPtrToProto(m.Default),
+		Extract:          bindingPtrToProto(m.Extract),
+		TimeParse:        bindingPtrToProto(m.TimeParse),
+		Consolidate:      bindingPtrToProto(m.Consolidate),
+		DedupCheck:       bindingPtrToProto(m.DedupCheck),
+		Reflect:          bindingPtrToProto(m.Reflect),
+		StructuredOutput: bindingPtrToProto(m.StructuredOutput),
+		MentalModel:      bindingPtrToProto(m.MentalModel),
+		Rerank:           bindingPtrToProto(m.Rerank),
+		Embed:            bindingPtrToProto(m.Embed),
 	}
-	return out
 }

@@ -12,8 +12,8 @@ import (
 
 // anyListSet reports whether any of o's clearable lists or maps is non-nil (an explicit value or clear).
 func anyListSet(o domain.BankConfig) bool {
-	return o.Recall.EnabledStrategies != nil || o.Recall.StrategyBoosts != nil || o.EntityLabels != nil ||
-		o.ConsolidationStrategies != nil || o.Models != nil
+	return o.Recall.EnabledStrategies != nil || o.Recall.StrategyBoosts != nil || o.Retain != nil ||
+		o.Observations != nil || o.Models != nil
 }
 
 // TestEmptyRepeatedOverrideIsNotAClear sends a Recall override that sets only recall.rrf_k over the wire
@@ -22,7 +22,7 @@ func anyListSet(o domain.BankConfig) bool {
 func TestEmptyRepeatedOverrideIsNotAClear(t *testing.T) {
 	rrf := int32(7)
 	wire, err := proto.Marshal(&pb.RecallRequest{
-		BankId: "b", Query: "q", Overrides: &pb.BankConfig{Recall: &pb.RecallConfig{RrfK: &rrf}},
+		BankId: "b", Query: "q", Overrides: &pb.RecallOverrides{Recall: &pb.RecallConfig{RrfK: &rrf}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,10 +46,10 @@ func TestEmptyRepeatedOverrideIsNotAClear(t *testing.T) {
 		Recall: &domain.RecallConfig{
 			EnabledStrategies: []string{"semantic"}, StrategyBoosts: map[string]float64{"semantic": 2},
 		},
-		EntityLabels: []domain.EntityLabel{{Key: "k"}},
+		Retain: &domain.RetainConfig{EntityLabels: []domain.EntityLabel{{Key: "k"}}},
 	}
 	got := config.Merge(tenant, *o)
-	if len(got.Recall.EnabledStrategies) != 1 || len(got.Recall.StrategyBoosts) != 1 || len(got.EntityLabels) != 1 {
+	if len(got.Recall.EnabledStrategies) != 1 || len(got.Recall.StrategyBoosts) != 1 || len(got.Retain.EntityLabels) != 1 {
 		t.Fatalf("tenant lists cleared by the override: %+v", got)
 	}
 	if got.Recall.RRFK == nil || *got.Recall.RRFK != 7 {

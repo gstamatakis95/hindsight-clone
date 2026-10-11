@@ -55,7 +55,7 @@ func TestMaxDeltaRatioFallsBackToFull(t *testing.T) {
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	doc := splitMarkdown(m.ContentMD)
-	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{
+	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "replace_section_blocks", "section_id": doc.Sections[0].ID, "blocks_md": []string{"Rewritten."},
 	}))
 	e.scriptSynthesize("## Status\n\nAlice leads; Bob joined.")

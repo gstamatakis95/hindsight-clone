@@ -13,12 +13,15 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   - internal/ai (LLM, Embedder, Reranker; Router and Tokenizer are concrete) — internal/ai/gateway
   - internal/blob (Store, Key; contract suite in blob/blobtest) — internal/blob/s3, chosen by MEMD_BLOB_PROVIDER
   - internal/clock (Clock; System and Manual)
-- internal/config: config resolution, merge, defaults, validation. internal/prompts: templates.
+- internal/config: config resolution, merge (incl. model routing), defaults, validation, FieldMask patches.
+  internal/prompts: templates.
 - internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
   kind's payload, serial key and Enqueue helper. internal/maintenance: the 60 s tick and the graph_maintenance job.
 - internal/engine/*: business logic over the boundaries; internal/server: gRPC handlers.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
-  area builds its engines and server dependencies; handlers.go adapts the engines to job handlers.
+  area builds its engines and server dependencies; handlers.go adapts the engines to job handlers. config.go reads
+  the environment (deployment, infrastructure and secrets only), configfile.go the server config file
+  (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
 
 ## Rules
@@ -32,7 +35,9 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - McCabe complexity <= 15 and lines <= 120. Split the function; don't suppress the linter.
 - No `//nolint` without a reason comment.
 - Prompts live in internal/prompts/templates. Never inline prompt text in Go.
-- New behaviour knobs go in BankConfig and must be overridable per request unless the spec says otherwise.
+- New behaviour knobs go in BankConfig, in their phase group (retain, observations, recall, reflect, mental_models,
+  models), and in the overrides message of each RPC that may change them. Operator-only settings go in a section
+  of the server config file. Environment variables are only for deployment, infrastructure and secrets.
 - No per-memory delete API. Invalidate archives a unit; upsert and reprocess replace a document's units.
 - Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim. Report
   progress and results through jobs.Run; keep result keys stable (GetOperation shows them).

@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"errors"
-	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/store"
 	"memd/internal/store/postgres/pgtest"
@@ -56,23 +55,30 @@ func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.B
 
 func TestEffectivePrecedence(t *testing.T) {
 	server := domain.BankConfig{
-		RetainMission: "server", ReflectMission: "server", ObservationsMission: "server",
-		Models: []domain.SlotBinding{bind(domain.ModelSlotExtract, "s-ext"), bind(domain.ModelSlotRerank, "s-rr")},
+		Retain:       &domain.RetainConfig{Mission: "server"},
+		Reflect:      &domain.ReflectConfig{Mission: "server"},
+		Observations: &domain.ObservationConfig{Mission: "server"},
+		Models: bindings("", map[domain.ModelSlot]string{
+			domain.ModelSlotExtract: "s-ext", domain.ModelSlotRerank: "s-rr",
+		}),
 	}
-	tenant := domain.BankConfig{ReflectMission: "tenant", ObservationsMission: "tenant"}
+	tenant := domain.BankConfig{
+		Reflect: &domain.ReflectConfig{Mission: "tenant"}, Observations: &domain.ObservationConfig{Mission: "tenant"},
+	}
 	bank := domain.Bank{Ref: ref, Config: domain.BankConfig{
-		ObservationsMission: "bank",
-		Models:              []domain.SlotBinding{bind(domain.ModelSlotRerank, "b-rr")},
+		Observations: &domain.ObservationConfig{Mission: "bank"},
+		Models:       bindings("", map[domain.ModelSlot]string{domain.ModelSlotRerank: "b-rr"}),
 	}}
 	r := NewResolver(seedStore(t, tenant, map[string]domain.Bank{"b1": bank}), nil, server)
 
 	got, err := r.Effective(context.Background(), ref,
-		domain.BankConfig{DedupThreshold: ptr(0.5)}, domain.BankConfig{DedupThreshold: ptr(0.6)})
+		domain.BankConfig{Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.5)}},
+		domain.BankConfig{Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.6)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.RetainMission != "server" || got.ReflectMission != "tenant" || got.ObservationsMission != "bank" ||
-		*got.DedupThreshold != 0.6 || modelOf(t, got, domain.ModelSlotRerank) != "b-rr" ||
+	if got.Retain.Mission != "server" || got.Reflect.Mission != "tenant" || got.Observations.Mission != "bank" ||
+		*got.Observations.DedupThreshold != 0.6 || modelOf(t, got, domain.ModelSlotRerank) != "b-rr" ||
 		modelOf(t, got, domain.ModelSlotExtract) != "s-ext" {
 		t.Fatalf("got %+v", got)
 	}
@@ -93,18 +99,18 @@ func TestEffectiveUnknownOrDeletingBank(t *testing.T) {
 func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	strat := domain.ConsolidationStrategy{
 		Name:                    "people",
-		ObservationsMission:     "strategy",
+		Mission:                 "strategy",
 		MaxObservationsPerScope: ptr(7),
 		SourceFactsMaxTokens:    ptr(11),
-		Models:                  []domain.SlotBinding{bind(domain.ModelSlotConsolidate, "st-con")},
+		ConsolidateModel:        &domain.ModelBinding{Model: "st-con"},
 	}
 	bank := domain.Bank{Ref: ref, Config: domain.BankConfig{
-		ObservationsMission:     "bank",
-		MaxObservationsPerScope: ptr(3),
-		ConsolidationStrategies: []domain.ConsolidationStrategy{strat},
-		Models: []domain.SlotBinding{
-			bind(domain.ModelSlotConsolidate, "b-con"), bind(domain.ModelSlotDedupCheck, "b-dd"),
+		Observations: &domain.ObservationConfig{
+			Mission: "bank", MaxObservationsPerScope: ptr(3), Strategies: []domain.ConsolidationStrategy{strat},
 		},
+		Models: bindings("", map[domain.ModelSlot]string{
+			domain.ModelSlotConsolidate: "b-con", domain.ModelSlotDedupCheck: "b-dd",
+		}),
 	}}
 	var gotStrategies []domain.ConsolidationStrategy
 	match := func(s []domain.ConsolidationStrategy, _ domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
@@ -120,12 +126,13 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), m, domain.BankConfig{})
 	scope := domain.NewScopeKey(ref, []string{"people"})
 
-	got, err := r.ForScope(context.Background(), scope, &domain.BankConfig{MaxObservationsPerScope: ptr(9)})
+	got, err := r.ForScope(context.Background(), scope,
+		&domain.BankConfig{Observations: &domain.ObservationConfig{MaxObservationsPerScope: ptr(9)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ObservationsMission != "strategy" || *got.MaxObservationsPerScope != 9 ||
-		*got.ConsolidationSourceFactsMaxTokens != 11 || modelOf(t, got, domain.ModelSlotConsolidate) != "st-con" ||
+	if got.Observations.Mission != "strategy" || *got.Observations.MaxObservationsPerScope != 9 ||
+		*got.Observations.SourceFactsMaxTokens != 11 || modelOf(t, got, domain.ModelSlotConsolidate) != "st-con" ||
 		modelOf(t, got, domain.ModelSlotDedupCheck) != "b-dd" {
 		t.Fatalf("got %+v", got)
 	}
@@ -134,14 +141,15 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	}
 
 	// A request's own strategies replace the bank's list before matching.
-	reqStrat := domain.ConsolidationStrategy{Name: "req", ObservationsMission: "request strategy"}
-	got, err = r.ForScope(context.Background(), scope,
-		&domain.BankConfig{ConsolidationStrategies: []domain.ConsolidationStrategy{reqStrat}})
+	reqStrat := domain.ConsolidationStrategy{Name: "req", Mission: "request strategy"}
+	got, err = r.ForScope(context.Background(), scope, &domain.BankConfig{
+		Observations: &domain.ObservationConfig{Strategies: []domain.ConsolidationStrategy{reqStrat}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ObservationsMission != "request strategy" {
-		t.Fatalf("observations_mission = %q", got.ObservationsMission)
+	if got.Observations.Mission != "request strategy" {
+		t.Fatalf("observations.mission = %q", got.Observations.Mission)
 	}
 
 	// No match and no request: bank level only.
@@ -152,7 +160,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ObservationsMission != "bank" || modelOf(t, got, domain.ModelSlotConsolidate) != "b-con" {
+	if got.Observations.Mission != "bank" || modelOf(t, got, domain.ModelSlotConsolidate) != "b-con" {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -160,12 +168,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 // TestEffectiveConcurrentNoAliasing runs Effective concurrently under -race while mutating results, and
 // checks the server level the resolver holds is never changed.
 func TestEffectiveConcurrentNoAliasing(t *testing.T) {
-	server, err := ServerDefaults(func(k string) string {
-		if k == ai.EnvModel {
-			return "m"
-		}
-		return ""
-	})
+	server, err := ServerDefaults(domain.BankConfig{Models: bindings("m", nil)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +185,7 @@ func TestEffectiveConcurrentNoAliasing(t *testing.T) {
 			}
 			*got.Recall.BudgetLow = 1
 			*got.Reflect.MaxIterations = 1
-			got.Models[0].Binding.Model = "changed"
+			got.Models.Extract.Model = "changed"
 		})
 	}
 	wg.Wait()

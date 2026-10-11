@@ -63,7 +63,7 @@ func chunksMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeChunks, verbatim: true}
 }
 
-// customMode extracts with BankConfig.CustomExtractionPrompt as the guidelines; a blank prompt falls back to the
+// customMode extracts with retain.custom_extraction_prompt as the guidelines; a blank prompt falls back to the
 // concise template.
 func customMode() ExtractionStrategy {
 	return &strategy{mode: domain.ExtractionModeCustom, tmpl: prompts.ExtractCustom, llm: true}
@@ -85,15 +85,15 @@ func (s *strategy) Prompt(cfg domain.BankConfig, in extractInput) (extractPrompt
 		return extractPrompt{}, fmt.Errorf("%w: extraction mode %s makes no call", domain.ErrInvalidArgument, s.mode)
 	}
 	tmpl := s.tmpl
-	if s.mode == domain.ExtractionModeCustom && strings.TrimSpace(cfg.CustomExtractionPrompt) == "" {
+	if s.mode == domain.ExtractionModeCustom && strings.TrimSpace(cfg.GetRetain().CustomExtractionPrompt) == "" {
 		tmpl = prompts.ExtractConcise
 	}
 	data := prompts.ExtractData{
-		CustomPrompt:     cfg.CustomExtractionPrompt,
+		CustomPrompt:     cfg.GetRetain().CustomExtractionPrompt,
 		CausalLinks:      tuningOf(cfg).causal,
-		FreeFormEntities: boolOr(cfg.EntitiesAllowFreeForm, true),
-		Labels:           cfg.EntityLabels,
-		Mission:          cfg.RetainMission,
+		FreeFormEntities: boolOr(cfg.GetRetain().EntitiesAllowFreeForm, true),
+		Labels:           cfg.GetRetain().EntityLabels,
+		Mission:          cfg.GetRetain().Mission,
 		MentionedAt:      in.MentionedAt,
 		Context:          in.Context,
 		Metadata:         in.Metadata,

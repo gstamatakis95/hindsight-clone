@@ -161,22 +161,12 @@ func RunJob(ctx context.Context, r RefreshRunner, j store.Job) (RefreshOutcome, 
 	return out, nil
 }
 
-// decodeRefreshPayload reads a refresh_mental_model payload. Rows queued by consolidation before decision
-// 1800 carry the model under "model_id"; that key is read when "mental_model_id" is missing.
+// decodeRefreshPayload reads a refresh_mental_model payload; one without a mental_model_id is
+// domain.ErrInvalidArgument.
 func decodeRefreshPayload(raw []byte) (jobs.RefreshPayload, error) {
-	var p struct {
-		jobs.RefreshPayload
-		// LegacyModelID is the pre-1800 consolidation key.
-		LegacyModelID domain.MentalModelID `json:"model_id"`
-	}
-	if err := json.Unmarshal(raw, &p); err != nil {
+	var p jobs.RefreshPayload
+	if err := json.Unmarshal(raw, &p); err != nil || p.MentalModelID == "" {
 		return jobs.RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
 	}
-	if p.MentalModelID == "" {
-		p.MentalModelID = p.LegacyModelID
-	}
-	if p.MentalModelID == "" {
-		return jobs.RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
-	}
-	return p.RefreshPayload, nil
+	return p, nil
 }

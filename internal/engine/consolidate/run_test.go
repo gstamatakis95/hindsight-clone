@@ -106,7 +106,7 @@ func TestConsolidateSchemaInjection(t *testing.T) {
 
 // TestRunObservationCap: a full scope gets maxItems 0 and the limit note, so the model may only update.
 func TestRunObservationCap(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{MaxObservationsPerScope: ptr(1)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{MaxObservationsPerScope: ptr(1)}})
 	e.fact("f0", "Dana runs", "x")
 	e.observation("obs-run", "Dana runs", []string{"x"}, "f0")
 	e.fact("f1", "Dana swims", "x")
@@ -149,7 +149,7 @@ func TestRunDropsInvalidActions(t *testing.T) {
 // TestRunEmptyPayloadDisabledAndBadPayload: {} and an empty payload run every scope; disabled observations
 // do nothing; a malformed payload is INVALID_ARGUMENT.
 func TestRunEmptyPayloadDisabledAndBadPayload(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{EnableObservations: ptr(false)})
+	e := newEnv(t, domain.BankConfig{Observations: &domain.ObservationConfig{Enabled: ptr(false)}})
 	e.fact("f1", "Frank sings", "x")
 	j := autoJob()
 	j.Payload = nil
@@ -158,7 +158,7 @@ func TestRunEmptyPayloadDisabledAndBadPayload(t *testing.T) {
 		t.Fatalf("disabled: %+v, %v", res, err)
 	}
 	e.script(e.createEach("f1"))
-	j.Overrides = &domain.BankConfig{EnableObservations: ptr(true)}
+	j.Overrides = &domain.BankConfig{Observations: &domain.ObservationConfig{Enabled: ptr(true)}}
 	if res, err = e.consolidator().Run(t.Context(), e.jobRun(j)); err != nil || res.Processed != 1 {
 		t.Fatalf("enabled by the request: %+v, %v", res, err)
 	}
@@ -171,7 +171,9 @@ func TestRunEmptyPayloadDisabledAndBadPayload(t *testing.T) {
 // TestRunManualScopes: a manual run takes only units in its scopes, but decides each in every scope it
 // belongs to before stamping it.
 func TestRunManualScopes(t *testing.T) {
-	e := newEnv(t, domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}})
+	e := newEnv(t, domain.BankConfig{
+		Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}},
+	})
 	e.fact("f1", "Gina codes", "a", "b")
 	e.fact("f2", "Hank reads", "c")
 	j := newJob([]domain.TagSet{{Tags: []string{"A"}}}, nil)
@@ -195,7 +197,9 @@ func TestRunDocumentScopeMode(t *testing.T) {
 	e.tx(func(tx store.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{
 			ID: "d1", Bank: bank, Tags: []string{"a", "b"},
-			Overrides: &domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared}},
+			Overrides: &domain.BankConfig{
+				Retain: &domain.RetainConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeShared}},
+			},
 		})
 	})
 	e.texts["f1"] = "Ivy hikes"

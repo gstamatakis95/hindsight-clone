@@ -189,16 +189,10 @@ func (s *Server) GetBankConfig(
 	if _, err := s.lookup(ctx, req.GetBankId()); err != nil {
 		return nil, err
 	}
-	resolved := &memoryv1.BankConfig{}
-	for _, slot := range []memoryv1.ModelSlot{
-		memoryv1.ModelSlot_MODEL_SLOT_EXTRACT,
-		memoryv1.ModelSlot_MODEL_SLOT_CONSOLIDATE,
-		memoryv1.ModelSlot_MODEL_SLOT_REFLECT,
-	} {
-		resolved.Models = append(resolved.Models, &memoryv1.SlotBinding{
-			Slot: slot, Binding: &memoryv1.ModelBinding{Model: stubModel},
-		})
-	}
+	stub := func() *memoryv1.ModelBinding { return &memoryv1.ModelBinding{Model: stubModel} }
+	resolved := &memoryv1.BankConfig{Models: &memoryv1.ModelBindings{
+		Extract: stub(), Consolidate: stub(), Reflect: stub(),
+	}}
 	return &memoryv1.GetBankConfigResponse{Resolved: resolved}, nil
 }
 
