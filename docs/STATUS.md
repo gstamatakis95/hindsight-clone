@@ -292,3 +292,4 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-11 WP-14a (emulated gateway + e2e harness) merged as a28bc05; gates pass. No separate review: test
   infrastructure that WP-14b exercises end to end and the final review covers. memd env contract in decision 1411.
 - 2026-10-11 WP-16 (engine follow-ups + Reprocessor) merged as 988a886; gates pass. A focused review runs in parallel with WP-14b.
+- 2026-10-11 WP-14b (integration) started; a focused WP-16 review runs in parallel (2 agents, no helpers).
