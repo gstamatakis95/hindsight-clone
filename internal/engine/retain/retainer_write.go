@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/jobs"
+	"memd/internal/linking"
 	"memd/internal/store"
 	"slices"
 	"time"
@@ -158,7 +159,7 @@ func (r *retainer) writeUnits(ctx context.Context, tx store.Tx, rn *run, pb *pre
 		if err != nil {
 			return fmt.Errorf("retain: labels: %w", err)
 		}
-		entityIDs, err := r.d.Entities.Resolve(ctx, tx, b, ResolveInput{
+		entityIDs, err := r.d.Entities.Resolve(ctx, tx, b, linking.ResolveInput{
 			Mentions: pf.fact.Entities, Hints: hints(rn.p), Literal: !boolOr(rn.p.ResolveEntities, true),
 			At: factTime(pf.fact, rn.mentioned), Threshold: rn.t.matchThreshold,
 		})
@@ -178,7 +179,7 @@ func (r *retainer) writeUnits(ctx context.Context, tx store.Tx, rn *run, pb *pre
 			}
 		}
 	}
-	causes := CauseMap{}
+	causes := linking.CauseMap{}
 	for i, pf := range pb.facts {
 		for _, c := range pf.causes {
 			causes[units[i].ID] = append(causes[units[i].ID], units[c].ID)

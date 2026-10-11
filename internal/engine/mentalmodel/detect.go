@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
+	"memd/internal/recall"
 	"memd/internal/store"
 	"slices"
 )
@@ -20,14 +20,15 @@ type ChangeDetector interface {
 type changeDetector struct {
 	r     store.Reader
 	scope ScopeReader
+	tags  TagCompiler
 }
 
 var _ ChangeDetector = (*changeDetector)(nil)
 
 // NewChangeDetector returns the ChangeDetector. r reads BankSeq and the cited sources; s (store.Reader) finds the
-// newest in-scope unit and resolves fuzzy scope tags.
-func NewChangeDetector(r store.Reader, s ScopeReader) ChangeDetector {
-	return &changeDetector{r: r, scope: s}
+// newest in-scope unit; tags (recall.Engine) resolves fuzzy scope tags.
+func NewChangeDetector(r store.Reader, s ScopeReader, tags TagCompiler) ChangeDetector {
+	return &changeDetector{r: r, scope: s, tags: tags}
 }
 
 // NeedsRefresh reads BankSeq first, then looks for in-scope units in (LastSeqSeen, upTo] and for cited
@@ -37,7 +38,7 @@ func (d *changeDetector) NeedsRefresh(ctx context.Context, m domain.MentalModel)
 	if err != nil {
 		return false, 0, fmt.Errorf("mentalmodel: bank seq: %w", err)
 	}
-	q, err := scopeQuery(ctx, d.scope, m, store.SeqUpTo(m.LastSeqSeen, upTo), true,
+	q, err := scopeQuery(ctx, d.tags, m, domain.SeqUpTo(m.LastSeqSeen, upTo), true,
 		recall.FuzzyTagMinSimilarity(domain.BankConfig{}))
 	if err != nil {
 		return false, 0, err

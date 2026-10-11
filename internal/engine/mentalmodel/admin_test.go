@@ -3,7 +3,6 @@ package mentalmodel
 import (
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/store"
 	"testing"
 )
 
@@ -132,37 +131,6 @@ func TestFoldersListAndDelete(t *testing.T) {
 	}
 	if err := adm.DeleteMentalModel(e.ctx, e.bank, "c"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("second delete: %v", err)
-	}
-}
-
-// TestSearchPages checks ranking, the folder filter and snippets.
-func TestSearchPages(t *testing.T) {
-	e := newEnv(t)
-	add := func(id, folder, name, content string) {
-		vec, _ := e.emb.EmbedQuery(e.ctx, name+"\n\n"+content)
-		e.addModel(domain.MentalModelSpec{ID: domain.MentalModelID(id), Name: name, FolderPath: folder})
-		m := e.model(domain.MentalModelID(id))
-		m.ContentMD, m.Embedding = content, vec
-		e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
-	}
-	add("deploy", "ops", "Deploy process", "# Deploy\n\nWe deploy with Argo every Tuesday.")
-	add("hiring", "people", "Hiring", "# Hiring\n\nInterviews take two rounds.")
-	add("oncall", "ops", "On-call", "# On-call\n\nThe on-call rotation is weekly.")
-	ps := NewPageSearcher(e.reads, e.emb)
-	hits, err := ps.Search(e.ctx, SearchPagesRequest{Bank: e.bank, Query: "how do we deploy?"})
-	if err != nil || len(hits) == 0 || hits[0].MentalModelID != "deploy" ||
-		hits[0].Snippet != "We deploy with Argo every Tuesday." {
-		t.Fatalf("hits %+v %v", hits, err)
-	}
-	hits, _ = ps.Search(e.ctx, SearchPagesRequest{Bank: e.bank, Query: "interviews", FolderPrefix: "ops"})
-	for _, h := range hits {
-		if h.FolderPath != "ops" {
-			t.Fatalf("folder filter leaked %+v", h)
-		}
-	}
-	if _, err := ps.Search(e.ctx, SearchPagesRequest{Bank: e.bank, Query: " ? "}); !errors.Is(err,
-		domain.ErrInvalidArgument) {
-		t.Fatalf("empty query: %v", err)
 	}
 }
 

@@ -52,7 +52,7 @@
 //
 // # Recall arms
 //
-// The four arms build their SQL at run time, because the tag filter is a variable tree (store.SQLPredicate) that sqlc
+// The four arms build their SQL at run time, because the tag filter is a variable tree (domain.TagPredicate) that sqlc
 // can't express; every value is a bind parameter with an explicit cast and only fixed SQL text is concatenated. Each
 // arm filters by bank, fact types, tag predicate and seq range, reads only memory_units (live units; archived ones live
 // in memory_units_archive) and breaks score ties by id.
@@ -64,8 +64,9 @@
 //     query syntax. Score is paradedb.score(id).
 //   - SearchTemporal: units whose span overlaps the half-open window, scored by proximity to the window's centre,
 //     optionally spread round-robin over Buckets sub-windows and filtered by embedding similarity.
-//   - ExpandGraph: a recursive CTE over the bank's forward links, at most 2 hops, scored by the best product of link
-//     weights; seeds are never hits.
+//   - Graph().Expand (graph.Reader, also Tx.Graph): a recursive CTE over the bank's forward links in memory_links,
+//     at most 2 hops, scored by the best product of link weights; seeds are never hits; Types, Tags and Seq apply
+//     in SQL before the limit.
 //
 // # Job queue
 //

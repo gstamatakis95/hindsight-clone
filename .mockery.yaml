@@ -21,9 +21,6 @@ packages:
   memd/internal/blob:
     interfaces:
       Store: {}
-  memd/internal/config:
-    interfaces:
-      Resolver: {}
   memd/internal/engine/bank:
     interfaces:
       BankDeleter: {}
@@ -33,7 +30,7 @@ packages:
   memd/internal/engine/consolidate:
     interfaces:
       Consolidator: {}
-      StrategyMatcher: {}
+      StrategyPreviewer: {}
   memd/internal/engine/curate:
     interfaces:
       Curator: {}
@@ -44,16 +41,7 @@ packages:
       Retagger: {}
   memd/internal/engine/mentalmodel:
     interfaces:
-      PageSearcher: {}
       RefreshRunner: {}
-  memd/internal/engine/recall:
-    interfaces:
-      Recaller: {}
-  memd/internal/engine/reflect:
-    interfaces:
-      PageReader: {}
-      Recaller: {}
-      Reflector: {}
   memd/internal/engine/retain:
     interfaces:
       Ingestor: {}

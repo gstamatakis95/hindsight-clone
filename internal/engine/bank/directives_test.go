@@ -23,40 +23,6 @@ func seedDirectives(t *testing.T, e env, b domain.BankRef) {
 	}
 }
 
-func TestDirectiveSelect(t *testing.T) {
-	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
-	seedDirectives(t, e, b)
-	sel := NewDirectiveSelector(e.store)
-	cases := []struct {
-		name string
-		tags []string
-		all  bool
-		want []string
-	}{
-		{"no tags: global only", nil, false, []string{"global"}},
-		{"matching tag", []string{"TEAM"}, false, []string{"global", "team"}},
-		{"one of several", []string{"emea", "x"}, false, []string{"global", "sales"}},
-		{"no overlap", []string{"x"}, false, []string{"global"}},
-		{"all active", nil, true, []string{"global", "sales", "team"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := sel.Select(e.ctx, b, tc.tags, tc.all)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !slices.Equal(names(got), tc.want) {
-				t.Errorf("Select(%v, %v) = %v, want %v", tc.tags, tc.all, names(got), tc.want)
-			}
-		})
-	}
-	if _, err := sel.Select(e.ctx, domain.BankRef{Tenant: "t", Bank: "nope"}, nil, false); !errors.Is(err,
-		domain.ErrNotFound) {
-		t.Errorf("unknown bank: %v", err)
-	}
-}
-
 func TestDirectiveAdmin(t *testing.T) {
 	e := newEnv(t)
 	b := domain.BankRef{Tenant: "t", Bank: "new"}

@@ -7,42 +7,23 @@ import (
 	"memd/internal/store"
 )
 
-// StrategyMatcher is the part of consolidate.StrategyMatcher the resolver uses (consumer-declared, so
-// config does not import the consolidate engine).
-type StrategyMatcher interface {
-	// Match returns the first strategy with a pattern matching s, and whether there is one.
-	Match(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool)
+// Resolver merges server < tenant < bank < strategy < request into the effective config. It reads the tenant and
+// bank levels in one short read-only transaction, so callers must not call it inside an open DB.InTx.
+type Resolver struct {
+	store  store.DB
+	server domain.BankConfig
 }
 
-// Resolver merges server < tenant < bank < strategy < request into the effective config.
-type Resolver interface {
-	// Effective merges server, tenant and bank config, then each override in order.
-	Effective(ctx context.Context, b domain.BankRef, overrides ...domain.BankConfig) (domain.BankConfig, error)
-	// ForScope also slots the scope's matching consolidation strategy in below the request level.
-	ForScope(ctx context.Context, s domain.ScopeKey, request *domain.BankConfig) (domain.BankConfig, error)
-}
-
-// resolver is the Resolver over the bank repository.
-type resolver struct {
-	store   store.DB
-	matcher StrategyMatcher
-	server  domain.BankConfig
-}
-
-var _ Resolver = (*resolver)(nil)
-
-// NewResolver returns the Resolver. It reads the tenant and bank levels in one short read-only
-// transaction (store.Reader has no config reads, so it takes the DB) and merges them
-// over server, the ServerDefaults level. m may be nil, which disables strategies in ForScope.
-// Callers must not call it inside an open DB.InTx.
-func NewResolver(s store.DB, m StrategyMatcher, server domain.BankConfig) Resolver {
-	return &resolver{store: s, matcher: m, server: Merge(server)}
+// NewResolver returns the Resolver over s (store.Reader has no config reads, so it takes the DB), merging the
+// tenant and bank levels over server, the ServerDefaults level.
+func NewResolver(s store.DB, server domain.BankConfig) *Resolver {
+	return &Resolver{store: s, server: Merge(server)}
 }
 
 // Effective merges server < tenant < bank, then each override in order. An unknown bank and a
 // tombstoned one are domain.ErrNotFound (the read rule); write paths Ensure the bank first, which
 // creates it or reports domain.ErrBankDeleting.
-func (r *resolver) Effective(
+func (r *Resolver) Effective(
 	ctx context.Context, b domain.BankRef, overrides ...domain.BankConfig,
 ) (domain.BankConfig, error) {
 	levels, err := r.levels(ctx, b)
@@ -53,9 +34,9 @@ func (r *resolver) Effective(
 }
 
 // ForScope merges server < tenant < bank < strategy < request, where strategy is the first consolidation
-// strategy matching s. The strategy list itself is the merged one, request included, so a Consolidate
+// strategy matching s (MatchStrategy). The strategy list itself is the merged one, request included, so a Consolidate
 // call can bring its own strategies.
-func (r *resolver) ForScope(
+func (r *Resolver) ForScope(
 	ctx context.Context, s domain.ScopeKey, request *domain.BankConfig,
 ) (domain.BankConfig, error) {
 	levels, err := r.levels(ctx, s.BankRef)
@@ -66,20 +47,18 @@ func (r *resolver) ForScope(
 	if request != nil {
 		req = append(req, *request)
 	}
-	if r.matcher != nil {
-		var strategies []domain.ConsolidationStrategy
-		if o := Merge(append(levels, req...)...).Observations; o != nil {
-			strategies = o.Strategies
-		}
-		if st, ok := r.matcher.Match(strategies, s); ok && st != nil {
-			levels = append(levels, StrategyLevel(*st))
-		}
+	var strategies []domain.ConsolidationStrategy
+	if o := Merge(append(levels, req...)...).Observations; o != nil {
+		strategies = o.Strategies
+	}
+	if st, ok := MatchStrategy(strategies, s); ok {
+		levels = append(levels, StrategyLevel(*st))
 	}
 	return Merge(append(levels, req...)...), nil
 }
 
 // levels reads the tenant and bank levels and returns server, tenant, bank.
-func (r *resolver) levels(ctx context.Context, b domain.BankRef) ([]domain.BankConfig, error) {
+func (r *Resolver) levels(ctx context.Context, b domain.BankRef) ([]domain.BankConfig, error) {
 	var tenant, bank domain.BankConfig
 	err := r.store.InTx(ctx, func(tx store.Tx) error {
 		var err error

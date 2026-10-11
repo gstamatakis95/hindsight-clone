@@ -9,13 +9,12 @@
 // (depguard). It declares what it consumes, such as [ScopeLister] (store.Reader), reports progress through the
 // jobs.Run it runs under, and enqueues its continuation and the refreshes it triggers through the jobs catalogue,
 // so it does not import mentalmodel. cmd/memd/wire.go builds the [Consolidator] for the consolidate job handler,
-// the [ScopeExpander] for retain, the [StrategyMatcher] for config.NewResolver and the server's strategy preview,
-// and the [Invalidator] for curate's ClearObservations.
+// the [StrategyPreviewer] for the strategy preview RPC and the [Invalidator] for curate's ClearObservations.
 //
 // # Scopes
 //
 // A fact consolidates in every observation scope it belongs to; a scope is a tag set
-// (domain.ScopeKey). [ScopeExpander.Expand] fans a unit's tags out by mode (unspecified = combined):
+// (domain.ScopeKey). domain.ExpandScopes fans a unit's tags out by mode (unspecified = combined):
 // combined (one scope, the full tag set), shared (the shared, untagged scope), per_tag (one per tag),
 // all_combinations (every non-empty subset, at most max_combinations, default 15, else
 // domain.ErrTooManyScopes, which retain reports synchronously) and custom (explicit tag sets). Untagged
@@ -83,9 +82,9 @@
 //
 // # Other types
 //
-//   - [StrategyMatcher.Match] returns the first consolidation strategy whose pattern matches a scope; the
+//   - config.MatchStrategy returns the first consolidation strategy whose pattern matches a scope; the
 //     winner applies whole. A pattern with unset mode is all_strict (the shared scope never matches); a
-//     pattern with no tags matches only under exact. [StrategyMatcher.Preview] evaluates draft strategies
+//     pattern with no tags matches only under exact. [StrategyPreviewer.Preview] evaluates draft strategies
 //     against the bank's existing scopes (the first 1000) without saving.
 //   - [Invalidator] clears derived observations in the caller's transaction, taking tx.Seq first.
 //     ClearScopes (every scope when the list is empty) is what ObservationService.ClearObservations uses.

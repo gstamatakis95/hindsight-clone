@@ -5,7 +5,7 @@ import (
 	"memd/internal/domain"
 )
 
-// ScopeLister lists a bank's observation scopes, for StrategyMatcher.Preview. It is the store.Reader method;
+// ScopeLister lists a bank's observation scopes, for StrategyPreviewer.Preview. It is the store.Reader method;
 // store.Reader satisfies it.
 type ScopeLister interface {
 	// ListScopes returns up to limit of b's observation scopes ordered by ScopeKey.String(), starting strictly

@@ -9,8 +9,8 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
-	"memd/internal/engine/retain"
 	"memd/internal/jobs"
+	"memd/internal/linking"
 	"memd/internal/store"
 	"time"
 )
@@ -74,6 +74,13 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
+// Linker adds the links units lack, inside the caller's transaction; linking.Linker satisfies it.
+type Linker interface {
+	// Link tops up the temporal and semantic links of units (and adds causes' causal links) within the per-unit
+	// caps.
+	Link(ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes linking.CauseMap) error
+}
+
 // Deps are the Service's dependencies. Claimer and Store are required by Run, Store and Linker by
 // RunGraphJob; every other dependency is optional and a nil one skips its tick step.
 type Deps struct {
@@ -86,7 +93,7 @@ type Deps struct {
 	// Resolver resolves each consolidation candidate's effective config: its reconcile grace, and banks with
 	// observations.auto_consolidation or observations.enabled false are skipped. nil = no filtering and the
 	// default grace.
-	Resolver config.Resolver
+	Resolver *config.Resolver
 	// Consolidation lists banks for the consolidation reconcile (UnconsolidatedBanks).
 	Consolidation store.Maintenance
 	// Deletes lists tombstoned banks whose delete_bank stopped (StalledBankDeletes).
@@ -101,8 +108,8 @@ type Deps struct {
 	CronRefresh mentalmodel.Triggers
 	// RefreshFailures pauses models whose latest refresh failed.
 	RefreshFailures mentalmodel.RefreshFailureReconciler
-	// Linker tops up the links of graph_dirty units in the graph job.
-	Linker retain.Linker
+	// Linker tops up the links of graph_dirty units in the graph job (linking.Linker).
+	Linker Linker
 	// Config holds the operator settings.
 	Config Config
 	// Logger receives maintenance logs; nil = slog.Default().
@@ -268,12 +275,14 @@ func (s *Service) reconcileConsolidation(ctx context.Context) (int, error) {
 // and observations.enabled are both unset or true, and its oldest waiting fact is older than its
 // observations.reconcile_grace_seconds (unset = DefaultConsolidationGrace). A nil resolver applies the default
 // grace to every bank.
-func autoConsolidates(ctx context.Context, r config.Resolver, b store.UnconsolidatedBank, now time.Time) (bool, error) {
+func autoConsolidates(
+	ctx context.Context, r *config.Resolver, b store.UnconsolidatedBank, now time.Time,
+) (bool, error) {
 	grace := DefaultConsolidationGrace
 	if r != nil {
 		cfg, err := r.Effective(ctx, b.Bank)
 		if err != nil {
-			return false, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
+			return false, fmt.Errorf("effective config: %w", err)
 		}
 		obs := cfg.GetObservations()
 		on := func(p *bool) bool { return p == nil || *p }

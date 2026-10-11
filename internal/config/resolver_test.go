@@ -14,14 +14,6 @@ import (
 
 var ref = domain.BankRef{Tenant: "t1", Bank: "b1"}
 
-// matchFunc is a StrategyMatcher backed by a function.
-type matchFunc func([]domain.ConsolidationStrategy, domain.ScopeKey) (*domain.ConsolidationStrategy, bool)
-
-// Match calls f.
-func (f matchFunc) Match(s []domain.ConsolidationStrategy, k domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
-	return f(s, k)
-}
-
 // seedStore returns a store over a new database holding tenant t1's config and banks (with their configs,
 // tombstoned when DeletingAt is set).
 func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank) store.DB {
@@ -69,7 +61,7 @@ func TestEffectivePrecedence(t *testing.T) {
 		Observations: &domain.ObservationConfig{Mission: "bank"},
 		Models:       bindings("", map[domain.ModelSlot]string{domain.ModelSlotRerank: "b-rr"}),
 	}}
-	r := NewResolver(seedStore(t, tenant, map[string]domain.Bank{"b1": bank}), nil, server)
+	r := NewResolver(seedStore(t, tenant, map[string]domain.Bank{"b1": bank}), server)
 
 	got, err := r.Effective(context.Background(), ref,
 		domain.BankConfig{Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.5)}},
@@ -87,7 +79,7 @@ func TestEffectivePrecedence(t *testing.T) {
 func TestEffectiveUnknownOrDeletingBank(t *testing.T) {
 	now := time.Unix(0, 0)
 	banks := map[string]domain.Bank{"gone": {Ref: domain.BankRef{Tenant: "t1", Bank: "gone"}, DeletingAt: &now}}
-	r := NewResolver(seedStore(t, domain.BankConfig{}, banks), nil, domain.BankConfig{})
+	r := NewResolver(seedStore(t, domain.BankConfig{}, banks), domain.BankConfig{})
 	for _, b := range []string{"missing", "gone"} {
 		_, err := r.Effective(context.Background(), domain.BankRef{Tenant: "t1", Bank: b})
 		if !errors.Is(err, domain.ErrNotFound) {
@@ -99,6 +91,7 @@ func TestEffectiveUnknownOrDeletingBank(t *testing.T) {
 func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	strat := domain.ConsolidationStrategy{
 		Name:                    "people",
+		Scopes:                  []domain.ScopePattern{{Tags: []string{"people"}}},
 		Mission:                 "strategy",
 		MaxObservationsPerScope: ptr(7),
 		SourceFactsMaxTokens:    ptr(11),
@@ -112,18 +105,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 			domain.ModelSlotConsolidate: "b-con", domain.ModelSlotDedupCheck: "b-dd",
 		}),
 	}}
-	var gotStrategies []domain.ConsolidationStrategy
-	match := func(s []domain.ConsolidationStrategy, _ domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
-		gotStrategies = s
-		if len(s) == 0 {
-			return nil, false
-		}
-		return &s[0], true
-	}
-	m := matchFunc(func(s []domain.ConsolidationStrategy, k domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
-		return match(s, k)
-	})
-	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), m, domain.BankConfig{})
+	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), domain.BankConfig{})
 	scope := domain.NewScopeKey(ref, []string{"people"})
 
 	got, err := r.ForScope(context.Background(), scope,
@@ -136,12 +118,10 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 		modelOf(t, got, domain.ModelSlotDedupCheck) != "b-dd" {
 		t.Fatalf("got %+v", got)
 	}
-	if len(gotStrategies) != 1 || gotStrategies[0].Name != "people" {
-		t.Fatalf("matcher saw %+v", gotStrategies)
-	}
-
 	// A request's own strategies replace the bank's list before matching.
-	reqStrat := domain.ConsolidationStrategy{Name: "req", Mission: "request strategy"}
+	reqStrat := domain.ConsolidationStrategy{
+		Name: "req", Scopes: []domain.ScopePattern{{Tags: []string{"people"}}}, Mission: "request strategy",
+	}
 	got, err = r.ForScope(context.Background(), scope, &domain.BankConfig{
 		Observations: &domain.ObservationConfig{Strategies: []domain.ConsolidationStrategy{reqStrat}},
 	})
@@ -153,10 +133,7 @@ func TestForScopeStrategyBetweenBankAndRequest(t *testing.T) {
 	}
 
 	// No match and no request: bank level only.
-	match = func([]domain.ConsolidationStrategy, domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
-		return nil, false
-	}
-	got, err = r.ForScope(context.Background(), scope, nil)
+	got, err = r.ForScope(context.Background(), domain.NewScopeKey(ref, []string{"other"}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +151,7 @@ func TestEffectiveConcurrentNoAliasing(t *testing.T) {
 	}
 	snap := Merge(server)
 	bank := domain.Bank{Ref: ref, Config: domain.BankConfig{Recall: &domain.RecallConfig{RRFK: ptr(5)}}}
-	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), nil, server)
+	r := NewResolver(seedStore(t, domain.BankConfig{}, map[string]domain.Bank{"b1": bank}), server)
 	var wg sync.WaitGroup
 	for range 16 {
 		wg.Go(func() {

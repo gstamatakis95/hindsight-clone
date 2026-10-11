@@ -2,17 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/mentalmodel"
-	"memd/internal/engine/reflect"
 	"memd/internal/grpcapi"
 	"memd/internal/store"
 )
 
 // Small adapters the composition root needs where no engine provides the interface: they only translate
-// between the store and the gRPC handlers' or reflect's interfaces, with no business logic.
+// between the store and the gRPC handlers' interfaces, with no business logic.
 
 // operationReader serves GetOperation, ListOperations and ListEvents over store.Queue and store.EventRepo,
 // each in one short read-only transaction. An unknown or tombstoned bank is domain.ErrNotFound (SPEC: once a
@@ -87,49 +84,4 @@ func (o *operationReader) ListEvents(
 		return err
 	})
 	return events, last, err
-}
-
-// pageReader is the reflect page tools' view of mental models: search through the PageSearcher, reads of
-// whole pages through the MentalModelRepo.
-type pageReader struct {
-	search mentalmodel.PageSearcher
-	s      store.DB
-}
-
-var _ reflect.PageReader = (*pageReader)(nil)
-
-// SearchPages ranks b's pages for query.
-func (p *pageReader) SearchPages(
-	ctx context.Context, b domain.BankRef, query string, limit int,
-) ([]domain.PageHit, error) {
-	hits, err := p.search.Search(ctx, mentalmodel.SearchPagesRequest{Bank: b, Query: query, Limit: limit})
-	if err != nil {
-		return nil, fmt.Errorf("search pages: %w", err)
-	}
-	return hits, nil
-}
-
-// ReadPages returns the pages with ids in order, skipping unknown ones.
-func (p *pageReader) ReadPages(
-	ctx context.Context, b domain.BankRef, ids []domain.MentalModelID,
-) ([]domain.MentalModel, error) {
-	var out []domain.MentalModel
-	err := p.s.InTx(ctx, func(tx store.Tx) error {
-		out = out[:0]
-		for _, id := range ids {
-			m, err := tx.MentalModels().Get(ctx, b, id)
-			if errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			out = append(out, m)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("read pages: %w", err)
-	}
-	return out, nil
 }

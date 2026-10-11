@@ -99,7 +99,7 @@ func reply(creates []create, updates []update) string {
 
 // env is a consolidation test environment over a store on its own database and the fakes (LLM, Embedder,
 // Clock) with the real
-// config resolver, router and StrategyMatcher.
+// config resolver and router.
 type env struct {
 	hook   reporter // receives the run's progress reports; nil = an inline run
 	t      *testing.T
@@ -136,7 +136,7 @@ func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 	})
 	e.deps = ConsolidatorDeps{
 		Store:    e.store,
-		Config:   config.NewResolver(e.store, NewStrategyMatcher(nil), server),
+		Config:   config.NewResolver(e.store, server),
 		Router:   ai.NewRouter(),
 		LLM:      e.llm,
 		Embedder: e.emb,

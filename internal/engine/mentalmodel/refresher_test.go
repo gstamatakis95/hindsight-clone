@@ -162,7 +162,7 @@ func TestLateCommittingWriterPickedUpByNextRefresh(t *testing.T) {
 	if m.LastSeqSeen != first.Seq || slices.Contains(m.SourceIDs, late.ID) {
 		t.Fatalf("watermark %d, sources %v", m.LastSeqSeen, m.SourceIDs)
 	}
-	stale, _, err := NewChangeDetector(e.store.Read(), e.reads).NeedsRefresh(e.ctx, m)
+	stale, _, err := NewChangeDetector(e.store.Read(), e.reads, e.tags).NeedsRefresh(e.ctx, m)
 	if err != nil || !stale {
 		t.Fatalf("model not stale after a late writer: %v %v", stale, err)
 	}

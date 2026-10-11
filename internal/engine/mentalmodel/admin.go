@@ -121,7 +121,7 @@ type AdminDeps struct {
 	// Clock dates enqueues.
 	Clock clock.Clock
 	// Config reads history_max_entries for Clear; nil = the default (50).
-	Config config.Resolver
+	Config *config.Resolver
 }
 
 // admin is the Admin implementation.

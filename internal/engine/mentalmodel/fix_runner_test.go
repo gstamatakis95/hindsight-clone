@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/engine/reflect"
+	"memd/internal/reflect"
 	"memd/internal/store"
 	"strings"
 	"testing"
@@ -29,7 +29,7 @@ func fuzzySpec() domain.MentalModelSpec {
 func TestFuzzyScopeResolvesBankTags(t *testing.T) {
 	e := newEnv(t)
 	m := e.addModel(fuzzySpec())
-	detector := NewChangeDetector(e.store.Read(), e.reads)
+	detector := NewChangeDetector(e.store.Read(), e.reads, e.tags)
 	e.addUnit(domain.FactTypeWorld, "untagged note")
 	if stale, _, err := detector.NeedsRefresh(e.ctx, m); err != nil || stale {
 		t.Fatalf("untagged unit staled a tag-grouped model: %v %v", stale, err)
@@ -68,8 +68,8 @@ func TestAgenticRefreshSetsContext(t *testing.T) {
 		t.Fatalf("%d reflect calls, want 2", len(e.rf.reqs))
 	}
 	m := e.model("status")
-	full, _ := refreshContext(m, store.SeqUpTo(0, 1))
-	delta, _ := refreshContext(m, store.SeqUpTo(1, 2))
+	full, _ := refreshContext(m, domain.SeqUpTo(0, 1))
+	delta, _ := refreshContext(m, domain.SeqUpTo(1, 2))
 	if got := e.rf.reqs[0].Context; got == "" || got != full {
 		t.Errorf("first build context = %q, want the full context %q", got, full)
 	}
@@ -165,8 +165,8 @@ func assertReparked(t *testing.T, e *env, end time.Time) {
 type citelessReflector struct{}
 
 // Reflect implements Reflector.
-func (citelessReflector) Reflect(context.Context, reflect.ReflectRequest) (reflect.ReflectResult, error) {
-	return reflect.ReflectResult{Text: "## Status\n\nSomething uncited."}, nil
+func (citelessReflector) Reflect(context.Context, reflect.Request) (reflect.Result, error) {
+	return reflect.Result{Text: "## Status\n\nSomething uncited."}, nil
 }
 
 // TestAgenticAnswerWithoutCitationsFails checks that an agentic full answer citing nothing fails the run
@@ -197,11 +197,11 @@ func TestAgenticAnswerWithoutCitationsFails(t *testing.T) {
 // and full versus delta advice by the window's lower bound.
 func TestRefreshContextRendersNameAndMode(t *testing.T) {
 	m := domain.MentalModel{Spec: domain.MentalModelSpec{Name: "Team roster"}}
-	full, err := refreshContext(m, store.SeqUpTo(0, 9))
+	full, err := refreshContext(m, domain.SeqUpTo(0, 9))
 	if err != nil {
 		t.Fatal(err)
 	}
-	delta, err := refreshContext(m, store.SeqUpTo(4, 9))
+	delta, err := refreshContext(m, domain.SeqUpTo(4, 9))
 	if err != nil {
 		t.Fatal(err)
 	}

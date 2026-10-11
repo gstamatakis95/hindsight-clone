@@ -62,25 +62,28 @@ func (e env) getOp(t *testing.T, b domain.BankRef, id domain.OperationID) (domai
 	return op, err
 }
 
-// cfgStub resolves the effective config as base < overrides.
-type cfgStub struct{ base domain.BankConfig }
-
-func (c cfgStub) Effective(_ context.Context, _ domain.BankRef, o ...domain.BankConfig) (domain.BankConfig, error) {
-	return config.Merge(append([]domain.BankConfig{c.base}, o...)...), nil
-}
-
-func (c cfgStub) ForScope(_ context.Context, _ domain.ScopeKey, r *domain.BankConfig) (domain.BankConfig, error) {
-	if r == nil {
-		return c.base, nil
-	}
-	return config.Merge(c.base, *r), nil
-}
-
-// dirStub returns fixed directives.
-type dirStub []domain.Directive
-
-func (d dirStub) Select(context.Context, domain.BankRef, []string, bool) ([]domain.Directive, error) {
-	return d, nil
+// previewer stores base as bank b's config and dirs as its directives, and returns a PromptPreviewer over a real
+// config resolver (no server level).
+func (e env) previewer(
+	t *testing.T, b domain.BankRef, base domain.BankConfig, dirs ...domain.Directive,
+) PromptPreviewer {
+	t.Helper()
+	e.tx(t, func(tx store.Tx) error {
+		if _, err := tx.Banks().Ensure(e.ctx, b); err != nil {
+			return err
+		}
+		if err := tx.Banks().SetConfig(e.ctx, b, base); err != nil {
+			return err
+		}
+		for _, d := range dirs {
+			d.Bank = b
+			if _, err := tx.Directives().Upsert(e.ctx, d); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return NewPromptPreviewer(config.NewResolver(e.store, domain.BankConfig{}), e.store)
 }
 
 // statsStub serves BankStats and TagCounts from fixed data.

@@ -6,9 +6,9 @@
 //
 // retain is an engine package: it imports domain, the boundary packages, jobs and prompts and must never import
 // adapters, server, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares what it consumes from other
-// engines: [DateNormalizer] (timex.TimeNormalizer), [ScopeExpander] (consolidate.ScopeExpander), [ConfigMerger]
-// (config.Merge) and [TokenCounter]; its jobs go through the jobs catalogue. Other engines reuse its pieces: curate
-// (EntityResolver, Linker), maintenance (Linker) and docs (Reprocessor). cmd/memd/wire.go builds everything; the
+// engines: [ConfigMerger] (config.Merge) and [TokenCounter]; it uses the timex.Normalizer, the linking library
+// (Resolver, LabelResolver, Linker) and domain.ExpandScopes directly; its jobs go through the jobs catalogue. docs
+// reuses its [Reprocessor]. cmd/memd/wire.go builds everything; the
 // server's Retain RPC calls [Ingestor.Ingest], the retain_document job handler calls [Retainer.ProcessDocument],
 // and DocumentService.ReprocessDocument reaches [Reprocessor.Reprocess] through docs.
 //
@@ -56,7 +56,7 @@
 //     work. Committed hashes are trusted only while the document is in flight and the run's first chunk is
 //     among them; then those chunks are skipped and the run resumes exactly after them.
 //  5. For each batch of [DefaultBatchChunks] (4) chunks: with no transaction open, extract each chunk (one
-//     EXTRACT call), normalize dates through the DateNormalizer against the item timestamp (timeless items
+//     EXTRACT call), normalize dates through the timex.Normalizer against the item timestamp (timeless items
 //     get no dates), and embed all facts in one call. Then one short transaction: tx.Seq(bank), re-check
 //     ownership under the lock (a newer retain, or a rewrite of a chunk this run committed, aborts the run as
 //     Superseded; changed tags are adopted so this batch's units carry them), replace the document's old

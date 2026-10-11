@@ -15,7 +15,7 @@
 // Each cmd/memd/wire_<area>.go builds its area's handlers with exactly the engines they call, and wire.go calls
 // [New]:
 //
-//	h := grpcapi.Handlers{Memory: &grpcapi.MemoryHandler{Ingestor: ing, Recaller: rec, Reflector: ref}, ...}
+//	h := grpcapi.Handlers{Memory: &grpcapi.MemoryHandler{Ingestor: ing, Engine: rec, Agent: agent}, ...}
 //	s := grpcapi.New(h, grpcapi.Options{DefaultDeadline: d, Probes: probes}, grpc.ChainUnaryInterceptor(extra...))
 //	err := s.Serve(lis)
 //

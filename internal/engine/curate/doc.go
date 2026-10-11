@@ -3,10 +3,10 @@
 //
 // # Where it sits
 //
-// curate is an engine package: it imports domain, the boundary packages, jobs and retain (for retain.ResolveInput
-// and retain.CauseMap) and must never import adapters, server, gen, pgx, net/http, the S3 SDK or Datadog
+// curate is an engine package: it imports domain, the boundary packages, jobs and linking (for linking.ResolveInput
+// and linking.CauseMap) and must never import adapters, server, gen, pgx, net/http, the S3 SDK or Datadog
 // (depguard). It declares what it consumes: [UnitSource], [UnitGetter], [CitingModels] and [ScopeSource]
-// (store.Reader methods), [EntityResolver] and [Linker] (retain.EntityResolver and retain.Linker) and
+// (store.Reader methods), [EntityResolver] and [Linker] (linking.Resolver and linking.Linker) and
 // [ObservationClearer] (consolidate.Invalidator); its jobs, including the refreshes of the models an invalidate
 // affects (jobs.QueueModelRefresh), go through the jobs catalogue. cmd/memd/wire.go builds [NewMemoryLister],
 // [NewCurator], [NewObservationAdmin] and [NewRederiver]; the server's MemoryUnitService and ObservationService

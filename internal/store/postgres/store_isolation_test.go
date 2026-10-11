@@ -2,13 +2,14 @@ package postgres_test
 
 import (
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/store"
 	"slices"
 	"testing"
 )
 
 // isolationCases check tenant isolation of the write ports TestStore's TenantIsolation case does not reach:
-// UnitRepo.SetDocumentTags, EntityRepo.PendingMaintenance and PruneOrphans, LinkRepo.Dirty and ClearDirty,
+// UnitRepo.SetDocumentTags, EntityRepo.PendingMaintenance and PruneOrphans, UnitRepo.DirtyLinks and ClearDirtyLinks,
 // and DirectiveRepo. Each case writes the same ids or names into bankA and bankOtherTenant (bankA's bank id
 // under another tenant), acts on one and checks the other is untouched.
 func isolationCases() []storeCase {
@@ -64,7 +65,7 @@ func gapDirty(t *testing.T, s store.DB, b domain.BankRef, limit int) []domain.Un
 	var ids []domain.UnitID
 	inTx(t, s, func(tx store.Tx) error {
 		var err error
-		ids, err = tx.Links().Dirty(t.Context(), b, limit)
+		ids, err = tx.Units().DirtyLinks(t.Context(), b, limit)
 		return err
 	})
 	return ids
@@ -73,7 +74,7 @@ func gapDirty(t *testing.T, s store.DB, b domain.BankRef, limit int) []domain.Un
 // gapClearDirty removes ids from bank b's graph_dirty.
 func gapClearDirty(t *testing.T, s store.DB, b domain.BankRef, ids ...domain.UnitID) {
 	t.Helper()
-	inTx(t, s, func(tx store.Tx) error { return tx.Links().ClearDirty(t.Context(), b, ids) })
+	inTx(t, s, func(tx store.Tx) error { return tx.Units().ClearDirtyLinks(t.Context(), b, ids) })
 }
 
 // gapDeleteDocUnits runs DeleteByDocument on bank b's doc in a transaction that takes the bank's Seq.
@@ -97,7 +98,7 @@ func gapNeighbours(t *testing.T, s store.DB) map[domain.BankRef]domain.UnitID {
 		x, n := fact(b, "x"), fact(b, "n")
 		x.DocumentID = "doc-1"
 		insertUnits(t, s, x, n)
-		insertLinks(t, s, link(b, x.ID, n.ID, domain.LinkSemantic, 0.9))
+		insertLinks(t, s, link(b, x.ID, n.ID, graph.KindSemantic, 0.9))
 		out[b] = n.ID
 	}
 	return out

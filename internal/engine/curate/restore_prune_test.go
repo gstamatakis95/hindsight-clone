@@ -2,6 +2,7 @@ package curate
 
 import (
 	"context"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/store"
 	"testing"
@@ -37,7 +38,7 @@ func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 	})
 	c := NewCurator(CuratorDeps{
 		Store: e.store, Clock: e.clock, Citing: e.citing, Resolver: resolverStub{},
-		Config: configStub{},
+		Config: config.NewResolver(e.fake, domain.BankConfig{}),
 		Archived: archivedStub{u: domain.Unit{
 			ID: idF1, Bank: testBank, State: domain.MemoryStateInvalidated, Entities: []string{"Alice"},
 		}},

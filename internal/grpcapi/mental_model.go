@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
+	"memd/internal/recall"
 
 	pb "memd/gen/memory/v1"
 )
@@ -17,7 +18,7 @@ type MentalModelHandler struct {
 	// Refresher serves DryRunRefresh.
 	Refresher mentalmodel.RefreshRunner
 	// Pages serves SearchPages.
-	Pages mentalmodel.PageSearcher
+	Pages *recall.Engine
 }
 
 var _ pb.MentalModelServiceServer = (*MentalModelHandler)(nil)
@@ -243,7 +244,7 @@ func (h *MentalModelHandler) SearchPages(
 	}
 	in := searchPagesFromProto(req)
 	in.Bank = b
-	hits, err := h.Pages.Search(ctx, in)
+	hits, err := h.Pages.SearchPages(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}

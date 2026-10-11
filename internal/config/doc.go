@@ -3,10 +3,10 @@
 //
 // # Where it sits
 //
-// config imports domain, store and ai only and never an adapter, server, jobs or engine package. It declares
-// the one engine piece it needs, [StrategyMatcher], so consolidate.StrategyMatcher satisfies it without config
-// importing consolidate. cmd/memd builds the server level with [ServerDefaults] from the server config file and
-// the resolver with [NewResolver]; engines consume the resolver as [Resolver]; the server validates every
+// config imports domain, store and ai only and never an adapter, server, jobs or engine package. It owns
+// consolidation strategy matching ([MatchStrategy]), which the resolver and the strategy preview share. cmd/memd
+// builds the server level with [ServerDefaults] from the server config file and the resolver with [NewResolver];
+// engines and libraries take the concrete *[Resolver]; the server validates every
 // config it is given with [Validate] and patches stored levels with [ApplyPaths] and [ResetPaths]; retain's
 // Ingestor uses [Merge] to combine a request's and an item's overrides.
 //
@@ -62,13 +62,12 @@
 //
 // # Resolver
 //
-// [NewResolver](store, matcher, server) returns the Resolver:
+// [NewResolver](store, server) returns the Resolver:
 //
 //   - Effective(ctx, bank, overrides...) merges server < tenant < bank < overrides (in order).
 //   - ForScope(ctx, scope, request) merges server < tenant < bank < strategy < request, where strategy is
 //     the first consolidation strategy whose pattern matches the scope, taken from the merged list with the
-//     request level included, so a Consolidate call can bring its own strategies. A nil matcher disables
-//     strategies.
+//     request level included, so a Consolidate call can bring its own strategies ([MatchStrategy]).
 //
 // Both read the tenant config and the bank row in one short read-only DB.InTx (store.Reader has no config
 // reads), so callers must not call them from inside an open transaction. An unknown or tombstoned bank is

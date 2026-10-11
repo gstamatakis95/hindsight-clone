@@ -84,44 +84,31 @@ func (mock *Consolidator) RunCalls() []struct {
 	return calls
 }
 
-// Ensure that StrategyMatcher does implement consolidate.StrategyMatcher.
+// Ensure that StrategyPreviewer does implement consolidate.StrategyPreviewer.
 // If this is not the case, regenerate this file with mockery.
-var _ consolidate.StrategyMatcher = &StrategyMatcher{}
+var _ consolidate.StrategyPreviewer = &StrategyPreviewer{}
 
-// StrategyMatcher is a mock implementation of consolidate.StrategyMatcher.
+// StrategyPreviewer is a mock implementation of consolidate.StrategyPreviewer.
 //
-//	func TestSomethingThatUsesStrategyMatcher(t *testing.T) {
+//	func TestSomethingThatUsesStrategyPreviewer(t *testing.T) {
 //
-//		// make and configure a mocked consolidate.StrategyMatcher
-//		mockedStrategyMatcher := &StrategyMatcher{
-//			MatchFunc: func(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
-//				panic("mock out the Match method")
-//			},
+//		// make and configure a mocked consolidate.StrategyPreviewer
+//		mockedStrategyPreviewer := &StrategyPreviewer{
 //			PreviewFunc: func(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error) {
 //				panic("mock out the Preview method")
 //			},
 //		}
 //
-//		// use mockedStrategyMatcher in code that requires consolidate.StrategyMatcher
+//		// use mockedStrategyPreviewer in code that requires consolidate.StrategyPreviewer
 //		// and then make assertions.
 //
 //	}
-type StrategyMatcher struct {
-	// MatchFunc mocks the Match method.
-	MatchFunc func(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool)
-
+type StrategyPreviewer struct {
 	// PreviewFunc mocks the Preview method.
 	PreviewFunc func(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
-		// Match holds details about calls to the Match method.
-		Match []struct {
-			// Strategies is the strategies argument value.
-			Strategies []domain.ConsolidationStrategy
-			// S is the s argument value.
-			S domain.ScopeKey
-		}
 		// Preview holds details about calls to the Preview method.
 		Preview []struct {
 			// Ctx is the ctx argument value.
@@ -132,50 +119,13 @@ type StrategyMatcher struct {
 			Draft []domain.ConsolidationStrategy
 		}
 	}
-	lockMatch   sync.RWMutex
 	lockPreview sync.RWMutex
 }
 
-// Match calls MatchFunc.
-func (mock *StrategyMatcher) Match(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
-	if mock.MatchFunc == nil {
-		panic("StrategyMatcher.MatchFunc: method is nil but StrategyMatcher.Match was just called")
-	}
-	callInfo := struct {
-		Strategies []domain.ConsolidationStrategy
-		S          domain.ScopeKey
-	}{
-		Strategies: strategies,
-		S:          s,
-	}
-	mock.lockMatch.Lock()
-	mock.calls.Match = append(mock.calls.Match, callInfo)
-	mock.lockMatch.Unlock()
-	return mock.MatchFunc(strategies, s)
-}
-
-// MatchCalls gets all the calls that were made to Match.
-// Check the length with:
-//
-//	len(mockedStrategyMatcher.MatchCalls())
-func (mock *StrategyMatcher) MatchCalls() []struct {
-	Strategies []domain.ConsolidationStrategy
-	S          domain.ScopeKey
-} {
-	var calls []struct {
-		Strategies []domain.ConsolidationStrategy
-		S          domain.ScopeKey
-	}
-	mock.lockMatch.RLock()
-	calls = mock.calls.Match
-	mock.lockMatch.RUnlock()
-	return calls
-}
-
 // Preview calls PreviewFunc.
-func (mock *StrategyMatcher) Preview(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error) {
+func (mock *StrategyPreviewer) Preview(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error) {
 	if mock.PreviewFunc == nil {
-		panic("StrategyMatcher.PreviewFunc: method is nil but StrategyMatcher.Preview was just called")
+		panic("StrategyPreviewer.PreviewFunc: method is nil but StrategyPreviewer.Preview was just called")
 	}
 	callInfo := struct {
 		Ctx   context.Context
@@ -195,8 +145,8 @@ func (mock *StrategyMatcher) Preview(ctx context.Context, b domain.BankRef, draf
 // PreviewCalls gets all the calls that were made to Preview.
 // Check the length with:
 //
-//	len(mockedStrategyMatcher.PreviewCalls())
-func (mock *StrategyMatcher) PreviewCalls() []struct {
+//	len(mockedStrategyPreviewer.PreviewCalls())
+func (mock *StrategyPreviewer) PreviewCalls() []struct {
 	Ctx   context.Context
 	B     domain.BankRef
 	Draft []domain.ConsolidationStrategy

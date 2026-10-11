@@ -3,6 +3,7 @@ package grpcapi
 import (
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
+	"memd/internal/recall"
 
 	pb "memd/gen/memory/v1"
 )
@@ -214,8 +215,8 @@ func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (mentalmodel.Refre
 }
 
 // searchPagesFromProto converts a SearchPagesRequest; Bank.Bank carries bank_id.
-func searchPagesFromProto(r *pb.SearchPagesRequest) mentalmodel.SearchPagesRequest {
-	return mentalmodel.SearchPagesRequest{
+func searchPagesFromProto(r *pb.SearchPagesRequest) recall.SearchPagesRequest {
+	return recall.SearchPagesRequest{
 		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		Query:        r.GetQuery(),
 		FolderPrefix: r.GetFolderPrefix(),

@@ -565,8 +565,8 @@ func rdNewest(t *testing.T, s store.DB, q store.ScopeQuery) int64 {
 }
 
 // rdTagsAnyStrict is the predicate "carries one of tags" that excludes untagged units.
-func rdTagsAnyStrict(tags ...string) *store.SQLPredicate {
-	return &store.SQLPredicate{Op: store.PredicateTags, Tags: tags, Match: domain.TagsMatchAnyStrict}
+func rdTagsAnyStrict(tags ...string) *domain.TagPredicate {
+	return &domain.TagPredicate{Op: domain.PredicateTags, Tags: tags, Match: domain.TagsMatchAnyStrict}
 }
 
 // rdSeqFixture holds the seqs of bank A's units, each written in its own transaction.
@@ -615,13 +615,13 @@ func testRdNewestSeqInScope(t *testing.T, s store.DB) {
 		{"tags a, world", store.ScopeQuery{Tags: rdTagsAnyStrict("a"), Types: []domain.FactType{world}}, f.worldA},
 		{"tags b", store.ScopeQuery{Tags: rdTagsAnyStrict("b")}, f.expB},
 		{"tags none match", store.ScopeQuery{Tags: rdTagsAnyStrict("zzz")}, 0},
-		{"after expB", store.ScopeQuery{Seq: store.SeqRange{After: f.expB}}, f.untagged},
-		{"after untagged", store.ScopeQuery{Seq: store.SeqRange{After: f.untagged}}, 0},
-		{"up to expB", store.ScopeQuery{Seq: store.SeqRange{UpTo: ptr(f.expB)}}, f.expB},
-		{"(worldA, obsA]", store.ScopeQuery{Seq: store.SeqUpTo(f.worldA, f.obsA)}, f.obsA},
-		{"(obsA, obsA]", store.ScopeQuery{Seq: store.SeqUpTo(f.obsA, f.obsA)}, 0},
-		{"up to 0", store.ScopeQuery{Seq: store.SeqUpTo(0, 0)}, 0},
-		{"tags b, up to obsA", store.ScopeQuery{Tags: rdTagsAnyStrict("b"), Seq: store.SeqUpTo(0, f.obsA)}, 0},
+		{"after expB", store.ScopeQuery{Seq: domain.SeqRange{After: f.expB}}, f.untagged},
+		{"after untagged", store.ScopeQuery{Seq: domain.SeqRange{After: f.untagged}}, 0},
+		{"up to expB", store.ScopeQuery{Seq: domain.SeqRange{UpTo: ptr(f.expB)}}, f.expB},
+		{"(worldA, obsA]", store.ScopeQuery{Seq: domain.SeqUpTo(f.worldA, f.obsA)}, f.obsA},
+		{"(obsA, obsA]", store.ScopeQuery{Seq: domain.SeqUpTo(f.obsA, f.obsA)}, 0},
+		{"up to 0", store.ScopeQuery{Seq: domain.SeqUpTo(0, 0)}, 0},
+		{"tags b, up to obsA", store.ScopeQuery{Tags: rdTagsAnyStrict("b"), Seq: domain.SeqUpTo(0, f.obsA)}, 0},
 	}
 	for _, c := range cases {
 		c.q.Bank = bankA

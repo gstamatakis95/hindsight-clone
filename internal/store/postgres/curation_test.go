@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/store"
 	"slices"
 	"testing"
@@ -291,13 +292,13 @@ func testDirectives(t *testing.T, s store.DB) {
 
 // ---------- graph and entity maintenance queues ----------
 
-// linkCount returns Links().Count(unit, kind).
-func linkCount(t *testing.T, s store.DB, unit domain.UnitID, kind domain.LinkKind) int {
+// linkCount returns Graph().Degree(unit, kind).
+func linkCount(t *testing.T, s store.DB, unit domain.UnitID, kind graph.Kind) int {
 	t.Helper()
 	var n int
 	inTx(t, s, func(tx store.Tx) error {
 		var err error
-		n, err = tx.Links().Count(t.Context(), unit, kind)
+		n, err = tx.Graph().Degree(t.Context(), unit, kind)
 		return err
 	})
 	return n
@@ -309,7 +310,7 @@ func dirty(t *testing.T, s store.DB, limit int) []domain.UnitID {
 	var ids []domain.UnitID
 	inTx(t, s, func(tx store.Tx) error {
 		var err error
-		ids, err = tx.Links().Dirty(t.Context(), bankA, limit)
+		ids, err = tx.Units().DirtyLinks(t.Context(), bankA, limit)
 		return err
 	})
 	return ids
@@ -318,7 +319,7 @@ func dirty(t *testing.T, s store.DB, limit int) []domain.UnitID {
 // clearDirty removes ids from bank A's graph_dirty.
 func clearDirty(t *testing.T, s store.DB, ids ...domain.UnitID) {
 	t.Helper()
-	inTx(t, s, func(tx store.Tx) error { return tx.Links().ClearDirty(t.Context(), bankA, ids) })
+	inTx(t, s, func(tx store.Tx) error { return tx.Units().ClearDirtyLinks(t.Context(), bankA, ids) })
 }
 
 // deleteDocUnits runs DeleteByDocument on a bank-A document in a transaction that takes the bank's Seq.
@@ -346,17 +347,17 @@ func testLinksDirty(t *testing.T, s store.DB) {
 	x.DocumentID = "doc-1"
 	insertUnits(t, s, x, n1, n2, y, n3)
 	insertLinks(t, s,
-		link(bankA, x.ID, n1.ID, domain.LinkSemantic, 0.9), link(bankA, n2.ID, x.ID, domain.LinkSemantic, 0.8),
-		link(bankA, x.ID, n2.ID, domain.LinkTemporal, 0.7), link(bankA, y.ID, n3.ID, domain.LinkCausal, 0.6))
+		link(bankA, x.ID, n1.ID, graph.KindSemantic, 0.9), link(bankA, n2.ID, x.ID, graph.KindSemantic, 0.8),
+		link(bankA, x.ID, n2.ID, graph.KindTemporal, 0.7), link(bankA, y.ID, n3.ID, graph.KindCausal, 0.6))
 	counts := []struct {
 		unit domain.UnitID
-		kind domain.LinkKind
+		kind graph.Kind
 		want int
 	}{
-		{x.ID, domain.LinkSemantic, 2},
-		{x.ID, domain.LinkTemporal, 1},
-		{x.ID, domain.LinkCausal, 0},
-		{n1.ID, domain.LinkSemantic, 1},
+		{x.ID, graph.KindSemantic, 2},
+		{x.ID, graph.KindTemporal, 1},
+		{x.ID, graph.KindCausal, 0},
+		{n1.ID, graph.KindSemantic, 1},
 	}
 	for _, c := range counts {
 		if got := linkCount(t, s, c.unit, c.kind); got != c.want {
@@ -372,7 +373,7 @@ func testLinksDirty(t *testing.T, s store.DB) {
 	if got := dirty(t, s, 1); len(got) != 1 {
 		t.Errorf("Dirty(limit 1) = %v, want one unit", got)
 	}
-	if got := linkCount(t, s, n1.ID, domain.LinkSemantic) + linkCount(t, s, n3.ID, domain.LinkCausal); got != 0 {
+	if got := linkCount(t, s, n1.ID, graph.KindSemantic) + linkCount(t, s, n3.ID, graph.KindCausal); got != 0 {
 		t.Errorf("links left on n1 and n3 after their neighbours were removed = %d, want 0", got)
 	}
 	clearDirty(t, s, n1.ID, n2.ID, n3.ID)
@@ -474,15 +475,15 @@ func testRederiveDetach(t *testing.T, s store.DB) {
 		return tx.Entities().Attach(t.Context(), other.ID, []domain.EntityID{shared})
 	})
 	pruneOrphans(t, s, only, shared) // a baseline whatever Attach queued
-	insertLinks(t, s, link(bankA, u.ID, partner.ID, domain.LinkSemantic, 0.9),
-		link(bankA, partner.ID, u.ID, domain.LinkSemantic, 0.8), link(bankA, u.ID, partner.ID, domain.LinkTemporal, 0.7))
+	insertLinks(t, s, link(bankA, u.ID, partner.ID, graph.KindSemantic, 0.9),
+		link(bankA, partner.ID, u.ID, graph.KindSemantic, 0.8), link(bankA, u.ID, partner.ID, graph.KindTemporal, 0.7))
 	var n int
 	inTx(t, s, func(tx store.Tx) error {
 		if err := tx.Entities().Detach(t.Context(), u.ID); err != nil {
 			return err
 		}
 		var err error
-		n, err = tx.Links().DeleteForUnit(t.Context(), u.ID, []domain.LinkKind{domain.LinkSemantic})
+		n, err = tx.Graph().DeleteUnitLinks(t.Context(), u.ID, []graph.Kind{graph.KindSemantic})
 		return err
 	})
 	if n != 2 {
@@ -492,7 +493,7 @@ func testRederiveDetach(t *testing.T, s store.DB) {
 	if n := pruneOrphans(t, s, only, shared); n != 1 {
 		t.Errorf("PruneOrphans after Detach = %d, want 1 (the entity only the detached unit referenced)", n)
 	}
-	if sem, tmp := linkCount(t, s, u.ID, domain.LinkSemantic), linkCount(t, s, u.ID, domain.LinkTemporal); sem != 0 ||
+	if sem, tmp := linkCount(t, s, u.ID, graph.KindSemantic), linkCount(t, s, u.ID, graph.KindTemporal); sem != 0 ||
 		tmp != 1 {
 		t.Errorf("links of u after DeleteForUnit(semantic) = %d semantic, %d temporal; want 0, 1", sem, tmp)
 	}
@@ -518,7 +519,7 @@ func fillBank(t *testing.T, s store.DB, b domain.BankRef) []domain.UnitID {
 		if err := tx.Entities().Attach(t.Context(), f1.ID, []domain.EntityID{ent}); err != nil {
 			return err
 		}
-		if err := tx.Links().Insert(t.Context(), []domain.Link{link(b, f1.ID, f2.ID, domain.LinkSemantic, 1)}); err != nil {
+		if err := tx.Graph().AddLinks(t.Context(), []graph.Link{link(b, f1.ID, f2.ID, graph.KindSemantic, 1)}); err != nil {
 			return err
 		}
 		if err := tx.Evidence().Add(t.Context(), obs.ID, []domain.Evidence{{Unit: f1.ID, Quote: "f1"}}); err != nil {
@@ -635,9 +636,9 @@ func fillAllTables(t *testing.T, s store.DB, b domain.BankRef) filledBank {
 		if err := ents.Attach(ctx, arch.ID, f.ents[1:]); err != nil {
 			return err
 		}
-		ls := []domain.Link{link(b, gone.ID, f.units[1], domain.LinkSemantic, 1), link(b, f.units[1], arch.ID,
-			domain.LinkCausal, 1)}
-		if err := tx.Links().Insert(ctx, ls); err != nil {
+		ls := []graph.Link{link(b, gone.ID, f.units[1], graph.KindSemantic, 1), link(b, f.units[1], arch.ID,
+			graph.KindCausal, 1)}
+		if err := tx.Graph().AddLinks(ctx, ls); err != nil {
 			return err
 		}
 		v := domain.ObservationVersion{Version: 1, Text: "obs", SourceIDs: f.units[:1], At: day(1)}
@@ -697,12 +698,12 @@ func bankCounts(t *testing.T, s store.DB, b domain.BankRef, f filledBank) map[st
 		"entity_cooccurrences": func(tx store.Tx) (int, error) {
 			return tx.Entities().Cooccurrence(ctx, b, f.ents[0], f.ents[1:])
 		},
-		"memory_links": func(tx store.Tx) (int, error) { return tx.Links().Count(ctx, f.units[0], domain.LinkSemantic) },
+		"memory_links": func(tx store.Tx) (int, error) { return tx.Graph().Degree(ctx, f.units[0], graph.KindSemantic) },
 		"observation_evidence": func(tx store.Tx) (int, error) {
 			ok, err := tx.Evidence().Cites(ctx, domain.NewScopeKey(b, nil), f.units[0])
 			return boolCount(ok), err
 		},
-		"graph_dirty": func(tx store.Tx) (int, error) { ids, err := tx.Links().Dirty(ctx, b, 10); return len(ids), err },
+		"graph_dirty": func(tx store.Tx) (int, error) { ids, err := tx.Units().DirtyLinks(ctx, b, 10); return len(ids), err },
 		"entity_maintenance": func(tx store.Tx) (int, error) {
 			ids, err := tx.Entities().PendingMaintenance(ctx, b, 10)
 			return len(ids), err

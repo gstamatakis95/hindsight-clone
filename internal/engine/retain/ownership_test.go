@@ -7,6 +7,7 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
+	"memd/internal/linking"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"slices"
@@ -108,8 +109,9 @@ func (e *env) hookedRetainerBatch(batch, at int, hook func()) Retainer {
 	return NewRetainer(RetainerDeps{
 		Store: e.store, Blob: e.blob, Config: e.cfg,
 		Extractor: &hookExtractor{inner: NewExtractor(e.llm, router), at: at, hook: hook}, Embedder: e.emb,
-		Entities: NewEntityResolver(ResolverConfig{}), Labels: NewLabelResolver(), Linker: NewLinker(),
-		Clock: e.clock, BatchChunks: batch,
+		Entities: linking.NewResolver(linking.ResolverConfig{}), Labels: linking.NewLabelResolver(),
+		Linker: linking.NewLinker(),
+		Clock:  e.clock, BatchChunks: batch,
 	})
 }
 

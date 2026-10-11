@@ -7,6 +7,7 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"strings"
 )
 
@@ -38,16 +39,17 @@ const (
 
 // previewer implements PromptPreviewer with internal/prompts.
 type previewer struct {
-	cfg  config.Resolver
-	dirs DirectiveSelector
+	cfg *config.Resolver
+	s   store.DB
 }
 
 var _ PromptPreviewer = (*previewer)(nil)
 
-// NewPromptPreviewer returns the PromptPreviewer; cfg resolves the effective config and dirs picks the
-// directives reflect and synthesize would see (global ones: a preview has no request tags).
-func NewPromptPreviewer(cfg config.Resolver, dirs DirectiveSelector) PromptPreviewer {
-	return &previewer{cfg: cfg, dirs: dirs}
+// NewPromptPreviewer returns the PromptPreviewer; cfg resolves the effective config and s reads the bank's
+// directives. The reflect and synthesize previews show the directives domain.SelectDirectives picks for a request
+// with no tags (the untagged ones): a preview has no request tags.
+func NewPromptPreviewer(cfg *config.Resolver, s store.DB) PromptPreviewer {
+	return &previewer{cfg: cfg, s: s}
 }
 
 // Preview resolves the effective config with o on top and renders op's messages from the built-in
@@ -57,7 +59,7 @@ func (p *previewer) Preview(
 ) (domain.PromptPreview, error) {
 	cfg, err := p.cfg.Effective(ctx, b, o)
 	if err != nil {
-		return domain.PromptPreview{}, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
+		return domain.PromptPreview{}, fmt.Errorf("preview: %w", err)
 	}
 	switch op {
 	case domain.PromptOperationRetain:
@@ -67,10 +69,11 @@ func (p *previewer) Preview(
 	case domain.PromptOperationMentalModelDelta:
 		return previewDelta(cfg)
 	case domain.PromptOperationReflect, domain.PromptOperationSynthesize:
-		dirs, err := p.dirs.Select(ctx, b, nil, false)
+		active, err := readDirectives(ctx, p.s, b, true)
 		if err != nil {
 			return domain.PromptPreview{}, fmt.Errorf("preview directives: %w", err)
 		}
+		dirs := domain.SelectDirectives(active, domain.TagFilter{}, false)
 		if op == domain.PromptOperationReflect {
 			return previewReflect(cfg, dirs)
 		}

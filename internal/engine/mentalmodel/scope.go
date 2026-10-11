@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
 	"memd/internal/store"
 	"slices"
 )
@@ -41,30 +40,30 @@ func (s ResolvedScope) tagFilter() domain.TagFilter {
 // predicate adds the staleness rule to p, the scope's compiled tag filter (nil = no filter). With
 // stalenessOnly, a tagged scope also excludes untagged units: untagged writes never make a tagged model
 // stale, even when its refresh reads untagged memories (tags_match any / all).
-func (s ResolvedScope) predicate(p *store.SQLPredicate, stalenessOnly bool) *store.SQLPredicate {
+func (s ResolvedScope) predicate(p *domain.TagPredicate, stalenessOnly bool) *domain.TagPredicate {
 	if !stalenessOnly || (len(s.TagGroups) == 0 && len(s.Tags) == 0) {
 		return p
 	}
-	untagged := store.SQLPredicate{Op: store.PredicateTags, Tags: []string{}, Match: domain.TagsMatchExact}
-	tagged := store.SQLPredicate{Op: store.PredicateNot, Args: []store.SQLPredicate{untagged}}
+	untagged := domain.TagPredicate{Op: domain.PredicateTags, Tags: []string{}, Match: domain.TagsMatchExact}
+	tagged := domain.TagPredicate{Op: domain.PredicateNot, Args: []domain.TagPredicate{untagged}}
 	if p == nil {
 		return &tagged
 	}
-	return &store.SQLPredicate{Op: store.PredicateAnd, Args: []store.SQLPredicate{*p, tagged}}
+	return &domain.TagPredicate{Op: domain.PredicateAnd, Args: []domain.TagPredicate{*p, tagged}}
 }
 
 // tagPredicate compiles the tags or tag groups alone; nil = no tag filter. A scope with a fuzzy leaf needs
 // the bank's tags and compiles in scopeQuery instead.
-func (s ResolvedScope) tagPredicate() *store.SQLPredicate {
+func (s ResolvedScope) tagPredicate() *domain.TagPredicate {
 	switch {
 	case len(s.TagGroups) > 0:
-		args := make([]store.SQLPredicate, len(s.TagGroups))
+		args := make([]domain.TagPredicate, len(s.TagGroups))
 		for i, g := range s.TagGroups {
 			args[i] = compileGroup(g)
 		}
-		return &store.SQLPredicate{Op: store.PredicateAnd, Args: args}
+		return &domain.TagPredicate{Op: domain.PredicateAnd, Args: args}
 	case len(s.Tags) > 0 || s.TagsMatch == domain.TagsMatchExact:
-		return &store.SQLPredicate{Op: store.PredicateTags, Tags: slices.Clone(s.Tags), Match: s.TagsMatch}
+		return &domain.TagPredicate{Op: domain.PredicateTags, Tags: slices.Clone(s.Tags), Match: s.TagsMatch}
 	}
 	return nil
 }
@@ -84,7 +83,7 @@ func hasFuzzyLeaf(gs []domain.TagGroup) bool {
 
 // compileGroup turns a tag group into a predicate node with domain.MatchGroup semantics; a malformed
 // group compiles to an empty Or, which matches nothing.
-func compileGroup(g domain.TagGroup) store.SQLPredicate {
+func compileGroup(g domain.TagGroup) domain.TagPredicate {
 	switch g.Kind {
 	case domain.TagGroupLeaf:
 		if g.Leaf == nil {
@@ -94,35 +93,47 @@ func compileGroup(g domain.TagGroup) store.SQLPredicate {
 		if mode == domain.TagsMatchUnspecified {
 			mode = domain.TagsMatchAnyStrict
 		}
-		return store.SQLPredicate{Op: store.PredicateTags, Tags: domain.NormalizeTags(g.Leaf.Tags), Match: mode}
+		return domain.TagPredicate{Op: domain.PredicateTags, Tags: domain.NormalizeTags(g.Leaf.Tags), Match: mode}
 	case domain.TagGroupAllOf, domain.TagGroupAnyOf:
-		op := store.PredicateAnd
+		op := domain.PredicateAnd
 		if g.Kind == domain.TagGroupAnyOf {
-			op = store.PredicateOr
+			op = domain.PredicateOr
 		}
-		args := make([]store.SQLPredicate, len(g.Groups))
+		args := make([]domain.TagPredicate, len(g.Groups))
 		for i, c := range g.Groups {
 			args[i] = compileGroup(c)
 		}
-		return store.SQLPredicate{Op: op, Args: args}
+		return domain.TagPredicate{Op: op, Args: args}
 	case domain.TagGroupNoneOf:
 		if g.Not != nil {
-			return store.SQLPredicate{Op: store.PredicateNot, Args: []store.SQLPredicate{compileGroup(*g.Not)}}
+			return domain.TagPredicate{Op: domain.PredicateNot, Args: []domain.TagPredicate{compileGroup(*g.Not)}}
 		}
 	}
-	return store.SQLPredicate{Op: store.PredicateOr}
+	return domain.TagPredicate{Op: domain.PredicateOr}
+}
+
+// TagCompiler compiles a tag filter, resolving fuzzy leaves against the bank's tags; recall.Engine satisfies it.
+type TagCompiler interface {
+	// CompileTags resolves f's fuzzy leaves at minSimilarity and compiles f into a tag predicate.
+	CompileTags(
+		ctx context.Context, b domain.BankRef, f domain.TagFilter, minSimilarity float64,
+	) (domain.TagPredicate, error)
 }
 
 // scopeQuery is the ScopeReader query for m's scope over seq range r. A scope with a fuzzy leaf first
-// resolves its names to the bank's exact tags (sr.TagCounts) with recall's TagFilterCompiler at minSim, so
-// staleness and the pre-check see exactly the units recall would retrieve (decision 1203).
+// resolves its names to the bank's exact tags with recall's tag compiler (tc) at minSim, so staleness and the
+// pre-check see exactly the units recall would retrieve.
 func scopeQuery(
-	ctx context.Context, sr ScopeReader, m domain.MentalModel, r store.SeqRange, stalenessOnly bool, minSim float64,
+	ctx context.Context, tc TagCompiler, m domain.MentalModel, r domain.SeqRange, stalenessOnly bool, minSim float64,
 ) (store.ScopeQuery, error) {
 	s := resolveScope(m)
 	tags := s.tagPredicate()
 	if hasFuzzyLeaf(s.TagGroups) {
-		p, err := recall.NewTagFilterCompiler(sr).Compile(ctx, m.Bank, s.tagFilter(), minSim)
+		if tc == nil {
+			return store.ScopeQuery{}, fmt.Errorf("%w: mentalmodel: no tag compiler for a fuzzy scope",
+				domain.ErrFailedPrecondition)
+		}
+		p, err := tc.CompileTags(ctx, m.Bank, s.tagFilter(), minSim)
 		if err != nil {
 			return store.ScopeQuery{}, fmt.Errorf("mentalmodel: resolve fuzzy scope: %w", err)
 		}

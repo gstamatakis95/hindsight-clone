@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"memd/internal/ai"
-	"memd/internal/engine/recall"
+	"memd/internal/recall"
 	"store"
 )
 

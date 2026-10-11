@@ -40,7 +40,7 @@ type RefreshFailureReconciler interface {
 type reconciler struct {
 	src    FailureSource
 	store  store.DB
-	config config.Resolver
+	config *config.Resolver
 	clock  clock.Clock
 }
 
@@ -48,7 +48,7 @@ var _ RefreshFailureReconciler = (*reconciler)(nil)
 
 // NewRefreshFailureReconciler returns the reconciler over the failed-refresh read (store.Maintenance.FailedRefreshes).
 func NewRefreshFailureReconciler(
-	src FailureSource, s store.DB, c config.Resolver, clock clock.Clock,
+	src FailureSource, s store.DB, c *config.Resolver, clock clock.Clock,
 ) RefreshFailureReconciler {
 	return &reconciler{src: src, store: s, config: c, clock: clock}
 }

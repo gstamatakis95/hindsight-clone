@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/graph"
 	"memd/internal/jobs"
 	"memd/internal/store"
 )
@@ -77,8 +78,8 @@ func (r *rederiver) write(
 	if err := tx.Units().Update(ctx, u); err != nil {
 		return err
 	}
-	rebuilt := []domain.LinkKind{domain.LinkTemporal, domain.LinkSemantic}
-	if _, err := tx.Links().DeleteForUnit(ctx, id, rebuilt); err != nil {
+	rebuilt := []graph.Kind{graph.KindTemporal, graph.KindSemantic}
+	if _, err := tx.Graph().DeleteUnitLinks(ctx, id, rebuilt); err != nil {
 		return err
 	}
 	if err := r.d.Linker.Link(ctx, tx, b, []domain.Unit{u}, nil); err != nil {

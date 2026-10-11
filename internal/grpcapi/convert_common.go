@@ -2,8 +2,8 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
-	reflecteng "memd/internal/engine/reflect"
+	"memd/internal/recall"
+	reflecteng "memd/internal/reflect"
 
 	pb "memd/gen/memory/v1"
 )
@@ -297,7 +297,7 @@ func armTraceToProto(a recall.ArmTrace) *pb.ArmTrace {
 }
 
 // recallTraceToProto converts a RecallTrace; nil = nil.
-func recallTraceToProto(t *recall.RecallTrace) *pb.RecallTrace {
+func recallTraceToProto(t *recall.Trace) *pb.RecallTrace {
 	if t == nil {
 		return nil
 	}
@@ -339,7 +339,7 @@ func toolCallsToProto(in []domain.ToolCallTrace) []*pb.ToolCallTrace {
 }
 
 // reflectTraceToProto converts a ReflectTrace; nil = nil.
-func reflectTraceToProto(t *reflecteng.ReflectTrace) *pb.ReflectTrace {
+func reflectTraceToProto(t *reflecteng.Trace) *pb.ReflectTrace {
 	if t == nil {
 		return nil
 	}

@@ -126,9 +126,6 @@ func assertReadsNotFound(t *testing.T, e env, b domain.BankRef) {
 	if _, err := codec.Export(e.ctx, b); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("Export during delete: %v", err)
 	}
-	if _, err := NewDirectiveSelector(e.store).Select(e.ctx, b, nil, true); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("Select during delete: %v", err)
-	}
 }
 
 // runUntilDone runs the delete job until it reports done, counting the runs.

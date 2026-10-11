@@ -8,13 +8,6 @@ import (
 	"slices"
 )
 
-// DirectiveSelector returns active directives matching the request tags (untagged = global).
-type DirectiveSelector interface {
-	// Select returns bank b's active directives that are global or match tags; all = every active
-	// directive regardless of tags (apply_all_directives).
-	Select(ctx context.Context, b domain.BankRef, tags []string, all bool) ([]domain.Directive, error)
-}
-
 // DirectiveAdmin manages a bank's directives. Its method set is identical to server.DirectiveAdmin, so
 // the implementation satisfies the server's interface directly.
 type DirectiveAdmin interface {
@@ -55,35 +48,6 @@ func overlaps(a, b []string) bool {
 		}
 	}
 	return false
-}
-
-// directiveSelector implements DirectiveSelector over store.DB.
-type directiveSelector struct{ s store.DB }
-
-var _ DirectiveSelector = (*directiveSelector)(nil)
-
-// NewDirectiveSelector returns the DirectiveSelector over s. Directives are read in a short transaction
-// (store.Reader has no directive read; decision 1306).
-func NewDirectiveSelector(s store.DB) DirectiveSelector { return &directiveSelector{s: s} }
-
-// Select keeps the active directives that are untagged (global) or share a tag with the request; with no
-// request tags only global ones apply (Hindsight's isolation mode), and all keeps every active one.
-func (d *directiveSelector) Select(
-	ctx context.Context, b domain.BankRef, tags []string, all bool,
-) ([]domain.Directive, error) {
-	active, err := readDirectives(ctx, d.s, b, true)
-	if err != nil {
-		return nil, err
-	}
-	want := domain.NormalizeTags(tags)
-	out := make([]domain.Directive, 0, len(active))
-	for _, dir := range active {
-		own := domain.NormalizeTags(dir.Tags)
-		if all || len(own) == 0 || overlaps(own, want) {
-			out = append(out, dir)
-		}
-	}
-	return out, nil
 }
 
 // directiveAdmin implements DirectiveAdmin over store.DB.

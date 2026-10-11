@@ -8,17 +8,10 @@ import (
 	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"slices"
 	"strings"
 )
-
-// DirectiveSelector is the part of bank.DirectiveSelector the single-shot synthesizer consumes to put the
-// bank's directives into synthesize; bank.DirectiveSelector satisfies it (same signature).
-type DirectiveSelector interface {
-	// Select returns bank b's active directives that are global or match tags; all = every active
-	// directive regardless of tags.
-	Select(ctx context.Context, b domain.BankRef, tags []string, all bool) ([]domain.Directive, error)
-}
 
 // ModelDeps are what the synthesizers need to make their own LLM calls.
 type ModelDeps struct {
@@ -28,8 +21,9 @@ type ModelDeps struct {
 	Router *ai.Router
 	// Clock dates the prompts.
 	Clock clock.Clock
-	// Directives selects the directives for synthesize; nil = none.
-	Directives DirectiveSelector
+	// Directives reads the bank's directives for synthesize, which applies those domain.SelectDirectives picks for
+	// the model's scope; nil = none.
+	Directives store.DB
 }
 
 // deltaPlanner makes the delta call: edit ops over the current document's sections and

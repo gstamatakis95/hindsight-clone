@@ -14,7 +14,8 @@ linters:
         - name: unused-parameter
     wrapcheck:
       # errors crossing a boundary are already domain error classes (the jobs catalogue returns the store's)
-      ignore-package-globs: ["memd/internal/store", "memd/internal/ai", "memd/internal/blob", "memd/internal/jobs"]
+      ignore-package-globs: ["memd/internal/store", "memd/internal/graph", "memd/internal/ai", "memd/internal/blob",
+        "memd/internal/jobs"]
     depguard:
       rules:
         engines:
@@ -40,6 +41,79 @@ linters:
               desc: use blob.Store
             - pkg: "github.com/DataDog"
               desc: observability is wired in cmd/memd via internal/observability; engines stay vendor-free
+        graph:
+          files: ["**/internal/graph/*.go"]   # the boundary; graphtest may use store to seed units
+          deny:
+            - pkg: "memd/internal/store"
+              desc: the graph boundary imports only domain (store imports graph for Tx.Graph)
+            - pkg: "memd/internal/config"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/jobs"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/ai"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/blob"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/engine"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/recall"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/reflect"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/timex"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/linking"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/grpcapi"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/internal/maintenance"
+              desc: the graph boundary imports only domain
+            - pkg: "memd/gen"
+              desc: no proto types in the graph boundary
+            - pkg: "github.com/jackc/pgx"
+              desc: only store/postgres uses pgx
+            - pkg: "github.com/DataDog"
+              desc: the graph boundary stays vendor-free
+        libraries:
+          files: ["**/internal/recall/**", "**/internal/reflect/**", "**/internal/timex/**", "**/internal/linking/**",
+            "!$test"]   # tests use pgtest
+          deny:
+            - pkg: "memd/internal/engine"
+              desc: libraries never import the engines (services)
+            - pkg: "memd/internal/grpcapi"
+              desc: libraries don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the libraries
+            - pkg: "memd/internal/store/postgres"
+              desc: libraries depend on the store and graph interfaces only
+            - pkg: "memd/internal/ai/gateway"
+              desc: libraries depend on the ai interfaces only
+            - pkg: "memd/internal/blob/s3"
+              desc: libraries depend on blob.Store only
+            - pkg: "memd/gen"
+              desc: no proto types in libraries; use domain
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB
+            - pkg: "net/http"
+              desc: use ai.LLM / ai.Embedder / ai.Reranker
+            - pkg: "github.com/aws"
+              desc: use blob.Store
+            - pkg: "github.com/DataDog"
+              desc: libraries stay vendor-free
+        library-timex-linking:
+          files: ["**/internal/timex/**", "**/internal/linking/**"]
+          deny:
+            - pkg: "memd/internal/recall"
+              desc: timex and linking sit below recall
+            - pkg: "memd/internal/reflect"
+              desc: timex and linking sit below reflect
+        library-recall:
+          files: ["**/internal/recall/**"]
+          deny:
+            - pkg: "memd/internal/reflect"
+              desc: recall sits below reflect (reflect imports recall)
+            - pkg: "memd/internal/linking"
+              desc: recall never links
         grpcapi:
           files: ["**/internal/grpcapi/**"]
           deny:
@@ -75,6 +149,14 @@ linters:
               desc: contracts sit below config
             - pkg: "memd/internal/engine"
               desc: contracts sit below the engines
+            - pkg: "memd/internal/recall"
+              desc: contracts sit below the libraries
+            - pkg: "memd/internal/reflect"
+              desc: contracts sit below the libraries
+            - pkg: "memd/internal/timex"
+              desc: contracts sit below the libraries
+            - pkg: "memd/internal/linking"
+              desc: contracts sit below the libraries
             - pkg: "memd/internal/grpcapi"
               desc: contracts sit below the gRPC API
             - pkg: "memd/internal/jobs"
@@ -96,6 +178,14 @@ linters:
               desc: adapters translate; they never decide
             - pkg: "memd/internal/engine"
               desc: adapters never import engines
+            - pkg: "memd/internal/recall"
+              desc: adapters never import libraries
+            - pkg: "memd/internal/reflect"
+              desc: adapters never import libraries
+            - pkg: "memd/internal/timex"
+              desc: adapters never import libraries
+            - pkg: "memd/internal/linking"
+              desc: adapters never import libraries
             - pkg: "memd/internal/grpcapi"
               desc: adapters never import the gRPC API
             - pkg: "memd/internal/jobs"
@@ -109,6 +199,14 @@ linters:
           deny:
             - pkg: "memd/internal/engine"
               desc: jobs sits below the engines; they import it
+            - pkg: "memd/internal/recall"
+              desc: jobs sits below the libraries
+            - pkg: "memd/internal/reflect"
+              desc: jobs sits below the libraries
+            - pkg: "memd/internal/timex"
+              desc: jobs sits below the libraries
+            - pkg: "memd/internal/linking"
+              desc: jobs sits below the libraries
             - pkg: "memd/internal/config"
               desc: jobs sits beside config, below the engines
             - pkg: "memd/internal/grpcapi"

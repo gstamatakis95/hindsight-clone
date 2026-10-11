@@ -7,8 +7,7 @@
 // adapters, server, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares the small interfaces it
 // consumes instead of importing other engines, such as [StatsSource] (store.Reader satisfies it), and enqueues
 // through the jobs catalogue. cmd/memd/wire.go builds every engine here; the server's BankService calls them, the
-// delete_bank job handler calls [BankDeleter.Run], and the
-// mental-model synthesizers and the prompt previewer use the [DirectiveSelector]. Several interfaces have
+// delete_bank job handler calls [BankDeleter.Run]. Several interfaces have
 // the exact method set of the matching server interface, so the implementations plug into the server directly.
 //
 // # Bank existence rules
@@ -40,10 +39,9 @@
 // # Directives
 //
 // [DirectiveAdmin] upserts (normalizing tags; an empty ID creates), lists (filtered by tag overlap, optionally
-// active only) and deletes directives. [DirectiveSelector.Select] returns the active directives a request
-// sees: untagged directives are global and always apply; tagged ones apply when they share a tag with the
-// request; with no request tags only global ones apply; all=true (apply_all_directives) returns every
-// active directive. Directives are read in a short transaction because store.Reader has no directive read.
+// active only) and deletes directives. Which directives apply to a request is domain.SelectDirectives, the rule
+// reflect and the mental-model synthesize prompt share; the prompt preview applies it with no request tags (the
+// untagged directives). Directives are read in a short transaction because store.Reader has no directive read.
 //
 // # Stats and tags
 //

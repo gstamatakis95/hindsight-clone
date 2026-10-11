@@ -11,7 +11,9 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
+	"memd/internal/linking"
 	"memd/internal/store"
+	"memd/internal/timex"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,8 +52,8 @@ type RetainResult struct { //nolint:revive // stutter: name fixed by the spec
 	ChunksTotal int
 	// ChunksSkipped counts chunks already committed with a matching hash (a resumed retain).
 	ChunksSkipped int
-	// Scopes are the observation scopes the new units consolidate under (from the document's tags; empty
-	// when no ScopeExpander is wired).
+	// Scopes are the observation scopes the new units consolidate under (domain.ExpandScopes over the
+	// document's tags).
 	Scopes []domain.ScopeKey
 	// Usage is per-slot token usage of the extraction calls (EXTRACT), summed per slot and model.
 	Usage []domain.Usage
@@ -64,21 +66,19 @@ type RetainerDeps struct {
 	// Blob holds the original text.
 	Blob blob.Store
 	// Config resolves the effective config (server < tenant < bank < job overrides).
-	Config config.Resolver
+	Config *config.Resolver
 	// Extractor turns chunks into facts.
 	Extractor Extractor
-	// Dates resolves relative time expressions (timex.TimeNormalizer).
-	Dates DateNormalizer
+	// Dates resolves relative time expressions; nil = facts keep only their absolute dates.
+	Dates *timex.Normalizer
 	// Embedder embeds fact texts.
 	Embedder ai.Embedder
 	// Entities resolves free-form mentions.
-	Entities EntityResolver
+	Entities *linking.Resolver
 	// Labels resolves label entities.
-	Labels LabelResolver
+	Labels *linking.LabelResolver
 	// Linker adds temporal, semantic and causal links.
-	Linker Linker
-	// Scopes expands the document's tags into scopes for RetainResult.Scopes; nil = none reported.
-	Scopes ScopeExpander
+	Linker *linking.Linker
 	// Tokens counts tokens for chunking; nil = approxTokens.
 	Tokens TokenCounter
 	// Clock stamps events and progress.
@@ -210,7 +210,7 @@ func (r *retainer) start(ctx context.Context, job *jobs.Run) (*run, error) {
 	}
 	cfg, err := r.d.Config.Effective(ctx, j.Bank, levels...)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
+		return nil, fmt.Errorf("retain: %w", err)
 	}
 	oh, err := NoopHash(j.Overrides, p.ObservationScopes)
 	if err != nil {
@@ -375,12 +375,9 @@ func uncommitted(committed map[int]string, batch []domain.Chunk) []domain.Chunk 
 	return out
 }
 
-// scopes expands the document's tags under its scope mode, when a ScopeExpander is wired.
+// scopes expands the document's tags under its scope mode.
 func (r *retainer) scopes(rn *run) []domain.ScopeKey {
-	if r.d.Scopes == nil {
-		return nil
-	}
-	s, err := r.d.Scopes.Expand(rn.j.Bank, rn.tags, scopeMode(rn.p.ObservationScopes, rn.cfg))
+	s, err := domain.ExpandScopes(rn.j.Bank, rn.tags, scopeMode(rn.p.ObservationScopes, rn.cfg))
 	if err != nil {
 		return nil
 	}

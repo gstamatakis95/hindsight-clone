@@ -8,7 +8,7 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/reflect"
+	"memd/internal/reflect"
 	"memd/internal/store"
 )
 
@@ -147,8 +147,8 @@ type deltaDraft struct {
 	FactsRetrieved int
 }
 
-// Projector is the part of reflect.StructuredProjector the runner consumes to project a finished page
-// onto the trigger's response schema; reflect.StructuredProjector satisfies it.
+// Projector is the part of reflect.Agent the runner consumes to project a finished page onto the trigger's
+// response schema; reflect.Agent satisfies it.
 type Projector interface {
 	// Project makes one STRUCTURED_OUTPUT call and returns JSON valid against req.Schema.
 	Project(ctx context.Context, req reflect.ProjectRequest) (json.RawMessage, error)
@@ -159,13 +159,15 @@ type RefreshRunnerDeps struct {
 	// Store reads the model and writes the version.
 	Store store.DB
 	// Config merges server < tenant < bank < model overrides < trigger < call overrides.
-	Config config.Resolver
+	Config *config.Resolver
 	// Scope answers the no-LLM "anything in scope / in the window?" check.
 	Scope ScopeReader
 	// Synthesizers holds one Synthesizer per strategy.
 	Synthesizers []Synthesizer
 	// Projector projects the page onto trigger.response_schema_json; nil = a model with a schema fails.
 	Projector Projector
+	// Tags compiles fuzzy scope tags (recall.Engine); nil = a model with a fuzzy scope fails.
+	Tags TagCompiler
 	// Embedder embeds the page for SearchPages; nil = pages are stored without an embedding.
 	Embedder ai.Embedder
 	// Clock stamps last_refreshed_at, history and traces.

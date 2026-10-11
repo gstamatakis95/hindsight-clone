@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"math/rand/v2"
 	"memd/internal/domain"
-	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
 	"slices"
@@ -27,18 +26,18 @@ var predicateLeafTags = [][]string{
 }
 
 // randomPredicate builds a random tree of the given depth, including malformed nodes.
-func randomPredicate(r *rand.Rand, depth int) store.SQLPredicate {
+func randomPredicate(r *rand.Rand, depth int) domain.TagPredicate {
 	if depth == 0 || r.IntN(3) == 0 {
-		return store.SQLPredicate{
-			Op:    store.PredicateTags,
+		return domain.TagPredicate{
+			Op:    domain.PredicateTags,
 			Tags:  predicateLeafTags[r.IntN(len(predicateLeafTags))],
 			Match: predicateModes[r.IntN(len(predicateModes))],
 		}
 	}
-	ops := []store.PredicateOp{store.PredicateAnd, store.PredicateOr, store.PredicateNot, "xor"}
-	p := store.SQLPredicate{Op: ops[r.IntN(len(ops))]}
+	ops := []domain.PredicateOp{domain.PredicateAnd, domain.PredicateOr, domain.PredicateNot, "xor"}
+	p := domain.TagPredicate{Op: ops[r.IntN(len(ops))]}
 	n := r.IntN(4)
-	if p.Op == store.PredicateNot && r.IntN(4) != 0 {
+	if p.Op == domain.PredicateNot && r.IntN(4) != 0 {
 		n = 1 // mostly well-formed nots
 	}
 	for range n {
@@ -48,12 +47,12 @@ func randomPredicate(r *rand.Rand, depth int) store.SQLPredicate {
 }
 
 // TestRenderPredicateMatchesEval renders many predicates and checks Postgres selects exactly the tag sets
-// (*store.SQLPredicate).Eval accepts.
+// (*domain.TagPredicate).Eval accepts.
 func TestRenderPredicateMatchesEval(t *testing.T) {
 	t.Parallel()
 	pool := pgtest.Pool(t)
 	r := rand.New(rand.NewPCG(1, 2)) //nolint:gosec // deterministic test data, not security
-	preds := []*store.SQLPredicate{nil, {Op: store.PredicateAnd}, {Op: store.PredicateOr}, {Op: store.PredicateNot}}
+	preds := []*domain.TagPredicate{nil, {Op: domain.PredicateAnd}, {Op: domain.PredicateOr}, {Op: domain.PredicateNot}}
 	for range 300 {
 		p := randomPredicate(r, 3)
 		preds = append(preds, &p)

@@ -10,9 +10,9 @@
 // classes, so callers test them with errors.Is (wrapcheck ignores this package).
 //
 // Besides interfaces, the package holds only the types the interfaces reference: the query, hit and cursor types
-// ([VectorQuery], [TextQuery], [TemporalQuery], [GraphQuery], [Hit], [UnitQuery], [DocumentQuery], [ModelQuery],
+// ([VectorQuery], [TextQuery], [TemporalQuery], [Hit], [UnitQuery], [DocumentQuery], [ModelQuery],
 // [ScopeQuery], ...), the job types ([Job], [DedupePolicy], [OperationFilter], [LostJobsError]) and the tag filter tree
-// [SQLPredicate] with its reference semantics [SQLPredicate.Eval].
+// [domain.TagPredicate] (with its reference semantics).
 //
 // There is no mock or fake of this package: the Postgres implementation is tested on real Postgres
 // (internal/store/postgres/pgtest), and so is every caller. The doc comment on each interface method is its
@@ -27,11 +27,14 @@
 //
 // [Tx.Seq] locks the bank row and returns the transaction's change sequence. Every transaction that changes memory
 // content calls it first, before any read it depends on and before any Enqueue, and stamps the rows and lifecycle
-// events it writes with the value, so within a bank seq order is commit order; [SeqRange] lets readers (mental-model
-// refreshes) read a stable snapshot or only what changed. [BankRepo.LockTenantConfig] serializes read-modify-writes of
-// a tenant's config. The Postgres adapter re-runs a transaction that loses a deadlock or serialization race, or whose
-// [EntityRepo.Attach] hit an entity pruned meanwhile, so the function passed to InTx must reset its captured outputs at
-// the top and keep no side effects outside the database.
+// events it writes with the value, so within a bank seq order is commit order; domain.SeqRange lets readers
+// (mental-model refreshes) read a stable snapshot or only what changed. [BankRepo.LockTenantConfig] serializes
+// read-modify-writes of a tenant's config. The Postgres adapter re-runs a transaction that loses a deadlock or
+// serialization race, or whose [EntityRepo.Attach] hit an entity pruned meanwhile, so the function passed to InTx must
+// reset its captured outputs at the top and keep no side effects outside the database.
+//
+// [Tx.Graph] is the memory graph (internal/graph) bound to the transaction: link writes commit with it, and its reads
+// see them.
 //
 // A minimal write:
 //

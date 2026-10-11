@@ -1,11 +1,10 @@
 package analyzer_test
 
 import (
+	"memd/tools/txcheck/analyzer"
 	"testing"
 
 	"golang.org/x/tools/go/analysis/analysistest"
-
-	"memd/tools/txcheck/analyzer"
 )
 
 func TestAnalyzer(t *testing.T) {

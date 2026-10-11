@@ -337,11 +337,11 @@ func TestSearchTextSmallBank(t *testing.T) {
 	fuInsert(t, s, small...)
 	cases := []struct {
 		name string
-		tags *store.SQLPredicate
+		tags *domain.TagPredicate
 		want int
 	}{
 		{"no filter", nil, 5},
-		{"tag x", &store.SQLPredicate{Op: store.PredicateTags, Tags: []string{"x"}, Match: domain.TagsMatchAnyStrict}, 1},
+		{"tag x", &domain.TagPredicate{Op: domain.PredicateTags, Tags: []string{"x"}, Match: domain.TagsMatchAnyStrict}, 1},
 	}
 	for _, c := range cases {
 		hs, err := s.Read().SearchText(t.Context(), store.TextQuery{Bank: fuBank, Text: "apple", Tags: c.tags, Limit: 10})

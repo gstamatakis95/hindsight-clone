@@ -101,14 +101,12 @@ type IngestorDeps struct {
 	// Blob stores the original text.
 	Blob blob.Store
 	// Config resolves the bank's effective config.
-	Config config.Resolver
+	Config *config.Resolver
 	// Retainer runs a sync retain inline.
 	Retainer Retainer
 	// Merge merges config levels (config.Merge): the request and item overrides stored on the document and
 	// job. Needed only when both carry overrides.
 	Merge ConfigMerger
-	// Scopes expands scope fan-out (consolidate.ScopeExpander); nil = only the ALL_COMBINATIONS cap is checked.
-	Scopes ScopeExpander
 	// Clock is "now" for items without a timestamp.
 	Clock clock.Clock
 	// NewID generates document ids; nil = uuid.NewString.
@@ -182,8 +180,11 @@ func (i *ingestor) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 // transaction creates it. The server level only adds defaults that cannot fail validation.
 func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.BankConfig, bool, error) {
 	cfg, err := i.d.Config.Effective(ctx, b)
+	if err == nil {
+		return cfg, true, nil
+	}
 	if !errors.Is(err, domain.ErrNotFound) {
-		return cfg, err == nil, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
+		return cfg, false, fmt.Errorf("retain: %w", err)
 	}
 	var tenant domain.BankConfig
 	err = i.d.Store.InTx(ctx, func(tx store.Tx) error {
@@ -275,21 +276,10 @@ func (i *ingestor) mergeOverrides(req, item *domain.BankConfig) (*domain.BankCon
 	return &o, nil
 }
 
-// checkFanout rejects a scope fan-out over its cap: through the wired ScopeExpander, else by counting the
-// ALL_COMBINATIONS subsets (2^n - 1) against max_combinations.
+// checkFanout rejects a scope fan-out over its cap (domain.ExpandScopes).
 func (i *ingestor) checkFanout(b domain.BankRef, tags []string, s domain.ObservationScopes) error {
-	if i.d.Scopes != nil {
-		if _, err := i.d.Scopes.Expand(b, tags, s); err != nil {
-			return fmt.Errorf("retain: observation scopes: %w", err)
-		}
-		return nil
-	}
-	if s.Mode != domain.ScopeModeAllCombinations {
-		return nil
-	}
-	limit := positive(s.MaxCombinations, domain.DefaultMaxCombinations)
-	if len(tags) >= 31 || (1<<len(tags))-1 > limit {
-		return fmt.Errorf("%w: %d tags fan out past max_combinations %d", domain.ErrTooManyScopes, len(tags), limit)
+	if _, err := domain.ExpandScopes(b, tags, s); err != nil {
+		return fmt.Errorf("retain: observation scopes: %w", err)
 	}
 	return nil
 }

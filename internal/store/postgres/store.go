@@ -146,9 +146,6 @@ func (t *tx) Units() store.UnitRepo { return &unitRepo{q: t.q, tx: t} }
 // Entities returns the entity repository bound to this transaction.
 func (t *tx) Entities() store.EntityRepo { return &entityRepo{q: t.q, tx: t} }
 
-// Links returns the link repository bound to this transaction.
-func (t *tx) Links() store.LinkRepo { return &linkRepo{q: t.q, tx: t} }
-
 // Evidence returns the observation-evidence repository bound to this transaction.
 func (t *tx) Evidence() store.EvidenceRepo { return &evidenceRepo{q: t.q, tx: t} }
 

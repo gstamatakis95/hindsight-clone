@@ -2,9 +2,9 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/recall"
-	reflecteng "memd/internal/engine/reflect"
 	"memd/internal/engine/retain"
+	"memd/internal/recall"
+	reflecteng "memd/internal/reflect"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -85,9 +85,9 @@ func retainResultToProto(r retain.IngestResult) *pb.RetainResponse {
 // ---------- recall ----------
 
 // recallRequestFromProto converts a RecallRequest; Bank carries only bank_id (the handler sets the tenant).
-func recallRequestFromProto(r *pb.RecallRequest) (recall.RecallRequest, error) {
+func recallRequestFromProto(r *pb.RecallRequest) (recall.Request, error) {
 	var d decoder
-	out := recall.RecallRequest{
+	out := recall.Request{
 		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
 		Types:              fromEnums[domain.FactType](&d, r.GetTypes()),
@@ -133,7 +133,7 @@ func entityStateToProto(x domain.EntityState) *pb.EntityState {
 }
 
 // recallResultToProto converts a RecallResult to a RecallResponse.
-func recallResultToProto(r recall.RecallResult) *pb.RecallResponse {
+func recallResultToProto(r recall.Result) *pb.RecallResponse {
 	out := &pb.RecallResponse{
 		Results:              memoriesToProto(r.Results),
 		SourceFactsTruncated: r.SourceFactsTruncated,
@@ -176,9 +176,9 @@ func memoriesToProto(in []recall.Memory) []*pb.Memory {
 
 // reflectRequestFromProto converts a ReflectRequest; Bank carries only bank_id (the handler sets the
 // tenant). The internal-only fields (Seq, Types, exclusions, RecallInclude, AsDocument) stay zero.
-func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.ReflectRequest, error) {
+func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.Request, error) {
 	var d decoder
-	out := reflecteng.ReflectRequest{
+	out := reflecteng.Request{
 		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
 		Tags:               d.tagFilter(r.GetTags(), r.GetTagsMatch(), r.GetTagGroups()),
@@ -195,11 +195,11 @@ func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.ReflectRequest, e
 }
 
 // reflectIncludeFromProto converts a ReflectInclude; nil = the defaults (all nil / false).
-func reflectIncludeFromProto(x *pb.ReflectInclude) reflecteng.ReflectInclude {
+func reflectIncludeFromProto(x *pb.ReflectInclude) reflecteng.Include {
 	if x == nil {
-		return reflecteng.ReflectInclude{}
+		return reflecteng.Include{}
 	}
-	return reflecteng.ReflectInclude{
+	return reflecteng.Include{
 		Facts: optCopy(x.Facts), ToolCalls: x.GetToolCalls(), ToolOutputs: optCopy(x.ToolOutputs),
 	}
 }
@@ -217,7 +217,7 @@ func basedOnToProto(b reflecteng.BasedOn) *pb.BasedOn {
 }
 
 // reflectResultToProto converts a ReflectResult to a ReflectResponse.
-func reflectResultToProto(r reflecteng.ReflectResult) *pb.ReflectResponse {
+func reflectResultToProto(r reflecteng.Result) *pb.ReflectResponse {
 	return &pb.ReflectResponse{
 		Text:                  r.Text,
 		StructuredOutputJson:  string(r.StructuredOutputJSON),

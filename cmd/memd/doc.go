@@ -9,13 +9,13 @@
 //
 // cmd/memd is the composition root, the only place concrete types meet. wire.go opens the infrastructure (the
 // Postgres pool and postgres.DB, the blob store MEMD_BLOB_PROVIDER selects, the AI gateway client), narrows each to
-// its boundary (store, blob, ai), builds the shared libraries once (config resolver, ai.Router, ai.Tokenizer,
-// timex, retain's shared pieces, recall, reflect) and runs the two modes. Each wire_<area>.go (memory, document,
-// observation, mentalmodel, bank, config, operation, maintenance) builds one area's engines, its gRPC handlers
-// (internal/grpcapi), its job handlers (handlers.go adapts the engines to jobs.Handler for the internal/jobs runner)
-// and its part of the maintenance service (internal/maintenance). config.go reads the environment and flags,
-// configfile.go the server config file, workerid.go the worker id, and glue.go the small adapters no engine provides
-// yet: the operation reader and the reflect page reader. The readiness probes and the worker's health server live in
+// its boundary (store, graph, blob, ai), builds the shared libraries once (config resolver, ai.Router, ai.Tokenizer,
+// timex, linking, retain's shared retainer, recall over postgres.DB.Graph, reflect) and runs the two modes. Each
+// wire_<area>.go (memory, document, observation, mentalmodel, bank, config, operation, maintenance) builds one area's
+// engines, its gRPC handlers (internal/grpcapi), its job handlers (handlers.go adapts the engines to jobs.Handler for
+// the internal/jobs runner) and its part of the maintenance service (internal/maintenance). config.go reads the
+// environment and flags, configfile.go the server config file, workerid.go the worker id, and glue.go the small
+// adapter no engine provides yet: the operation reader. The readiness probes and the worker's health server live in
 // internal/grpcapi. Engines never import this package; nothing here holds business logic.
 //
 // # Startup

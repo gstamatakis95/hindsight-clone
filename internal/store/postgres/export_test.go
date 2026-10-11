@@ -2,13 +2,13 @@ package postgres
 
 import (
 	"fmt"
-	"memd/internal/store"
+	"memd/internal/domain"
 	"strings"
 )
 
 // PredicateQuery renders p against a VALUES list of the given tag sets and returns a query selecting the
 // indexes of the rows it matches, with its arguments. The external tests run it on a real database.
-func PredicateQuery(p *store.SQLPredicate, tagSets [][]string) (string, []any) {
+func PredicateQuery(p *domain.TagPredicate, tagSets [][]string) (string, []any) {
 	var a sqlArgs
 	rows := make([]string, len(tagSets))
 	for j, tags := range tagSets {

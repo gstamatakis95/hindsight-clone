@@ -245,7 +245,7 @@ func (c *consolidator) promptObservations(
 			if !ok {
 				continue
 			}
-			n := c.d.Tokens.Count(src.Text)
+			n := c.tokens.Count(src.Text)
 			if used+n > perObs || (budget >= 0 && n > budget) {
 				break
 			}

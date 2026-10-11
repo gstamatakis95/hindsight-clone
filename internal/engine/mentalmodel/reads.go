@@ -9,16 +9,10 @@ import (
 // The reads below are store.Reader methods (ScopeReader, ModelLister) and store.Maintenance methods (CronSource,
 // FailureSource). The engine declares the small subsets it consumes; the store satisfies each of them.
 
-// ScopeReader answers "has anything in this scope changed?" without a model call, and lists the bank's tags
-// so fuzzy tag leaves resolve to exact tags before the scope compiles (decision 1203).
+// ScopeReader answers "has anything in this scope changed?" without a model call.
 type ScopeReader interface {
 	// NewestSeqInScope returns the highest seq of a live unit matching q, or 0 when none matches.
 	NewestSeqInScope(ctx context.Context, q store.ScopeQuery) (int64, error)
-	// TagCounts returns up to limit (<= 0 = all) tags of b's source with how many items carry each.
-	// Unknown or tombstoned bank: domain.ErrNotFound.
-	TagCounts(
-		ctx context.Context, b domain.BankRef, source domain.TagSource, prefix, after string, limit int,
-	) ([]domain.TagCount, error)
 }
 
 // ModelLister lists a bank's mental models, ordered by id.
