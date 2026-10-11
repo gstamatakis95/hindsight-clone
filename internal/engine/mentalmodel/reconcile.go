@@ -142,9 +142,9 @@ func failureReason(msg string) string {
 // overrides and operation id. A model (or bank) deleted before the job ran is done, not failed, so a job
 // that runs twice or after a delete is harmless. A malformed payload is domain.ErrInvalidArgument.
 func RunJob(ctx context.Context, r RefreshRunner, j port.Job) (RefreshOutcome, error) {
-	var p RefreshPayload
-	if err := json.Unmarshal(j.Payload, &p); err != nil || p.MentalModelID == "" {
-		return RefreshOutcome{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, j.Payload)
+	p, err := decodeRefreshPayload(j.Payload)
+	if err != nil {
+		return RefreshOutcome{}, err
 	}
 	out, err := r.Run(ctx, j.Bank, p.MentalModelID, RefreshOptions{
 		Manual: p.Manual, ForceFull: p.ForceFull, Strategy: p.Strategy, Overrides: j.Overrides,
@@ -157,4 +157,24 @@ func RunJob(ctx context.Context, r RefreshRunner, j port.Job) (RefreshOutcome, e
 		return out, fmt.Errorf("mentalmodel: refresh %s: %w", p.MentalModelID, err)
 	}
 	return out, nil
+}
+
+// decodeRefreshPayload reads a refresh_mental_model payload. Rows queued by consolidation before decision
+// 1800 carry the model under "model_id"; that key is read when "mental_model_id" is missing.
+func decodeRefreshPayload(raw []byte) (RefreshPayload, error) {
+	var p struct {
+		RefreshPayload
+		// LegacyModelID is the pre-1800 consolidation key.
+		LegacyModelID port.MentalModelID `json:"model_id"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
+	}
+	if p.MentalModelID == "" {
+		p.MentalModelID = p.LegacyModelID
+	}
+	if p.MentalModelID == "" {
+		return RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
+	}
+	return p.RefreshPayload, nil
 }
