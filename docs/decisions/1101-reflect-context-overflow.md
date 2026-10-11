@@ -5,11 +5,6 @@ SPEC: "A context-window overflow does not [fail]: the agent synthesises from wha
 surfaces an overflow as a non-retried `ErrUnavailable` whose message carries the provider's error body
 (decision 301), so the port can't type it.
 
-**Update (WP-16):** CCR WP-11-1 landed, and the gateway now classifies overflow replies as
-`domain.ErrContextOverflow`, which wraps ErrUnavailable. `isContextOverflow` is therefore
-`errors.Is(err, domain.ErrContextOverflow)`, and the engine's text match is gone. The expand tool reads chunks
-with `port.Reader.GetChunks`. `ChunkReader` is removed, and `DefaultTools(rc, pages, r)` takes no chunk reader.
-
 ## Decision
 - File CCR WP-11-1 for `domain.ErrContextOverflow` (wrapping `ErrUnavailable`).
 - Meanwhile `isContextOverflow` matches the lowercased error text against Hindsight's markers

@@ -1,5 +1,7 @@
 # 1603 — Curate, docs and bank engines on the batch ports
 
+Supersedes the consumer-interface and alias parts of decision 1300.
+
 ## Context
 WP-13 declared the reads it needed as consumer interfaces whose methods matched CCR WP-13-1 (decision 1300).
 WP-15 applied that CCR: `ModelSpecReader` merged into `ListMentalModels`, the query and cursor types moved to

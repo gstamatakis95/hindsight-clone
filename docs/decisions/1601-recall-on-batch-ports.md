@@ -1,5 +1,8 @@
 # 1601 — Recall on the batch ports
 
+Supersedes the consumer-interface parts of decision 902: `TagVocabulary`/`ChunkReader`/`EntityStateReader`,
+the optional `Lookups`, and Stale left unfilled.
+
 ## Context
 With CCR WP-09-1 and WP-09-2 applied, `port.Reader` has `TagCounts`, `GetChunks`, `EntityStates`,
 `StaleScopes` and the temporal relevance filter. The optional `Lookups` dependency existed only because

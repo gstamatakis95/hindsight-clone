@@ -66,6 +66,7 @@ Every item runs against `internal/fake`. The porttest additions run against both
 | WP-08 replace via IDsByDocument (observations deleted, co-sources reset) | `retain.TestRetainReplacementDeletesObservationsAndResetsCoSources` |
 | WP-13 reprocess carries `ObservationScopes`, overrides replayed or replaced, item context kept | `retain.TestReprocessCarriesScopesAndOverrides` |
 | Reprocess: unknown document is NotFound, deleting bank is BankDeleting | `retain.TestReprocessUnknownDocumentAndDeletingBank` |
+| Reprocess ignores a curated unit's context and timeless flag; compile check `var _ docs.Reprocessor` | `retain.TestReprocessIgnoresCuratedUnit` |
 | WP-09 TagCounts vocabulary (count desc, then tag) | `recall.TestBankTagsMostUsedFirst`, `recall.TestRecallFuzzyTagsThroughFake` |
 | WP-09 Memory.Stale from StaleScopes | `recall.TestRecallMemoryStale` |
 | WP-09 temporal Embedding and MinSimilarity 0.1 | `recall.TestTemporalArmRelevanceFilter` |
@@ -98,8 +99,10 @@ Gates: `make gen` leaves no diff. `make lint BREAKING_AGAINST=contracts-v1` repo
   - 1600: the retain Reprocessor.
   - 1601: recall on the batch ports.
   - 1602: consolidate on the batch ports.
-  - 1603: curate, docs and bank on the batch ports.
-- **Updated decisions:** 802 (superseded), 808, 902, 1003, 1101, 1203 and 1300.
+  - 1603: curate, docs and bank on the batch ports. Supersedes parts of 1300.
+  - 1604: reflect on the batch ports. Supersedes the text-marker part of 1101.
+  - 1600 supersedes the item-scopes bullet of 808, and 1601 supersedes the consumer-interface parts of 902.
+- **Updated decisions (the ones the card names):** 802 (marked superseded), 1003 and 1203.
 - **CCRs:** none.
 
 ## Constructor changes for WP-14b
@@ -115,11 +118,16 @@ Gates: `make gen` leaves no diff. `make lint BREAKING_AGAINST=contracts-v1` repo
 
 ## Known gaps
 - **Reprocess loses some item fields.** Entity hints and `resolve_entities` are not stored anywhere, so a
-  reprocess runs without them. A document with no live units reprocesses with no context and with
-  mention time "now" (decision 1600).
+  reprocess runs without them. The item's context, metadata, mention time and timeless flag come from the
+  newest uncurated unit of the document. A document with no units at all reprocesses with none of them,
+  and its mention time becomes "now" (decision 1600).
 - **Audit rows are not tagged.** Replaced units' audit and archive rows are not tagged with the reprocess
   operation id (SPEC 1970). No port method exists for it; this is carried from WP-08.
-- **Stale threshold in the ChangeDetector.** The ChangeDetector resolves fuzzy scopes at recall's default
-  trigram floor (0.45), because it has no config. The runner's pre-check uses the model's effective config.
+- **The ChangeDetector can miss a refresh.** It resolves fuzzy scopes at recall's default trigram floor
+  (0.45), because it has no config; the runner's pre-check uses the model's effective config.
+  - Consequence: if a bank sets `recall.fuzzy_tag_min_similarity` below 0.45, a write whose tag matches
+    between the bank's floor and 0.45 does not mark the model stale. Its automatic refresh is missed until
+    some other in-scope write lands, or a manual or cron refresh runs.
+  - Fix for WP-14b or a follow-up: give `NewChangeDetector` a `ConfigResolver`.
 - **Stale ignores the snapshot.** `Memory.Stale` reads the latest committed state, not the request's seq
   snapshot.

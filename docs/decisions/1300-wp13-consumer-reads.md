@@ -5,10 +5,6 @@ ListMemories, GetMemory (archived), observation history, stats, tags, list docum
 template export and the invalidate refresh lookup all need reads `port.Reader` does not have. Frozen ports
 change only through a CCR, and engine work must not block on it.
 
-**Update (WP-16):** CCR WP-13-1 landed (WP-15). The query and cursor types are now port aliases, and
-`ModelSpecReader` is gone: Export uses `ListMentalModels`. The remaining consumer interfaces are satisfied by
-`port.Reader`. See decision 1603.
-
 ## Decision
 - Each missing read is declared as a small interface in the consuming engine package (`curate.UnitSource`,
   `curate.CitingModels`, `curate.ScopeSource`, `bank.StatsSource`, `bank.ModelSpecReader`,

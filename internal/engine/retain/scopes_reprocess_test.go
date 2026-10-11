@@ -3,7 +3,9 @@ package retain
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"memd/internal/domain"
+	"memd/internal/engine/docs"
 	"memd/internal/port"
 	"memd/internal/prompts"
 	"testing"
@@ -171,5 +173,41 @@ func TestReprocessUnknownDocumentAndDeletingBank(t *testing.T) {
 	if ops := e.operations(domain.OperationKindRetainDocument); len(ops) != 0 {
 		raw, _ := json.Marshal(ops)
 		t.Errorf("reprocess enqueued %s", raw)
+	}
+}
+
+// The retain Reprocessor is what docs.DocumentAdmin delegates ReprocessDocument to (decision 1303).
+var _ docs.Reprocessor = NewReprocessor(nil)
+
+// TestReprocessIgnoresCuratedUnit: the item's context, timeless flag and mention time come from a unit no
+// curator edited, so a curated context or timeless flag on one unit never spreads to the re-extracted ones
+// (reprocess resets curation).
+func TestReprocessIgnoresCuratedUnit(t *testing.T) {
+	e := newEnv(t, 0)
+	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("one"), fact("two")))
+	e.ingest(IngestRequest{Items: []IngestItem{{
+		DocumentID: "d1", Content: "some text", Context: "chat", Timestamp: &reprocessAt,
+	}}})
+	e.inTx(func(tx port.Tx) error {
+		seq, err := tx.Seq(e.ctx, testBank)
+		if err != nil {
+			return err
+		}
+		us, err := tx.ListUnits(e.ctx, port.UnitQuery{Bank: testBank, DocumentID: "d1", Limit: 10})
+		if err != nil || len(us) != 2 {
+			return fmt.Errorf("units of d1: %d, %w", len(us), err)
+		}
+		edited := e.clock.Now()
+		u := us[0] // the newest: Reprocess must skip it
+		u.Context, u.Timeless, u.EditedAt, u.Seq = "curated", true, &edited, seq
+		return tx.Units().Update(e.ctx, u)
+	})
+	if _, err := NewReprocessor(e.store).Reprocess(e.ctx, testBank, "d1", nil); err != nil {
+		t.Fatal(err)
+	}
+	_, p := e.reprocessJob()
+	if p.Context != "chat" || p.Timeless || p.Timestamp == nil || !p.Timestamp.Equal(reprocessAt) {
+		t.Errorf("payload context %q, timeless %v, timestamp %v; want the uncurated item values",
+			p.Context, p.Timeless, p.Timestamp)
 	}
 }

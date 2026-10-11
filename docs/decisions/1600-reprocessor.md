@@ -1,5 +1,8 @@
 # 1600 — The retain engine's Reprocessor
 
+Supersedes the "Item observation scopes" bullet of decision 808. `DocumentScopesWriter` is gone, and the
+Ingestor sets `Document.ObservationScopes` on `Upsert`. The no-op hash rules of 808 are unchanged.
+
 ## Context
 Decision 1303 delegates ReprocessDocument to the retain engine through `docs.Reprocessor`, but no
 implementation existed. The WP-16 card requires that every re-upsert path carry `Document.ObservationScopes`,
@@ -21,10 +24,14 @@ document row stores none of them.
   rebuilding the key. `Document.ContentHash` can't be used: it belongs to the last *completed* retain and is
   empty for a document that never completed. The Retainer re-hashes the blob anyway and fails loudly on a
   mismatch.
-- **Context, metadata, mention time and timeless flag:** these are read from one live unit of the
-  document. Every unit of one retain shares them.
-  - A document with no live units (zero facts, or all invalidated) reprocesses with none of them, and its
-    mention time becomes "now".
+- **Context, metadata, mention time and timeless flag:** these are read from one unit of the document.
+  Every unit of one retain shares them.
+  - The unit is the newest one that no curator edited (`EditedAt == nil`), live or archived. It comes from
+    `ListUnits` (`DocumentID`, newest first, up to 100). A curated context or timeless flag must not spread
+    to every re-extracted unit, because reprocess resets curation (SPEC 1970).
+  - If every listed unit was edited, the newest unit is used.
+  - A document with no units at all (zero facts) reprocesses with none of these values, and its mention
+    time becomes "now".
   - Entity hints and `resolve_entities` are not stored anywhere, so a reprocess runs without them.
 - Not done: tagging the replaced units' audit and archive rows with the reprocess operation id (SPEC
   1970). No port method exists for it. This is a known gap, carried from WP-08.

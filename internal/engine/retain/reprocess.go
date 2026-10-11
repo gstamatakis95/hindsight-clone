@@ -20,6 +20,9 @@ type Reprocessor interface {
 	) (port.OperationID, error)
 }
 
+// reprocessScanLimit is how many of a document's units (newest first) Reprocess scans for one never curated.
+const reprocessScanLimit = 100
+
 // reprocessor implements Reprocessor over port.Store.
 type reprocessor struct {
 	s port.Store
@@ -78,9 +81,10 @@ func (r *reprocessor) Reprocess(
 
 // reprocessPayload rebuilds a retain_document payload from the stored document: its blob key (whose last
 // segment is the content hash, domain.DocumentBlobKey), tags and item scopes. The item's context, metadata,
-// mention time and timeless flag are not stored on the document, so they are taken from one of its live
-// units (all units of one retain share them); entity hints are not stored anywhere and are lost (decision
-// 1600).
+// mention time and timeless flag are not stored on the document, so they are taken from one of its units
+// (all units of one retain share them): the newest one never curated (a curated context or timeless flag must
+// not spread to every re-extracted unit, since reprocess resets curation), live or archived, else the newest.
+// Entity hints are not stored anywhere and are lost (decision 1600).
 func reprocessPayload(ctx context.Context, tx port.Tx, b port.BankRef, doc domain.Document) (DocumentPayload, error) {
 	hash := doc.BlobKey[strings.LastIndex(doc.BlobKey, "/")+1:]
 	if doc.BlobKey == "" || domain.DocumentBlobKey(b, doc.ID, hash) != doc.BlobKey {
@@ -90,15 +94,17 @@ func reprocessPayload(ctx context.Context, tx port.Tx, b port.BankRef, doc domai
 		DocumentID: doc.ID, ContentHash: hash, BlobKey: doc.BlobKey, Tags: domain.NormalizeTags(doc.Tags),
 		ObservationScopes: doc.ObservationScopes, ForceReextract: true,
 	}
-	ids, err := tx.Units().IDsByDocument(ctx, b, doc.ID)
-	if err != nil || len(ids) == 0 {
-		return p, err
-	}
-	us, err := tx.GetUnits(ctx, b, ids[:1])
+	us, err := tx.ListUnits(ctx, port.UnitQuery{Bank: b, DocumentID: doc.ID, Limit: reprocessScanLimit})
 	if err != nil || len(us) == 0 {
 		return p, err
 	}
 	u := us[0]
+	for _, c := range us {
+		if c.EditedAt == nil {
+			u = c
+			break
+		}
+	}
 	p.Context, p.Metadata, p.Timeless = u.Context, u.Metadata, u.Timeless
 	if !u.Timeless && u.MentionedAt != nil {
 		at := u.MentionedAt.UTC()
