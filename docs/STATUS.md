@@ -326,3 +326,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 - 2026-10-11 WP-21 (config writes: per-slot models merge on implicit mask; validated whole-config writes) merged; gates pass.
 - 2026-10-11 WP-18 (the consolidation→refresh payload uses mental_model_id + a legacy key fallback; cited-scope re-check before stamping; e2e ConsolidationTriggersRefresh) merged; gates pass.
 - 2026-10-11 WP-19 merged (CCR WP-19-1: SetDocumentTags(old,new) keeps label tags; Retag rewrites unit tags in the API tx, so units carry the new tags as soon as UpdateDocument returns; retag_document clears observations). Gates pass.
+- 2026-10-11 CLOSING VERIFICATION of main @ 9a5d93a: CLEAN. C1, H1, H2 and the A-HIGH are confirmed fixed;
+  gates incl. make e2e pass; no cross-engine regression. Accepted gaps recorded in decisions 1900 and 2100
+  (stale document tags after a failed content-retain; label/doc tag-name collision; a pre-existing invalid
+  stored config blocks updates until reset). rules.md updated. Waiting on WP-20.

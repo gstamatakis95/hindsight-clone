@@ -42,3 +42,9 @@ Final review A, finding FX-A1, raised two problems.
 ## Spec lines involved
 SPEC "Model routing" (~line 80), the BankConfig comment (~line 242: "models: merged per slot. Other lists:
 set replaces"), decision 604 and decision 401.
+
+## Addendum (orchestrator, closing verification)
+
+A config stored before WP-21 that no longer validates makes every Update*Config call fail until it is fixed,
+even when the update touches an unrelated field. This is intended: ResetBankConfig (not validated) on the bad
+field repairs it.

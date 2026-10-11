@@ -68,3 +68,12 @@ Tests:
 - `porttest` `UnitsSetDocumentTagsKeepsExtraTags` (fake and Postgres);
 - `TestRetagKeepsLabelTags`;
 - `TestRetagSetEqualIsNoop`.
+
+## Addendum (orchestrator, closing verification)
+
+- A label tag that is the same string as a document tag is removed when a retag drops that document tag. This
+  is accepted: the two can't be told apart without a separate column.
+- Accepted gap: Apply runs `SetDocumentTags(cur, cur)`, so it only adds the current document tags. If a
+  content-changing retain left units carrying an older tag set and then failed or is still pending, a later
+  retag leaves `old ∪ new` on those units until a successful retain or reprocess replaces them. It needs a
+  failed or pending retain to trigger, it follows the approved CCR formula, and no facts are lost.
