@@ -2,7 +2,6 @@ package maintenance
 
 import (
 	"context"
-	"maps"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
@@ -196,45 +195,5 @@ func TestMaintenanceEnqueuesGraphMaintenance(t *testing.T) {
 	}
 	if row := ops.row(running); row.status != domain.OperationStatusProcessing {
 		t.Errorf("running graph job: %s", row.status)
-	}
-}
-
-// strandedSource is a store.Maintenance whose StrandedFacts returns fixed units.
-type strandedSource struct {
-	store.Maintenance
-	units []domain.Unit
-	after time.Duration
-}
-
-func (s *strandedSource) StrandedFacts(_ context.Context, retryAfter time.Duration, _ int) ([]domain.Unit, error) {
-	s.after = retryAfter
-	return s.units, nil
-}
-
-// The tick re-enqueues rederive_memory for facts a failed rederive left with a NULL embedding, with
-// curation's payload and serial key, after the default retry delay.
-func TestMaintenanceRederivesStrandedFacts(t *testing.T) {
-	ops := newOps(t)
-	src := &strandedSource{units: []domain.Unit{
-		{ID: "u1", Bank: bankA, DocumentID: "d1"}, {ID: "u2", Bank: bankA},
-	}}
-	s := New(Deps{Claimer: ops, Store: ops, Clock: newClock(), Stranded: src, Logger: quiet})
-	if n, err := s.rederiveStranded(t.Context()); err != nil || n != 2 {
-		t.Fatalf("rederiveStranded = %d, %v; want 2", n, err)
-	}
-	claimed, err := ops.Claim(t.Context(), "w", []domain.OperationKind{domain.OperationKindRederiveMemory}, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]string{}
-	for _, j := range claimed {
-		got[j.SerialKey] = string(j.Payload)
-	}
-	want := map[string]string{"doc:d1": `{"unit_id": "u1"}`, "unit:u2": `{"unit_id": "u2"}`}
-	if !maps.Equal(got, want) {
-		t.Fatalf("rederives %v, want %v", got, want)
-	}
-	if src.after != DefaultStrandedRetryAfter {
-		t.Fatalf("retry-after %s", src.after)
 	}
 }

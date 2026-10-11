@@ -6,7 +6,6 @@ import (
 	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/engine/retain"
 	"memd/internal/jobs"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
@@ -16,7 +15,6 @@ import (
 
 	mockbank "memd/internal/mocks/engine/bank"
 	mockconsolidate "memd/internal/mocks/engine/consolidate"
-	mockretain "memd/internal/mocks/engine/retain"
 )
 
 // hBank is the bank the handler tests use.
@@ -121,9 +119,6 @@ func TestHandlerResults(t *testing.T) {
 	usage := domain.Usage{Slot: domain.ModelSlotExtract, Model: "m", InputTokens: 10, OutputTokens: 5}
 	h := handlers{
 		clock: clock.NewManual(time.Time{}),
-		retainer: &mockretain.Retainer{ProcessDocumentFunc: func(context.Context, *jobs.Run) (retain.RetainResult, error) {
-			return retain.RetainResult{DocumentID: "d", UnitsCreated: 3, ChunksTotal: 2, Usage: []domain.Usage{usage}}, nil
-		}},
 		consolidator: &mockconsolidate.Consolidator{
 			RunFunc: func(context.Context, *jobs.Run) (consolidate.ConsolidationResult, error) {
 				return consolidate.ConsolidationResult{
@@ -138,8 +133,6 @@ func TestHandlerResults(t *testing.T) {
 		payload string
 		want    string
 	}{
-		{domain.OperationKindRetainDocument, h.retain, `{}`, `{"chunks_skipped":0,"chunks_total":2,` +
-			`"document_id":"d","superseded":false,"unchanged":false,"units_created":3}`},
 		{domain.OperationKindConsolidate, h.consolidate, `{}`, `{"changed_scopes":1,"more":true,"processed":4}`},
 	}
 	for _, tc := range cases {

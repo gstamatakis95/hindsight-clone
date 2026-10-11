@@ -31,18 +31,9 @@ packages:
     interfaces:
       Consolidator: {}
       StrategyPreviewer: {}
-  memd/internal/engine/curate:
-    interfaces:
-      Curator: {}
-      MemoryLister: {}
-      Rederiver: {}
   memd/internal/engine/docs:
     interfaces:
       Retagger: {}
-  memd/internal/engine/retain:
-    interfaces:
-      Ingestor: {}
-      Retainer: {}
   memd/internal/jobs:
     interfaces:
       OperationControl: {}

@@ -1,29 +1,25 @@
 package main
 
 import (
-	"memd/internal/config"
+	"memd/internal/domain"
 	"memd/internal/engine/curate"
-	"memd/internal/engine/retain"
 	"memd/internal/grpcapi"
+	"memd/internal/memory"
 )
 
-// wireMemory builds the memory area: MemoryService (retain, recall, reflect), MemoryUnitService (the memory listing
-// and curation), and the retain_document and rederive_memory jobs.
+// wireMemory builds the memory area: memory.Service serves MemoryService (retain, recall, reflect) and
+// MemoryUnitService's listing and curation, runs the retain_document and rederive_memory jobs, and provides the
+// maintenance tick's rederive_stranded and settle_retain_batches steps. GetObservationHistory still reads
+// through the curate lister.
 func wireMemory(c core, in infra, d *deps) {
-	d.api.Memory = &grpcapi.MemoryHandler{
-		Ingestor: retain.NewIngestor(retain.IngestorDeps{
-			Store: c.db, Blob: in.blob, Config: c.resolver, Retainer: c.retainer, Merge: config.Merge,
-			Clock: c.clock,
-		}),
-		Engine: c.recall, Agent: c.agent,
-	}
-	d.api.MemoryUnit = &grpcapi.MemoryUnitHandler{
-		Lister: curate.NewMemoryLister(c.read),
-		Curator: curate.NewCurator(curate.CuratorDeps{
-			Store: c.db, Clock: c.clock, Citing: c.read, Resolver: c.entities,
-			Config: c.resolver, Archived: c.read,
-		}),
-	}
-	d.handlers.retainer = c.retainer
-	d.handlers.rederiver = curate.NewRederiver(curate.RederiverDeps{Store: c.db, Embedder: in.gw, Linker: c.linker})
+	svc := memory.New(memory.Deps{
+		DB: c.db, Maintenance: in.maint, Blob: in.blob, LLM: in.gw, Embedder: in.gw, Router: c.router,
+		Tokens: c.tok, Config: c.resolver, Times: c.times, Linker: c.linker, Entities: c.entities,
+		Recall: c.recall, Agent: c.agent, Clock: c.clock,
+	})
+	d.api.Memory = &grpcapi.MemoryHandler{Memory: svc}
+	d.api.MemoryUnit = &grpcapi.MemoryUnitHandler{Memory: svc, Lister: curate.NewMemoryLister(c.read)}
+	d.handlers.add(domain.OperationKindRetainDocument, svc.RunRetainJob)
+	d.handlers.add(domain.OperationKindRederiveMemory, svc.RunRederiveJob)
+	d.maintenance.Memory = svc
 }

@@ -2,7 +2,7 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/retain"
+	"memd/internal/memory"
 	"memd/internal/recall"
 	"reflect"
 	"testing"
@@ -58,9 +58,9 @@ func TestGoldenRetainRequest(t *testing.T) {
 		SkipConsolidation: true,
 		RunAsync:          false,
 	}
-	want := retain.IngestRequest{
+	want := memory.RetainRequest{
 		Bank: domain.BankRef{Bank: "bank-1"},
-		Items: []retain.IngestItem{{
+		Items: []memory.RetainItem{{
 			Content:    "content-1",
 			Context:    "context-1",
 			Timestamp:  ptr(goldenTime(1)),

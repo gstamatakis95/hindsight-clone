@@ -4,6 +4,7 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/curate"
+	"memd/internal/memory"
 
 	pb "memd/gen/memory/v1"
 )
@@ -11,10 +12,10 @@ import (
 // MemoryUnitHandler serves memory.v1.MemoryUnitService.
 type MemoryUnitHandler struct {
 	pb.UnimplementedMemoryUnitServiceServer
-	// Lister serves ListMemories, GetMemory and GetObservationHistory.
+	// Memory serves ListMemories, GetMemory and UpdateMemory.
+	Memory *memory.Service
+	// Lister serves GetObservationHistory.
 	Lister curate.MemoryLister
-	// Curator serves UpdateMemory.
-	Curator curate.Curator
 }
 
 var _ pb.MemoryUnitServiceServer = (*MemoryUnitHandler)(nil)
@@ -44,7 +45,7 @@ func (h *MemoryUnitHandler) ListMemories(
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	page, err := h.Lister.List(ctx, in)
+	page, err := h.Memory.ListMemories(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -57,7 +58,7 @@ func (h *MemoryUnitHandler) GetMemory(ctx context.Context, req *pb.GetMemoryRequ
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	u, err := h.Lister.Get(ctx, b, id)
+	u, err := h.Memory.GetMemory(ctx, b, id)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -95,7 +96,7 @@ func (h *MemoryUnitHandler) UpdateMemory(
 	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
-	u, op, err := h.Curator.Update(ctx, in)
+	u, op, err := h.Memory.UpdateMemory(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}

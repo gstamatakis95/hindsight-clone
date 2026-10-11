@@ -31,6 +31,8 @@ var modelTypes = []struct{ pkg, name string }{
 	{"memd/internal/timex", "Normalizer"},
 	{"memd/internal/mentalmodel", "Service"},
 	{aiPkg, "Router"},
+	{"memd/internal/memory", "Service"},
+	{"memd/internal/memory", "extractor"},
 }
 
 func run(pass *analysis.Pass) (any, error) {

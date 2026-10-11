@@ -2,10 +2,7 @@ package grpcapi
 
 import (
 	"context"
-	"memd/internal/engine/retain"
-	"memd/internal/recall"
-
-	reflecteng "memd/internal/reflect"
+	"memd/internal/memory"
 
 	pb "memd/gen/memory/v1"
 )
@@ -13,12 +10,8 @@ import (
 // MemoryHandler serves memory.v1.MemoryService.
 type MemoryHandler struct {
 	pb.UnimplementedMemoryServiceServer
-	// Ingestor serves Retain.
-	Ingestor retain.Ingestor
-	// Engine serves Recall.
-	Engine *recall.Engine
-	// Agent serves Reflect.
-	Agent *reflecteng.Agent
+	// Memory serves Retain, Recall and Reflect.
+	Memory *memory.Service
 }
 
 var _ pb.MemoryServiceServer = (*MemoryHandler)(nil)
@@ -42,7 +35,7 @@ func (h *MemoryHandler) Retain(ctx context.Context, req *pb.RetainRequest) (*pb.
 			return nil, toStatus(err)
 		}
 	}
-	out, err := h.Ingestor.Ingest(ctx, in)
+	out, err := h.Memory.Retain(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -63,7 +56,7 @@ func (h *MemoryHandler) Recall(ctx context.Context, req *pb.RecallRequest) (*pb.
 	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Engine.Recall(ctx, in)
+	out, err := h.Memory.Recall(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -84,7 +77,7 @@ func (h *MemoryHandler) Reflect(ctx context.Context, req *pb.ReflectRequest) (*p
 	if err := validate(in.Overrides); err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Agent.Reflect(ctx, in)
+	out, err := h.Memory.Reflect(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}

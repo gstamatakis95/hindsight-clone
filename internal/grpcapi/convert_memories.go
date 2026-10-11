@@ -2,7 +2,7 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/curate"
+	"memd/internal/memory"
 
 	pb "memd/gen/memory/v1"
 )
@@ -11,9 +11,9 @@ import (
 
 // listMemoriesRequestFromProto converts a ListMemoriesRequest; Bank carries only bank_id (the handler sets
 // the tenant).
-func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (curate.ListMemoriesRequest, error) {
+func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (memory.ListRequest, error) {
 	var d decoder
-	out := curate.ListMemoriesRequest{
+	out := memory.ListRequest{
 		Bank:       domain.BankRef{Bank: r.GetBankId()},
 		Types:      fromEnums[domain.FactType](&d, r.GetTypes()),
 		Q:          r.GetQ(),
@@ -31,8 +31,8 @@ func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (curate.ListMemorie
 	return out, d.err
 }
 
-// listMemoriesPageToProto converts a ListMemoriesPage to a ListMemoriesResponse.
-func listMemoriesPageToProto(p curate.ListMemoriesPage) *pb.ListMemoriesResponse {
+// listMemoriesPageToProto converts a memory page to a ListMemoriesResponse.
+func listMemoriesPageToProto(p memory.Page) *pb.ListMemoriesResponse {
 	return &pb.ListMemoriesResponse{Items: unitsToProto(p.Items), NextPageToken: p.NextPageToken}
 }
 
@@ -66,9 +66,9 @@ func entityListFromProto(l *pb.EntityList) []string {
 
 // updateMemoryRequestFromProto converts an UpdateMemoryRequest; Bank carries only bank_id (the handler
 // sets the tenant).
-func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (curate.UpdateMemoryRequest, error) {
+func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (memory.UpdateRequest, error) {
 	var d decoder
-	out := curate.UpdateMemoryRequest{
+	out := memory.UpdateRequest{
 		Bank:            domain.BankRef{Bank: r.GetBankId()},
 		ID:              domain.UnitID(r.GetMemoryId()),
 		Text:            optCopy(r.Text),
@@ -86,8 +86,8 @@ func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (curate.UpdateMemor
 	return out, d.err
 }
 
-// updateResultToProto converts what Curator.Update returns (the unit after the change and the rederive_memory
-// operation, empty for invalidate) to an UpdateMemoryResponse.
+// updateResultToProto converts what memory.Service.UpdateMemory returns (the unit after the change and the
+// rederive_memory operation, empty for invalidate) to an UpdateMemoryResponse.
 func updateResultToProto(u domain.Unit, op domain.OperationID) *pb.UpdateMemoryResponse {
 	return &pb.UpdateMemoryResponse{Memory: unitToProto(u), OperationId: string(op)}
 }

@@ -120,6 +120,8 @@ linters:
           deny:
             - pkg: "memd/internal/engine"
               desc: libraries never import the engines (services)
+            - pkg: "memd/internal/memory"
+              desc: libraries never import the services
             - pkg: "memd/internal/grpcapi"
               desc: libraries don't know about gRPC
             - pkg: "memd/internal/maintenance"
@@ -154,8 +156,49 @@ linters:
               desc: recall sits below reflect (reflect imports recall)
             - pkg: "memd/internal/linking"
               desc: recall never links
+        svc-memory:
+          files: ["**/internal/memory/**", "!$test"]   # tests use pgtest
+          deny:
+            - pkg: "memd/internal/store/postgres"
+              desc: services depend on the store interfaces only
+            - pkg: "memd/internal/ai/gateway"
+              desc: services depend on the ai interfaces only
+            - pkg: "memd/internal/blob/s3"
+              desc: services depend on blob.Store only
+            - pkg: "memd/gen"
+              desc: no proto types in services; use domain
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB
+            - pkg: "net/http"
+              desc: use ai.LLM / ai.Embedder / ai.Reranker
+            - pkg: "github.com/aws"
+              desc: use blob.Store
+            - pkg: "github.com/DataDog"
+              desc: services stay vendor-free
+        svc-memory-features:
+          files: ["**/internal/memory/**"]   # tests included: they commit other services' effects through store
+          deny:
+            - pkg: "memd/internal/engine"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/grpcapi"
+              desc: services don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the services
         grpcapi:
           files: ["**/internal/grpcapi/**"]
+
           deny:
             - pkg: "memd/internal/store/postgres"
               desc: handlers call engines

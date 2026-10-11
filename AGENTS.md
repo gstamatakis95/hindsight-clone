@@ -26,6 +26,9 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   Resolver, LabelResolver).
 - Services, one package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC
   logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
+  - internal/memory: MemoryService (Retain, Recall, Reflect, ListMemories, GetMemory, UpdateMemory,
+    InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
+    sweeps.
   - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
 - internal/engine/*: the remaining business logic over the boundaries and libraries.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per service (holding only the engines it

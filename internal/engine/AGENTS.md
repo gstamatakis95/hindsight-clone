@@ -1,7 +1,8 @@
 # AGENTS.md — internal/engine
 
-Engines hold memd's business logic: retain, consolidate, bank, curate and docs. They build on the
-libraries (recall, reflect, timex, linking). These rules add to the root AGENTS.md.
+Engines hold the business logic outside the service packages: retain (reprocess), consolidate, bank,
+curate (observation admin) and docs. They build on the libraries (recall, reflect, timex, linking). These rules
+add to the root AGENTS.md.
 
 ## Boundaries
 - Depend on the boundaries only: stdlib, `memd/internal/domain`, `memd/internal/store`, `memd/internal/ai`,

@@ -8,9 +8,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
 	"memd/internal/engine/consolidate"
-	"memd/internal/engine/curate"
 	"memd/internal/engine/docs"
-	"memd/internal/engine/retain"
 	"memd/internal/jobs"
 	"memd/internal/maintenance"
 	"memd/internal/store"
@@ -22,10 +20,8 @@ import (
 // the adapter records the result and usage on the run and re-enqueues delete_bank's leftover work. Each
 // wire_<area>.go sets its engines, or adds a service's own handler with add.
 type handlers struct {
-	retainer     retain.Retainer
 	consolidator consolidate.Consolidator
 	deleter      bank.BankDeleter
-	rederiver    curate.Rederiver
 	retagger     docs.Retagger
 	graph        *maintenance.Service
 	db           store.DB    // enqueues delete_bank's continuations
@@ -45,29 +41,13 @@ func (h *handlers) add(kind domain.OperationKind, fn jobs.Handler) {
 // register registers every handler on r. retain_batch is never registered: it is a parent row whose status
 // aggregates its children, not a job a worker runs.
 func (h handlers) register(r *jobs.Runner) {
-	r.Handle(domain.OperationKindRetainDocument, h.retain)
 	r.Handle(domain.OperationKindConsolidate, h.consolidate)
 	r.Handle(domain.OperationKindDeleteBank, h.deleteBank)
-	r.Handle(domain.OperationKindRederiveMemory, h.rederive)
 	r.Handle(domain.OperationKindRetagDocument, h.retag)
 	r.Handle(domain.OperationKindGraphMaintenance, h.graph.RunGraphJob)
 	for kind, fn := range h.services {
 		r.Handle(kind, fn)
 	}
-}
-
-// retain runs retain_document through retain.Retainer.ProcessDocument. The retainer enqueues the bank's
-// consolidation in its completing transaction.
-func (h handlers) retain(ctx context.Context, run *jobs.Run) error {
-	res, err := h.retainer.ProcessDocument(ctx, run)
-	if err != nil {
-		return fmt.Errorf("retain_document: %w", err)
-	}
-	run.SetResult(map[string]any{
-		"document_id": res.DocumentID, "units_created": res.UnitsCreated, "unchanged": res.Unchanged,
-		"superseded": res.Superseded, "chunks_total": res.ChunksTotal, "chunks_skipped": res.ChunksSkipped,
-	}, res.Usage...)
-	return nil
 }
 
 // consolidate runs consolidate through consolidate.Consolidator.Run. It does not re-enqueue on More: Run
@@ -80,17 +60,6 @@ func (h handlers) consolidate(ctx context.Context, run *jobs.Run) error {
 	run.SetResult(map[string]any{
 		"processed": res.Processed, "changed_scopes": len(res.Changed), "more": res.More,
 	}, res.Usage...)
-	return nil
-}
-
-// rederive runs rederive_memory through curate.Rederiver.Rederive.
-func (h handlers) rederive(ctx context.Context, run *jobs.Run) error {
-	if err := h.started(ctx, run); err != nil {
-		return err
-	}
-	if err := h.rederiver.Rederive(ctx, run.Job); err != nil {
-		return fmt.Errorf("rederive_memory: %w", err)
-	}
 	return nil
 }
 

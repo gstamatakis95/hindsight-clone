@@ -10,6 +10,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/jobs"
 	"memd/internal/linking"
+	"memd/internal/memory"
 	"memd/internal/mentalmodel"
 	"memd/internal/store"
 	"time"
@@ -27,9 +28,6 @@ const (
 	// bank when its config sets no observations.reconcile_grace_seconds, so skip_consolidation followed by a
 	// manual Consolidate is not pre-empted (decision 2000).
 	DefaultConsolidationGrace = 10 * time.Minute
-	// DefaultStrandedRetryAfter is how long after a rederive ended the tick may queue another one for the
-	// same unit, so a fact whose rederive keeps failing is retried every few minutes, not every tick.
-	DefaultStrandedRetryAfter = 10 * time.Minute
 	// DefaultGraphBudget bounds one graph_maintenance run (SPEC "Jobs": 240 s); leftover work re-enqueues the
 	// job.
 	DefaultGraphBudget = 240 * time.Second
@@ -51,9 +49,6 @@ type Config struct {
 	OperationRetention time.Duration
 	// EventRetention keeps lifecycle events this long (default DefaultEventRetention).
 	EventRetention time.Duration
-	// StrandedRetryAfter is how long after a unit's last rederive ended the tick may queue another one
-	// (default DefaultStrandedRetryAfter).
-	StrandedRetryAfter time.Duration
 	// GraphBudget bounds one graph_maintenance run (default DefaultGraphBudget).
 	GraphBudget time.Duration
 }
@@ -69,7 +64,6 @@ func (c Config) withDefaults() Config {
 	def(&c.StaleAfter, jobs.DefaultStaleAfter)
 	def(&c.OperationRetention, DefaultOperationRetention)
 	def(&c.EventRetention, DefaultEventRetention)
-	def(&c.StrandedRetryAfter, DefaultStrandedRetryAfter)
 	def(&c.GraphBudget, DefaultGraphBudget)
 	return c
 }
@@ -100,10 +94,8 @@ type Deps struct {
 	Deletes store.Maintenance
 	// Graph lists banks with graph maintenance queued (BanksWithGraphWork).
 	Graph store.Maintenance
-	// Batches settles retain_batch parents whose children finished (SettleRetainBatches).
-	Batches store.Maintenance
-	// Stranded finds facts with a NULL embedding left by a failed rederive (StrandedFacts).
-	Stranded store.Maintenance
+	// Memory re-queues the rederives of stranded facts and settles finished retain_batch parents.
+	Memory *memory.Service
 	// MentalModels runs the mental-model sweeps: it pauses models whose latest refresh failed and enqueues
 	// refreshes whose refresh_cron fired.
 	MentalModels *mentalmodel.Service
@@ -188,6 +180,22 @@ var steps = []step{
 	{"settle_retain_batches", (*Service).settleBatches},
 	{"prune_operations", (*Service).pruneOperations},
 	{"prune_events", (*Service).pruneEvents},
+}
+
+// rederiveStranded re-enqueues rederive_memory for facts a failed rederive left without an embedding.
+func (s *Service) rederiveStranded(ctx context.Context) (int, error) {
+	if s.d.Memory == nil {
+		return 0, nil
+	}
+	return s.d.Memory.RederiveStranded(ctx) //nolint:wrapcheck // the sweep wraps its own errors
+}
+
+// settleBatches ends retain_batch parents whose children are all terminal.
+func (s *Service) settleBatches(ctx context.Context) (int, error) {
+	if s.d.Memory == nil {
+		return 0, nil
+	}
+	return s.d.Memory.SettleRetainBatches(ctx) //nolint:wrapcheck // the sweep wraps its own errors
 }
 
 // tick runs every step once and joins their errors.

@@ -5,11 +5,11 @@
 // # Where it sits
 //
 // maintenance sits above the engines and jobs: it calls the services' sweeps (mentalmodel.Service's cron
-// refreshes and failed-refresh reconcile), the cross-bank scans of store.Maintenance and the jobs catalogue,
+// refreshes and failed-refresh reconcile, memory.Service's stranded-fact and retain-batch sweeps), the cross-bank
+// scans of store.Maintenance and the jobs catalogue,
 // and never an adapter. No engine imports it. cmd/memd builds it and runs [Service.Run] beside the job runner
 // in the worker and all modes. Its [Config] holds the operator settings (tick interval, reclaim age, retention
-// of terminal operations and lifecycle events, stranded retry delay, graph budget); zero values take the
-// defaults.
+// of terminal operations and lifecycle events, graph budget); zero values take the defaults.
 //
 // # Tick
 //
@@ -28,9 +28,10 @@
 //     by a manual Consolidate is not pre-empted), unless the bank turns observations.auto_consolidation or
 //     observations.enabled off.
 //  6. graph_reconcile: enqueues graph_maintenance for banks with graph_dirty or entity_maintenance rows.
-//  7. rederive_stranded: re-enqueues rederive_memory for facts whose rederive ended FAILED or CANCELLED and
-//     left them without an embedding, StrandedRetryAfter (default 10 min) after it ended.
-//  8. settle_retain_batches: ends retain_batch parents whose children are all terminal.
+//  7. rederive_stranded: memory.Service.RederiveStranded re-enqueues rederive_memory for facts whose rederive
+//     ended FAILED or CANCELLED and left them without an embedding, 10 minutes after it ended.
+//  8. settle_retain_batches: memory.Service.SettleRetainBatches ends retain_batch parents whose children are
+//     all terminal.
 //  9. prune_operations / prune_events: delete terminal operations older than OperationRetention (7 days)
 //     and lifecycle events older than EventRetention (30 days).
 //

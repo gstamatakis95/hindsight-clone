@@ -12,7 +12,6 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/retain"
 	"memd/internal/graph"
 	"memd/internal/grpcapi"
 	"memd/internal/jobs"
@@ -191,7 +190,6 @@ type core struct {
 	times    *timex.Normalizer
 	linker   *linking.Linker
 	entities *linking.Resolver
-	retainer retain.Retainer
 	recall   *recall.Engine
 	agent    *reflect.Agent
 }
@@ -219,8 +217,8 @@ func wireEngines(
 	return d
 }
 
-// wireCore builds the libraries: config resolution, routing, time normalization, linking, retain's shared retainer,
-// recall (over the store and the graph reader) and the reflect agent.
+// wireCore builds the libraries: config resolution, routing, time normalization, linking, recall (over the store
+// and the graph reader) and the reflect agent.
 func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock) core {
 	db, gw := in.db, in.gw
 	c := core{db: db, read: db.Read(), clock: clk, tok: tok, router: ai.NewRouter()}
@@ -228,11 +226,6 @@ func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk cloc
 	c.times = timex.New(gw, c.router, clk)
 	c.linker = linking.NewLinker()
 	c.entities = linking.NewResolver(linking.ResolverConfig{})
-	c.retainer = retain.NewRetainer(retain.RetainerDeps{
-		Store: db, Blob: in.blob, Config: c.resolver, Extractor: retain.NewExtractor(gw, c.router),
-		Dates: c.times, Embedder: gw, Entities: c.entities, Labels: linking.NewLabelResolver(), Linker: c.linker,
-		Tokens: tok, Clock: clk,
-	})
 	c.recall = recall.New(recall.Deps{
 		DB: db, Graph: in.graph, Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router, Times: c.times,
 		Clock: clk, Tokens: tok,

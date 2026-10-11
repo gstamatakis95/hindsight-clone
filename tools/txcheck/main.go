@@ -1,9 +1,9 @@
 package main
 
 import (
-	"golang.org/x/tools/go/analysis/singlechecker"
-
 	"memd/tools/txcheck/analyzer"
+
+	"golang.org/x/tools/go/analysis/singlechecker"
 )
 
 func main() {
