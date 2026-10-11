@@ -94,6 +94,19 @@ make test      # go test -race ./... (the Postgres contract suites use testconta
 make e2e       # compose stack + emulated gateway + memd api/worker processes: every scenario, crash and reclaim
 ```
 
+## Benchmarks
+
+`eval/` runs LoCoMo, LongMemEval and the golden fixtures against a running memd. It downloads the datasets,
+writes a report per run, resumes interrupted runs and compares runs. LoCoMo is scored the way Hindsight's
+published LoCoMo numbers are, so the two compare directly. [eval/README.md](eval/README.md) has the full flow
+against a real AI gateway.
+
+```sh
+make bench BENCH=golden ARGS=-stub                  # smoke test, no server
+make bench CONFIG=eval/configs/locomo.yaml          # LoCoMo against memd on :50051
+make bench-compare A=eval-results/<run> B=eval-results/<run>
+```
+
 ## Configuration and overrides
 
 One `BankConfig` shape is used at every level and merged server < tenant < bank < strategy < request
