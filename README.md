@@ -96,6 +96,20 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","query":"Summarize
 grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.BankService/GetBankStats
 ```
 
+Memories are curated, never deleted one by one. `ListMemories` finds a fact's id; `UpdateMemory` edits the
+fields its `update_mask` names (a named field left unset is cleared), `InvalidateMemory` hides a fact from recall
+and `RestoreMemory` brings it back. Observations are not curated directly: they re-derive from their facts.
+
+```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","text_contains":"Paris"}' \
+  localhost:50051 memory.v1.MemoryService/ListMemories
+grpcurl -plaintext -H 'x-tenant-id: acme' \
+  -d '{"bank_id":"b1","memory_id":"<id>","memory":{"text":"Alice moved to Lyon in May."},"update_mask":"text"}' \
+  localhost:50051 memory.v1.MemoryService/UpdateMemory
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","memory_id":"<id>","reason":"wrong"}' \
+  localhost:50051 memory.v1.MemoryService/InvalidateMemory
+```
+
 ### API conventions
 
 The header of `api/memory/v1/memory.proto` states these once:
@@ -217,7 +231,7 @@ Each RPC that does work takes its own overrides message, holding only what that 
 | `RecallOverrides` | Recall | `recall` (except `recall.arms`: use the request's `arms`), `time_parse_model`, `rerank_model` |
 | `ReflectOverrides` | Reflect | `reflect`, `recall` (except `recall.arms`), `reflect_model`, `structured_output_model`, `rerank_model` |
 | `ConsolidateOverrides` | Consolidate | the observations group minus `enabled` / `auto_consolidation` / `reconcile_grace_seconds`, `consolidate_model`, `dedup_check_model` |
-| `RederiveOverrides` | UpdateMemory | `entity_match_threshold`, `extract_model`, `time_parse_model` |
+| `RederiveOverrides` | UpdateMemory, RestoreMemory | `entity_match_threshold`, `extract_model`, `time_parse_model` |
 | `RefreshOverrides` | RefreshMentalModel, MentalModelSpec | `reflect` (including the loop caps `recall_max_tokens` and `search_observations_*`), `max_delta_ratio`, `reflect_model`, `mental_model_model`, `structured_output_model` |
 
 A document keeps its retain overrides (`Document.retain_overrides`) and ReprocessDocument replays them. A mental

@@ -185,7 +185,7 @@ func scoresToProto(s recall.Scores) *pb.Scores {
 func unitToProto(u domain.Unit) *pb.Memory {
 	return &pb.Memory{
 		Id:            string(u.ID),
-		Type:          toEnum[pb.FactType](u.Type),
+		FactType:      toEnum[pb.FactType](u.Type),
 		Text:          u.Text,
 		Context:       u.Context,
 		Metadata:      u.Metadata,

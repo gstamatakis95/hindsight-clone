@@ -31,7 +31,7 @@ func retainOne(t *testing.T, w *wiredStack, bank string) {
 	ret, err := mem.Retain(w.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{{
 		Content: "Alice moved to Lisbon in 2021. Alice works as a nurse.", DocumentId: "d1",
 	}}})
-	if err != nil || ret.GetDocuments()[0].GetUnitsCreated() == 0 {
+	if err != nil || ret.GetDocuments()[0].GetMemoriesCreated() == 0 {
 		t.Fatalf("retain: %v %v", ret, err)
 	}
 	w.idle(t, bank)

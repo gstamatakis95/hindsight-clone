@@ -12,10 +12,10 @@ import (
 type ListRequest struct {
 	// Bank is the bank listed.
 	Bank domain.BankRef
-	// Types limits fact types; empty = all.
-	Types []domain.FactType
-	// Q is a case-insensitive text filter; empty = none.
-	Q string
+	// FactTypes limits fact types; empty = all.
+	FactTypes []domain.FactType
+	// TextContains is a case-insensitive substring of the unit text; empty = none.
+	TextContains string
 	// DocumentID limits units to one document; empty = all.
 	DocumentID domain.DocumentID
 	// EntityID limits units to those attached to an entity (live units only); empty = all.
@@ -79,7 +79,7 @@ func unitQuery(req ListRequest) (store.UnitQuery, error) {
 	if err := req.Tags.RequireFlat(); err != nil {
 		return store.UnitQuery{}, fmt.Errorf("list memories: %w", err)
 	}
-	for _, t := range req.Types {
+	for _, t := range req.FactTypes {
 		if !knownFactType(t) {
 			return store.UnitQuery{}, fmt.Errorf("%w: unknown fact type %q", domain.ErrInvalidArgument, t)
 		}
@@ -90,8 +90,8 @@ func unitQuery(req ListRequest) (store.UnitQuery, error) {
 		return store.UnitQuery{}, fmt.Errorf("%w: unknown memory state %q", domain.ErrInvalidArgument, req.State)
 	}
 	q := store.UnitQuery{
-		Bank: req.Bank, Types: req.Types, Q: req.Q, DocumentID: req.DocumentID, EntityID: req.EntityID,
-		State: req.State, Start: req.Start, End: req.End, TimeField: req.TimeField,
+		Bank: req.Bank, Types: req.FactTypes, Q: req.TextContains, DocumentID: req.DocumentID,
+		EntityID: req.EntityID, State: req.State, Start: req.Start, End: req.End, TimeField: req.TimeField,
 		Tags: domain.NormalizeTags(req.Tags.Tags), TagsMatch: req.Tags.Match, Limit: size,
 	}
 	if req.PageToken != "" {

@@ -104,7 +104,7 @@ const (
 
 // Trace mirrors memory.v1.Trace.
 type Trace struct {
-	// ToolCalls are the loop's tool calls (when include.tool_calls).
+	// ToolCalls are the loop's tool calls (when include.trace).
 	ToolCalls []domain.ToolCallTrace
 	// Iterations is the number of loop iterations.
 	Iterations int

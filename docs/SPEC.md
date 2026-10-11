@@ -1959,7 +1959,7 @@ Curation fixes or retires one raw fact without a hard delete; observations are n
 
 | Action | Committed in the RPC | Done by the rederive_memory job |
 |---|---|---|
-| Edit (text, context, dates, fact type, entities) | New values, `edited_at`, audit row with reason; embedding cleared, so the unit leaves semantic search until rederive; citing observations deleted and their co-sources reset; rederive enqueued | Re-embed; re-resolve entities (or take names literally when `resolve_entities=false`); rebuild temporal and semantic links; enqueue consolidation |
+| Edit (text, context, dates, fact type, entities) | New values, `edited_at`, audit row with reason; embedding cleared, so the unit leaves semantic search until rederive; citing observations deleted and their co-sources reset; a refresh of every model whose `source_ids` include a deleted observation; rederive enqueued | Re-embed; re-resolve entities (or take names literally when `resolve_entities=false`); rebuild temporal and semantic links; enqueue consolidation |
 | Invalidate | Move to `memory_units_archive` with entity and causal snapshots; delete its links and entity rows; delete citing observations and reset their co-sources; record neighbours in `graph_dirty`; enqueue consolidate, graph_maintenance, and a refresh of every model whose `source_ids` include the unit or a deleted observation | Nothing; no job needed |
 | Restore | Move back; reattach entities and causal links from the snapshot | Same as edit |
 

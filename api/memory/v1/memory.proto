@@ -77,9 +77,9 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "memd/gen/memory/v1;memoryv1";
 
-// MemoryService stores content as memories and answers questions from them.
+// MemoryService stores content as memories, answers questions from them, and lists and curates them.
 service MemoryService {
-  // Retain stores content and extracts memory units from it. Synchronous by default (returns after units
+  // Retain stores content and extracts memories from it. Synchronous by default (returns after the memories
   // commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
   // bank creates it with tenant defaults.
   rpc Retain(RetainRequest) returns (RetainResponse);
@@ -94,19 +94,25 @@ service MemoryService {
   // names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
   // MinScores.arms accept.
   rpc ListRecallArms(ListRecallArmsRequest) returns (ListRecallArmsResponse);
+  // ListMemories lists live and invalidated memories (raw facts and observations) with filters and keyset
+  // pagination. Returns no total.
+  rpc ListMemories(ListMemoriesRequest) returns (ListMemoriesResponse);
+  // GetMemory returns one memory, live or invalidated.
+  rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse);
+  // UpdateMemory edits a live raw fact; observations are rejected. It enqueues a rederive_memory job.
+  rpc UpdateMemory(UpdateMemoryRequest) returns (UpdateMemoryResponse);
+  // InvalidateMemory archives a live raw fact: recall and consolidation stop seeing it, and RestoreMemory
+  // brings it back. Observations are rejected. Everything happens in the call; no operation is returned.
+  rpc InvalidateMemory(InvalidateMemoryRequest) returns (InvalidateMemoryResponse);
+  // RestoreMemory brings an invalidated raw fact back and enqueues a rederive_memory job. Restoring a live
+  // fact changes nothing.
+  rpc RestoreMemory(RestoreMemoryRequest) returns (RestoreMemoryResponse);
 }
 
-// MemoryUnitService lists, reads and curates individual memory units.
+// MemoryUnitService reads the version history of observations.
 service MemoryUnitService {
-  // ListMemories lists live and archived units with filters and keyset pagination. Returns no total.
-  rpc ListMemories(ListMemoriesRequest) returns (ListMemoriesResponse);
-  // GetMemory returns one unit, live or invalidated.
-  rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse);
   // GetObservationHistory returns every version of an observation, oldest first.
   rpc GetObservationHistory(GetObservationHistoryRequest) returns (GetObservationHistoryResponse);
-  // UpdateMemory edits, invalidates or restores a raw fact; observations are rejected. Edit and restore
-  // enqueue a rederive_memory job; invalidate needs none.
-  rpc UpdateMemory(UpdateMemoryRequest) returns (UpdateMemoryResponse);
 }
 
 // DocumentService lists, reads, retags and reprocesses retained documents.
@@ -231,7 +237,8 @@ service OperationService {
 
 // ======================= MemoryService =======================
 
-// The data plane: Retain, Recall and Reflect.
+// The data plane (Retain, Recall, Reflect, ListRecallArms), then browsing and curation (ListMemories,
+// GetMemory, UpdateMemory, InvalidateMemory, RestoreMemory).
 
 // ---- Retain ----
 
@@ -241,14 +248,14 @@ message RetainRequest {
   string bank_id = 1;
   // Documents to retain.
   repeated RetainItem items = 2;
-  // Tags added to every item's units.
+  // Tags added to every item's memories.
   repeated string document_tags = 3;
   // Request-level overrides. Stored on each document (part of its no-op hash); never inherited by automatic
   // consolidation.
   RetainOverrides overrides = 4;
   // Do not enqueue consolidation after this retain, so a manual Consolidate can run with its own settings.
   bool skip_consolidation = 5;
-  // false (default) = return after units commit; true = enqueue jobs and return their operations.
+  // false (default) = return after the memories commit; true = enqueue jobs and return their operations.
   bool run_async = 6;
 }
 
@@ -278,11 +285,11 @@ message RetainItem {
   bool timeless = 4;
   // Upsert key: an existing document with this id is replaced. Generated when empty.
   string document_id = 5;
-  // Tags of the document's units, added to the request's document_tags.
+  // Tags of the document's memories, added to the request's document_tags.
   repeated string tags = 6;
   // Observation scopes for this item; unset = retain.default_observation_scopes of the config.
   ObservationScopes observation_scopes = 7;
-  // Metadata copied onto every unit of the document.
+  // Metadata copied onto every memory of the document.
   map<string, string> metadata = 8;
   // Entities the extractor should link.
   repeated EntityHint entities = 9;
@@ -305,12 +312,12 @@ message EntityHint {
 
 // RetainedDocument reports the outcome for one retained document.
 message RetainedDocument {
-  reserved 4;
-  reserved "operation_id";
+  reserved 2, 4;
+  reserved "units_created", "operation_id";
   // Document id (given or generated).
   string document_id = 1;
-  // Units created; 0 when unchanged or async.
-  int32 units_created = 2;
+  // Memories created; 0 when unchanged or async.
+  int32 memories_created = 6;
   // Same content and overrides hash as the last completed retain: nothing was re-extracted.
   bool unchanged = 3;
   // The retain_document operation; set when run_async and the document changed.
@@ -321,14 +328,14 @@ message RetainedDocument {
 
 // RecallRequest retrieves memories for a query.
 message RecallRequest {
-  reserved 5, 6;
-  reserved "tags_match", "tag_groups";
+  reserved 3, 5, 6;
+  reserved "types", "tags_match", "tag_groups";
   // Bank to search; unknown bank = NOT_FOUND.
   string bank_id = 1;
   // Query text, at most 500 tokens.
   string query = 2;
   // Fact types to return; empty = all.
-  repeated FactType types = 3;
+  repeated FactType fact_types = 18;
   // Tag filter on the memories' tags; unset = no filter. Flat tags or groups; tags.match unset =
   // TAGS_MATCH_ANY.
   TagFilter tags = 4;
@@ -441,9 +448,9 @@ message ReflectResponse {
   string structured_output_json = 2;
   // Why the structured pass failed; empty on success.
   string structured_output_error = 3;
-  // Evidence the answer used; set unless include.facts is false.
+  // Evidence the answer used; set unless include.based_on is false.
   BasedOn based_on = 4;
-  // Loop trace; set when include.tool_calls.
+  // Loop trace; set when include.trace.
   ReflectTrace trace = 5;
   // Token usage per slot and model.
   repeated SlotUsage usage = 6;
@@ -451,11 +458,13 @@ message ReflectResponse {
 
 // ReflectInclude picks what Reflect returns beside the answer.
 message ReflectInclude {
-  // Return based_on (the memories, models and directives used), default true.
-  optional bool facts = 1;
+  reserved 1, 2;
+  reserved "facts", "tool_calls";
+  // Return based_on (the memories, models and directives used); unset = true.
+  optional bool based_on = 4;
   // Return the trace with tool calls.
-  bool tool_calls = 2;
-  // Include tool outputs in the trace, default true when tool_calls.
+  bool trace = 5;
+  // Include tool outputs in the trace; unset = true when trace.
   optional bool tool_outputs = 3;
 }
 
@@ -488,23 +497,208 @@ message RecallArm {
   string description = 2;
 }
 
+// Curation fixes or retires one raw fact without a hard delete; observations are never curated directly,
+// they re-derive from their sources. Everything that would leave recall inconsistent happens in the call
+// itself; only re-embedding and re-linking wait for a rederive_memory job. Invalidated memories are invisible
+// to recall and consolidation until restored.
+
+// ---- ListMemories ----
+
+// ListMemoriesRequest filters and pages the bank's memories.
+message ListMemoriesRequest {
+  reserved 2, 3, 11;
+  reserved "types", "q", "tags_match";
+  // Bank to list; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Fact types; empty = all.
+  repeated FactType fact_types = 14;
+  // Case-insensitive substring the memory text must contain; empty = no filter.
+  string text_contains = 15;
+  // Only memories of this document.
+  string document_id = 4;
+  // Only live memories linked to this entity.
+  string entity_id = 5;
+  // Live or invalidated memories; unspecified = no state filter.
+  MemoryState state = 6;
+  // Inclusive start of the time range on time_field.
+  google.protobuf.Timestamp start = 7;
+  // Exclusive end of the time range on time_field.
+  google.protobuf.Timestamp end = 8;
+  // Timestamp the range applies to.
+  TimeField time_field = 9;
+  // Tag filter on the memories' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
+  // TAGS_MATCH_ANY.
+  TagFilter tags = 10;
+  // Maximum memories per page; 0 = 100, at most 1000.
+  int32 page_size = 12;
+  // Token from a previous response; empty = first page.
+  string page_token = 13;
+
+  // TimeField picks the memory timestamp the time range applies to.
+  enum TimeField {
+    // Not set; same as TIME_FIELD_CREATED_AT.
+    TIME_FIELD_UNSPECIFIED = 0;
+    // When the memory was written.
+    TIME_FIELD_CREATED_AT = 1;
+    // When the memory last changed.
+    TIME_FIELD_UPDATED_AT = 2;
+    // When the fact was mentioned.
+    TIME_FIELD_MENTIONED_AT = 3;
+    // When the fact started happening.
+    TIME_FIELD_OCCURRED_START = 4;
+    // When the fact stopped happening.
+    TIME_FIELD_OCCURRED_END = 5;
+  }
+}
+
+// ListMemoriesResponse is one page of memories.
+message ListMemoriesResponse {
+  reserved 1;
+  reserved "items";
+  // Memories on this page, newest first.
+  repeated Memory memories = 3;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
+}
+
+// ---- GetMemory ----
+
+// GetMemoryRequest names one memory.
+message GetMemoryRequest {
+  // Bank owning the memory; unknown bank = NOT_FOUND.
+  string bank_id = 1;
+  // Memory id.
+  string memory_id = 2;
+}
+
+// GetMemoryResponse carries the memory.
+message GetMemoryResponse {
+  // The memory, live or invalidated.
+  Memory memory = 1;
+}
+
+// ---- UpdateMemory ----
+
+// UpdateMemoryRequest edits one live raw fact. The edit commits with an audit row, clears the embedding until
+// the rederive_memory job writes a new one, deletes the observations citing the fact and queues refreshes of
+// the mental models that cite one of those observations.
+message UpdateMemoryRequest {
+  reserved 3, 4, 5, 6, 7, 8, 9, 11;
+  reserved "text", "context", "occurred_start", "occurred_end", "clear_occurred", "fact_type", "entities",
+    "state";
+  // Bank owning the memory.
+  string bank_id = 1;
+  // Memory id; must be a live raw fact. An observation = INVALID_ARGUMENT (reason MEMORY_IS_OBSERVATION); an
+  // invalidated or unknown memory = NOT_FOUND.
+  string memory_id = 2;
+  // The new values; only the fields update_mask names are applied.
+  MemoryEdit memory = 14;
+  // Fields of memory to apply: text, context, occurred_start, occurred_end, fact_type, entities. Empty = the
+  // populated fields of memory. A named field left unset clears it, so clearing a field (the entities, or
+  // both occurred bounds to make the fact timeless) needs it named here. Any other path, or nothing to
+  // apply, = INVALID_ARGUMENT.
+  google.protobuf.FieldMask update_mask = 15;
+  // false = take the new entity names literally instead of resolving them to existing entities; unset = true.
+  optional bool resolve_entities = 10;
+  // Why the change was made; stored on the audit row.
+  string reason = 12;
+  // Overrides for re-deriving; kept on the rederive operation.
+  RederiveOverrides overrides = 13;
+}
+
+// UpdateMemoryResponse carries the edited memory and its rederive operation.
+message UpdateMemoryResponse {
+  reserved 2;
+  reserved "operation_id";
+  // The memory after the edit.
+  Memory memory = 1;
+  // The rederive_memory operation, which re-embeds and re-links the fact.
+  Operation operation = 3;
+}
+
+// MemoryEdit holds the curated fields of a raw fact that UpdateMemory can change.
+message MemoryEdit {
+  // Fact text; named but empty = INVALID_ARGUMENT.
+  string text = 1;
+  // Context of the fact; empty clears it.
+  string context = 2;
+  // When the fact started happening; unset clears it.
+  google.protobuf.Timestamp occurred_start = 3;
+  // When the fact stopped happening; unset clears it.
+  google.protobuf.Timestamp occurred_end = 4;
+  // FACT_TYPE_WORLD or FACT_TYPE_EXPERIENCE; any other value, unspecified included, = INVALID_ARGUMENT.
+  FactType fact_type = 5;
+  // Entity names linked to the fact; empty removes every entity.
+  repeated string entities = 6;
+}
+
+// ---- InvalidateMemory ----
+
+// InvalidateMemoryRequest names the raw fact to archive. The call also deletes the observations citing the
+// fact, queues consolidation and graph maintenance, and queues refreshes of the mental models that cite the
+// fact or one of those observations.
+message InvalidateMemoryRequest {
+  // Bank owning the memory.
+  string bank_id = 1;
+  // Memory id; must be a live raw fact. An observation = INVALID_ARGUMENT (reason MEMORY_IS_OBSERVATION); an
+  // invalidated or unknown memory = NOT_FOUND.
+  string memory_id = 2;
+  // Why the fact is invalidated; stored on the audit row.
+  string reason = 3;
+}
+
+// InvalidateMemoryResponse carries the invalidated memory.
+message InvalidateMemoryResponse {
+  // The memory, now MEMORY_STATE_INVALIDATED.
+  Memory memory = 1;
+}
+
+// ---- RestoreMemory ----
+
+// RestoreMemoryRequest names the invalidated raw fact to bring back. The restore re-attaches the entities the
+// fact had when it was invalidated; its rederive_memory job re-embeds and re-links it.
+message RestoreMemoryRequest {
+  // Bank owning the memory.
+  string bank_id = 1;
+  // Memory id. An unknown memory = NOT_FOUND; an observation = INVALID_ARGUMENT (reason
+  // MEMORY_IS_OBSERVATION); a live fact is left unchanged.
+  string memory_id = 2;
+  // Why the fact is restored; stored on the audit row.
+  string reason = 3;
+  // false = re-attach the fact's entity names literally instead of resolving them to existing entities;
+  // unset = true.
+  optional bool resolve_entities = 4;
+  // Overrides for re-deriving; kept on the rederive operation.
+  RederiveOverrides overrides = 5;
+}
+
+// RestoreMemoryResponse carries the restored memory and its rederive operation.
+message RestoreMemoryResponse {
+  // The memory, now MEMORY_STATE_VALID.
+  Memory memory = 1;
+  // The rederive_memory operation; unset when the memory was already live.
+  Operation operation = 2;
+}
+
 // ---- Resources ----
 
-// Memory is the read model of one memory unit: a raw fact or an observation.
+// Memory is the read model of one memory: a raw fact or an observation.
 message Memory {
-  // Unit id.
+  reserved 2;
+  reserved "type";
+  // Memory id.
   string id = 1;
   // World, experience or observation.
-  FactType type = 2;
+  FactType fact_type = 19;
   // The fact or observation text.
   string text = 3;
   // Context given at retain (or by curation).
   string context = 4;
   // Metadata copied from the retained item.
   map<string, string> metadata = 5;
-  // Tags of the unit.
+  // Tags of the memory.
   repeated string tags = 6;
-  // Canonical names of the entities linked to the unit.
+  // Canonical names of the entities linked to the memory.
   repeated string entities = 7;
   // Start of when the fact happened; unset for timeless facts.
   google.protobuf.Timestamp occurred_start = 8;
@@ -512,9 +706,9 @@ message Memory {
   google.protobuf.Timestamp occurred_end = 9;
   // When the fact was mentioned (the retained item's timestamp).
   google.protobuf.Timestamp mentioned_at = 10;
-  // Document the unit was extracted from; empty for observations.
+  // Document the memory was extracted from; empty for observations.
   string document_id = 11;
-  // Chunk the unit was extracted from; empty for observations.
+  // Chunk the memory was extracted from; empty for observations.
   string chunk_id = 12;
   // Number of source facts supporting an observation; feeds the proof boost.
   int32 proof_count = 13;
@@ -530,95 +724,17 @@ message Memory {
   bool stale = 18;
 }
 
-// MemoryState says whether a unit is live or archived by curation.
+// MemoryState says whether a memory is live or invalidated by curation.
 enum MemoryState {
-  // Not set. In ListMemories it applies no state filter; in UpdateMemory it leaves the state unchanged.
+  // Not set. In ListMemories it applies no state filter.
   MEMORY_STATE_UNSPECIFIED = 0;
   // Live: visible to recall and consolidation.
   MEMORY_STATE_VALID = 1;
-  // Archived in memory_units_archive; invisible to recall and consolidation, restorable.
+  // Invalidated (InvalidateMemory): invisible to recall and consolidation; RestoreMemory brings it back.
   MEMORY_STATE_INVALIDATED = 2;
 }
 
 // ======================= MemoryUnitService =======================
-
-// Curation fixes or retires one raw fact without a hard delete; observations are never curated
-// directly, they re-derive from their sources. Everything that would leave recall inconsistent happens
-// in the RPC's own transaction; only re-embedding and re-linking wait for a rederive_memory job.
-// Invalidated units move to an archive table, so recall and consolidation never see them.
-
-// ---- ListMemories ----
-
-// ListMemoriesRequest filters and pages the bank's units.
-message ListMemoriesRequest {
-  reserved 11;
-  reserved "tags_match";
-  // Bank to list; unknown bank = NOT_FOUND.
-  string bank_id = 1;
-  // Fact types; empty = all.
-  repeated FactType types = 2;
-  // Text substring filter; empty = none.
-  string q = 3;
-  // Only units of this document.
-  string document_id = 4;
-  // Only live units linked to this entity.
-  string entity_id = 5;
-  // Live or invalidated units; unspecified = no state filter.
-  MemoryState state = 6;
-  // Inclusive start of the time range on time_field.
-  google.protobuf.Timestamp start = 7;
-  // Exclusive end of the time range on time_field.
-  google.protobuf.Timestamp end = 8;
-  // Timestamp the range applies to.
-  TimeField time_field = 9;
-  // Tag filter on the units' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
-  // TAGS_MATCH_ANY.
-  TagFilter tags = 10;
-  // Maximum units per page; 0 = 100, at most 1000.
-  int32 page_size = 12;
-  // Token from a previous response; empty = first page.
-  string page_token = 13;
-}
-
-// ListMemoriesResponse is one page of units.
-message ListMemoriesResponse {
-  // Units on this page.
-  repeated Memory items = 1;
-  // Token for the next page; empty = no more.
-  string next_page_token = 2;
-}
-
-// TimeField picks the unit timestamp a ListMemories time range applies to.
-enum TimeField {
-  // Not set; same as TIME_FIELD_CREATED_AT.
-  TIME_FIELD_UNSPECIFIED = 0;
-  // When the unit was written.
-  TIME_FIELD_CREATED_AT = 1;
-  // When the unit last changed.
-  TIME_FIELD_UPDATED_AT = 2;
-  // When the fact was mentioned.
-  TIME_FIELD_MENTIONED_AT = 3;
-  // When the fact started happening.
-  TIME_FIELD_OCCURRED_START = 4;
-  // When the fact stopped happening.
-  TIME_FIELD_OCCURRED_END = 5;
-}
-
-// ---- GetMemory ----
-
-// GetMemoryRequest names one unit.
-message GetMemoryRequest {
-  // Bank owning the unit; unknown bank = NOT_FOUND.
-  string bank_id = 1;
-  // Unit id.
-  string memory_id = 2;
-}
-
-// GetMemoryResponse carries the unit.
-message GetMemoryResponse {
-  // The unit, live or invalidated.
-  Memory memory = 1;
-}
 
 // ---- GetObservationHistory ----
 
@@ -646,55 +762,6 @@ message ObservationVersion {
   repeated string source_ids = 3;
   // When the version was written.
   google.protobuf.Timestamp at = 4;
-}
-
-// ---- UpdateMemory ----
-
-// UpdateMemoryRequest edits, invalidates or restores one raw fact. Unset fields are left unchanged.
-// Edits commit with an audit row, clear the embedding until rederive, and delete citing observations.
-message UpdateMemoryRequest {
-  // Bank owning the unit.
-  string bank_id = 1;
-  // Unit id; must be a raw fact, not an observation.
-  string memory_id = 2;
-  // New fact text.
-  optional string text = 3;
-  // New context.
-  optional string context = 4;
-  // New occurred start.
-  optional google.protobuf.Timestamp occurred_start = 5;
-  // New occurred end.
-  optional google.protobuf.Timestamp occurred_end = 6;
-  // Clear occurred_start and occurred_end (makes the fact timeless).
-  bool clear_occurred = 7;
-  // New fact type (world or experience); unspecified = unchanged.
-  FactType fact_type = 8;
-  // Replacement entity names; unset = unchanged.
-  EntityList entities = 9;
-  // false = take the new entity names literally when re-deriving; unset = resolve.
-  optional bool resolve_entities = 10;
-  // VALID restores an invalidated unit; INVALIDATED archives a live one; unspecified = edit only.
-  MemoryState state = 11;
-  // Why the change was made; stored on the audit row.
-  string reason = 12;
-  // Overrides for re-deriving; kept on the rederive operation row.
-  RederiveOverrides overrides = 13;
-}
-
-// UpdateMemoryResponse carries the curated unit.
-message UpdateMemoryResponse {
-  reserved 2;
-  reserved "operation_id";
-  // The unit after the change.
-  Memory memory = 1;
-  // The rederive_memory operation; unset for an invalidate (and a restore of a live unit with no edits).
-  Operation operation = 3;
-}
-
-// EntityList wraps a list of entity names so that unset can differ from empty.
-message EntityList {
-  // Entity names; empty = remove all entities.
-  repeated string names = 1;
 }
 
 // ======================= DocumentService =======================
@@ -2257,7 +2324,7 @@ message ToolCallTrace {
   int64 duration_ms = 6;
 }
 
-// ReflectTrace explains a reflect call. Returned when ReflectInclude.tool_calls is set.
+// ReflectTrace explains a reflect call. Returned when ReflectInclude.trace is set.
 message ReflectTrace {
   // Tool calls in order.
   repeated ToolCallTrace tool_calls = 1;
@@ -2643,8 +2710,8 @@ message ConsolidateOverrides {
   ModelBinding dedup_check_model = 10;
 }
 
-// RederiveOverrides is what re-deriving an edited memory may override: entity matching and the EXTRACT and
-// TIME_PARSE models.
+// RederiveOverrides is what re-deriving an edited or restored memory may override: entity matching and the
+// EXTRACT and TIME_PARSE models.
 message RederiveOverrides {
   // Minimum resolver score to reuse an entity.
   optional double entity_match_threshold = 1;
@@ -2674,9 +2741,9 @@ message RefreshOverrides {
 
 // Enums used by more than one service.
 
-// FactType classifies a memory unit.
+// FactType classifies a memory.
 enum FactType {
-  // Not set; never stored. In UpdateMemory it leaves the fact type unchanged.
+  // Not set; never stored.
   FACT_TYPE_UNSPECIFIED = 0;
   // A fact about the world, extracted at retain.
   FACT_TYPE_WORLD = 1;
@@ -2776,11 +2843,11 @@ enum ModelSlot {
   reserved "MODEL_SLOT_SYNTHESIZE", "MODEL_SLOT_MENTAL_MODEL_DELTA";
   // Not set; never recorded in usage.
   MODEL_SLOT_UNSPECIFIED = 0;
-  // Retain fact, entity and label extraction. Overridable on Retain, ReprocessDocument and UpdateMemory
-  // (re-deriving).
+  // Retain fact, entity and label extraction. Overridable on Retain, ReprocessDocument, UpdateMemory and
+  // RestoreMemory (re-deriving).
   MODEL_SLOT_EXTRACT = 1;
   // Relative dates at retain, and query time windows at recall (only when a cue is found and the rules
-  // fail). Overridable on Retain, Recall, ReprocessDocument and UpdateMemory.
+  // fail). Overridable on Retain, Recall, ReprocessDocument, UpdateMemory and RestoreMemory.
   MODEL_SLOT_TIME_PARSE = 2;
   // Create / update / none decisions per observation scope. Overridable on a manual Consolidate request
   // or the matching consolidation strategy, never by the retain that triggered the consolidation.
@@ -2854,7 +2921,7 @@ enum EventType {
   EVENT_TYPE_MENTAL_MODEL_REFRESHED = 3;
   // A mental-model refresh failed after its job retries and auto-refresh was paused.
   EVENT_TYPE_MENTAL_MODEL_REFRESH_FAILED = 4;
-  // A memory unit was edited, invalidated or restored through UpdateMemory.
+  // A memory was edited, invalidated or restored (UpdateMemory, InvalidateMemory, RestoreMemory).
   EVENT_TYPE_MEMORY_CURATED = 5;
   // An operation reached FAILED.
   EVENT_TYPE_OPERATION_FAILED = 6;

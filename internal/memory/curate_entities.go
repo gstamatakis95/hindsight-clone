@@ -20,14 +20,14 @@ type entityChange struct {
 // explicit names, or a restore's archive-snapshot names (graph maintenance may have pruned those entities
 // while the unit was archived, so Restore alone would drop them). It reads the threshold here so the
 // transaction makes no config read.
-func (c *curator) planEntities(ctx context.Context, req UpdateRequest, snapshot []string) (*entityChange, error) {
-	names := req.Entities
+func (c *curator) planEntities(ctx context.Context, req curation, snapshot []string) (*entityChange, error) {
+	names := req.Edit.Entities
 	literal := req.ResolveEntities != nil && !*req.ResolveEntities
-	if names == nil {
+	if !req.edits(EditEntities) {
 		if snapshot == nil {
 			return nil, nil
 		}
-		names, literal = snapshot, false
+		names = snapshot
 	}
 	if c.d.Resolver == nil {
 		return nil, fmt.Errorf("%w: no entity resolver wired for entity changes", domain.ErrFailedPrecondition)
@@ -42,7 +42,7 @@ func (c *curator) planEntities(ctx context.Context, req UpdateRequest, snapshot 
 }
 
 // threshold resolves the entity merge threshold with the request overrides.
-func (c *curator) threshold(ctx context.Context, req UpdateRequest) (float64, error) {
+func (c *curator) threshold(ctx context.Context, req curation) (float64, error) {
 	if c.d.Config == nil {
 		return linking.DefaultEntityMatchThreshold, nil
 	}
@@ -60,12 +60,12 @@ func (c *curator) threshold(ctx context.Context, req UpdateRequest) (float64, er
 	return linking.DefaultEntityMatchThreshold, nil
 }
 
-// commitEntities applies change to u in tx when the request names entities or a restore brought the unit
-// back (its snapshot names), and returns u with the names now attached.
+// commitEntities applies change to u in tx when the edit names entities or a restore brought the unit back
+// (its snapshot names), and returns u with the names now attached.
 func (c *curator) commitEntities(
-	ctx context.Context, tx store.Tx, u domain.Unit, req UpdateRequest, restored bool, change *entityChange,
+	ctx context.Context, tx store.Tx, u domain.Unit, req curation, restored bool, change *entityChange,
 ) (domain.Unit, error) {
-	if change == nil || (req.Entities == nil && !restored) {
+	if change == nil || (!req.edits(EditEntities) && !restored) {
 		return u, nil
 	}
 	names, err := c.applyEntities(ctx, tx, u, change)

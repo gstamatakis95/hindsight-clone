@@ -53,8 +53,8 @@ func TestEveryRPCWired(t *testing.T) {
 		}
 		return true
 	})
-	if n != 48 {
-		t.Fatalf("found %d RPCs, want 48", n)
+	if n != 50 {
+		t.Fatalf("found %d RPCs, want 50", n)
 	}
 }
 
@@ -263,8 +263,8 @@ func TestUpdateDocumentTags(t *testing.T) {
 	}
 }
 
-// TestReflectBasedOn checks based_on is present when facts are included (the default), even when the answer cites
-// nothing, and absent when they are excluded.
+// TestReflectBasedOn checks based_on is present when include.based_on is unset (the default), even when the
+// answer cites nothing, and absent when it is turned off.
 func TestReflectBasedOn(t *testing.T) {
 	w := startWired(t)
 	ctx := w.ctx(t)
@@ -276,12 +276,12 @@ func TestReflectBasedOn(t *testing.T) {
 	}
 	resp, err := mem.Reflect(ctx, &pb.ReflectRequest{BankId: "b", Query: "q"})
 	if err != nil || resp.GetBasedOn() == nil {
-		t.Errorf("facts included by default: based_on = %v, err = %v; want non-nil", resp.GetBasedOn(), err)
+		t.Errorf("based_on included by default: based_on = %v, err = %v; want non-nil", resp.GetBasedOn(), err)
 	}
 	resp, err = mem.Reflect(ctx, &pb.ReflectRequest{
-		BankId: "b", Query: "q", Include: &pb.ReflectInclude{Facts: proto.Bool(false)},
+		BankId: "b", Query: "q", Include: &pb.ReflectInclude{BasedOn: proto.Bool(false)},
 	})
 	if err != nil || resp.GetBasedOn() != nil {
-		t.Errorf("facts excluded: based_on = %v, err = %v; want nil", resp.GetBasedOn(), err)
+		t.Errorf("based_on excluded: based_on = %v, err = %v; want nil", resp.GetBasedOn(), err)
 	}
 }

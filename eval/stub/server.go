@@ -146,7 +146,7 @@ func (s *Server) Retain(ctx context.Context, req *memoryv1.RetainRequest) (*memo
 		}
 		b.upsert(&document{id: id, content: it.GetContent(), time: it.GetTimestamp()})
 		s.retains++
-		resp.Documents = append(resp.Documents, &memoryv1.RetainedDocument{DocumentId: id, UnitsCreated: 1})
+		resp.Documents = append(resp.Documents, &memoryv1.RetainedDocument{DocumentId: id, MemoriesCreated: 1})
 		resp.Usage = append(resp.Usage, &memoryv1.SlotUsage{
 			Slot: memoryv1.ModelSlot_MODEL_SLOT_EXTRACT, Model: stubModel, InputTokens: 20, OutputTokens: 4,
 		})
@@ -322,7 +322,7 @@ func (b *bank) recall(query string, limit int) []*memoryv1.Memory {
 			}
 			cands = append(cands, candidate{score: score, mem: &memoryv1.Memory{
 				Id:          fmt.Sprintf("%s#%d", d.id, n),
-				Type:        memoryv1.FactType_FACT_TYPE_WORLD,
+				FactType:    memoryv1.FactType_FACT_TYPE_WORLD,
 				Text:        line,
 				DocumentId:  d.id,
 				MentionedAt: d.time,
