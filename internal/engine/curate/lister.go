@@ -2,6 +2,7 @@ package curate
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"time"
@@ -17,6 +18,61 @@ type MemoryLister interface {
 	ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
 }
 
+// UnitSource is the read side of MemoryLister. Its methods are the port.Reader methods proposed in CCR
+// WP-13-1 (UnitQuery and UnitCursor move to port with it); port.Reader satisfies it once the CCR lands.
+type UnitSource interface {
+	// GetUnit returns one unit of b, live (State valid) or archived (State invalidated), with Entities,
+	// SourceIDs and, for observations, Stale filled; unknown = domain.ErrNotFound. An unknown or
+	// tombstoned bank is domain.ErrNotFound.
+	GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+	// ListUnits returns up to q.Limit units matching q, newest first (created_at, then id, both
+	// descending), starting strictly after q.After. Units are filled like GetUnit. An unknown or tombstoned
+	// bank is domain.ErrNotFound.
+	ListUnits(ctx context.Context, q UnitQuery) ([]domain.Unit, error)
+	// ObservationHistory returns the observation_versions rows of observation id, newest first; an
+	// unknown id is domain.ErrNotFound. An unknown or tombstoned bank is domain.ErrNotFound.
+	ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
+}
+
+// UnitQuery filters ListUnits. Zero fields do not filter.
+type UnitQuery struct {
+	// Bank is the bank listed.
+	Bank port.BankRef
+	// Types limits fact types; empty = all.
+	Types []domain.FactType
+	// Q is a case-insensitive substring filter on the text; empty = none.
+	Q string
+	// DocumentID limits units to one document.
+	DocumentID port.DocumentID
+	// EntityID limits units to live units attached to the entity (archived units never match).
+	EntityID port.EntityID
+	// State selects live (valid), archived (invalidated) or both (unspecified) tables.
+	State domain.MemoryState
+	// Start is the inclusive lower bound on TimeField; nil = unbounded.
+	Start *time.Time
+	// End is the exclusive upper bound on TimeField; nil = unbounded.
+	End *time.Time
+	// TimeField is the timestamp Start and End filter on; unspecified = created_at. A unit whose field is
+	// null never matches a bound on it.
+	TimeField domain.TimeField
+	// Tags filters by normalized tags with domain.MatchTags semantics; empty = none.
+	Tags []string
+	// TagsMatch is how Tags compare.
+	TagsMatch domain.TagsMatch
+	// After continues a listing: only units strictly after this cursor in the listing order; nil = first.
+	After *UnitCursor
+	// Limit caps the result (> 0).
+	Limit int
+}
+
+// UnitCursor is a keyset position in a unit listing.
+type UnitCursor struct {
+	// CreatedAt is the last listed unit's created_at.
+	CreatedAt time.Time `json:"c"`
+	// ID is the last listed unit's id.
+	ID port.UnitID `json:"i"`
+}
+
 // ListMemoriesRequest mirrors memory.v1.ListMemoriesRequest with domain types.
 type ListMemoriesRequest struct {
 	// Bank is the bank listed.
@@ -29,7 +85,7 @@ type ListMemoriesRequest struct {
 	DocumentID port.DocumentID
 	// EntityID limits units to those attached to an entity (live units only); empty = all.
 	EntityID port.EntityID
-	// State selects live (unspecified or valid) or archived (invalidated) units.
+	// State selects live (valid), archived (invalidated) or both (unspecified) units.
 	State domain.MemoryState
 	// Start is the inclusive lower bound on TimeField; nil = unbounded.
 	Start *time.Time
@@ -53,4 +109,100 @@ type ListMemoriesPage struct {
 	Items []domain.Unit
 	// NextPageToken continues the listing; empty = last page.
 	NextPageToken string
+}
+
+// Page size bounds shared by the listings of this package.
+const (
+	// DefaultPageSize is the page size when a request sets none.
+	DefaultPageSize = 100
+	// MaxPageSize caps a requested page size.
+	MaxPageSize = 1000
+)
+
+// lister implements MemoryLister over a UnitSource.
+type lister struct {
+	src UnitSource
+}
+
+var _ MemoryLister = (*lister)(nil)
+
+// NewMemoryLister returns the MemoryLister reading through src.
+func NewMemoryLister(src UnitSource) MemoryLister {
+	return &lister{src: src}
+}
+
+// List validates req, decodes its page token and reads one page plus one unit to know whether more follow.
+func (l *lister) List(ctx context.Context, req ListMemoriesRequest) (ListMemoriesPage, error) {
+	q, err := unitQuery(req)
+	if err != nil {
+		return ListMemoriesPage{}, err
+	}
+	size := q.Limit
+	q.Limit = size + 1
+	units, err := l.src.ListUnits(ctx, q)
+	if err != nil {
+		return ListMemoriesPage{}, fmt.Errorf("list memories: %w", err)
+	}
+	page := ListMemoriesPage{Items: units}
+	if len(units) > size {
+		page.Items = units[:size]
+		last := page.Items[size-1]
+		page.NextPageToken, err = encodeToken(UnitCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+		if err != nil {
+			return ListMemoriesPage{}, err
+		}
+	}
+	return page, nil
+}
+
+// unitQuery turns a request into a UnitQuery, validating enums and decoding the page token.
+func unitQuery(req ListMemoriesRequest) (UnitQuery, error) {
+	for _, t := range req.Types {
+		if !knownFactType(t) {
+			return UnitQuery{}, fmt.Errorf("%w: unknown fact type %q", domain.ErrInvalidArgument, t)
+		}
+	}
+	switch req.State {
+	case domain.MemoryStateUnspecified, domain.MemoryStateValid, domain.MemoryStateInvalidated:
+	default:
+		return UnitQuery{}, fmt.Errorf("%w: unknown memory state %q", domain.ErrInvalidArgument, req.State)
+	}
+	q := UnitQuery{
+		Bank: req.Bank, Types: req.Types, Q: req.Q, DocumentID: req.DocumentID, EntityID: req.EntityID,
+		State: req.State, Start: req.Start, End: req.End, TimeField: req.TimeField,
+		Tags: domain.NormalizeTags(req.Tags), TagsMatch: req.TagsMatch, Limit: pageSize(req.PageSize),
+	}
+	if req.PageToken != "" {
+		var c UnitCursor
+		if err := decodeToken(req.PageToken, &c); err != nil {
+			return UnitQuery{}, err
+		}
+		q.After = &c
+	}
+	return q, nil
+}
+
+// knownFactType reports whether t is a concrete fact type.
+func knownFactType(t domain.FactType) bool {
+	return t == domain.FactTypeWorld || t == domain.FactTypeExperience || t == domain.FactTypeObservation
+}
+
+// Get returns one unit, live or archived.
+func (l *lister) Get(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+	u, err := l.src.GetUnit(ctx, b, id)
+	if err != nil {
+		return domain.Unit{}, fmt.Errorf("get memory %s: %w", id, err)
+	}
+	return u, nil
+}
+
+// ObservationHistory returns an observation's versions, newest first.
+func (l *lister) ObservationHistory(
+	ctx context.Context, b port.BankRef, id port.UnitID,
+) ([]domain.ObservationVersion, error) {
+	vs, err := l.src.ObservationHistory(ctx, b, id)
+	if err != nil {
+		return nil, fmt.Errorf("observation history %s: %w", id, err)
+	}
+	return vs, nil
 }

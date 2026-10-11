@@ -44,3 +44,47 @@ type UpdateMemoryRequest struct {
 	// Overrides are kept on the rederive operation; nil = none.
 	Overrides *domain.BankConfig
 }
+
+// CitingModels finds the mental models whose source_ids cite units. It is the port.Reader method proposed
+// in CCR WP-13-1; port.Reader satisfies it once the CCR lands.
+type CitingModels interface {
+	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids or any
+	// observation that cites one of ids, ordered by id. An unknown or tombstoned bank is domain.ErrNotFound.
+	ModelsCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error)
+}
+
+// RefreshQueuer enqueues mental-model refreshes; the mental-model engine (WP-12) owns the refresh payload
+// and its scheduling rules (decision 1303). bank.RefreshQueuer has the same method.
+type RefreshQueuer interface {
+	// QueueRefresh enqueues (or joins) a refresh of model id of bank b inside tx and returns its operation
+	// id. The caller has already called tx.Seq(b).
+	QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
+}
+
+// UnitGetter reads one unit, live or archived. It is UnitSource.GetUnit (the port.Reader method proposed in
+// CCR WP-13-1); for an archived unit, Entities are the names in its archive snapshot, even when the entity
+// rows were pruned since.
+type UnitGetter interface {
+	// GetUnit returns one unit of b, live or archived; unknown = domain.ErrNotFound.
+	GetUnit(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+}
+
+// CuratorDeps are the Curator's dependencies.
+type CuratorDeps struct {
+	// Store opens the RPC's transaction.
+	Store port.Store
+	// Clock stamps edited_at, audit rows and events.
+	Clock port.Clock
+	// Citing finds the models an invalidate must refresh.
+	Citing CitingModels
+	// Refresh enqueues those refreshes in the invalidate's transaction.
+	Refresh RefreshQueuer
+	// Resolver resolves an edit's entity names and a restore's snapshot names inside the RPC's transaction;
+	// nil rejects such requests with domain.ErrFailedPrecondition.
+	Resolver EntityResolver
+	// Config resolves the entity match threshold (with the request overrides) before the transaction.
+	Config port.ConfigResolver
+	// Archived reads an archived unit's snapshot entity names before a restore, so the rederive re-creates
+	// entities graph maintenance pruned meanwhile; nil = rely on the entities Restore reattaches.
+	Archived UnitGetter
+}
