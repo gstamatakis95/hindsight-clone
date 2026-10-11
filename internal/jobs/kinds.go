@@ -108,7 +108,7 @@ type RefreshPayload struct {
 	MentalModelID domain.MentalModelID `json:"mental_model_id"`
 	// ForceFull rewrites in full even when delta mode would apply.
 	ForceFull bool `json:"force_full,omitempty"`
-	// Strategy overrides the trigger's strategy for this refresh.
+	// Strategy overrides the spec's strategy for this refresh.
 	Strategy domain.RefreshStrategy `json:"strategy,omitempty"`
 	// Manual marks a user-requested refresh; its success clears auto_refresh_paused.
 	Manual bool `json:"manual,omitempty"`

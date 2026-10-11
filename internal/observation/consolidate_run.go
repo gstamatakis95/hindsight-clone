@@ -19,7 +19,7 @@ type run struct {
 	payload jobs.ConsolidatePayload
 	filter  []domain.ScopeKey    // a manual run's scopes; empty = every unit
 	check   *jobs.Run            // progress and the cancel check
-	models  []domain.MentalModel // refresh_after_consolidation models, listed once per run
+	models  []domain.MentalModel // schedule.after_consolidation models, listed once per run
 
 	units  map[domain.UnitID]domain.Unit       // planned units (their seq and tags are re-checked before stamping)
 	cited  map[domain.UnitID][]domain.ScopeKey // scopes that cite the unit: skipped at plan, or written this run

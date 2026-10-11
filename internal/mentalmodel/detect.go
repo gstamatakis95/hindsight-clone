@@ -40,8 +40,8 @@ func (s *Service) needsRefresh(
 	return isStale(m, newest, retracted), upTo, nil
 }
 
-// modelConfig is m's effective config without call overrides: server < tenant < bank < the model's overrides <
-// its trigger's knobs. Staleness, scheduling and reads use it.
+// modelConfig is m's effective config without call overrides: server < tenant < bank < the model's overrides.
+// Staleness, scheduling and reads use it.
 func (s *Service) modelConfig(ctx context.Context, m domain.MentalModel) (domain.BankConfig, error) {
 	cfg, err := s.d.Config.Effective(ctx, m.Bank, configLevels(m, nil)...)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 )
 
 // TestStructuredOutputProjectedFromFinalPage checks that the page written is projected onto the
-// trigger's schema and the projection is stored with the version.
+// spec's response schema and the projection is stored with the version.
 func TestStructuredOutputProjectedFromFinalPage(t *testing.T) {
 	e := newEnv(t)
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")

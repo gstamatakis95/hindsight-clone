@@ -35,7 +35,7 @@ type refreshOptions struct {
 	ForceFull bool
 	// Preview runs the pipeline and returns the outcome and diff without writing anything.
 	Preview bool
-	// Strategy overrides the trigger's refresh strategy; unspecified = the trigger's or the bank default.
+	// Strategy overrides the spec's refresh strategy; unspecified = the spec's or the bank default.
 	Strategy domain.RefreshStrategy
 	// Overrides are per-call config overrides, above the model's stored overrides; nil = none.
 	Overrides *domain.BankConfig
@@ -73,7 +73,7 @@ type RefreshOutcome struct {
 
 // ResolvedScope mirrors memory.v1.ResolvedScope: the effective scope of a model after defaults.
 type ResolvedScope struct {
-	// Tags is the effective tag filter (domain.MentalModelSpec.ScopeFilter): the trigger's groups, or the
+	// Tags is the effective tag filter (domain.MentalModelSpec.ScopeFilter): the scope's groups, or the
 	// model's tags under the effective match mode.
 	Tags domain.TagFilter
 	// FactTypes limits the scope; empty = all.
@@ -103,7 +103,7 @@ type draft struct {
 	ContentMD string
 	// SourceIDs are the units the document is based on.
 	SourceIDs []domain.UnitID
-	// StructuredOutputJSON is the projection onto the trigger's response schema; nil = none.
+	// StructuredOutputJSON is the projection onto the spec's response schema; nil = none.
 	StructuredOutputJSON json.RawMessage
 	// Usage is per-slot token usage.
 	Usage []domain.Usage

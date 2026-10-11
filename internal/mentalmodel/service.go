@@ -16,11 +16,11 @@ type Deps struct {
 	DB store.DB
 	// Maintenance lists the cron models and the failed refreshes for the maintenance sweeps.
 	Maintenance store.Maintenance
-	// Config merges server < tenant < bank < model overrides < trigger < call overrides.
+	// Config merges server < tenant < bank < model overrides < call overrides.
 	Config *config.Resolver
 	// Recall runs the single-shot recall, resolves fuzzy scope tags and serves SearchMentalModels.
 	Recall *recall.Engine
-	// Reflect runs the agentic refresh loop and projects pages onto a trigger's response schema; nil = the
+	// Reflect runs the agentic refresh loop and projects pages onto a spec's response schema; nil = the
 	// agentic strategy and structured output fail.
 	Reflect *reflect.Agent
 	// LLM makes the synthesize and delta calls.

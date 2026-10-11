@@ -97,7 +97,7 @@ type ModelQuery struct {
 	Tags []string
 	// TagsMatch is how Tags compare.
 	TagsMatch domain.TagsMatch
-	// RefreshAfterConsolidation keeps only models whose trigger sets refresh_after_consolidation.
+	// RefreshAfterConsolidation keeps only models whose schedule sets after_consolidation.
 	RefreshAfterConsolidation bool
 	// PageSize caps the page; 0 = all.
 	PageSize int

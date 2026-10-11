@@ -303,7 +303,7 @@ func (s *Service) full(ctx context.Context, p *refreshPlan) (drafted, error) {
 	return dr, nil
 }
 
-// finish projects structured output onto the trigger's schema when the content changed.
+// finish projects structured output onto the spec's response schema when the content changed.
 func (s *Service) finish(ctx context.Context, p *refreshPlan, dr drafted, err error) (drafted, error) {
 	schema := strings.TrimSpace(p.m.Spec.ResponseSchemaJSON)
 	if err != nil || dr.noNewFacts || schema == "" || dr.content == p.m.ContentMD {
