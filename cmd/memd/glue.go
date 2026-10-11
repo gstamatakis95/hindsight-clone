@@ -140,10 +140,23 @@ func (o *operationReader) ListOperations(
 	return ops, next, err
 }
 
-// ListEvents returns b's events after afterSeq, of types (empty = all), and the last seq scanned.
+// ListEvents page bounds: the soft limit of a request that sets none, and the cap of any request (the
+// memory and bank listings' bounds; decision 2502).
+const (
+	defaultEventsLimit = 100
+	maxEventsLimit     = 1000
+)
+
+// ListEvents returns b's events after afterSeq, of types (empty = all), and the last seq scanned. A limit of
+// 0 or less is defaultEventsLimit and one above maxEventsLimit is capped (EventRepo.List itself treats
+// <= 0 as no limit).
 func (o *operationReader) ListEvents(
 	ctx context.Context, b port.BankRef, afterSeq int64, limit int, types []domain.EventType,
 ) ([]domain.LifecycleEvent, int64, error) {
+	if limit <= 0 {
+		limit = defaultEventsLimit
+	}
+	limit = min(limit, maxEventsLimit)
 	var events []domain.LifecycleEvent
 	var last int64
 	err := o.readBank(ctx, b, func(tx port.Tx) error {

@@ -53,9 +53,9 @@ const txAttempts = 3
 
 // InTx runs fn in one READ COMMITTED transaction and commits when fn returns nil. Any error or panic
 // rolls back; a panic is re-raised after the rollback. fn's error is returned unchanged. A transaction that
-// fails with a deadlock (40P01) or serialization failure (40001) is rolled back and run again, up to
-// txAttempts times in all: fn never calls a model (port.Store), so re-running it only repeats short
-// database work (decision 100).
+// fails with a deadlock (40P01), a serialization failure (40001) or errEntityGone (decision 2501) is rolled
+// back and run again, up to txAttempts times in all: fn never calls a model (port.Store), so re-running it
+// only repeats short database work (decision 100).
 func (s *Store) InTx(ctx context.Context, fn func(port.Tx) error) error {
 	var err error
 	for range txAttempts {
@@ -67,9 +67,10 @@ func (s *Store) InTx(ctx context.Context, fn func(port.Tx) error) error {
 }
 
 // retryableTxErr reports whether err is a lost deadlock or serialization race that a fresh transaction
-// may win.
+// may win, or an Attach of an entity pruned meanwhile (errEntityGone), which a re-run resolves afresh.
 func retryableTxErr(err error) bool {
-	return isPgCode(err, codeDeadlockDetected) || isPgCode(err, codeSerializationFailure)
+	return isPgCode(err, codeDeadlockDetected) || isPgCode(err, codeSerializationFailure) ||
+		errors.Is(err, errEntityGone)
 }
 
 // runTx runs fn in one transaction (see InTx).

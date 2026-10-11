@@ -39,7 +39,7 @@ Every name below was checked to exist (`func Test...` or a suite case string) wh
 | Slots: 10 per worker, 2 reserved for consolidate | `worker.TestRunnerReservedSlotsHoldUnderRetainFlood` |
 | Maintenance tick: reclaim, cron refreshes, consolidation reconcile, prune; no leader, idempotent | `worker.TestMaintenanceStepOrderAndIsolation`, `worker.TestConcurrentMaintenanceNoDuplicateEnqueues`, `worker.TestPruneOperations`, `mentalmodel.TestCronRefreshes`, `mentalmodel.TestCronFiresOnScheduleWithinGrace`, `worker.TestMaintenanceRederivesStrandedFacts`, `postgres.TestStrandedFacts` |
 | Debounce and parking; Reschedule releases a parked job | `mentalmodel.TestRefreshQueuer`, `mentalmodel.TestDecide`, `porttest:DedupePendingJoinsParked`, `porttest:RescheduleReleaseAndPark` |
-| Events: written in the change's tx, numbered by the change seq, polled by after_seq | `porttest:EventsAppendList`, `porttest:EventsListNeverSplitsSeqGroup`, `porttest:EventsTypeFilterAdvancesLastSeq`, `porttest:FailTerminalAppendsEvent` |
+| Events: written in the change's tx, numbered by the change seq, polled by after_seq; ListEvents limit 0 = 100, capped at 1000 | `porttest:EventsAppendList`, `porttest:EventsListNeverSplitsSeqGroup`, `porttest:EventsTypeFilterAdvancesLastSeq`, `porttest:FailTerminalAppendsEvent`, `memd.TestListEventsDefaultAndCap` |
 
 ## Curation
 
@@ -68,7 +68,8 @@ Every name below was checked to exist (`func Test...` or a suite case string) wh
 | A changed document replaces old units in the first batch tx, deleting observations and resetting co-sources; an interrupted retain resumes | `retain.TestRetainReplacementDeletesObservationsAndResetsCoSources`, `retain.TestRetainResumeAfterCrashReextractsOnlyRemainingChunks`, `retain.TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged` |
 | ALL_COMBINATIONS fan-out over max_combinations is INVALID_ARGUMENT synchronously | `retain.TestIngestFanOutRejectionStoresNothing`, `retain.TestIngestFanOutRejectionUnknownBankCreatesNothing`, `consolidate.TestScopeExpanderTooManyCombinations` |
 | UpdateDocument replaces the tag set; set-equal is a no-op; a change clears observations and re-consolidates | `docs.TestRetagSetEqualIsNoop`, `docs.TestRetagChangeClearsObservations`, `e2e.TestScenarios/RetagReprocess` |
-| graph_maintenance refills links of graph_dirty neighbours below their caps and prunes orphan entities, in committed batches, resuming | `maintenance.TestGraphMaintenanceTopsUpAndPrunes`, `maintenance.TestGraphMaintenanceResumesAfterBudget`, `maintenance.TestGraphMaintenanceRechecksAfterFinalBatch` |
+| graph_maintenance refills links of graph_dirty neighbours below their caps and prunes orphan entities, in committed batches, resuming; an entity pruned between resolve and Attach is a conflict and the tx re-resolves | `maintenance.TestGraphMaintenanceTopsUpAndPrunes`, `maintenance.TestGraphMaintenanceResumesAfterBudget`, `maintenance.TestGraphMaintenanceRechecksAfterFinalBatch`, `porttest:EntitiesAttachPrunedIsConflict`, `postgres.TestAttachAfterConcurrentPruneReresolves` |
+| Config writes (UpdateBankConfig, ResetBankConfig, UpdateTenantConfig) serialize their read-modify-write, so concurrent patches of different fields both land | `postgres.TestConcurrentBankConfigPatchesKeepBoth`, `postgres.TestConcurrentTenantConfigPatchesKeepBoth`, `porttest:BanksTenantConfigLockSerializes` |
 | Change sequence: one bump per tx under the bank row lock; seq order is commit order | `porttest:SameValueWithinTx`, `porttest:StrictlyIncreasingAcrossTx`, `porttest:ConcurrentWritersSerialize`, `postgres.TestAcceptSeqOrder` |
 | Stats and tag counts from COUNT queries; ListMemories returns no total | `bank.TestStats`, `bank.TestTagsPaging`, `porttest:bank_stats`, `porttest:tag_counts` |
 

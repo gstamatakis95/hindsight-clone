@@ -4458,6 +4458,9 @@ var _ port.BankRepo = &BankRepo{}
 //			GetFunc: func(ctx context.Context, b port.BankRef) (domain.Bank, error) {
 //				panic("mock out the Get method")
 //			},
+//			LockTenantConfigFunc: func(ctx context.Context, tenant string) error {
+//				panic("mock out the LockTenantConfig method")
+//			},
 //			MarkDeletingFunc: func(ctx context.Context, b port.BankRef, at time.Time) error {
 //				panic("mock out the MarkDeleting method")
 //			},
@@ -4491,6 +4494,9 @@ type BankRepo struct {
 
 	// GetFunc mocks the Get method.
 	GetFunc func(ctx context.Context, b port.BankRef) (domain.Bank, error)
+
+	// LockTenantConfigFunc mocks the LockTenantConfig method.
+	LockTenantConfigFunc func(ctx context.Context, tenant string) error
 
 	// MarkDeletingFunc mocks the MarkDeleting method.
 	MarkDeletingFunc func(ctx context.Context, b port.BankRef, at time.Time) error
@@ -4543,6 +4549,13 @@ type BankRepo struct {
 			// B is the b argument value.
 			B port.BankRef
 		}
+		// LockTenantConfig holds details about calls to the LockTenantConfig method.
+		LockTenantConfig []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tenant is the tenant argument value.
+			Tenant string
+		}
 		// MarkDeleting holds details about calls to the MarkDeleting method.
 		MarkDeleting []struct {
 			// Ctx is the ctx argument value.
@@ -4578,15 +4591,16 @@ type BankRepo struct {
 			Tenant string
 		}
 	}
-	lockCreate          sync.RWMutex
-	lockDelete          sync.RWMutex
-	lockDeleteBatch     sync.RWMutex
-	lockEnsure          sync.RWMutex
-	lockGet             sync.RWMutex
-	lockMarkDeleting    sync.RWMutex
-	lockSetConfig       sync.RWMutex
-	lockSetTenantConfig sync.RWMutex
-	lockTenantConfig    sync.RWMutex
+	lockCreate           sync.RWMutex
+	lockDelete           sync.RWMutex
+	lockDeleteBatch      sync.RWMutex
+	lockEnsure           sync.RWMutex
+	lockGet              sync.RWMutex
+	lockLockTenantConfig sync.RWMutex
+	lockMarkDeleting     sync.RWMutex
+	lockSetConfig        sync.RWMutex
+	lockSetTenantConfig  sync.RWMutex
+	lockTenantConfig     sync.RWMutex
 }
 
 // Create calls CreateFunc.
@@ -4770,6 +4784,42 @@ func (mock *BankRepo) GetCalls() []struct {
 	mock.lockGet.RLock()
 	calls = mock.calls.Get
 	mock.lockGet.RUnlock()
+	return calls
+}
+
+// LockTenantConfig calls LockTenantConfigFunc.
+func (mock *BankRepo) LockTenantConfig(ctx context.Context, tenant string) error {
+	if mock.LockTenantConfigFunc == nil {
+		panic("BankRepo.LockTenantConfigFunc: method is nil but BankRepo.LockTenantConfig was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		Tenant string
+	}{
+		Ctx:    ctx,
+		Tenant: tenant,
+	}
+	mock.lockLockTenantConfig.Lock()
+	mock.calls.LockTenantConfig = append(mock.calls.LockTenantConfig, callInfo)
+	mock.lockLockTenantConfig.Unlock()
+	return mock.LockTenantConfigFunc(ctx, tenant)
+}
+
+// LockTenantConfigCalls gets all the calls that were made to LockTenantConfig.
+// Check the length with:
+//
+//	len(mockedBankRepo.LockTenantConfigCalls())
+func (mock *BankRepo) LockTenantConfigCalls() []struct {
+	Ctx    context.Context
+	Tenant string
+} {
+	var calls []struct {
+		Ctx    context.Context
+		Tenant string
+	}
+	mock.lockLockTenantConfig.RLock()
+	calls = mock.calls.LockTenantConfig
+	mock.lockLockTenantConfig.RUnlock()
 	return calls
 }
 

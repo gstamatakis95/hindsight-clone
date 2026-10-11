@@ -32,3 +32,13 @@ The facts of those chunks are then lost. `force_reextract` on unchanged content 
 ## Spec lines involved
 SPEC "Behavioural rules" (retain idempotency); `ChunkRepo` doc in `internal/port/repos.go`; decision 140.
 Tests: `TestRetainChangedDocumentCrashResumeKeepsAllFacts`, `TestRetainForceReextractCrashResume`.
+
+## Addendum (WP-25): sync retains longer than the deadline
+An inline run never resumes, so a sync Retain that fails part-way (an RPC deadline, an LLM outage) can leave
+the document partly replaced, and the client's retry is a new run that re-extracts every chunk. A document
+whose extraction takes longer than the call's deadline (`MEMD_RPC_DEADLINE`, 120s by default, when the
+client sets none) can therefore never complete synchronously.
+
+This is accepted, and the salting is unchanged: run ownership (decision 807) and the reopen-on-replace rule
+(decision 2200) rely on it. Long documents should use `run_async` (the `retain_document` job resumes from
+its committed chunks) or a longer client deadline. The README says so under "Sync vs async retain".

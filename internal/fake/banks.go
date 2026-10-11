@@ -178,6 +178,9 @@ func (r bankRepo) TenantConfig(_ context.Context, tenant string) (domain.BankCon
 	return configOf(r.t.st.tenants[tenant]), nil
 }
 
+// LockTenantConfig is a no-op: the fake already serializes every transaction.
+func (r bankRepo) LockTenantConfig(_ context.Context, _ string) error { return nil }
+
 // SetTenantConfig replaces the tenant's config.
 func (r bankRepo) SetTenantConfig(_ context.Context, tenant string, cfg domain.BankConfig) error {
 	r.t.st.tenants[tenant] = jsonOf(&cfg)

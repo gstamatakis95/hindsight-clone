@@ -36,6 +36,11 @@ WHERE tenant_id = $1 AND id = $2;
 -- name: GetTenantConfig :one
 SELECT config FROM tenants WHERE id = $1;
 
+-- TenantConfigLock serializes read-modify-writes of one tenant's config until the tx ends; it needs no
+-- tenants row, so a first-ever write is covered too.
+-- name: TenantConfigLock :exec
+SELECT pg_advisory_xact_lock(hashtextextended('tenant_config/' || @tenant_id::text, 0));
+
 -- UpsertTenantConfig replaces the tenant-level config.
 -- name: UpsertTenantConfig :exec
 INSERT INTO tenants (id, config) VALUES ($1, $2)

@@ -196,6 +196,10 @@ type BankRepo interface {
 	TenantConfig(ctx context.Context, tenant string) (domain.BankConfig, error)
 	// SetTenantConfig replaces the tenant-level config.
 	SetTenantConfig(ctx context.Context, tenant string, cfg domain.BankConfig) error
+	// LockTenantConfig locks the tenant's config for the rest of the transaction, whether or not one is
+	// set, so a read-modify-write (LockTenantConfig, TenantConfig, SetTenantConfig) serializes with any
+	// other that locks it too (Postgres: pg_advisory_xact_lock). Plain TenantConfig reads never wait on it.
+	LockTenantConfig(ctx context.Context, tenant string) error
 }
 
 // MentalModelRepo stores mental models and their history.

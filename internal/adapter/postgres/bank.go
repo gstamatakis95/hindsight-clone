@@ -99,6 +99,11 @@ func (r *bankRepo) TenantConfig(ctx context.Context, tenant string) (domain.Bank
 	return cfg, unmarshal("tenant config", raw, &cfg)
 }
 
+// LockTenantConfig takes the tenant config's transaction-scoped advisory lock (decision 2500).
+func (r *bankRepo) LockTenantConfig(ctx context.Context, tenant string) error {
+	return mapErr("lock tenant config", r.q.TenantConfigLock(ctx, tenant))
+}
+
 // SetTenantConfig replaces the tenant-level config.
 func (r *bankRepo) SetTenantConfig(ctx context.Context, tenant string, c domain.BankConfig) error {
 	cfg, err := marshal("tenant config", c)

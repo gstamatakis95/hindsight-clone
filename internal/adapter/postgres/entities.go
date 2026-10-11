@@ -1,11 +1,14 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"memd/internal/adapter/postgres/db"
 	"memd/internal/domain"
 	"memd/internal/port"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,6 +22,13 @@ type entityRepo struct {
 }
 
 var _ port.EntityRepo = (*entityRepo)(nil)
+
+// errEntityGone is Attach's error for an entity pruned after the caller resolved it. InTx retries it like
+// a lost deadlock: the re-run resolves the mention afresh (decision 2501).
+var errEntityGone = fmt.Errorf("%w: an entity to attach was pruned concurrently", domain.ErrConflict)
+
+// uuidCompare orders uuids bytewise, as Postgres orders the uuid type.
+func uuidCompare(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) }
 
 // contentLimit clamps a caller's limit to a positive int32.
 func contentLimit(limit int) int32 {
@@ -110,11 +120,13 @@ func (r *entityRepo) Upsert(ctx context.Context, e domain.Entity) (port.EntityID
 	return idOf[port.EntityID](got), nil
 }
 
-// Attach links a live unit to those of ents that exist in its bank (others are skipped: graph maintenance
-// may have pruned them), adds a mention to each newly linked entity and bumps the co-occurrence count of
-// every new pair on the unit. Re-attaching is a no-op. The entities are locked in id order first, so a
-// concurrent PruneOrphans either sees the new rows or deletes the entities before they are attached. An
-// unknown unit is domain.ErrNotFound.
+// Attach links a live unit to ents (all in its bank), adds a mention to each newly linked entity and bumps
+// the co-occurrence count of every new pair on the unit. Re-attaching is a no-op. The entities are locked in
+// id order first, so a concurrent PruneOrphans either sees the new rows or deletes the entities before they
+// are attached. An entity that no longer exists (graph maintenance pruned it after the caller resolved it)
+// is errEntityGone (domain.ErrConflict) and attaches nothing: InTx re-runs the transaction, whose fresh
+// entity resolution no longer finds the pruned entity (decision 2501). An unknown unit is
+// domain.ErrNotFound.
 func (r *entityRepo) Attach(ctx context.Context, unit port.UnitID, ents []port.EntityID) error {
 	uid, err := parseID(unit)
 	if err != nil {
@@ -124,13 +136,17 @@ func (r *entityRepo) Attach(ctx context.Context, unit port.UnitID, ents []port.E
 	if err != nil {
 		return mapErr("unit "+string(unit), err)
 	}
-	ids := parseIDs(ents)
+	ids := slices.Compact(slices.SortedFunc(slices.Values(parseIDs(ents)), uuidCompare))
 	if len(ids) == 0 {
 		return nil
 	}
 	locked, err := r.q.EntityLock(ctx, db.EntityLockParams{TenantID: bank.TenantID, BankID: bank.BankID, Ids: ids})
-	if err != nil || len(locked) == 0 {
+	if err != nil {
 		return mapErr("lock entities", err)
+	}
+	if len(locked) < len(ids) {
+		return fmt.Errorf("%w: unit %s: %d of %d entities no longer exist", errEntityGone, unit,
+			len(ids)-len(locked), len(ids))
 	}
 	added, err := r.q.EntityAttach(ctx, db.EntityAttachParams{
 		TenantID: bank.TenantID, BankID: bank.BankID, UnitID: uid, Ids: locked,

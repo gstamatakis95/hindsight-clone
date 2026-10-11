@@ -25,6 +25,7 @@ func repoCases() []storeCase {
 		{"EntitiesCandidates", testEntityCandidates},
 		{"EntitiesLabelResolvesExisting", testEntityLabel},
 		{"EntitiesAttachCooccurrence", testEntityCooccurrence},
+		{"EntitiesAttachPrunedIsConflict", testEntityAttachPruned},
 		{"LinksInsertNoDuplicates", testLinksIdempotent},
 		{"EvidenceAddIdempotentAndCites", testEvidenceCites},
 		{"EvidenceDeleteCiting", testEvidenceDeleteCiting},
@@ -38,6 +39,7 @@ func repoCases() []storeCase {
 		{"BanksMarkDeleting", testBankMarkDeleting},
 		{"BanksDelete", testBankDelete},
 		{"BanksTenantConfig", testTenantConfig},
+		{"BanksTenantConfigLockSerializes", testTenantConfigLock},
 		{"MentalModelsCreateGet", testModelCreateGet},
 		{"MentalModelsCreateDuplicate", testModelDuplicate},
 		{"MentalModelsUpdate", testModelUpdate},
@@ -529,6 +531,31 @@ func testEntityCooccurrence(t *testing.T, s port.Store) {
 	check("after Attach")
 	attach(u1.ID, e[0], e[1])
 	check("after re-Attach")
+}
+
+// testEntityAttachPruned: Attach of an entity that was pruned (resolved before graph maintenance deleted
+// it) is domain.ErrConflict and attaches nothing, not even the entities that still exist (decision 2501).
+func testEntityAttachPruned(t *testing.T, s port.Store) {
+	ensureBanks(t, s, bankA)
+	u := fact(bankA, "Ann met Ben")
+	insertUnits(t, s, u)
+	ann := upsertEntity(t, s, domain.Entity{Bank: bankA, CanonicalName: "Ann", Kind: "person"})
+	ben := upsertEntity(t, s, domain.Entity{Bank: bankA, CanonicalName: "Ben", Kind: "person"})
+	if n := pruneOrphans(t, s, ben); n != 1 {
+		t.Fatalf("PruneOrphans(Ben) = %d, want 1", n)
+	}
+	err := s.InTx(t.Context(), func(tx port.Tx) error {
+		return tx.Entities().Attach(t.Context(), u.ID, []port.EntityID{ann, ben})
+	})
+	wantErrIs(t, "Attach with a pruned entity", err, domain.ErrConflict)
+	if got := getUnits(t, s, bankA, u.ID); len(got) != 1 || len(got[0].Entities) != 0 {
+		t.Errorf("unit after the failed Attach = %+v, want it with no entities", got)
+	}
+	for _, c := range candidates(t, s, bankA, "Ann", 5) {
+		if c.Entity.ID == ann && c.Entity.MentionCount != 0 {
+			t.Errorf("Ann's MentionCount after the failed Attach = %d, want 0", c.Entity.MentionCount)
+		}
+	}
 }
 
 // ---------- LinkRepo ----------
