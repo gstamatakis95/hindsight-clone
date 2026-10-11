@@ -10,10 +10,10 @@
 // cmd/memd is the composition root, the only place concrete types meet. wire.go opens the infrastructure (the
 // Postgres pool and postgres.DB, the blob store MEMD_BLOB_PROVIDER selects, the AI gateway client), narrows each to
 // its boundary (store, graph, blob, ai), builds the shared libraries once (config resolver, ai.Router, ai.Tokenizer,
-// timex, linking, recall over postgres.DB.Graph, reflect) and runs the two modes. Each wire_<area>.go (memory,
-// document, observation, mentalmodel, bank, config, operation, maintenance) builds one service, hands it to its
-// gRPC handlers (internal/grpcapi), registers its job handlers (Service.RunXJob) for the internal/jobs runner and
-// sets its steps of the maintenance tick; wire_maintenance.go builds maintenance.Service last, with the
+// timex, linking, recall with the arms recallArms registers, reflect) and runs the two modes. Each wire_<area>.go
+// (memory, document, observation, mentalmodel, bank, config, operation, maintenance) builds one service, hands it to
+// its gRPC handlers (internal/grpcapi), registers its job handlers (Service.RunXJob) for the internal/jobs runner
+// and sets its steps of the maintenance tick; wire_maintenance.go builds maintenance.Service last, with the
 // graph_maintenance handler. config.go reads the environment and flags, configfile.go the server config file and
 // workerid.go the worker id. The readiness probes and the worker's health server live in internal/grpcapi. No
 // service imports this package; nothing here holds business logic.

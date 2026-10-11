@@ -91,8 +91,8 @@ func (c *consolidator) probe(ctx context.Context, s domain.ScopeKey, cfg domain.
 	return usage, nil
 }
 
-// related returns the scope's existing observations near the batch's facts: per fact, the semantic and
-// keyword arms over observations of exactly this scope, interleaved (no rerank, as in Hindsight), then the
+// related returns the scope's existing observations near the batch's facts: per fact, the vector and
+// text searches over observations of exactly this scope, interleaved (no rerank, as in Hindsight), then the
 // union over the batch in first-seen order.
 func (c *consolidator) related(ctx context.Context, s domain.ScopeKey, facts []domain.Unit) ([]domain.Unit, error) {
 	read := c.d.DB.Read()

@@ -9,6 +9,7 @@ import (
 	"memd/internal/domain"
 	mockai "memd/internal/mocks/ai"
 	"memd/internal/recall"
+	"memd/internal/recall/arms"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
@@ -56,9 +57,11 @@ func newToolEnv(t *testing.T, units ...domain.Unit) *toolEnv {
 		t.Fatal(err)
 	}
 	emb := &mockai.Embedder{EmbedQueryFunc: func(context.Context, string) ([]float32, error) { return toolVector, nil }}
+	r := e.store.Read()
 	engine := recall.New(recall.Deps{
-		DB: e.store, Graph: e.store.Graph(), Config: config.NewResolver(e.store, domain.BankConfig{}), Embedder: emb,
-		Router: ai.NewRouter(), Clock: clock.NewManual(time.Time{}), Tokens: tok,
+		DB: e.store, Config: config.NewResolver(e.store, domain.BankConfig{}), Embedder: emb, Router: ai.NewRouter(),
+		Clock: clock.NewManual(time.Time{}), Tokens: tok,
+		Arms: []recall.Arm{arms.NewVector(r), arms.NewText(r), arms.NewGraph(r, e.store.Graph()), arms.NewTemporal(r)},
 	})
 	e.tools = newTools(engine, e.store.Read())
 	return e

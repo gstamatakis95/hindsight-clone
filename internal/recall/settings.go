@@ -20,8 +20,6 @@ const (
 	defaultTemporalAlpha         = 0.2
 	defaultProofAlpha            = 0.1
 	defaultRecencyHorizonDays    = 365
-	defaultGraphMaxHops          = 1
-	defaultTemporalBuckets       = 4
 	defaultFuzzyTagMinSimilarity = 0.45
 	defaultBudgetLow             = 100
 	defaultBudgetMid             = 300
@@ -29,15 +27,6 @@ const (
 	defaultBudgetMin             = 20
 	defaultBudgetMax             = 2000
 
-	// graphSeedLimit and graphSeedMinSimilarity pick the graph arm's entry points (Hindsight's
-	// GRAPH_SEED_LIMIT and graph_seed_min_similarity).
-	graphSeedLimit         = 20
-	graphSeedMinSimilarity = 0.3
-	// semanticMinSimilarity is the semantic arm's floor when min_scores.semantic is unset (Hindsight's 0.3).
-	semanticMinSimilarity = 0.3
-	// temporalMinSimilarity is the temporal arm's relevance floor: in-window units less similar to the query
-	// are dropped (Hindsight pg/recall.py's in-window pool, CCR WP-09-2).
-	temporalMinSimilarity = 0.1
 	// traceTopIDs is how many ids ArmTrace.TopIDs keeps.
 	traceTopIDs = 5
 )
@@ -51,19 +40,16 @@ type settings struct {
 	temporalAlpha      float64
 	proofAlpha         float64
 	recencyHorizonDays int
-	graphMaxHops       int
-	temporalBuckets    int
 	fuzzyMinSimilarity float64
 	boosts             map[string]float64
-	enabled            map[string]bool
 }
 
 // FuzzyTagMinSimilarity is the trigram floor recall resolves fuzzy tag leaves with under cfg
 // (recall.fuzzy_tag_min_similarity, default 0.45); the mental-model engine resolves model scopes with it.
 func FuzzyTagMinSimilarity(cfg domain.BankConfig) float64 { return settingsOf(cfg).fuzzyMinSimilarity }
 
-// settingsOf reads the recall settings from an effective config. An empty enabled_strategies list (nil, or
-// an explicit clear) runs all four arms.
+// settingsOf reads the engine's recall settings from an effective config. The arms read their own knobs
+// (Query.ArmSettings).
 func settingsOf(cfg domain.BankConfig) settings {
 	rc := domain.RecallConfig{}
 	if cfg.Recall != nil {
@@ -77,25 +63,14 @@ func settingsOf(cfg domain.BankConfig) settings {
 		temporalAlpha:      floatOr(rc.TemporalAlpha, defaultTemporalAlpha),
 		proofAlpha:         floatOr(rc.ProofAlpha, defaultProofAlpha),
 		recencyHorizonDays: intOr(rc.RecencyHorizonDays, defaultRecencyHorizonDays),
-		graphMaxHops:       intOr(rc.GraphMaxHops, defaultGraphMaxHops),
-		temporalBuckets:    intOr(rc.TemporalBuckets, defaultTemporalBuckets),
 		fuzzyMinSimilarity: floatOr(rc.FuzzyTagMinSimilarity, defaultFuzzyTagMinSimilarity),
-		boosts:             rc.StrategyBoosts,
-		enabled:            map[string]bool{},
+		boosts:             rc.ArmBoosts,
 	}
 	if s.rrfK <= 0 {
 		s.rrfK = defaultRRFK
 	}
 	if s.recencyHorizonDays <= 0 {
 		s.recencyHorizonDays = defaultRecencyHorizonDays
-	}
-	s.graphMaxHops = min(max(s.graphMaxHops, 1), 2)
-	names := rc.EnabledStrategies
-	if len(names) == 0 {
-		names = []string{ArmSemantic, ArmKeyword, ArmGraph, ArmTemporal}
-	}
-	for _, n := range names {
-		s.enabled[n] = true
 	}
 	return s
 }

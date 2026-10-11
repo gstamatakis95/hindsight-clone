@@ -18,7 +18,7 @@ type boosts struct {
 	// Recency favours recent units (recency_alpha, linear decay over recency_horizon_days).
 	Recency float64
 	// Temporal favours units close to the middle of the query's time window (temporal_alpha, Hindsight's
-	// linear proximity; neutral for units the temporal arm did not return).
+	// linear proximity; neutral for units no WindowArm returned).
 	Temporal float64
 	// Proof favours observations with many supporting facts (proof_alpha, log of proof_count).
 	Proof float64
@@ -29,11 +29,14 @@ type scorer struct {
 	rr     ai.Reranker
 	router *ai.Router
 	clock  clock.Clock
+	// windowed are the names of the arms whose hits get the temporal boost (WindowArm).
+	windowed map[string]bool
 }
 
-// newScorer returns the scorer. rr may be nil, which behaves as recall.rerank = false.
-func newScorer(rr ai.Reranker, router *ai.Router, clock clock.Clock) *scorer {
-	return &scorer{rr: rr, router: router, clock: clock}
+// newScorer returns the scorer. rr may be nil, which behaves as recall.rerank = false. windowed names the
+// WindowArm arms.
+func newScorer(rr ai.Reranker, router *ai.Router, clock clock.Clock, windowed map[string]bool) *scorer {
+	return &scorer{rr: rr, router: router, clock: clock, windowed: windowed}
 }
 
 // Score keeps the top reranker_max_candidates of cs (already trimmed and hydrated by the caller), scores them with
@@ -57,7 +60,7 @@ func (s *scorer) Score(ctx context.Context, q *parsedQuery, cs []candidate) ([]c
 		passthroughBase(out)
 	}
 	for i := range out {
-		out[i].Boosts = boost(out[i], q, set)
+		out[i].Boosts = boost(out[i], q, set, s.windowed)
 		out[i].Final *= out[i].Boosts.Recency * out[i].Boosts.Temporal * out[i].Boosts.Proof
 	}
 	slices.SortStableFunc(out, func(a, b candidate) int {
@@ -123,10 +126,11 @@ func passthroughBase(cs []candidate) {
 	}
 }
 
-// boost returns the recency, temporal and proof multipliers of c under the settings s.
-func boost(c candidate, q *parsedQuery, s settings) boosts {
+// boost returns the recency, temporal and proof multipliers of c under the settings s; windowed names the arms
+// whose hits get the temporal boost.
+func boost(c candidate, q *parsedQuery, s settings, windowed map[string]bool) boosts {
 	temporal := 0.5
-	if _, ok := c.Arms[ArmTemporal]; ok && c.Unit != nil && q.Window != nil {
+	if fromWindowArm(c, windowed) && c.Unit != nil && q.Window != nil {
 		temporal = temporalProximity(*c.Unit, *q.Window, s.recencyHorizonDays)
 	}
 	recency, proof := 0.5, 0.5
@@ -139,6 +143,16 @@ func boost(c candidate, q *parsedQuery, s settings) boosts {
 		Temporal: 1 + s.temporalAlpha*(temporal-0.5),
 		Proof:    1 + s.proofAlpha*(proof-0.5),
 	}
+}
+
+// fromWindowArm reports whether a WindowArm returned c.
+func fromWindowArm(c candidate, windowed map[string]bool) bool {
+	for arm := range c.Arms {
+		if windowed[arm] {
+			return true
+		}
+	}
+	return false
 }
 
 // temporalProximity is Hindsight's linear proximity of a unit to the query window (pg/recall.py):

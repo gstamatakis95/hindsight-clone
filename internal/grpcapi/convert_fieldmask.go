@@ -3,8 +3,8 @@ package grpcapi
 import (
 	"fmt"
 	"memd/internal/config"
-	"memd/internal/domain"
 	"memd/internal/configsvc"
+	"memd/internal/domain"
 	"memd/internal/mentalmodel"
 	"strings"
 

@@ -1,6 +1,7 @@
 package grpcapi
 
 import (
+	"fmt"
 	"memd/internal/domain"
 	"strings"
 
@@ -53,11 +54,20 @@ func retainOverridesToProto(c *domain.BankConfig) *pb.RetainOverrides {
 	}
 }
 
-// recallOverrides converts RecallOverrides.
+// noOverrideArms rejects overrides.recall.arms: a Recall or Reflect picks its arms with the request's own arms field.
+func (d *decoder) noOverrideArms(r *pb.RecallConfig) {
+	if len(r.GetArms()) > 0 {
+		d.fail(fmt.Errorf("%w: overrides.recall.arms: set the request's arms field instead",
+			domain.ErrInvalidArgument))
+	}
+}
+
+// recallOverrides converts RecallOverrides; recall.arms must be empty.
 func (d *decoder) recallOverrides(o *pb.RecallOverrides) *domain.BankConfig {
 	if o == nil {
 		return nil
 	}
+	d.noOverrideArms(o.GetRecall())
 	return &domain.BankConfig{
 		Recall: d.recallConfig(o.GetRecall()),
 		Models: someBindings(domain.ModelBindings{
@@ -66,11 +76,12 @@ func (d *decoder) recallOverrides(o *pb.RecallOverrides) *domain.BankConfig {
 	}
 }
 
-// reflectOverrides converts ReflectOverrides.
+// reflectOverrides converts ReflectOverrides; recall.arms must be empty.
 func (d *decoder) reflectOverrides(o *pb.ReflectOverrides) *domain.BankConfig {
 	if o == nil {
 		return nil
 	}
+	d.noOverrideArms(o.GetRecall())
 	return &domain.BankConfig{
 		Reflect: d.reflectConfig(o.GetReflect()),
 		Recall:  d.recallConfig(o.GetRecall()),

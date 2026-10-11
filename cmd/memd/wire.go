@@ -19,6 +19,7 @@ import (
 	"memd/internal/maintenance"
 	"memd/internal/observability"
 	"memd/internal/recall"
+	"memd/internal/recall/arms"
 	"memd/internal/reflect"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
@@ -79,6 +80,8 @@ type deps struct {
 	claimer     jobs.Claimer
 	db          store.DB
 	clock       clock.Clock
+	// recallArms are the registered recall arm names, which the server config file and the API's configs may use.
+	recallArms []string
 	// tel is the optional Datadog instrumentation; nil (the default) installs nothing.
 	tel *observability.Telemetry
 }
@@ -105,7 +108,12 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observabi
 		closer()
 		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
-	return wireServices(cfg, in, tok, serverCfg, clock.System{}, log, tel), closer, nil
+	d := wireServices(cfg, in, tok, serverCfg, clock.System{}, log, tel)
+	if err := config.CheckArms(serverCfg, d.recallArms); err != nil {
+		closer()
+		return nil, nil, fmt.Errorf("memd: config file: defaults: %w", err)
+	}
+	return d, closer, nil
 }
 
 // openInfra opens the Postgres pool, the blob store and the gateway client, which embeds with embedModel. tel's
@@ -211,6 +219,7 @@ func wireServices(
 	c := wireCore(in, tok, serverCfg, clk)
 	d := &deps{
 		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk, tel: tel, handlers: jobHandlers{},
+		recallArms: armNames(c.recall),
 		probes: []grpcapi.ReadinessProbe{
 			grpcapi.PostgresProbe{Ping: in.ping}, grpcapi.NewGatewayProbe(cfg.GatewayURL, &http.Client{}, clk),
 		},
@@ -226,8 +235,24 @@ func wireServices(
 	return d
 }
 
-// wireCore builds the libraries: config resolution, routing, time normalization, linking, recall (over the store
-// and the graph reader) and the reflect agent.
+// recallArms are the registered recall arms, in fusion order: the built-in vector, text, graph and temporal arms.
+// A new arm implements recall.Arm in its own file under internal/recall/arms (or its own package), takes only the
+// boundary it reads, and is added here.
+func recallArms(s store.Search, g graph.Reader) []recall.Arm {
+	return []recall.Arm{arms.NewVector(s), arms.NewText(s), arms.NewGraph(s, g), arms.NewTemporal(s)}
+}
+
+// armNames are the names of e's registered arms.
+func armNames(e *recall.Engine) []string {
+	var out []string
+	for _, a := range e.Arms() {
+		out = append(out, a.Name)
+	}
+	return out
+}
+
+// wireCore builds the libraries: config resolution, routing, time normalization, linking, recall (the registered
+// arms over the store and the graph reader) and the reflect agent.
 func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock) core {
 	db, gw := in.db, in.gw
 	c := core{db: db, read: db.Read(), clock: clk, tok: tok, router: ai.NewRouter()}
@@ -236,8 +261,8 @@ func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk cloc
 	c.linker = linking.NewLinker()
 	c.entities = linking.NewResolver(linking.ResolverConfig{})
 	c.recall = recall.New(recall.Deps{
-		DB: db, Graph: in.graph, Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router, Times: c.times,
-		Clock: clk, Tokens: tok,
+		DB: db, Arms: recallArms(c.read, in.graph), Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router,
+		Times: c.times, Clock: clk, Tokens: tok,
 	})
 	c.agent = reflect.New(reflect.Deps{
 		DB: db, Config: c.resolver, Router: c.router, LLM: gw, Clock: clk, Recall: c.recall,
@@ -276,7 +301,9 @@ func runAPI(ctx context.Context, d *deps) error {
 
 // newGRPCServer builds the gRPC server over d, traced when d.tel is enabled.
 func newGRPCServer(d *deps) *grpc.Server {
-	o := grpcapi.Options{DefaultDeadline: time.Duration(*d.cfg.File.API.RPCDeadline), Probes: d.probes}
+	o := grpcapi.Options{
+		DefaultDeadline: time.Duration(*d.cfg.File.API.RPCDeadline), Probes: d.probes, RecallArms: d.recallArms,
+	}
 	return grpcapi.New(d.api, o, d.tel.GRPCServerOptions(grpcapi.TenantFrom)...)
 }
 

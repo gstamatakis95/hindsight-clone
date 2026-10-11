@@ -23,11 +23,11 @@ func fusedIDs(cs []candidate) []domain.UnitID {
 
 func TestFuseRRFOrder(t *testing.T) {
 	lists := map[string][]candidate{
-		ArmSemantic: list(ArmSemantic, "a", "b", "c"),
-		ArmKeyword:  list(ArmKeyword, "b", "c", "d"),
-		ArmGraph:    list(ArmGraph, "d"),
+		armVector: list(armVector, "a", "b", "c"),
+		armText:   list(armText, "b", "c", "d"),
+		armGraph:  list(armGraph, "d"),
 	}
-	got := newRRF().Fuse(lists, 60)
+	got := newRRF(testOrder).Fuse(lists, 60)
 	// b = 1/61+1/62, d = 1/63+1/61, c = 1/63+1/62, a = 1/61.
 	if want := []domain.UnitID{"b", "d", "c", "a"}; !slices.Equal(fusedIDs(got), want) {
 		t.Fatalf("order = %v, want %v", fusedIDs(got), want)
@@ -35,12 +35,12 @@ func TestFuseRRFOrder(t *testing.T) {
 	if want := 1.0/61 + 1.0/62; math.Abs(got[0].RRF-want) > 1e-12 {
 		t.Fatalf("RRF(b) = %v, want %v", got[0].RRF, want)
 	}
-	if b := got[0].Arms; b[ArmSemantic].Rank != 2 || b[ArmKeyword].Rank != 1 || len(b) != 2 {
+	if b := got[0].Arms; b[armVector].Rank != 2 || b[armText].Rank != 1 || len(b) != 2 {
 		t.Fatalf("arms of b = %+v", b)
 	}
-	// k <= 0 means 60; ties keep first-seen order (semantic before keyword), not id order.
-	tie := newRRF().Fuse(map[string][]candidate{
-		ArmSemantic: list(ArmSemantic, "y"), ArmKeyword: list(ArmKeyword, "x"),
+	// k <= 0 means 60; ties keep first-seen order (vector before text), not id order.
+	tie := newRRF(testOrder).Fuse(map[string][]candidate{
+		armVector: list(armVector, "y"), armText: list(armText, "x"),
 	}, 0)
 	if want := []domain.UnitID{"y", "x"}; !slices.Equal(fusedIDs(tie), want) || tie[0].RRF != 1.0/61 {
 		t.Fatalf("tie = %v (%v)", fusedIDs(tie), tie[0].RRF)
@@ -49,14 +49,14 @@ func TestFuseRRFOrder(t *testing.T) {
 
 func TestFuseStrategyBoostRankSpace(t *testing.T) {
 	lists := map[string][]candidate{
-		ArmSemantic: list(ArmSemantic, "a", "b"),
-		ArmKeyword:  list(ArmKeyword, "c", "d"),
+		armVector: list(armVector, "a", "b"),
+		armText:   list(armText, "c", "d"),
 	}
-	fused := newRRF().Fuse(lists, 60)
+	fused := newRRF(testOrder).Fuse(lists, 60)
 	if want := []domain.UnitID{"a", "c", "b", "d"}; !slices.Equal(fusedIDs(fused), want) {
 		t.Fatalf("fused = %v, want %v", fusedIDs(fused), want)
 	}
-	boosts := map[string]float64{ArmKeyword: 4, ArmGraph: -1}
+	boosts := map[string]float64{armText: 4, armGraph: -1}
 	// A pool within the cap is not re-sorted: the boost only decides the cut.
 	if got := trimBoosted(fused, 4, 60, boosts); !slices.Equal(fusedIDs(got), fusedIDs(fused)) {
 		t.Fatalf("untrimmed = %v", fusedIDs(got))

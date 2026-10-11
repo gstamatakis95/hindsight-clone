@@ -53,8 +53,8 @@ func TestEveryRPCWired(t *testing.T) {
 		}
 		return true
 	})
-	if n != 48 {
-		t.Fatalf("found %d RPCs, want 48", n)
+	if n != 49 {
+		t.Fatalf("found %d RPCs, want 49", n)
 	}
 }
 
@@ -88,6 +88,9 @@ func invalidConfigs() map[string]*pb.BankConfig {
 		"duplicate strategy names": {Observations: &pb.ObservationConfig{Strategies: []*pb.ConsolidationStrategy{
 			{Name: "s"}, {Name: "s"},
 		}}},
+		"unknown recall arm":   {Recall: &pb.RecallConfig{Arms: []string{"semantic"}}},
+		"unknown boosted arm":  {Recall: &pb.RecallConfig{ArmBoosts: map[string]float64{"keyword": 2}}},
+		"repeated recall arms": {Recall: &pb.RecallConfig{Arms: []string{"graph", "graph"}}},
 	}
 }
 
@@ -192,6 +195,7 @@ func TestConfigWritesValidated(t *testing.T) {
 				Observations: &pb.ObservationConfig{Strategies: []*pb.ConsolidationStrategy{{
 					Name: "s", ConsolidateModel: &pb.ModelBinding{Model: "m"},
 				}}},
+				Recall: &pb.RecallConfig{Arms: []string{"graph", "vector"}, ArmBoosts: map[string]float64{"text": 2}},
 			}
 			if st := cw.send(w.ctxAs(t, tenant), w, bank, valid); st.Code() != codes.OK {
 				t.Fatalf("valid config: %v", st)

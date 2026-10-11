@@ -159,18 +159,12 @@ func minScoresFromProto(m *pb.MinScores) domain.MinScores {
 	if m == nil {
 		return domain.MinScores{}
 	}
-	return domain.MinScores{
-		Semantic: optCopy(m.Semantic), Keyword: optCopy(m.Keyword),
-		Reranker: optCopy(m.Reranker), Final: optCopy(m.Final),
-	}
+	return domain.MinScores{Arms: m.GetArms(), Reranker: optCopy(m.Reranker), Final: optCopy(m.Final)}
 }
 
 // scoresToProto converts Scores.
 func scoresToProto(s recall.Scores) *pb.Scores {
-	return &pb.Scores{
-		Final: s.Final, Reranker: optCopy(s.Reranker),
-		Semantic: optCopy(s.Semantic), Keyword: optCopy(s.Keyword),
-	}
+	return &pb.Scores{Final: s.Final, Reranker: optCopy(s.Reranker), Arms: s.Arms}
 }
 
 // unitToProto converts a domain unit to a Memory without scores.

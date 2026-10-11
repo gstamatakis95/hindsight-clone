@@ -35,7 +35,7 @@ const (
 	PredicateNot PredicateOp = "not"
 )
 
-// TagPredicate is a compiled tag filter shared by all four recall arms. It is a backend-neutral tree
+// TagPredicate is a compiled tag filter shared by every recall arm. It is a backend-neutral tree
 // over a unit's tags whose leaves hold resolved, normalized tag names (fuzzy leaves already resolved by
 // recall.Engine.CompileTags). The Postgres adapter renders it as one WHERE fragment over memory_units.tags;
 // the in-memory fake evaluates it with Eval. A nil *TagPredicate means no tag filter.

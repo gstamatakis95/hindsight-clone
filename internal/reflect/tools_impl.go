@@ -173,7 +173,8 @@ func remember(st *agentState, units ...domain.Unit) {
 	}
 }
 
-// recallRequest builds the recall request a recall-backed tool sends.
+// recallRequest builds the recall request a recall-backed tool (recall, search_observations) sends, with the
+// request's arms.
 func recallRequest(st *agentState, query string, types []domain.FactType, maxTokens int) recall.Request {
 	budget := domain.BudgetMid
 	if st.Config.Reflect != nil && st.Config.Reflect.RecallBudget != domain.BudgetUnspecified {
@@ -183,7 +184,7 @@ func recallRequest(st *agentState, query string, types []domain.FactType, maxTok
 	return recall.Request{
 		Bank: st.Request.Bank, Query: query, Types: types, Tags: st.Request.Tags, Budget: budget,
 		MaxTokens: maxTokens, QueryTime: &qt, Include: st.Request.RecallInclude, Overrides: st.Request.Overrides,
-		Seq: st.Request.Seq,
+		Seq: st.Request.Seq, Arms: st.Request.Arms,
 	}
 }
 

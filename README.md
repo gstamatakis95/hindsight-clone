@@ -2,8 +2,8 @@
 
 memd is a stateless Go gRPC agent-memory service — a Go clone of
 [Hindsight](https://github.com/vectorize-io/hindsight)'s memory engine. Agents **retain** text, **recall**
-it through four retrieval arms (semantic, BM25 keyword, graph, temporal) fused with RRF and a
-cross-encoder, and **reflect** over it with a tool-calling loop. Background workers consolidate facts into
+it through pluggable retrieval arms (built in: vector, BM25 text, graph, temporal; a request can pick any subset)
+fused with RRF and a cross-encoder, and **reflect** over it with a tool-calling loop. Background workers consolidate facts into
 observations and keep mental models (synthesized pages) fresh. All state lives in Postgres (pgvector,
 pg_search, pg_trgm) and object storage; LLMs, the reranker and the embedder sit behind an
 OpenAI-compatible AI gateway.
@@ -96,6 +96,35 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","query":"Summarize
 grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.BankService/GetBankStats
 ```
 
+### Recall arms
+
+Recall runs several retrieval arms concurrently and fuses their ranked lists with RRF. The built-in arms are:
+
+| Arm | Retrieves |
+|---|---|
+| `vector` | semantic similarity: cosine between the query and memory embeddings (floor 0.3 unless `min_scores.arms.vector` says otherwise) |
+| `text` | full-text search: BM25 keyword relevance |
+| `graph` | memories linked (semantic and causal links) to the query's best vector matches, up to `recall.graph_max_hops` |
+| `temporal` | memories that happened inside the query's explicit or derived time window (skipped without one) |
+
+`ListRecallArms` lists the arms the server has registered, with a description each, so clients can discover
+arms added later. A request picks arms with `arms` (empty = the bank's `recall.arms`, else all of them); an
+unknown or repeated name is `INVALID_ARGUMENT`. `ReflectRequest.arms` does the same for reflect's retrieval
+tools. Banks and tenants set the default set with `recall.arms`, weight arms with `recall.arm_boosts` and give
+an arm a retrieval floor with `min_scores.arms`, all keyed by arm name and validated against the registry.
+
+```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{}' localhost:50051 memory.v1.MemoryService/ListRecallArms
+grpcurl -plaintext -H 'x-tenant-id: acme' \
+  -d '{"bank_id":"b1","query":"Who does Alice work with?","arms":["graph","vector"],"trace":true}' \
+  localhost:50051 memory.v1.MemoryService/Recall
+```
+
+Code: `internal/recall` is the engine (fusion, rerank, boosts, packing, and the re-check that keeps every arm's
+hits inside the request's bank and filters), `internal/recall/arms` holds the built-in arms (one file each), and
+`internal/recall/armtest` is the contract suite every arm runs. To add an arm, implement `recall.Arm` and register
+it in `cmd/memd/wire.go`; the steps are in `internal/recall/doc.go` ("Adding a recall arm").
+
 ### Sync vs async retain
 
 `Retain` is synchronous by default. It returns once the units are committed, and the extraction LLM calls
@@ -160,8 +189,8 @@ Each RPC that does work takes its own overrides message, holding only what that 
 | Message | RPCs | Fields |
 |---|---|---|
 | `RetainOverrides` | Retain (request and item), ReprocessDocument | `retain`, `extract_model`, `time_parse_model` |
-| `RecallOverrides` | Recall | `recall`, `time_parse_model`, `rerank_model` |
-| `ReflectOverrides` | Reflect | `reflect`, `recall`, `reflect_model`, `structured_output_model`, `rerank_model` |
+| `RecallOverrides` | Recall | `recall` (except `recall.arms`: use the request's `arms`), `time_parse_model`, `rerank_model` |
+| `ReflectOverrides` | Reflect | `reflect`, `recall` (except `recall.arms`), `reflect_model`, `structured_output_model`, `rerank_model` |
 | `ConsolidateOverrides` | Consolidate | the observations group minus `enabled` / `auto_consolidation` / `reconcile_grace_seconds`, `consolidate_model`, `dedup_check_model` |
 | `RederiveOverrides` | UpdateMemory | `entity_match_threshold`, `extract_model`, `time_parse_model` |
 | `RefreshOverrides` | RefreshMentalModel, MentalModelSpec | `reflect`, `max_delta_ratio`, `reflect_model`, `mental_model_model`, `structured_output_model` |

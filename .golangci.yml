@@ -191,6 +191,11 @@ linters:
               desc: recall sits below reflect (reflect imports recall)
             - pkg: "memd/internal/linking"
               desc: recall never links
+        recall-engine:
+          files: ["**/internal/recall/*.go"]
+          deny:
+            - pkg: "memd/internal/recall/arms"
+              desc: the engine never names an arm; arms implement recall.Arm and are registered in cmd/memd/wire.go
         svc-memory:
           files: ["**/internal/memory/**", "!$test"]   # tests use pgtest
           deny:

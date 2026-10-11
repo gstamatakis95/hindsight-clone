@@ -24,7 +24,9 @@ type failingDeletesTx struct {
 	err error
 }
 
-func (t failingDeletesTx) Banks() store.BankRepo { return failingBatch{BankRepo: t.Tx.Banks(), err: t.err} }
+func (t failingDeletesTx) Banks() store.BankRepo {
+	return failingBatch{BankRepo: t.Tx.Banks(), err: t.err}
+}
 
 type failingBatch struct {
 	store.BankRepo

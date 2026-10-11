@@ -61,6 +61,9 @@
 //   - expand: the source facts behind observations and the chunks behind facts; it registers nothing as
 //     retrieved, so its output can only be cited if a search returned the unit.
 //
+// The recall and search_observations tools run the recall arms the request names (Request.Arms, checked before
+// the loop starts: an unknown or repeated name is domain.ErrInvalidArgument), else the effective recall.arms.
+//
 // Token arguments from the model are clamped to [1000, 16000]. Every retrieval honours the request's tag
 // filter, fact types, seq bound and excluded models. A retrieval error is never answered around: it fails
 // the call, keeping its class when it is already classified (cancellation, invalid argument, failed

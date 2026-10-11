@@ -36,15 +36,19 @@ type Options struct {
 	DefaultDeadline time.Duration
 	// Probes are the readiness checks (Postgres, gateway) behind grpc.health.v1 Check.
 	Probes []ReadinessProbe
+	// RecallArms are the registered recall arm names (recall.Engine.Arms): a RecallConfig in a request may name
+	// only these. Empty = unchecked.
+	RecallArms []string
 }
 
 // New returns a gRPC server with the memory.v1 services of h and grpc.health.v1 registered. The tenant,
-// default-deadline and paging (negative page_size / limit) interceptors run first, in that order; opts are appended
-// (more interceptors chain after them).
+// default-deadline, paging (negative page_size / limit) and arm-name (RecallConfig names outside o.RecallArms)
+// interceptors run first, in that order; opts are appended (more interceptors chain after them).
 func New(h Handlers, o Options, opts ...grpc.ServerOption) *grpc.Server {
 	base := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
 			TenantInterceptor(), DeadlineInterceptor(o.DefaultDeadline), pagingInterceptor(),
+			armNamesInterceptor(o.RecallArms),
 		),
 	}
 	s := grpc.NewServer(append(base, opts...)...)

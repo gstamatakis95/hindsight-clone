@@ -3,7 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"memd/internal/domain"
+	"slices"
+	"strings"
 )
 
 // Validate checks one config level below the server: a tenant or bank config, a bank template, a request's
@@ -42,6 +45,38 @@ func ValidateServer(c domain.BankConfig) error {
 		return fmt.Errorf("%w: %w", domain.ErrInvalidArgument, err)
 	}
 	return nil
+}
+
+// CheckArms checks a config level's recall arm names against the arms the server registered (the wiring passes
+// recall.Engine's names): every name in recall.arms must be registered and listed once, and every recall.arm_boosts
+// key must be registered. Failures are domain.ErrInvalidArgument.
+func CheckArms(c domain.BankConfig, registered []string) error {
+	if c.Recall == nil {
+		return nil
+	}
+	known := func(n string) bool { return slices.Contains(registered, n) }
+	seen := map[string]bool{}
+	for i, n := range c.Recall.Arms {
+		switch {
+		case !known(n):
+			return unknownArm(fmt.Sprintf("recall.arms[%d]", i), n, registered)
+		case seen[n]:
+			return fmt.Errorf("%w: recall.arms[%d]: arm %q is listed twice", domain.ErrInvalidArgument, i, n)
+		}
+		seen[n] = true
+	}
+	for _, n := range slices.Sorted(maps.Keys(c.Recall.ArmBoosts)) {
+		if !known(n) {
+			return unknownArm("recall.arm_boosts", n, registered)
+		}
+	}
+	return nil
+}
+
+// unknownArm is the error for an unregistered arm name at path.
+func unknownArm(path, name string, registered []string) error {
+	return fmt.Errorf("%w: %s: unknown recall arm %q (registered: %s)", domain.ErrInvalidArgument, path, name,
+		strings.Join(registered, ", "))
 }
 
 // checkDisposition requires each trait in 0..5 (0 = unset, inherit; 1-5 per the spec).

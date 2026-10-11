@@ -11,6 +11,7 @@ import (
 	mockai "memd/internal/mocks/ai"
 	"memd/internal/prompts"
 	"memd/internal/recall"
+	"memd/internal/recall/arms"
 	"memd/internal/reflect"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
@@ -90,8 +91,10 @@ func newEnv(t *testing.T) *env {
 		},
 	}
 	router := ai.NewRouter()
+	r := pg.Read()
 	e.recall = recall.New(recall.Deps{
-		DB: pg, Graph: pg.Graph(), Config: e.config, Embedder: e.emb, Router: router, Clock: clk, Tokens: tok,
+		DB: pg, Config: e.config, Embedder: e.emb, Router: router, Clock: clk, Tokens: tok,
+		Arms: []recall.Arm{arms.NewVector(r), arms.NewText(r), arms.NewGraph(r, pg.Graph()), arms.NewTemporal(r)},
 	})
 	e.agent = reflect.New(reflect.Deps{DB: pg, Config: e.config, Router: router, LLM: e.llm, Clock: clk, Recall: e.recall})
 	e.svc = e.service(nil)
