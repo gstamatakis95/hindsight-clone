@@ -1,22 +1,20 @@
 package main
 
 import (
-	"memd/internal/engine/consolidate"
-	"memd/internal/engine/curate"
+	"memd/internal/domain"
 	"memd/internal/grpcapi"
+	"memd/internal/observation"
 )
 
-// wireObservations builds the observation area: ObservationService (the observation admin RPCs and the strategy
-// preview) and the consolidate job.
+// wireObservations builds observation.Service: it serves ObservationService and GetObservationHistory, runs
+// the consolidate job and the tick's consolidation reconcile sweep.
 func wireObservations(c core, in infra, d *deps) {
-	d.api.Observation = &grpcapi.ObservationHandler{
-		Observations: curate.NewObservationAdmin(curate.ObservationAdminDeps{
-			Store: c.db, Scopes: c.read, Clearer: consolidate.NewInvalidator(),
-		}),
-		Strategies: consolidate.NewStrategyPreviewer(c.read),
-	}
-	d.handlers.consolidator = consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
-		Store: c.db, Config: c.resolver, Router: c.router, LLM: in.gw, Embedder: in.gw, Clock: c.clock,
-		Tokens: c.tok,
+	svc := observation.New(observation.Deps{
+		DB: c.db, Maintenance: in.maint, Config: c.resolver, Router: c.router, LLM: in.gw, Embedder: in.gw,
+		Tokens: c.tok, Clock: c.clock,
 	})
+	d.api.Observation = &grpcapi.ObservationHandler{Observations: svc}
+	d.api.MemoryUnit.Observations = svc
+	d.handlers.add(domain.OperationKindConsolidate, svc.RunConsolidateJob)
+	d.maintenance.Observations = svc
 }

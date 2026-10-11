@@ -36,9 +36,6 @@ func newClock() *clock.Manual {
 	return clock.NewManual(time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second))
 }
 
-// ptrBool returns &v.
-func ptrBool(v bool) *bool { return &v }
-
 // opsDB is the production store and claimer over the test's database, with SQL helpers.
 type opsDB struct {
 	*postgres.DB

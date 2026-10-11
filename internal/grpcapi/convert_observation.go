@@ -2,8 +2,7 @@ package grpcapi
 
 import (
 	"memd/internal/domain"
-	"memd/internal/engine/consolidate"
-	"memd/internal/engine/curate"
+	"memd/internal/observation"
 
 	pb "memd/gen/memory/v1"
 )
@@ -18,7 +17,7 @@ func scopeInfoToProto(s domain.ScopeInfo) *pb.ScopeInfo {
 }
 
 // scopePageToProto converts a ScopePage to a ListScopesResponse.
-func scopePageToProto(p curate.ScopePage) *pb.ListScopesResponse {
+func scopePageToProto(p observation.ScopePage) *pb.ListScopesResponse {
 	var scopes []*pb.ScopeInfo
 	if p.Items != nil {
 		scopes = make([]*pb.ScopeInfo, len(p.Items))
@@ -30,12 +29,12 @@ func scopePageToProto(p curate.ScopePage) *pb.ListScopesResponse {
 }
 
 // clearResultToObservationsProto converts a ClearResult to a ClearObservationsResponse.
-func clearResultToObservationsProto(r curate.ClearResult) *pb.ClearObservationsResponse {
+func clearResultToObservationsProto(r observation.ClearResult) *pb.ClearObservationsResponse {
 	return &pb.ClearObservationsResponse{Deleted: r.Deleted, Operation: operationPtrToProto(r.Operation)}
 }
 
 // clearResultToMemoryProto converts a ClearResult to a ClearMemoryObservationsResponse.
-func clearResultToMemoryProto(r curate.ClearResult) *pb.ClearMemoryObservationsResponse {
+func clearResultToMemoryProto(r observation.ClearResult) *pb.ClearMemoryObservationsResponse {
 	return &pb.ClearMemoryObservationsResponse{Deleted: r.Deleted, Operation: operationPtrToProto(r.Operation)}
 }
 
@@ -52,7 +51,7 @@ func scopeKeysToProto(in []domain.ScopeKey) []string {
 }
 
 // strategyMatchToProto converts a StrategyMatch.
-func strategyMatchToProto(m consolidate.StrategyMatch) *pb.StrategyMatch {
+func strategyMatchToProto(m observation.StrategyMatch) *pb.StrategyMatch {
 	return &pb.StrategyMatch{
 		Strategy:       m.Strategy,
 		MatchedScopes:  scopeKeysToProto(m.MatchedScopes),
@@ -61,7 +60,7 @@ func strategyMatchToProto(m consolidate.StrategyMatch) *pb.StrategyMatch {
 }
 
 // strategyPreviewToProto converts a StrategyPreview to a PreviewConsolidationStrategiesResponse.
-func strategyPreviewToProto(p consolidate.StrategyPreview) *pb.PreviewConsolidationStrategiesResponse {
+func strategyPreviewToProto(p observation.StrategyPreview) *pb.PreviewConsolidationStrategiesResponse {
 	var matches []*pb.StrategyMatch
 	if p.Matches != nil {
 		matches = make([]*pb.StrategyMatch, len(p.Matches))

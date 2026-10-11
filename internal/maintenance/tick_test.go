@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jobs"
 	"memd/internal/mentalmodel"
+	"memd/internal/observation"
 	"memd/internal/store"
 	"strings"
 	"sync"
@@ -71,6 +73,14 @@ func (c *countingModels) FailedRefreshes(context.Context) ([]store.FailedRefresh
 	return nil, nil
 }
 
+// observations is an observation.Service over ops whose reconcile sweep lists banks (every bank's config
+// is the default).
+func observations(ops *opsDB, banks store.Maintenance, c clock.Clock) *observation.Service {
+	return observation.New(observation.Deps{
+		DB: ops, Maintenance: banks, Config: config.NewResolver(ops, domain.BankConfig{}), Clock: c,
+	})
+}
+
 // mentalModels is a mentalmodel.Service over ops whose sweeps read m.
 func mentalModels(ops *opsDB, m *countingModels, c clock.Clock) *mentalmodel.Service {
 	return mentalmodel.New(mentalmodel.Deps{DB: ops, Maintenance: m, Clock: c})
@@ -111,7 +121,8 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 	ops.ageHeartbeats(jobs.DefaultStaleAfter + time.Second)
 	models := &countingModels{}
 	deps := Deps{
-		Claimer: ops, Store: ops, Clock: clock, Consolidation: banksOf(bankA, bankB, bankC),
+		Claimer: ops, Store: ops, Clock: clock,
+		Observations: observations(ops, banksOf(bankA, bankB, bankC), clock),
 		MentalModels: mentalModels(ops, models, clock), Config: Config{Interval: time.Millisecond}, Logger: quiet,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,8 +162,8 @@ func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 	models := &countingModels{log: log, cronErr: errors.New("cron models failed")}
 	deps := New(Deps{
 		Claimer: &loggingClaimer{Claimer: ops, log: log}, Store: store, Clock: clock,
-		Consolidation: loggingBanks{banksOf(bankA, bankC), log}, MentalModels: mentalModels(ops, models, clock),
-		Logger: quiet,
+		Observations: observations(ops, loggingBanks{banksOf(bankA, bankC), log}, clock),
+		MentalModels: mentalModels(ops, models, clock), Logger: quiet,
 	})
 	err := deps.tick(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "cron_refresh") {
@@ -190,7 +201,7 @@ func TestConsolidationReconcileJoinsRunning(t *testing.T) {
 		t.Fatal("setup claim")
 	}
 	deps := New(Deps{
-		Claimer: ops, Store: ops, Clock: clock, Consolidation: banksOf(bankA), Logger: quiet,
+		Claimer: ops, Store: ops, Clock: clock, Observations: observations(ops, banksOf(bankA), clock), Logger: quiet,
 	})
 	n, err := deps.reconcileConsolidation(context.Background())
 	if err != nil || n != 0 {

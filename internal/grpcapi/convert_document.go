@@ -1,8 +1,8 @@
 package grpcapi
 
 import (
+	"memd/internal/document"
 	"memd/internal/domain"
-	"memd/internal/engine/docs"
 
 	pb "memd/gen/memory/v1"
 )
@@ -22,17 +22,17 @@ func documentToProto(x domain.Document) *pb.Document {
 	}
 }
 
-// documentViewToProto converts a DocumentView: the document plus its original text.
-func documentViewToProto(v docs.DocumentView) *pb.Document {
+// documentViewToProto converts a document.View: the document plus its original text.
+func documentViewToProto(v document.View) *pb.Document {
 	out := documentToProto(v.Document)
 	out.OriginalText = v.OriginalText
 	return out
 }
 
 // listDocumentsFromProto converts a ListDocumentsRequest; the tenant is set by the caller.
-func listDocumentsFromProto(r *pb.ListDocumentsRequest) (docs.ListDocumentsRequest, error) {
+func listDocumentsFromProto(r *pb.ListDocumentsRequest) (document.ListRequest, error) {
 	var d decoder
-	out := docs.ListDocumentsRequest{
+	out := document.ListRequest{
 		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		Q:         r.GetQ(),
 		Tags:      r.GetTags(),
@@ -46,8 +46,8 @@ func listDocumentsFromProto(r *pb.ListDocumentsRequest) (docs.ListDocumentsReque
 	return out, d.err
 }
 
-// documentPageToProto converts a DocumentPage to a ListDocumentsResponse (listed documents carry no text).
-func documentPageToProto(p docs.DocumentPage) *pb.ListDocumentsResponse {
+// documentPageToProto converts a document.Page to a ListDocumentsResponse (listed documents carry no text).
+func documentPageToProto(p document.Page) *pb.ListDocumentsResponse {
 	var items []*pb.Document
 	if p.Items != nil {
 		items = make([]*pb.Document, len(p.Items))

@@ -3,8 +3,7 @@ package grpcapi
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/engine/consolidate"
-	"memd/internal/engine/curate"
+	"memd/internal/observation"
 
 	pb "memd/gen/memory/v1"
 )
@@ -12,10 +11,8 @@ import (
 // ObservationHandler serves memory.v1.ObservationService.
 type ObservationHandler struct {
 	pb.UnimplementedObservationServiceServer
-	// Observations serves Consolidate, ListScopes, ClearObservations and ClearMemoryObservations.
-	Observations curate.ObservationAdmin
-	// Strategies serves PreviewConsolidationStrategies.
-	Strategies consolidate.StrategyPreviewer
+	// Observations serves every ObservationService RPC.
+	Observations *observation.Service
 }
 
 var _ pb.ObservationServiceServer = (*ObservationHandler)(nil)
@@ -52,7 +49,7 @@ func (h *ObservationHandler) ListScopes(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Observations.ListScopes(ctx, b, int(req.GetPageSize()), req.GetPageToken())
+	out, err := h.Observations.ListObservationScopes(ctx, b, int(req.GetPageSize()), req.GetPageToken())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -67,7 +64,11 @@ func (h *ObservationHandler) ClearObservations(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Observations.ClearObservations(ctx, b, tagSetsFromProto(req.GetScopes()), req.GetReconsolidate())
+	in := observation.ClearRequest{
+		Bank: b, Scopes: tagSetsFromProto(req.GetScopes()), Reconsolidate: req.GetReconsolidate(),
+	}
+	in.All = len(in.Scopes) == 0 // an empty scope list clears every scope
+	out, err := h.Observations.ClearObservations(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -85,7 +86,9 @@ func (h *ObservationHandler) ClearMemoryObservations(
 	if err := requireID("memory_id", req.GetMemoryId()); err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Observations.ClearMemoryObservations(ctx, b, domain.UnitID(req.GetMemoryId()), req.GetReconsolidate())
+	out, err := h.Observations.ClearObservations(ctx, observation.ClearRequest{
+		Bank: b, MemoryID: domain.UnitID(req.GetMemoryId()), Reconsolidate: req.GetReconsolidate(),
+	})
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -104,7 +107,7 @@ func (h *ObservationHandler) PreviewConsolidationStrategies(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Strategies.Preview(ctx, b, draft)
+	out, err := h.Observations.PreviewConsolidationStrategies(ctx, b, draft)
 	if err != nil {
 		return nil, toStatus(err)
 	}

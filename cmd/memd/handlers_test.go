@@ -5,7 +5,6 @@ import (
 	"errors"
 	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/engine/consolidate"
 	"memd/internal/jobs"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	mockbank "memd/internal/mocks/engine/bank"
-	mockconsolidate "memd/internal/mocks/engine/consolidate"
 )
 
 // hBank is the bank the handler tests use.
@@ -108,42 +106,6 @@ func TestDeleteBankRetriesWithoutAttemptCap(t *testing.T) {
 			}
 			if tc.want == 1 && (ops[0].NextRunAt == nil || !ops[0].NextRunAt.After(e.clock.Now())) {
 				t.Fatalf("continuation not delayed: %+v", ops[0])
-			}
-		})
-	}
-}
-
-// TestHandlerResults pins the result summary each handler records: GetOperation shows it, so its keys are
-// part of the API.
-func TestHandlerResults(t *testing.T) {
-	usage := domain.Usage{Slot: domain.ModelSlotExtract, Model: "m", InputTokens: 10, OutputTokens: 5}
-	h := handlers{
-		clock: clock.NewManual(time.Time{}),
-		consolidator: &mockconsolidate.Consolidator{
-			RunFunc: func(context.Context, *jobs.Run) (consolidate.ConsolidationResult, error) {
-				return consolidate.ConsolidationResult{
-					Processed: 4, Changed: []domain.ScopeKey{{}}, More: true, Usage: []domain.Usage{usage},
-				}, nil
-			},
-		},
-	}
-	cases := []struct {
-		kind    domain.OperationKind
-		handler jobs.Handler
-		payload string
-		want    string
-	}{
-		{domain.OperationKindConsolidate, h.consolidate, `{}`, `{"changed_scopes":1,"more":true,"processed":4}`},
-	}
-	for _, tc := range cases {
-		t.Run(string(tc.kind), func(t *testing.T) {
-			run := jobs.Inline(store.Job{Bank: hBank, Kind: tc.kind, Payload: []byte(tc.payload)})
-			if err := tc.handler(t.Context(), run); err != nil {
-				t.Fatal(err)
-			}
-			result, got := run.Result()
-			if string(result) != tc.want || len(got) != 1 || got[0] != usage {
-				t.Fatalf("result %s usage %+v, want %s and the engine's usage", result, got, tc.want)
 			}
 		})
 	}

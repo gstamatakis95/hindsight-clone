@@ -29,6 +29,9 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   - internal/memory: MemoryService (Retain, Recall, Reflect, ListMemories, GetMemory, UpdateMemory,
     InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
     sweeps.
+  - internal/observation: ObservationService and GetObservationHistory; consolidate; the consolidation
+    reconcile sweep.
+  - internal/document: DocumentService (list, get, retag, reprocess); retag_document.
   - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
 - internal/engine/*: the remaining business logic over the boundaries and libraries.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per service (holding only the engines it

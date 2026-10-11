@@ -30,6 +30,8 @@ var modelTypes = []struct{ pkg, name string }{
 	{"memd/internal/reflect", "Agent"},
 	{"memd/internal/timex", "Normalizer"},
 	{"memd/internal/mentalmodel", "Service"},
+	{"memd/internal/observation", "Service"},
+	{"memd/internal/observation", "deduper"},
 	{aiPkg, "Router"},
 	{"memd/internal/memory", "Service"},
 	{"memd/internal/memory", "extractor"},

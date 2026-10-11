@@ -3,8 +3,8 @@ package grpcapi
 import (
 	"context"
 	"fmt"
+	"memd/internal/document"
 	"memd/internal/domain"
-	"memd/internal/engine/docs"
 
 	pb "memd/gen/memory/v1"
 )
@@ -12,12 +12,8 @@ import (
 // DocumentHandler serves memory.v1.DocumentService.
 type DocumentHandler struct {
 	pb.UnimplementedDocumentServiceServer
-	// Documents serves ListDocuments, GetDocument and ReprocessDocument.
-	Documents docs.DocumentAdmin
-	// Retagger serves UpdateDocument.
-	Retagger docs.Retagger
-	// Operations loads the operation UpdateDocument started.
-	Operations OperationReader
+	// Documents serves every DocumentService RPC (UpdateDocument through RetagDocument).
+	Documents *document.Service
 }
 
 var _ pb.DocumentServiceServer = (*DocumentHandler)(nil)
@@ -79,16 +75,12 @@ func (h *DocumentHandler) UpdateDocument(
 	if tags == nil {
 		tags = []string{} // a set but empty TagSet clears the document's tags
 	}
-	id, err := h.Retagger.Retag(ctx, b, domain.DocumentID(req.GetDocumentId()), tags)
+	op, err := h.Documents.RetagDocument(ctx, b, domain.DocumentID(req.GetDocumentId()), tags)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	if id == "" {
+	if op.ID == "" {
 		return &pb.UpdateDocumentResponse{}, nil
-	}
-	op, err := h.Operations.GetOperation(ctx, b, id)
-	if err != nil {
-		return nil, toStatus(err)
 	}
 	return &pb.UpdateDocumentResponse{Operation: operationToProto(op)}, nil
 }
