@@ -27,7 +27,7 @@
 //     retain batches), re-reads the document under the lock (a concurrent retag that already set the same
 //     tags makes this a no-op), then stores the new tags on the document, rewrites its units' tags with
 //     UnitRepo.SetDocumentTags(old, new, seq) and enqueues retag_document (serial key "doc:{id}",
-//     DedupePending, payload [RetagPayload]).
+//     DedupePending, payload jobs.RetagPayload; jobs.EnqueueRetag).
 //
 // SetDocumentTags computes (tags - old) + new per unit, so label tags written by entity_labels with
 // write_to_tags survive; a tag that is both a document tag and a label tag cannot be told

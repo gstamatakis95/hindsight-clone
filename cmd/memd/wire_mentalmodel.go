@@ -22,7 +22,7 @@ func wireMentalModels(c core, in infra, d *deps) {
 	d.server.MentalModels = mentalmodel.NewAdmin(mentalmodel.AdminDeps{
 		Store: c.db, Models: c.read, Detector: detector, Clock: c.clock, Config: c.resolver,
 	})
-	d.handlers.Refresher = runner
+	d.handlers.refresher = runner
 	d.maintenance.CronRefresh = mentalmodel.NewTriggers(mentalmodel.TriggerDeps{
 		Store: c.db, Scheduler: mentalmodel.NewRefreshScheduler(detector, c.resolver), Cron: in.maint,
 		Clock: c.clock,

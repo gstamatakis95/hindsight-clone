@@ -5,6 +5,7 @@ import (
 	"errors"
 	"memd/internal/blob"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"testing"
@@ -161,7 +162,7 @@ func TestIngestAsyncEnqueuesChildrenUnderBatch(t *testing.T) {
 func checkFirstChild(e *env, j store.Job, res IngestResult, ts time.Time) {
 	t := e.t
 	t.Helper()
-	if j.ParentID != res.ParentOperationID || j.SerialKey != DocumentSerialKey("d1") ||
+	if j.ParentID != res.ParentOperationID || j.SerialKey != jobs.DocumentSerialKey("d1") ||
 		j.ID != res.Documents[0].OperationID {
 		t.Errorf("job = %+v", j)
 	}
@@ -179,7 +180,7 @@ func checkFirstChild(e *env, j store.Job, res IngestResult, ts time.Time) {
 func checkPayload(e *env, j store.Job, ts time.Time) {
 	t := e.t
 	t.Helper()
-	var p DocumentPayload
+	var p jobs.RetainPayload
 	if err := json.Unmarshal(j.Payload, &p); err != nil {
 		t.Fatal(err)
 	}

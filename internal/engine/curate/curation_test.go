@@ -6,6 +6,7 @@ import (
 	"errors"
 	"memd/internal/ai"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"testing"
@@ -100,6 +101,7 @@ func (e *env) assertInvalidateEffects() {
 
 func TestInvalidateRemovesCitingObservationsAndQueuesRefresh(t *testing.T) {
 	e := newEnv(t)
+	e.addModels("m-fact", "m-obs", "m-other")
 	e.citing.by = map[domain.UnitID][]domain.MentalModelID{
 		idF1: {"m-fact"}, idO1: {"m-obs", "m-fact"}, idF2: {"m-other"},
 	}
@@ -200,15 +202,15 @@ func (e *env) rederiveEdited(names []string) {
 	if got, _ := e.unit(idF1); !slices.Equal(got.Entities, names) {
 		t.Fatalf("entities committed by the RPC = %v, want %v", got.Entities, names)
 	}
-	jobs := e.claim(domain.OperationKindRederiveMemory)
-	if len(jobs) != 1 {
-		t.Fatalf("rederive jobs = %d", len(jobs))
+	claimed := e.claim(domain.OperationKindRederiveMemory)
+	if len(claimed) != 1 {
+		t.Fatalf("rederive jobs = %d", len(claimed))
 	}
-	var p RederivePayload
-	if err := json.Unmarshal(jobs[0].Payload, &p); err != nil || p.UnitID != idF1 {
-		t.Fatalf("payload = %s (%v)", jobs[0].Payload, err)
+	var p jobs.RederivePayload
+	if err := json.Unmarshal(claimed[0].Payload, &p); err != nil || p.UnitID != idF1 {
+		t.Fatalf("payload = %s (%v)", claimed[0].Payload, err)
 	}
-	if err := e.rederiver(nil).Rederive(e.ctx, jobs[0]); err != nil {
+	if err := e.rederiver(nil).Rederive(e.ctx, claimed[0]); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := e.unit(idF1); got.Embedding == nil || !slices.Equal(got.Entities, names) {

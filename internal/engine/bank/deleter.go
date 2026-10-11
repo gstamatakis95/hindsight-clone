@@ -2,12 +2,12 @@ package bank
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"memd/internal/blob"
 	"memd/internal/clock"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"time"
 )
@@ -34,13 +34,8 @@ type BankDeleter interface { //nolint:revive // stutter: name fixed by the spec
 	// BankRepo.Delete removes the bank row with its remaining events and operations, so a later write
 	// creates a clean bank. A run that finds the bank gone (or no longer tombstoned) is done and deletes
 	// no blobs.
-	Run(ctx context.Context, j store.Job) (done bool, err error)
-}
-
-// JobFence tells a running job whether it still holds its operation; store.Claimer satisfies it.
-type JobFence interface {
-	// Alive reports whether the job should keep running.
-	Alive(ctx context.Context, id domain.OperationID) (bool, error)
+	// The job's liveness comes from run.Alive.
+	Run(ctx context.Context, run *jobs.Run) (done bool, err error)
 }
 
 // DeleterConfig bounds one delete_bank run.
@@ -68,23 +63,18 @@ const (
 	DeleteBlockedDelay = 5 * time.Second
 )
 
-// DeleteBankSerialKey is the delete_bank serial key (decision 1301).
-const DeleteBankSerialKey = "bank"
-
 // bankDeleter implements BankDeleter over store.DB and blob.Store.
 type bankDeleter struct {
 	s     store.DB
 	blob  blob.Store
-	fence JobFence
 	clock clock.Clock
 	cfg   DeleterConfig
 }
 
 var _ BankDeleter = (*bankDeleter)(nil)
 
-// NewBankDeleter returns the BankDeleter. fence (store.Claimer in production) is checked right before the
-// blob prefix is deleted; clock stamps deleting_at.
-func NewBankDeleter(s store.DB, blob blob.Store, fence JobFence, clock clock.Clock, cfg DeleterConfig) BankDeleter {
+// NewBankDeleter returns the BankDeleter; clock stamps deleting_at.
+func NewBankDeleter(s store.DB, blob blob.Store, clock clock.Clock, cfg DeleterConfig) BankDeleter {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = DefaultDeleteBatchSize
 	}
@@ -94,7 +84,7 @@ func NewBankDeleter(s store.DB, blob blob.Store, fence JobFence, clock clock.Clo
 	if cfg.BlobPageSize <= 0 {
 		cfg.BlobPageSize = DefaultDeleteBlobPageSize
 	}
-	return &bankDeleter{s: s, blob: blob, fence: fence, clock: clock, cfg: cfg}
+	return &bankDeleter{s: s, blob: blob, clock: clock, cfg: cfg}
 }
 
 // Tombstone marks the bank deleting, cancels its pending jobs and enqueues (or joins) delete_bank, in one
@@ -114,10 +104,7 @@ func (d *bankDeleter) Tombstone(ctx context.Context, b domain.BankRef) (domain.O
 		if _, err := tx.Queue().CancelBank(ctx, b); err != nil {
 			return err
 		}
-		id, _, err := tx.Queue().Enqueue(ctx, store.Job{
-			Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: DeleteBankSerialKey,
-			Payload: json.RawMessage(`{}`), Dedupe: store.DedupePendingOrRunning,
-		})
+		id, _, err := jobs.EnqueueDeleteBank(ctx, tx, b)
 		if err != nil {
 			return err
 		}
@@ -139,7 +126,8 @@ func bankGone(err error) bool {
 
 // Run deletes up to MaxBatches batches, each in its own transaction, and finishes the bank once a batch
 // finds nothing left.
-func (d *bankDeleter) Run(ctx context.Context, j store.Job) (bool, error) {
+func (d *bankDeleter) Run(ctx context.Context, run *jobs.Run) (bool, error) {
+	j := run.Job
 	for range d.cfg.MaxBatches {
 		if err := ctx.Err(); err != nil {
 			return false, fmt.Errorf("%w: delete_bank %s: %w", domain.ErrCancelled, j.ID, err)
@@ -157,7 +145,7 @@ func (d *bankDeleter) Run(ctx context.Context, j store.Job) (bool, error) {
 			return false, err
 		}
 		if n == 0 {
-			return d.finish(ctx, j)
+			return d.finish(ctx, run)
 		}
 	}
 	return false, nil
@@ -167,8 +155,9 @@ func (d *bankDeleter) Run(ctx context.Context, j store.Job) (bool, error) {
 // holds its operation and the bank is still tombstoned, so a stale duplicate run never deletes the blobs of
 // a fresh bank) and that no other job of the bank is still processing; the processing check repeats in the
 // transaction that deletes the bank row.
-func (d *bankDeleter) finish(ctx context.Context, j store.Job) (bool, error) {
-	ok, err := d.fenced(ctx, j)
+func (d *bankDeleter) finish(ctx context.Context, run *jobs.Run) (bool, error) {
+	j := run.Job
+	ok, err := d.fenced(ctx, run)
 	if err != nil || !ok {
 		return err == nil, err
 	}
@@ -181,7 +170,7 @@ func (d *bankDeleter) finish(ctx context.Context, j store.Job) (bool, error) {
 	if err != nil || blocked {
 		return false, err
 	}
-	if ok, err = d.deleteBlobs(ctx, j); err != nil || !ok {
+	if ok, err = d.deleteBlobs(ctx, run); err != nil || !ok {
 		return err == nil, err
 	}
 	err = d.s.InTx(ctx, func(tx store.Tx) error {
@@ -199,8 +188,9 @@ func (d *bankDeleter) finish(ctx context.Context, j store.Job) (bool, error) {
 
 // fenced reports whether the delete may go on: the job is alive (else domain.ErrCancelled) and the bank
 // still exists and is tombstoned (else false: nothing left to do).
-func (d *bankDeleter) fenced(ctx context.Context, j store.Job) (bool, error) {
-	alive, err := d.fence.Alive(ctx, j.ID)
+func (d *bankDeleter) fenced(ctx context.Context, run *jobs.Run) (bool, error) {
+	j := run.Job
+	alive, err := run.Alive(ctx)
 	if err != nil {
 		return false, fmt.Errorf("delete_bank %s: alive check: %w", j.ID, err)
 	}
@@ -218,10 +208,7 @@ func (d *bankDeleter) blockIfBusy(ctx context.Context, tx store.Tx, b domain.Ban
 	if err != nil || !busy {
 		return false, err
 	}
-	_, _, err = tx.Queue().Enqueue(ctx, store.Job{
-		Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: DeleteBankSerialKey,
-		Payload: json.RawMessage(`{}`), Dedupe: store.DedupePending, RunAt: d.clock.Now().Add(DeleteBlockedDelay),
-	})
+	_, _, err = jobs.EnqueueDeleteBankContinuation(ctx, tx, b, d.clock.Now().Add(DeleteBlockedDelay))
 	return true, err
 }
 
@@ -249,12 +236,12 @@ func otherJobsProcessing(ctx context.Context, tx store.Tx, b domain.BankRef) (bo
 // (DeletePrefix of the full key: every listed key lies under the bank prefix being emptied, so nothing outside it is
 // touched) and checks the fence before the next page. ok=false means a fence check found the bank gone or no longer
 // tombstoned, so the delete stops there with nothing left to do.
-func (d *bankDeleter) deleteBlobs(ctx context.Context, j store.Job) (bool, error) {
-	prefix := blob.BankPrefix(j.Bank)
+func (d *bankDeleter) deleteBlobs(ctx context.Context, run *jobs.Run) (bool, error) {
+	prefix := blob.BankPrefix(run.Job.Bank)
 	after := ""
 	for page := 0; ; page++ {
 		if page > 0 {
-			if ok, err := d.fenced(ctx, j); err != nil || !ok {
+			if ok, err := d.fenced(ctx, run); err != nil || !ok {
 				return false, err
 			}
 		}

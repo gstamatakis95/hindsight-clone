@@ -12,18 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB is the Postgres implementation of store.DB (with its Tx, Reader and repositories), store.Claimer and
-// store.Maintenance. It is safe for concurrent use.
+// DB is the Postgres implementation of store.DB (with its Tx, Reader and repositories), store.Maintenance
+// and jobs.Claimer (satisfied structurally; the assertion sits in a test file, so the adapter never imports
+// jobs). It is safe for concurrent use.
 type DB struct {
 	pool   *pgxpool.Pool
 	reader *reader
 }
 
 var (
-	_ store.DB      = (*DB)(nil)
-	_ store.Tx      = (*tx)(nil)
-	_ store.Reader  = (*reader)(nil)
-	_ store.Claimer = (*DB)(nil)
+	_ store.DB     = (*DB)(nil)
+	_ store.Tx     = (*tx)(nil)
+	_ store.Reader = (*reader)(nil)
 )
 
 // New returns a DB over pool. The caller owns the pool and closes it after the DB is no longer used.

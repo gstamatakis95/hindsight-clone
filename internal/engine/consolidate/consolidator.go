@@ -9,6 +9,7 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
+	"memd/internal/jobs"
 	"memd/internal/store"
 
 	"github.com/google/uuid"
@@ -28,8 +29,9 @@ type Consolidator interface {
 	// in the same tx as its last scope's writes; a scope that already cites the unit is skipped, so a
 	// replayed run is safe. A failing LLM batch is halved and retried; a unit that fails alone is parked
 	// with consolidation_failed_at. When units remain, Run enqueues the continuation itself (in its final
-	// transaction) and reports More=true.
-	Run(ctx context.Context, j store.Job) (ConsolidationResult, error)
+	// transaction) and reports More=true. It reports progress through job between scopes and batches and
+	// stops (domain.ErrCancelled) once the job is cancelled or its bank deleted.
+	Run(ctx context.Context, job *jobs.Run) (ConsolidationResult, error)
 }
 
 // ConsolidationResult summarizes one consolidation run.
@@ -65,9 +67,6 @@ type ConsolidatorDeps struct {
 	Deduper Deduper
 	// Tokens counts tokens for the source-fact budgets; nil = about four characters per token.
 	Tokens recall.TokenCounter
-	// Checkpoint returns the run's checkpoint (progress + cancel check) between scopes and batches;
-	// nil = none.
-	Checkpoint func(j store.Job) Checkpointer
 	// NewID makes observation ids; nil = random UUIDs.
 	NewID func() domain.UnitID
 }
@@ -104,7 +103,8 @@ func (approxTokens) Count(text string) int { return (len([]rune(text)) + 3) / 4 
 
 // Run plans the run in a read transaction, decides and applies scope by scope, then finishes in one
 // transaction (leftover stamps, continuation, refresh triggers, CONSOLIDATION_COMPLETED event).
-func (c *consolidator) Run(ctx context.Context, j store.Job) (ConsolidationResult, error) {
+func (c *consolidator) Run(ctx context.Context, job *jobs.Run) (ConsolidationResult, error) {
+	j := job.Job
 	p, err := decodePayload(j.Payload)
 	if err != nil {
 		return ConsolidationResult{}, err
@@ -120,10 +120,7 @@ func (c *consolidator) Run(ctx context.Context, j store.Job) (ConsolidationResul
 	if cfg.EnableObservations != nil && !*cfg.EnableObservations {
 		return ConsolidationResult{}, nil
 	}
-	r := &run{c: c, job: j, cfg: cfg, payload: p, filter: payloadScopes(j.Bank, p)}
-	if c.d.Checkpoint != nil {
-		r.check = c.d.Checkpoint(j)
-	}
+	r := &run{c: c, job: j, check: job, cfg: cfg, payload: p, filter: payloadScopes(j.Bank, p)}
 	if r.models, err = r.refreshCandidates(ctx); err != nil {
 		return ConsolidationResult{}, err
 	}

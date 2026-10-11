@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"strings"
@@ -15,9 +16,9 @@ type run struct {
 	c       *consolidator
 	job     store.Job
 	cfg     domain.BankConfig // effective run config (server < tenant < bank < request)
-	payload Payload
-	filter  []domain.ScopeKey // a manual run's scopes; empty = every unit
-	check   Checkpointer
+	payload jobs.ConsolidatePayload
+	filter  []domain.ScopeKey    // a manual run's scopes; empty = every unit
+	check   *jobs.Run            // progress and the cancel check
 	models  []domain.MentalModel // refresh_after_consolidation models, listed once per run
 
 	units  map[domain.UnitID]domain.Unit       // planned units (their seq and tags are re-checked before stamping)
@@ -211,9 +212,6 @@ func (r *run) open(ids []domain.UnitID) []domain.UnitID {
 
 // checkpoint reports progress and stops the run when the job was cancelled or its bank deleted.
 func (r *run) checkpoint(ctx context.Context, stage string) error {
-	if r.check == nil {
-		return nil
-	}
 	err := r.check.Report(ctx, domain.Progress{
 		Stage: stage, At: r.c.d.Clock.Now(), Processed: int64(r.processed), Total: int64(len(r.units)),
 	})

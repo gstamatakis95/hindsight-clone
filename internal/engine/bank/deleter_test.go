@@ -5,6 +5,7 @@ import (
 	"errors"
 	"memd/internal/blob"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"memd/internal/store/postgres/pgtest"
 	"slices"
@@ -121,7 +122,7 @@ func assertReadsNotFound(t *testing.T, e env, b domain.BankRef) {
 	if _, err := NewDirectiveAdmin(e.store).ListDirectives(e.ctx, b, nil, false); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("ListDirectives during delete: %v", err)
 	}
-	codec := NewTemplateCodec(e.store, refreshStub{})
+	codec := NewTemplateCodec(e.store, e.clock)
 	if _, err := codec.Export(e.ctx, b); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("Export during delete: %v", err)
 	}
@@ -134,7 +135,7 @@ func assertReadsNotFound(t *testing.T, e env, b domain.BankRef) {
 func runUntilDone(t *testing.T, e env, d BankDeleter, j store.Job) int {
 	t.Helper()
 	for runs := 1; runs <= 50; runs++ {
-		done, err := d.Run(e.ctx, j)
+		done, err := d.Run(e.ctx, jobs.NewRun(e.store, j))
 		if err != nil {
 			t.Fatalf("run %d: %v", runs, err)
 		}
@@ -157,7 +158,7 @@ func TestBankDeleteLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending, claimed := seedBank(t, e, b)
-	d := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{BatchSize: 1, MaxBatches: 2})
+	d := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{BatchSize: 1, MaxBatches: 2})
 
 	op, err := d.Tombstone(e.ctx, b)
 	if err != nil {
@@ -179,7 +180,7 @@ func TestBankDeleteLifecycle(t *testing.T) {
 	if j.ID != op.ID {
 		t.Fatalf("claimed %s, want the tombstone's delete_bank %s", j.ID, op.ID)
 	}
-	if done, err := d.Run(e.ctx, j); err != nil || done {
+	if done, err := d.Run(e.ctx, jobs.NewRun(e.store, j)); err != nil || done {
 		t.Fatalf("first run with a 2-batch budget: done=%v err=%v, want done=false", done, err)
 	}
 	assertBlockedByProcessing(t, e, d, j, claimed)
@@ -211,7 +212,7 @@ func assertBlockedByProcessing(t *testing.T, e env, d BankDeleter, j store.Job, 
 	t.Helper()
 	var cont *domain.Operation
 	for runs := 0; runs < 50 && cont == nil; runs++ {
-		done, err := d.Run(e.ctx, j)
+		done, err := d.Run(e.ctx, jobs.NewRun(e.store, j))
 		if err != nil || done {
 			t.Fatalf("run while a job is processing: done=%v err=%v, want done=false", done, err)
 		}
@@ -223,7 +224,7 @@ func assertBlockedByProcessing(t *testing.T, e env, d BankDeleter, j store.Job, 
 	if want := e.clock.Now().Add(DeleteBlockedDelay); cont.NextRunAt == nil || cont.NextRunAt.Before(want) {
 		t.Errorf("continuation run_at = %v, want >= %v", cont.NextRunAt, want)
 	}
-	if done, err := d.Run(e.ctx, j); err != nil || done {
+	if done, err := d.Run(e.ctx, jobs.NewRun(e.store, j)); err != nil || done {
 		t.Errorf("run still blocked: done=%v err=%v", done, err)
 	}
 	var bank domain.Bank
@@ -301,7 +302,7 @@ func assertFreshBank(t *testing.T, e env, b domain.BankRef, oldOps ...domain.Ope
 func TestTombstoneIdempotent(t *testing.T) {
 	e := newEnv(t)
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
-	d := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{})
+	d := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{})
 	if _, err := d.Tombstone(e.ctx, b); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown bank: %v, want NotFound", err)
 	}
@@ -328,14 +329,14 @@ func TestDeleteRunSkipsPrefixWhenBankGone(t *testing.T) {
 	e := newEnv(t)
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	seedBank(t, e, b)
-	d := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{})
+	d := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{})
 	if _, err := d.Tombstone(e.ctx, b); err != nil {
 		t.Fatal(err)
 	}
 	j := claimDelete(t, e)
 	// An earlier run finished (bank row gone), then a write created a fresh bank with a new blob.
 	e.tx(t, func(tx store.Tx) error { return tx.Banks().Delete(e.ctx, b) })
-	if done, err := d.Run(e.ctx, j); err != nil || !done {
+	if done, err := d.Run(e.ctx, jobs.NewRun(e.store, j)); err != nil || !done {
 		t.Fatalf("run on a gone bank: done=%v err=%v", done, err)
 	}
 	e.ensure(t, b)
@@ -343,7 +344,7 @@ func TestDeleteRunSkipsPrefixWhenBankGone(t *testing.T) {
 	if err := e.blob.Put(e.ctx, fresh, strings.NewReader("x"), 1, ""); err != nil {
 		t.Fatal(err)
 	}
-	if done, err := d.Run(e.ctx, j); err != nil || !done {
+	if done, err := d.Run(e.ctx, jobs.NewRun(e.store, j)); err != nil || !done {
 		t.Fatalf("run on a fresh bank: done=%v err=%v", done, err)
 	}
 	// The bank row was removed by hand above, so the old blob is still there too: Run deleted nothing.
@@ -360,14 +361,14 @@ func TestDeleteRunStopsWhenCancelled(t *testing.T) {
 	if err := e.blob.Put(e.ctx, key, strings.NewReader("x"), 1, ""); err != nil {
 		t.Fatal(err)
 	}
-	d := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{})
+	d := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{})
 	op, err := d.Tombstone(e.ctx, b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	j := claimDelete(t, e)
 	e.tx(t, func(tx store.Tx) error { _, err := tx.Queue().Cancel(e.ctx, b, op.ID); return err })
-	if _, err := d.Run(e.ctx, j); !errors.Is(err, domain.ErrCancelled) {
+	if _, err := d.Run(e.ctx, jobs.NewRun(e.store, j)); !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("run after cancel: %v, want ErrCancelled", err)
 	}
 	if keys := blobKeys(e, blob.BankPrefix(b)); len(keys) != 1 {

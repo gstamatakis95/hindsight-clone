@@ -4,7 +4,7 @@
 // # Where it sits
 //
 // reflect is an engine package: it imports domain, the boundary packages, prompts, jsonschema and recall (for its
-// request and result types) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
+// request and result types) and must never import adapters, server, gen, pgx, net/http, the S3 SDK or Datadog
 // (depguard). It never imports mentalmodel, which imports reflect; it declares the small [Recaller] (recall.Recaller
 // satisfies it) and [PageReader] (search and read of mental-model pages, provided by cmd/memd from mentalmodel's
 // PageSearcher) it consumes. cmd/memd/wire.go builds the [Reflector] with [NewReflector] and [DefaultTools]; the

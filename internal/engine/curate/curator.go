@@ -55,14 +55,6 @@ type CitingModels interface {
 	ModelsCiting(ctx context.Context, b domain.BankRef, ids []domain.UnitID) ([]domain.MentalModelID, error)
 }
 
-// RefreshQueuer enqueues mental-model refreshes; the mental-model engine (WP-12) owns the refresh payload
-// and its scheduling rules (decision 1303). bank.RefreshQueuer has the same method.
-type RefreshQueuer interface {
-	// QueueRefresh enqueues (or joins) a refresh of model id of bank b inside tx and returns its operation
-	// id. The caller has already called tx.Seq(b).
-	QueueRefresh(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID) (domain.OperationID, error)
-}
-
 // UnitGetter reads one unit, live or archived. It is UnitSource.GetUnit (a store.Reader method); for an
 // archived unit, Entities are the names in its archive snapshot, even when the entity
 // rows were pruned since.
@@ -77,10 +69,9 @@ type CuratorDeps struct {
 	Store store.DB
 	// Clock stamps edited_at, audit rows and events.
 	Clock clock.Clock
-	// Citing finds the models an invalidate must refresh.
+	// Citing finds the models an invalidate must refresh (jobs.QueueModelRefresh, in the invalidate's
+	// transaction); nil = no refreshes.
 	Citing CitingModels
-	// Refresh enqueues those refreshes in the invalidate's transaction.
-	Refresh RefreshQueuer
 	// Resolver resolves an edit's entity names and a restore's snapshot names inside the RPC's transaction;
 	// nil rejects such requests with domain.ErrFailedPrecondition.
 	Resolver EntityResolver

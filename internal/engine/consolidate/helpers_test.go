@@ -1,6 +1,7 @@
 package consolidate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/fake"
+	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
@@ -99,6 +101,7 @@ func reply(creates []create, updates []update) string {
 // Clock) with the real
 // config resolver, router and StrategyMatcher.
 type env struct {
+	hook   reporter // receives the run's progress reports; nil = an inline run
 	t      *testing.T
 	clock  *clock.Manual
 	store  *postgres.DB
@@ -329,10 +332,54 @@ func (e *env) wantPending(kind domain.OperationKind, n int) {
 	}
 }
 
+// reporter is a test hook on a run's progress reports.
+type reporter interface {
+	Report(ctx context.Context, p domain.Progress) error
+}
+
+// hookClaimer is a jobs.Claimer serving only a jobs.Run's progress reports: Progress goes to the hook and
+// the job is always alive.
+type hookClaimer struct {
+	jobs.Claimer
+	hook reporter
+}
+
+// Progress hands p to the hook.
+func (h hookClaimer) Progress(ctx context.Context, _ domain.OperationID, p domain.Progress) error {
+	return h.hook.Report(ctx, p) //nolint:wrapcheck // the hook's error is the run's checkpoint error
+}
+
+// Alive is always true.
+func (hookClaimer) Alive(context.Context, domain.OperationID) (bool, error) { return true, nil }
+
+// jobRun is the run of j: its progress reports go to e.hook when one is set; without one it is an inline run.
+func (e *env) jobRun(j store.Job) *jobs.Run {
+	if e.hook == nil {
+		return jobs.Inline(j)
+	}
+	return jobs.NewRun(hookClaimer{hook: e.hook}, j)
+}
+
+// newJob is a consolidate job of the test bank as the catalogue builds it: payload {} or the scopes, DedupeNone
+// with scopes or overrides, else DedupePending.
+func newJob(scopes []domain.TagSet, overrides *domain.BankConfig) store.Job {
+	j := store.Job{
+		Bank: bank, Kind: domain.OperationKindConsolidate, SerialKey: jobs.SerialKeyConsolidate,
+		Payload: []byte(`{}`), Overrides: overrides, Dedupe: store.DedupePending,
+	}
+	if len(scopes) > 0 {
+		j.Payload, _ = json.Marshal(jobs.ConsolidatePayload{Scopes: scopes})
+	}
+	if len(scopes) > 0 || overrides != nil {
+		j.Dedupe = store.DedupeNone
+	}
+	return j
+}
+
 // run runs j and fails the test on error.
 func (e *env) run(j store.Job) ConsolidationResult {
 	e.t.Helper()
-	res, err := e.consolidator().Run(e.t.Context(), j)
+	res, err := e.consolidator().Run(e.t.Context(), e.jobRun(j))
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -341,7 +388,7 @@ func (e *env) run(j store.Job) ConsolidationResult {
 
 // autoJob is the automatic consolidate job of the test bank.
 func autoJob() store.Job {
-	j := NewJob(bank, nil, nil)
+	j := newJob(nil, nil)
 	j.ID = pgtest.ID[domain.OperationID]("op-1")
 	return j
 }

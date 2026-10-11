@@ -2,12 +2,14 @@ package retain
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"memd/internal/blob"
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"strings"
@@ -134,7 +136,7 @@ type itemPlan struct {
 	content   string
 	overrides *domain.BankConfig
 	oh        string
-	payload   DocumentPayload
+	payload   jobs.RetainPayload
 	unchanged bool
 }
 
@@ -219,7 +221,7 @@ func (i *ingestor) plan(
 	if doc == "" {
 		doc = domain.DocumentID(i.d.NewID())
 	}
-	p := DocumentPayload{
+	p := jobs.RetainPayload{
 		DocumentID: doc, ContentHash: ContentHash(it.Content), Tags: tags, Context: it.Context,
 		Timeless: it.Timeless, Metadata: it.Metadata, Entities: payloadHints(it.Entities),
 		ResolveEntities: it.ResolveEntities, ObservationScopes: it.ObservationScopes,
@@ -396,9 +398,7 @@ func (i *ingestor) enqueue(
 ) (domain.OperationID, error) {
 	var parent domain.OperationID
 	if changed > 1 {
-		id, _, err := tx.Queue().Enqueue(ctx, store.Job{
-			Bank: b, Kind: domain.OperationKindRetainBatch, Payload: []byte(fmt.Sprintf(`{"documents":%d}`, changed)),
-		})
+		id, _, err := jobs.EnqueueRetainBatch(ctx, tx, b, changed)
 		if err != nil {
 			return "", err
 		}
@@ -408,14 +408,8 @@ func (i *ingestor) enqueue(
 		if p.unchanged {
 			continue
 		}
-		payload, err := p.payload.Marshal()
-		if err != nil {
-			return "", err
-		}
-		opIDs[k], _, err = tx.Queue().Enqueue(ctx, store.Job{
-			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: DocumentSerialKey(p.doc),
-			Payload: payload, Overrides: p.overrides, ParentID: parent, Dedupe: store.DedupeNone,
-		})
+		var err error
+		opIDs[k], _, err = jobs.EnqueueRetainDocument(ctx, tx, b, p.payload, p.overrides, parent)
 		if err != nil {
 			return "", err
 		}
@@ -432,14 +426,14 @@ func (i *ingestor) runInline(
 		if p.unchanged {
 			continue
 		}
-		payload, err := p.payload.Marshal()
+		payload, err := json.Marshal(p.payload)
 		if err != nil {
-			return IngestResult{}, err
+			return IngestResult{}, fmt.Errorf("retain: encode payload: %w", err)
 		}
-		out, err := i.d.Retainer.ProcessDocument(ctx, store.Job{
-			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: DocumentSerialKey(p.doc),
+		out, err := i.d.Retainer.ProcessDocument(ctx, jobs.Inline(store.Job{
+			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: jobs.DocumentSerialKey(p.doc),
 			Payload: payload, Overrides: p.overrides,
-		})
+		}))
 		usage = append(usage, out.Usage...)
 		if err == nil && out.Superseded {
 			err = ErrSuperseded

@@ -12,7 +12,6 @@ import (
 // Defaults used when the merged config leaves a mental-model knob unset (the server defaults set them).
 const (
 	defaultHistoryMaxEntries = 50
-	defaultDebounceSeconds   = 30
 )
 
 // write commits a successful run in one short transaction: last_refreshed_at always; the watermark and

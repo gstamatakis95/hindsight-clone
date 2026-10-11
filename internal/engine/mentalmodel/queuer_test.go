@@ -3,14 +3,15 @@ package mentalmodel
 import (
 	"context"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"testing"
 	"time"
 )
 
-// queue runs QueueRefresh in its own transaction (taking tx.Seq first, as callers must).
-func queue(e *env, q RefreshQueuer, id domain.MentalModelID) domain.OperationID {
+// queue runs jobs.QueueModelRefresh in its own transaction (taking tx.Seq first, as callers must).
+func queue(e *env, id domain.MentalModelID) domain.OperationID {
 	e.t.Helper()
 	var op domain.OperationID
 	e.tx(func(tx store.Tx) error {
@@ -18,19 +19,18 @@ func queue(e *env, q RefreshQueuer, id domain.MentalModelID) domain.OperationID 
 			return err
 		}
 		var err error
-		op, err = q.QueueRefresh(e.ctx, tx, e.bank, id)
+		op, err = jobs.QueueModelRefresh(e.ctx, tx, e.bank, id, e.clock.Now())
 		return err //nolint:wrapcheck // test helper; e.tx fails the test with it
 	})
 	return op
 }
 
-// TestRefreshQueuer checks the in-transaction queuer: a never-built model is due now and full, a built
+// TestQueueModelRefresh checks the in-transaction queuer: a never-built model is due now and full, a built
 // one is parked for the debounce and joined by a second call, and a paused or deleted model is skipped.
-func TestRefreshQueuer(t *testing.T) {
+func TestQueueModelRefresh(t *testing.T) {
 	e := newEnv(t)
-	q := NewRefreshQueuer(e.clock)
 	e.addModel(domain.MentalModelSpec{ID: "fresh"})
-	op := queue(e, q, "fresh")
+	op := queue(e, "fresh")
 	job, p, ok := claimRefresh(e)
 	if op == "" || !ok || job.ID != op || !p.ForceFull {
 		t.Fatalf("first build not due now: op %q claimed %v payload %+v", op, ok, p)
@@ -40,7 +40,7 @@ func TestRefreshQueuer(t *testing.T) {
 	refreshed := e.clock.Now()
 	m.LastRefreshedAt = &refreshed
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
-	op1, op2 := queue(e, q, "status"), queue(e, q, "status")
+	op1, op2 := queue(e, "status"), queue(e, "status")
 	if op1 == "" || op1 != op2 {
 		t.Fatalf("second queue did not join: %q %q", op1, op2)
 	}
@@ -55,10 +55,10 @@ func TestRefreshQueuer(t *testing.T) {
 	m = e.model("status")
 	m.AutoRefreshPaused = true
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
-	if op := queue(e, q, "status"); op != "" {
+	if op := queue(e, "status"); op != "" {
 		t.Fatalf("paused model queued %q", op)
 	}
-	if op := queue(e, q, "gone"); op != "" {
+	if op := queue(e, "gone"); op != "" {
 		t.Fatalf("deleted model queued %q", op)
 	}
 }
@@ -67,7 +67,6 @@ func TestRefreshQueuer(t *testing.T) {
 // (version 0, no content, last_refreshed_at set) counts as built: its refresh is parked, not forced full.
 func TestQueuerNeverBuiltIsLastRefreshedAtNil(t *testing.T) {
 	e := newEnv(t)
-	q := NewRefreshQueuer(e.clock)
 	e.addModel(domain.MentalModelSpec{ID: "empty"})
 	if _, err := e.runner.Run(e.ctx, e.bank, "empty", RefreshOptions{Manual: true}); err != nil {
 		t.Fatal(err)
@@ -75,7 +74,7 @@ func TestQueuerNeverBuiltIsLastRefreshedAtNil(t *testing.T) {
 	if m := e.model("empty"); m.LastRefreshedAt == nil || m.Version != 0 || m.ContentMD != "" {
 		t.Fatalf("first build: %+v", m)
 	}
-	if op := queue(e, q, "empty"); op == "" {
+	if op := queue(e, "empty"); op == "" {
 		t.Fatal("not queued")
 	}
 	if job, p, ok := claimRefresh(e); ok {

@@ -3,12 +3,11 @@
 //
 // # Where it sits
 //
-// bank is an engine package: it imports domain, store, blob, clock and prompts and must never import adapters,
-// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares the small interfaces it consumes
-// instead of importing other engines: [StatsSource] (store.Reader satisfies it), [JobFence] (store.Claimer)
-// and [RefreshQueuer] (mentalmodel.RefreshQueuer, since the mental-model engine
-// owns the refresh payload and its scheduling rules). cmd/memd/wire.go builds every engine here; the
-// server's BankService calls them, the worker's delete_bank handler calls [BankDeleter.Run], and the
+// bank is an engine package: it imports domain, store, blob, clock, jobs and prompts and must never import
+// adapters, server, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares the small interfaces it
+// consumes instead of importing other engines, such as [StatsSource] (store.Reader satisfies it), and enqueues
+// through the jobs catalogue. cmd/memd/wire.go builds every engine here; the server's BankService calls them, the
+// delete_bank job handler calls [BankDeleter.Run], and the
 // mental-model synthesizers and the prompt previewer use the [DirectiveSelector]. Several interfaces have
 // the exact method set of the matching server interface, so the implementations plug into the server directly.
 //
@@ -72,7 +71,7 @@
 // [TemplateCodec.Export] returns a bank's own config, its directives (ids, bank refs and timestamps
 // dropped) and its mental-model specs, with no memories. [TemplateCodec.CreateNamed] creates a bank from a
 // template in one transaction: Banks().Create, tx.Seq(bank), the directives with new ids, each mental model,
-// and each model's first build enqueued through the [RefreshQueuer] (which expects tx.Seq to have been
+// and each model's first build enqueued with jobs.QueueModelRefresh (which expects tx.Seq to have been
 // taken); it returns the build operations in template order. An existing bank is domain.ErrAlreadyExists, a
 // template model without an id is domain.ErrInvalidArgument, and any failure rolls the whole bank back.
 //
@@ -82,14 +81,14 @@
 //
 //  1. Tombstone (the DeleteBank RPC), in one transaction: read the bank (unknown = domain.ErrNotFound), set
 //     deleting_at (MarkDeleting, which locks the bank row), cancel the bank's pending jobs (Queue.CancelBank
-//     spares delete_bank) and enqueue delete_bank (serial key [DeleteBankSerialKey] "bank", payload {},
+//     spares delete_bank) and enqueue delete_bank (jobs.EnqueueDeleteBank: serial key "bank", payload {},
 //     DedupePendingOrRunning), returning that operation. No tx.Seq is taken: Seq refuses a tombstoned bank.
 //     From then on writes fail with domain.ErrBankDeleting and reads with domain.ErrNotFound. Re-issuing
 //     DeleteBank returns the running delete, or a new one when the previous delete_bank failed or was
 //     cancelled, which resumes a half-deleted bank.
 //  2. Run (the delete_bank job): up to MaxBatches committed transactions, each removing up to BatchSize rows
-//     with BankRepo.DeleteBatch. When the budget runs out it returns done=false and the worker re-enqueues
-//     the job. When a batch finds nothing left, it finishes: check the [JobFence] (the job still holds its
+//     with BankRepo.DeleteBatch. When the budget runs out it returns done=false and the handler re-enqueues
+//     the job. When a batch finds nothing left, it finishes: check jobs.Run.Alive (the job still holds its
 //     operation, else domain.ErrCancelled) and that the bank is still tombstoned; if another job of the bank
 //     is still PROCESSING (a handler winding down after the tombstone) it enqueues its own continuation
 //     [DeleteBlockedDelay] (5 s) later and returns done=false; otherwise it deletes the blobs under

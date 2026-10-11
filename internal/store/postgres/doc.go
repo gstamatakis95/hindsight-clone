@@ -1,5 +1,5 @@
 // Package postgres is memd's production persistence adapter. One [DB] implements store.DB (with its store.Tx,
-// store.Reader and every repository), store.Claimer and store.Maintenance over a pgx pool and the sqlc-generated
+// store.Reader and every repository), store.Maintenance and jobs.Claimer over a pgx pool and the sqlc-generated
 // queries in internal/store/postgres/db. Postgres with pgvector (HNSW cosine), pg_search (BM25) and pg_trgm serves the
 // four recall arms, the bank change sequence (Tx.Seq) and the job queue (FOR UPDATE SKIP LOCKED claims, heartbeats,
 // reclaim).
@@ -7,12 +7,12 @@
 // # Architecture
 //
 // The package is the adapter of internal/store. It imports internal/store, internal/domain, its own db subpackage, pgx
-// and pgvector, and never internal/engine, internal/server or internal/worker. It holds no business logic: scoring,
+// and pgvector, and never internal/engine, internal/server or internal/jobs. It holds no business logic: scoring,
 // budgets, config merging and deciding what to enqueue belong to the engines (internal/store/AGENTS.md). Alembic owns
 // the schema (migrations/, dumped to schema/schema.sql); this package never runs DDL.
 //
-// [New] returns the concrete *DB; cmd/memd, the only composition root, narrows it to store.DB, store.Claimer and
-// store.Maintenance.
+// [New] returns the concrete *DB; cmd/memd, the only composition root, narrows it to store.DB, store.Maintenance and
+// jobs.Claimer.
 //
 //	store := postgres.New(pool) // over a caller-owned pool
 //	err := store.InTx(ctx, func(tx store.Tx) error {

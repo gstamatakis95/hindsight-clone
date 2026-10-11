@@ -2,7 +2,6 @@ package bank
 
 import (
 	"context"
-	"encoding/json"
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
@@ -59,20 +58,6 @@ func (e env) getOp(t *testing.T, b domain.BankRef, id domain.OperationID) (domai
 		var err error
 		op, err = tx.Queue().Get(e.ctx, b, id)
 		return err
-	})
-	return op, err
-}
-
-// refreshStub enqueues a refresh_mental_model job like the mental-model queuer would, inside the caller's tx.
-type refreshStub struct{}
-
-func (refreshStub) QueueRefresh(
-	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID,
-) (domain.OperationID, error) {
-	payload, _ := json.Marshal(map[string]string{"model_id": string(id)})
-	op, _, err := tx.Queue().Enqueue(ctx, store.Job{
-		Bank: b, Kind: domain.OperationKindRefreshMentalModel, SerialKey: "mm:" + string(id),
-		Payload: payload, Dedupe: store.DedupePending,
 	})
 	return op, err
 }

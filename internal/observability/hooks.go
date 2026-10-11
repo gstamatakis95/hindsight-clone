@@ -15,7 +15,7 @@ import (
 	"github.com/aws/smithy-go/middleware"
 )
 
-// JobHook returns the worker's job tracing hook (assign it to worker.RunnerConfig.TraceJob): one SpanJob
+// JobHook returns the worker's job tracing hook (assign it to jobs.Config.TraceJob): one SpanJob
 // span per run, resource = the job kind, tagged with the operation id, tenant, bank, attempt and outcome,
 // and marked as an error when the run did not complete. Disabled, it returns nil.
 func (t *Telemetry) JobHook() func(context.Context, store.Job) (context.Context, func(string, error)) {
@@ -41,7 +41,7 @@ func traceJob(ctx context.Context, j store.Job) (context.Context, func(string, e
 	}
 }
 
-// TickHook returns the maintenance tick tracing hook (assign it to worker.MaintenanceDeps.TraceTick): one
+// TickHook returns the maintenance tick tracing hook (assign it to maintenance.Deps.TraceTick): one
 // SpanTick span per tick, marked as an error when a step failed. Disabled, it returns nil.
 func (t *Telemetry) TickHook() func(context.Context) (context.Context, func(error)) {
 	if t == nil {

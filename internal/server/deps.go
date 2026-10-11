@@ -11,8 +11,8 @@ import (
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/recall"
 	"memd/internal/engine/retain"
+	"memd/internal/jobs"
 	"memd/internal/store"
-	"memd/internal/worker"
 	"time"
 
 	reflecteng "memd/internal/engine/reflect"
@@ -48,7 +48,7 @@ type Deps struct {
 	// Pages serves SearchPages.
 	Pages mentalmodel.PageSearcher
 	// Control serves CancelOperation and RetryOperation.
-	Control worker.OperationControl
+	Control jobs.OperationControl
 	// Config resolves GetBankConfig's effective view.
 	Config config.Resolver
 	// Tenants serves TenantService.

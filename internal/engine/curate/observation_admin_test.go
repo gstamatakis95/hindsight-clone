@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"memd/internal/store/postgres/pgtest"
 	"slices"
@@ -46,26 +47,26 @@ func adminEnv(t *testing.T) (*env, ObservationAdmin) {
 
 // consolidatePayload claims (and completes) consolidate jobs one at a time, as their serial key allows,
 // until it finds id, and returns its payload.
-func (e *env) consolidatePayload(id domain.OperationID) ConsolidatePayload {
+func (e *env) consolidatePayload(id domain.OperationID) jobs.ConsolidatePayload {
 	e.t.Helper()
 	for range 10 {
-		jobs := e.claim(domain.OperationKindConsolidate)
-		if len(jobs) == 0 {
+		claimed := e.claim(domain.OperationKindConsolidate)
+		if len(claimed) == 0 {
 			break
 		}
-		if err := e.fake.Complete(e.ctx, jobs[0].ID, nil, nil); err != nil {
+		if err := e.fake.Complete(e.ctx, claimed[0].ID, nil, nil); err != nil {
 			e.t.Fatal(err)
 		}
-		if jobs[0].ID == id {
-			var p ConsolidatePayload
-			if err := json.Unmarshal(jobs[0].Payload, &p); err != nil {
+		if claimed[0].ID == id {
+			var p jobs.ConsolidatePayload
+			if err := json.Unmarshal(claimed[0].Payload, &p); err != nil {
 				e.t.Fatal(err)
 			}
 			return p
 		}
 	}
 	e.t.Fatalf("consolidate job %s never claimed", id)
-	return ConsolidatePayload{}
+	return jobs.ConsolidatePayload{}
 }
 
 func TestObservationAdminConsolidate(t *testing.T) {

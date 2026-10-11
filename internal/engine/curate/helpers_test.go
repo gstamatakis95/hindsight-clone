@@ -2,7 +2,6 @@ package curate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"memd/internal/ai"
 	"memd/internal/clock"
@@ -115,10 +114,10 @@ func (e *env) inTx(fn func(tx store.Tx) error) {
 	}
 }
 
-// curator returns a Curator over the env with the refresh stub.
+// curator returns a Curator over the env.
 func (e *env) curator() Curator {
 	return NewCurator(CuratorDeps{
-		Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{}, Resolver: resolverStub{},
+		Store: e.store, Clock: e.clock, Citing: e.citing, Resolver: resolverStub{},
 		Config: configStub{},
 	})
 }
@@ -278,19 +277,19 @@ func (c *citingStub) ModelsCiting(
 	return out, nil
 }
 
-// refreshStub enqueues a refresh_mental_model job in the caller's tx, as the mental-model queuer would.
-type refreshStub struct{}
-
-// QueueRefresh enqueues {"model_id": id} under serial key mm:{id}.
-func (refreshStub) QueueRefresh(
-	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID,
-) (domain.OperationID, error) {
-	raw, _ := json.Marshal(map[string]string{"model_id": string(id)})
-	op, _, err := tx.Queue().Enqueue(ctx, store.Job{
-		Bank: b, Kind: domain.OperationKindRefreshMentalModel, SerialKey: "mm:" + string(id), Payload: raw,
-		Dedupe: store.DedupePending,
+// addModels creates mental models with ids in the test bank.
+func (e *env) addModels(ids ...domain.MentalModelID) {
+	e.t.Helper()
+	e.inTx(func(tx store.Tx) error {
+		for _, id := range ids {
+			if err := tx.MentalModels().Create(e.ctx, domain.MentalModel{
+				Bank: testBank, Spec: domain.MentalModelSpec{ID: id, Name: string(id), SourceQuery: "q"},
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
-	return op, err
 }
 
 // resolverStub resolves each mention to the entity with exactly that name, creating it when missing.

@@ -13,8 +13,8 @@ linters:
         - name: package-comments
         - name: unused-parameter
     wrapcheck:
-      # errors crossing a boundary are already domain error classes
-      ignore-package-globs: ["memd/internal/store", "memd/internal/ai", "memd/internal/blob"]
+      # errors crossing a boundary are already domain error classes (the jobs catalogue returns the store's)
+      ignore-package-globs: ["memd/internal/store", "memd/internal/ai", "memd/internal/blob", "memd/internal/jobs"]
     depguard:
       rules:
         engines:
@@ -28,8 +28,8 @@ linters:
               desc: engines depend on blob.Store only
             - pkg: "memd/internal/server"
               desc: engines don't know about gRPC
-            - pkg: "memd/internal/worker"
-              desc: engines don't know about job plumbing
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the engines
             - pkg: "memd/gen"
               desc: no proto types in engines; use domain
             - pkg: "github.com/jackc/pgx"
@@ -73,8 +73,10 @@ linters:
               desc: contracts sit below the engines
             - pkg: "memd/internal/server"
               desc: contracts sit below the server
-            - pkg: "memd/internal/worker"
-              desc: contracts sit below the worker
+            - pkg: "memd/internal/jobs"
+              desc: contracts sit below jobs
+            - pkg: "memd/internal/maintenance"
+              desc: contracts sit below maintenance
             - pkg: "memd/gen"
               desc: no proto types in contracts
             - pkg: "github.com/jackc/pgx"
@@ -92,9 +94,59 @@ linters:
               desc: adapters never import engines
             - pkg: "memd/internal/server"
               desc: adapters never import the server
-            - pkg: "memd/internal/worker"
-              desc: adapters never import the worker
+            - pkg: "memd/internal/jobs"
+              desc: adapters satisfy jobs.Claimer structurally; they never import jobs
+            - pkg: "memd/internal/maintenance"
+              desc: adapters never import maintenance
             - pkg: "memd/gen"
               desc: no proto types in adapters
+        jobs:
+          files: ["**/internal/jobs/**", "!$test"]   # tests run the runner on pgtest
+          deny:
+            - pkg: "memd/internal/engine"
+              desc: jobs sits below the engines; they import it
+            - pkg: "memd/internal/config"
+              desc: jobs sits beside config, below the engines
+            - pkg: "memd/internal/server"
+              desc: jobs doesn't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above jobs
+            - pkg: "memd/internal/store/postgres"
+              desc: jobs depends on store and jobs.Claimer only
+            - pkg: "memd/internal/ai"
+              desc: no model calls in the job runtime
+            - pkg: "memd/internal/blob"
+              desc: no blob calls in the job runtime
+            - pkg: "memd/gen"
+              desc: no proto types in jobs
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB and jobs.Claimer
+            - pkg: "net/http"
+              desc: no network calls in the job runtime
+            - pkg: "github.com/aws"
+              desc: no blob calls in the job runtime
+            - pkg: "github.com/DataDog"
+              desc: tracing comes in through Config.TraceJob
+        maintenance:
+          files: ["**/internal/maintenance/**", "!$test"]   # tests use pgtest
+          deny:
+            - pkg: "memd/internal/server"
+              desc: maintenance doesn't know about gRPC
+            - pkg: "memd/internal/store/postgres"
+              desc: maintenance depends on the store interfaces only
+            - pkg: "memd/internal/ai/gateway"
+              desc: maintenance depends on the ai interfaces only
+            - pkg: "memd/internal/blob/s3"
+              desc: maintenance depends on blob.Store only
+            - pkg: "memd/gen"
+              desc: no proto types in maintenance
+            - pkg: "github.com/jackc/pgx"
+              desc: use store.DB
+            - pkg: "net/http"
+              desc: no network calls in maintenance
+            - pkg: "github.com/aws"
+              desc: use blob.Store
+            - pkg: "github.com/DataDog"
+              desc: tracing comes in through Deps.TraceTick
 formatters:
   enable: [gofumpt, goimports]

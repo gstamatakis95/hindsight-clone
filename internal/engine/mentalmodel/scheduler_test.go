@@ -3,6 +3,7 @@ package mentalmodel
 import (
 	"encoding/json"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"testing"
 	"time"
@@ -60,7 +61,7 @@ func TestDecide(t *testing.T) {
 	}
 	floor, last := 600, now.Add(-time.Minute)
 	m.Spec.Trigger.MinRefreshIntervalSeconds, m.LastRefreshedAt = &floor, &last
-	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionPark || d.Reason != ReasonIntervalFloor ||
+	if d, _ := sched.Decide(e.ctx, m, now); d.Kind != decisionPark || d.Reason != domain.RefreshReasonIntervalFloor ||
 		!d.Until.Equal(last.Add(10*time.Minute)) {
 		t.Fatalf("floor: %+v", d)
 	}
@@ -92,17 +93,17 @@ func autoTrigger(e *env, tr Triggers, id domain.MentalModelID) (int, error) {
 }
 
 // claimRefresh claims the due refresh job, if any.
-func claimRefresh(e *env) (store.Job, RefreshPayload, bool) {
+func claimRefresh(e *env) (store.Job, jobs.RefreshPayload, bool) {
 	e.t.Helper()
-	jobs := e.claimDue(domain.OperationKindRefreshMentalModel)
-	if len(jobs) == 0 {
-		return store.Job{}, RefreshPayload{}, false
+	claimed := e.claimDue(domain.OperationKindRefreshMentalModel)
+	if len(claimed) == 0 {
+		return store.Job{}, jobs.RefreshPayload{}, false
 	}
-	var p RefreshPayload
-	if err := json.Unmarshal(jobs[0].Payload, &p); err != nil {
+	var p jobs.RefreshPayload
+	if err := json.Unmarshal(claimed[0].Payload, &p); err != nil {
 		e.t.Fatal(err)
 	}
-	return jobs[0], p, true
+	return claimed[0], p, true
 }
 
 // TestJoiningQueuedRefreshWithForceFullUpgrades checks the queued-refresh semantics: automatic triggers
@@ -233,7 +234,7 @@ func TestRunJob(t *testing.T) {
 	if _, err := RunJob(e.ctx, e.runner, store.Job{Bank: e.bank, Payload: json.RawMessage(`{}`)}); err == nil {
 		t.Fatal("empty payload accepted")
 	}
-	payload, _ := json.Marshal(RefreshPayload{MentalModelID: "gone"})
+	payload, _ := json.Marshal(jobs.RefreshPayload{MentalModelID: "gone"})
 	if _, err := RunJob(e.ctx, e.runner, store.Job{Bank: e.bank, Payload: payload}); err != nil {
 		t.Fatalf("deleted model: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"memd/internal/blob"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"strings"
 )
@@ -64,14 +65,7 @@ func (r *reprocessor) Reprocess(
 		}); err != nil {
 			return err
 		}
-		raw, err := p.Marshal()
-		if err != nil {
-			return err
-		}
-		opID, _, err = tx.Queue().Enqueue(ctx, store.Job{
-			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: DocumentSerialKey(id),
-			Payload: raw, Overrides: doc.Overrides, Dedupe: store.DedupeNone,
-		})
+		opID, _, err = jobs.EnqueueRetainDocument(ctx, tx, b, p, doc.Overrides, "")
 		return err
 	})
 	if err != nil {
@@ -88,12 +82,12 @@ func (r *reprocessor) Reprocess(
 // Entity hints are not stored anywhere and are lost (decision 1600).
 func reprocessPayload(
 	ctx context.Context, tx store.Tx, b domain.BankRef, doc domain.Document,
-) (DocumentPayload, error) {
+) (jobs.RetainPayload, error) {
 	hash := doc.BlobKey[strings.LastIndex(doc.BlobKey, "/")+1:]
 	if doc.BlobKey == "" || blob.Key(b, doc.ID, hash) != doc.BlobKey {
-		return DocumentPayload{}, fmt.Errorf("%w: document %s has no stored text", domain.ErrFailedPrecondition, doc.ID)
+		return jobs.RetainPayload{}, fmt.Errorf("%w: document %s has no stored text", domain.ErrFailedPrecondition, doc.ID)
 	}
-	p := DocumentPayload{
+	p := jobs.RetainPayload{
 		DocumentID: doc.ID, ContentHash: hash, BlobKey: doc.BlobKey, Tags: domain.NormalizeTags(doc.Tags),
 		ObservationScopes: doc.ObservationScopes, ForceReextract: true,
 	}

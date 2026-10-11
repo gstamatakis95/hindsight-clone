@@ -3,8 +3,6 @@ package main
 import (
 	"memd/internal/engine/consolidate"
 	"memd/internal/engine/curate"
-	"memd/internal/store"
-	"memd/internal/worker"
 )
 
 // wireObservations builds the observation area: the observation admin RPCs, the strategy preview and the
@@ -14,9 +12,8 @@ func wireObservations(c core, in infra, d *deps) {
 		Store: c.db, Scopes: c.read, Clearer: consolidate.NewInvalidator(),
 	})
 	d.server.Strategies = c.matcher
-	d.handlers.Consolidator = consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
+	d.handlers.consolidator = consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
 		Store: c.db, Config: c.resolver, Router: c.router, LLM: in.gw, Embedder: in.gw, Clock: c.clock,
 		Scopes: c.scopes, Tokens: c.tok,
-		Checkpoint: func(j store.Job) consolidate.Checkpointer { return worker.NewCheckpoint(in.claimer, j.ID) },
 	})
 }

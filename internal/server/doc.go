@@ -98,7 +98,7 @@
 // # Consumer interfaces
 //
 // [Deps] holds engine interfaces for the RPCs that have an engine (retain, recall, reflect, curate, bank,
-// docs, consolidate, mentalmodel, worker.OperationControl) and small server-declared interfaces for the rest:
+// docs, consolidate, mentalmodel, jobs.OperationControl) and small server-declared interfaces for the rest:
 // [TenantAdmin], [BankAdmin], [DirectiveAdmin], [DocumentAdmin], [ObservationAdmin], [MentalModelAdmin],
 // [OperationReader] and [ReadinessProbe]. The engine implementations satisfy them directly (several request
 // and page types are aliases of engine types). [OperationReader] is implemented in cmd/memd: ListEvents with

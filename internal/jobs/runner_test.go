@@ -1,0 +1,754 @@
+package jobs
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"memd/internal/clock"
+	"memd/internal/domain"
+	"memd/internal/store"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// quiet is a logger that drops everything, so test output stays readable.
+var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+func init() { slog.SetDefault(quiet) }
+
+// blockUntil blocks until release is closed or ctx is done.
+func blockUntil(ctx context.Context, release <-chan struct{}) error {
+	select {
+	case <-release:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("blocked: %w", ctx.Err())
+	}
+}
+
+// Accept: reserved slots hold under a retain flood.
+func TestRunnerReservedSlotsHoldUnderRetainFlood(t *testing.T) {
+	clock := newClock()
+	ops := newOps(t)
+	const flood = 40
+	for i := range flood {
+		ops.add(retainJob(fmt.Sprint(i)))
+	}
+	release := make(chan struct{})
+	var running, maxRunning atomic.Int32
+	r := testRunner(ops, clock, Config{})
+	r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+		n := running.Add(1)
+		for m := maxRunning.Load(); n > m && !maxRunning.CompareAndSwap(m, n); m = maxRunning.Load() {
+		}
+		defer running.Add(-1)
+		return blockUntil(ctx, release)
+	})
+	consStarted := make(chan domain.OperationID, 2)
+	r.Handle(domain.OperationKindConsolidate, func(ctx context.Context, run *Run) error {
+		consStarted <- run.Job.ID
+		return blockUntil(ctx, release)
+	})
+	startRunner(t, r)
+
+	processing := func(kind domain.OperationKind) int { return ops.countBank(bankA, kind, "status = 'processing'") }
+	eventually(t, "8 retains running", func() bool { return running.Load() == 8 })
+	time.Sleep(30 * time.Millisecond) // many polls with free slots
+	if got := processing(domain.OperationKindRetainDocument); got != 8 {
+		t.Fatalf("processing retains = %d, want 8 (10 slots, 2 reserved)", got)
+	}
+	ops.add(consolidateRow(bankA))
+	ops.add(consolidateRow(bankB))
+	for range 2 {
+		select {
+		case <-consStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a consolidate did not start while retains filled their slots")
+		}
+	}
+	if got := processing(domain.OperationKindRetainDocument); got != 8 {
+		t.Errorf("processing retains with consolidates running = %d, want 8", got)
+	}
+	close(release)
+	eventually(t, "every job completed", func() bool {
+		return ops.count("status = 'completed'") == flood+2
+	})
+	if m := maxRunning.Load(); m != 8 {
+		t.Errorf("max concurrent retains = %d, want 8", m)
+	}
+}
+
+// retryStep is one expected Fail: the retry offset from the clock at the failure, or terminal.
+type retryStep struct {
+	after    time.Duration
+	terminal bool
+}
+
+// driveRetries runs one job of kind whose handler returns errFor(run) until the expected Fail calls have
+// happened and checks each call's retry time against the (frozen) clock. The clock is a day behind the
+// database, so every retry is due at once.
+func driveRetries(t *testing.T, j store.Job, errFor func(run int, now time.Time) error, want []retryStep,
+	pending pendingChecker, ops *opsDB, clock *clock.Manual,
+) domain.OperationID {
+	t.Helper()
+	r := testRunner(ops, clock, Config{})
+	r.pending = pending
+	var runs atomic.Int32
+	r.Handle(j.Kind, func(_ context.Context, _ *Run) error {
+		return errFor(int(runs.Add(1)), clock.Now())
+	})
+	id := ops.add(j)
+	startRunner(t, r)
+	for i, w := range want {
+		eventually(t, fmt.Sprintf("fail call %d", i+1), func() bool { return len(ops.failCalls()) > i })
+		fc := ops.failCalls()[i]
+		now := clock.Now()
+		if fc.attempt != i {
+			t.Errorf("fail %d: attempt %d, want %d", i+1, fc.attempt, i)
+		}
+		if w.terminal {
+			if fc.retryAt != nil {
+				t.Fatalf("fail %d: retry at %v, want terminal", i+1, fc.retryAt.Sub(now))
+			}
+			continue
+		}
+		if fc.retryAt == nil {
+			t.Fatalf("fail %d: terminal, want retry after %v", i+1, w.after)
+		}
+		if got := fc.retryAt.Sub(now); got != w.after {
+			t.Fatalf("fail %d: retry after %v, want %v", i+1, got, w.after)
+		}
+	}
+	return id
+}
+
+// Accept: retries are scheduled at the right times.
+func TestRunnerRetrySchedule(t *testing.T) {
+	boom := errors.New("gateway timeout")
+	always := func(int, time.Time) error { return boom }
+	m := time.Minute
+	tests := []struct {
+		name       string
+		job        store.Job
+		errFor     func(int, time.Time) error
+		want       []retryStep
+		wantStatus domain.OperationStatus
+	}{
+		{
+			"linear backoff then the 3-attempt cap", retainJob("x"), always,
+			[]retryStep{{after: m}, {after: 2 * m}, {terminal: true}},
+			domain.OperationStatusFailed,
+		},
+		{"permanent fails at once", retainJob("x"), func(int, time.Time) error {
+			return fmt.Errorf("%w: schema violation", ErrPermanent)
+		}, []retryStep{{terminal: true}}, domain.OperationStatusFailed},
+		{"consolidate: capped exponential, unbounded", consolidateRow(bankA), func(run int, _ time.Time) error {
+			if run <= 7 {
+				return boom
+			}
+			return nil
+		}, []retryStep{
+			{after: m},
+			{after: 2 * m},
+			{after: 4 * m},
+			{after: 8 * m},
+			{after: 16 * m},
+			{after: 30 * m},
+			{after: 30 * m},
+		}, domain.OperationStatusCompleted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newClock()
+			ops := newOps(t)
+			id := driveRetries(t, tt.job, tt.errFor, tt.want, nil, ops, clock)
+			eventually(t, "final status "+string(tt.wantStatus), func() bool { return ops.row(id).status == tt.wantStatus })
+		})
+	}
+}
+
+// A failed consolidate skips its retry only when another automatic consolidate is due for the bank.
+func TestRunnerConsolidateSkipsRetryWhenPending(t *testing.T) {
+	tests := []struct {
+		name  string
+		other func(now time.Time) *store.Job // queued while the first run is going; nil = none
+		want  retryStep
+	}{
+		{"due automatic consolidate: skip", func(now time.Time) *store.Job {
+			j := consolidateRow(bankA)
+			j.RunAt = now
+			return &j
+		}, retryStep{terminal: true}},
+		{"parked automatic consolidate: retry", func(now time.Time) *store.Job {
+			j := consolidateRow(bankA)
+			j.RunAt = now.Add(time.Hour)
+			return &j
+		}, retryStep{after: time.Minute}},
+		{"consolidate with overrides: retry", func(time.Time) *store.Job {
+			return &store.Job{
+				Bank: bankA, Kind: domain.OperationKindConsolidate, SerialKey: SerialKeyConsolidate,
+				Overrides: &domain.BankConfig{},
+			}
+		}, retryStep{after: time.Minute}},
+		{"none: retry", func(time.Time) *store.Job { return nil }, retryStep{after: time.Minute}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newClock()
+			ops := newOps(t)
+			errFor := func(run int, now time.Time) error {
+				if j := tt.other(now); j != nil && run == 1 {
+					ops.add(*j)
+				}
+				return errors.New("boom")
+			}
+			driveRetries(t, consolidateRow(bankA), errFor, []retryStep{tt.want},
+				&consolidateProbe{s: ops, c: clock}, ops, clock)
+		})
+	}
+}
+
+func TestRetryPolicy(t *testing.T) {
+	now := newClock().Now()
+	boom := errors.New("boom")
+	tests := []struct {
+		name    string
+		kind    domain.OperationKind
+		attempt int
+		err     error
+		after   time.Duration
+		retry   bool
+	}{
+		{"retain first failure", domain.OperationKindRetainDocument, 0, boom, time.Minute, true},
+		{"retain second failure", domain.OperationKindRetainDocument, 1, boom, 2 * time.Minute, true},
+		{"retain third failure is terminal", domain.OperationKindRetainDocument, 2, boom, 0, false},
+		{"refresh capped too", domain.OperationKindRefreshMentalModel, 2, boom, 0, false},
+		{"permanent", domain.OperationKindRetainDocument, 0, fmt.Errorf("x: %w", ErrPermanent), 0, false},
+		{"model unbound", domain.OperationKindConsolidate, 0, fmt.Errorf("x: %w", domain.ErrModelUnbound), 0, false},
+		{"invalid argument", domain.OperationKindRetainDocument, 0, domain.ErrInvalidArgument, 0, false},
+		{"cancelled", domain.OperationKindConsolidate, 0, domain.ErrCancelled, 0, false},
+		{"consolidate attempt 0", domain.OperationKindConsolidate, 0, boom, time.Minute, true},
+		{"consolidate attempt 3", domain.OperationKindConsolidate, 3, boom, 8 * time.Minute, true},
+		{"consolidate capped", domain.OperationKindConsolidate, 50, boom, ConsolidateBackoffCap, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			at, ok := nextRun(store.Job{Kind: tt.kind, Attempt: tt.attempt}, tt.err, now)
+			if ok != tt.retry {
+				t.Fatalf("retry = %v, want %v", ok, tt.retry)
+			}
+			if ok && at.Sub(now) != tt.after {
+				t.Errorf("retry after %v, want %v", at.Sub(now), tt.after)
+			}
+		})
+	}
+}
+
+// Accept: a cancelled job stops at its next checkpoint.
+func TestRunnerCancelledJobStopsAtCheckpoint(t *testing.T) {
+	t.Run("checkpoint sees Alive=false", func(t *testing.T) {
+		clock := newClock()
+		ops := newOps(t)
+		steps := make(chan int, 10)
+		next := make(chan struct{})
+		r := testRunner(ops, clock, Config{})
+		r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, run *Run) error {
+			for i := 1; ; i++ {
+				p := domain.Progress{Stage: "chunks", Processed: int64(i), At: clock.Now()}
+				if err := run.Report(ctx, p); err != nil {
+					return fmt.Errorf("checkpoint: %w", err)
+				}
+				steps <- i
+				<-next
+			}
+		})
+		id := ops.add(retainJob("1"))
+		startRunner(t, r)
+		if got := <-steps; got != 1 {
+			t.Fatalf("first step = %d", got)
+		}
+		if _, err := ops.cancel(bankA, id); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		close(next)
+		eventually(t, "row CANCELLED", func() bool { return ops.row(id).status == domain.OperationStatusCancelled })
+		select {
+		case s := <-steps:
+			t.Errorf("handler ran step %d after the cancel", s)
+		default:
+		}
+		fails := ops.failCalls()
+		if len(fails) != 1 || fails[0].retryAt != nil || !errors.Is(fails[0].cause, domain.ErrCancelled) {
+			t.Errorf("fail calls = %+v, want one terminal Fail with ErrCancelled", fails)
+		}
+	})
+	t.Run("heartbeat reports the job lost", func(t *testing.T) {
+		clock := newClock()
+		ops := newOps(t)
+		started := make(chan struct{})
+		r := testRunner(ops, clock, Config{HeartbeatInterval: 2 * time.Millisecond})
+		r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		id := ops.add(retainJob("1"))
+		startRunner(t, r)
+		<-started
+		if _, err := ops.cancel(bankA, id); err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		eventually(t, "row CANCELLED", func() bool { return ops.row(id).status == domain.OperationStatusCancelled })
+		if fails := ops.failCalls(); len(fails) != 1 || fails[0].retryAt != nil {
+			t.Errorf("fail calls = %+v, want one terminal Fail", fails)
+		}
+	})
+}
+
+// killable wraps a Claimer; after kill every call fails without reaching it, like a dead process.
+type killable struct {
+	Claimer
+	mu   sync.RWMutex
+	dead bool
+}
+
+// errDead wraps ErrFailedPrecondition (a fencing outcome) so the dead runner's settle at test cleanup
+// gives up at once instead of retrying for the whole settle timeout.
+var errDead = fmt.Errorf("%w: worker process is dead", domain.ErrFailedPrecondition)
+
+// kill waits for in-flight calls, then cuts the worker off.
+func (k *killable) kill() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.dead = true
+}
+
+// call runs fn unless the worker is dead.
+func (k *killable) call(fn func() error) error {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	if k.dead {
+		return errDead
+	}
+	return fn()
+}
+
+func (k *killable) Claim(ctx context.Context, w string, kinds []domain.OperationKind, n int) ([]store.Job, error) {
+	var js []store.Job
+	err := k.call(func() (err error) { js, err = k.Claimer.Claim(ctx, w, kinds, n); return err })
+	return js, err
+}
+
+func (k *killable) Heartbeat(ctx context.Context, w string, ids []domain.OperationID) error {
+	return k.call(func() error { return k.Claimer.Heartbeat(ctx, w, ids) })
+}
+
+func (k *killable) Complete(ctx context.Context, id domain.OperationID, res json.RawMessage, u []domain.Usage) error {
+	return k.call(func() error { return k.Claimer.Complete(ctx, id, res, u) })
+}
+
+func (k *killable) Fail(ctx context.Context, id domain.OperationID, cause error, at *time.Time) error {
+	return k.call(func() error { return k.Claimer.Fail(ctx, id, cause, at) })
+}
+
+// Accept: a worker killed mid-job gets its job reclaimed.
+func TestKilledWorkerJobReclaimed(t *testing.T) {
+	clock := newClock()
+	ops := newOps(t)
+	a := &killable{Claimer: ops}
+	started := make(chan struct{})
+	ra := testRunner(a, clock, Config{WorkerID: "worker-a", HeartbeatInterval: 2 * time.Millisecond})
+	ra.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	id := ops.add(retainJob("1"))
+	startRunner(t, ra)
+	<-started
+	a.kill()
+
+	ops.ageHeartbeats(DefaultStaleAfter + time.Second)
+	if _, err := ops.ReclaimStale(context.Background(), DefaultStaleAfter); err != nil { // the tick's first step
+		t.Fatalf("reclaim: %v", err)
+	}
+	if row := ops.row(id); row.status != domain.OperationStatusPending || row.attempt != 1 {
+		t.Fatalf("after reclaim: status %s attempt %d, want pending attempt 1", row.status, row.attempt)
+	}
+
+	seen := make(chan int, 1)
+	rb := testRunner(ops, clock, Config{WorkerID: "worker-b"})
+	rb.Handle(domain.OperationKindRetainDocument, func(_ context.Context, run *Run) error {
+		seen <- run.Job.Attempt
+		return nil
+	})
+	startRunner(t, rb)
+	if got := <-seen; got != 1 {
+		t.Errorf("worker b ran attempt %d, want 1", got)
+	}
+	eventually(t, "worker b completed the job", func() bool {
+		r := ops.row(id)
+		return r.status == domain.OperationStatusCompleted && r.worker == "worker-b"
+	})
+}
+
+// A job lost to another worker (reclaimed and re-claimed) is stopped here and its row is left alone,
+// whether the stopped handler returns an error or nil (a lost run never reaches Complete unchecked).
+func TestRunnerLostToAnotherWorkerLeavesRowAlone(t *testing.T) {
+	for _, returnNil := range []bool{false, true} {
+		t.Run(fmt.Sprintf("handler returns nil=%v", returnNil), func(t *testing.T) {
+			clock := newClock()
+			ops := newOps(t)
+			started := make(chan struct{})
+			r := testRunner(ops, clock, Config{WorkerID: "w1", HeartbeatInterval: 2 * time.Millisecond})
+			r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+				close(started)
+				<-ctx.Done()
+				if returnNil {
+					return nil
+				}
+				return fmt.Errorf("stopped: %w", ctx.Err())
+			})
+			id := ops.add(retainJob("1"))
+			startRunner(t, r)
+			<-started
+			ops.exec(`UPDATE operations SET worker_id = 'w2' WHERE id = $1`, string(id)) // re-claimed elsewhere
+			eventually(t, "run released", func() bool {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				return len(r.running) == 0
+			})
+			if fails := ops.failCalls(); len(fails) != 0 {
+				t.Errorf("fail calls = %+v, want none", fails)
+			}
+			if row := ops.row(id); row.status != domain.OperationStatusProcessing || row.worker != "w2" {
+				t.Errorf("row: status %s worker %s, want processing under w2", row.status, row.worker)
+			}
+		})
+	}
+}
+
+// This runner re-claims an id it is still running (its job was reclaimed after a heartbeat stall).
+// The older run is stopped as lost and writes nothing; the newer run owns the row and completes it.
+func TestRunnerSelfReclaimStopsOlderRun(t *testing.T) {
+	clock := newClock()
+	ops := newOps(t)
+	var runs, concurrent atomic.Int32
+	firstStopped := make(chan error, 1)
+	release := make(chan struct{})
+	r := testRunner(ops, clock, Config{WorkerID: "w1"})
+	r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+		run := runs.Add(1)
+		concurrent.Add(1)
+		defer concurrent.Add(-1)
+		if run == 1 {
+			<-ctx.Done()
+			firstStopped <- context.Cause(ctx)
+			return fmt.Errorf("first run: %w", ctx.Err())
+		}
+		return blockUntil(ctx, release)
+	})
+	id := ops.add(retainJob("1"))
+	startRunner(t, r)
+	eventually(t, "first run", func() bool { return runs.Load() == 1 })
+	ops.ageHeartbeats(DefaultStaleAfter + time.Second)
+	if _, err := ops.ReclaimStale(context.Background(), DefaultStaleAfter); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case cause := <-firstStopped:
+		if !errors.Is(cause, errLost) {
+			t.Errorf("older run cancelled with %v, want errLost", cause)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("older run was not stopped when the id was re-claimed")
+	}
+	eventually(t, "only the newer run left", func() bool { return concurrent.Load() == 1 && runs.Load() == 2 })
+	r.heartbeat(context.Background())
+	if fails := ops.failCalls(); len(fails) != 0 {
+		t.Errorf("fail calls = %+v, want none (the older run writes nothing)", fails)
+	}
+	r.mu.Lock()
+	tracked := r.running[id] != nil
+	r.mu.Unlock()
+	if !tracked {
+		t.Fatal("the older run's release dropped the newer run's entry")
+	}
+	close(release)
+	eventually(t, "newer run completed", func() bool {
+		row := ops.row(id)
+		return row.status == domain.OperationStatusCompleted && row.attempt == 1
+	})
+}
+
+// flakyClaimer injects Claimer failures.
+type flakyClaimer struct {
+	Claimer
+	hbErr         error                       // every Heartbeat fails with it
+	aliveErr      error                       // every Alive fails with it
+	completeFails atomic.Int32                // the next n Completes fail with domain.ErrUnavailable
+	failAckLost   atomic.Int32                // the next n Fails commit, then report domain.ErrUnavailable
+	afterFail     func(id domain.OperationID) // runs after a Fail committed, before its ack
+}
+
+func (f *flakyClaimer) Heartbeat(ctx context.Context, w string, ids []domain.OperationID) error {
+	if f.hbErr != nil {
+		return f.hbErr
+	}
+	return f.Claimer.Heartbeat(ctx, w, ids)
+}
+
+func (f *flakyClaimer) Alive(ctx context.Context, id domain.OperationID) (bool, error) {
+	if f.aliveErr != nil {
+		return false, f.aliveErr
+	}
+	return f.Claimer.Alive(ctx, id)
+}
+
+func (f *flakyClaimer) Fail(ctx context.Context, id domain.OperationID, cause error, at *time.Time) error {
+	err := f.Claimer.Fail(ctx, id, cause, at)
+	if f.afterFail != nil {
+		f.afterFail(id)
+	}
+	if f.failAckLost.Add(-1) >= 0 {
+		return domain.ErrUnavailable
+	}
+	return err
+}
+
+func (f *flakyClaimer) Complete(
+	ctx context.Context, id domain.OperationID, res json.RawMessage, u []domain.Usage,
+) error {
+	if f.completeFails.Add(-1) >= 0 {
+		return domain.ErrUnavailable
+	}
+	return f.Claimer.Complete(ctx, id, res, u)
+}
+
+// When heartbeats keep failing, the runner stops its handlers before the reclaim threshold. If
+// Alive then fails too, nothing is written; reclaim covers the row.
+func TestRunnerFencesItselfWithoutHeartbeats(t *testing.T) {
+	for _, aliveErr := range []error{nil, domain.ErrUnavailable} {
+		t.Run(fmt.Sprintf("alive error %v", aliveErr), func(t *testing.T) {
+			clock := newClock()
+			ops := newOps(t)
+			fc := &flakyClaimer{Claimer: ops, hbErr: domain.ErrUnavailable, aliveErr: aliveErr}
+			stopped := make(chan error, 1)
+			r := testRunner(fc, clock, Config{HeartbeatInterval: 2 * time.Millisecond})
+			r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+				<-ctx.Done()
+				stopped <- context.Cause(ctx)
+				return fmt.Errorf("stopped: %w", ctx.Err())
+			})
+			id := ops.add(retainJob("1"))
+			startRunner(t, r)
+			eventually(t, "claimed", func() bool { return ops.row(id).status == domain.OperationStatusProcessing })
+			time.Sleep(10 * time.Millisecond) // failing heartbeats below the threshold change nothing
+			select {
+			case <-stopped:
+				t.Fatal("handler stopped before the fence threshold")
+			default:
+			}
+			clock.Advance(DefaultStaleAfter*3/4 + time.Second)
+			select {
+			case cause := <-stopped:
+				if !errors.Is(cause, errLost) {
+					t.Errorf("cause = %v, want errLost", cause)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("handler not stopped without heartbeats")
+			}
+			eventually(t, "run released", func() bool {
+				r.mu.Lock()
+				defer r.mu.Unlock()
+				return len(r.running) == 0
+			})
+			if fails := ops.failCalls(); len(fails) != 0 {
+				t.Errorf("fail calls = %+v, want none", fails)
+			}
+		})
+	}
+}
+
+// A transient Complete error is retried within the settle timeout.
+func TestRunnerRetriesTerminalCall(t *testing.T) {
+	clock := newClock()
+	ops := newOps(t)
+	fc := &flakyClaimer{Claimer: ops}
+	fc.completeFails.Store(2)
+	r := testRunner(fc, clock, Config{})
+	r.Handle(domain.OperationKindRetainDocument, func(context.Context, *Run) error { return nil })
+	id := ops.add(retainJob("1"))
+	startRunner(t, r)
+	eventually(t, "completed after two failed Completes", func() bool {
+		return ops.row(id).status == domain.OperationStatusCompleted
+	})
+}
+
+// A Fail whose commit landed but whose ack was lost is retried only when its retry time lies beyond the
+// settle timeout. A release due now is tried once, so it can't reset a row another worker has already
+// claimed back to PENDING (which would let a third worker run it concurrently).
+func TestRunnerFailAckLost(t *testing.T) {
+	t.Run("shutdown release due now: one try", func(t *testing.T) {
+		clock := newClock()
+		ops := newOps(t)
+		fc := &flakyClaimer{Claimer: ops, afterFail: func(domain.OperationID) {
+			// Another worker claims the released row before our ack arrives.
+			_, _ = ops.Claim(context.Background(), "w2", []domain.OperationKind{domain.OperationKindRetainDocument}, 1)
+		}}
+		fc.failAckLost.Store(1)
+		started := make(chan struct{})
+		r := testRunner(fc, clock, Config{WorkerID: "w1"})
+		r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+			close(started)
+			<-ctx.Done()
+			return fmt.Errorf("stopped: %w", ctx.Err())
+		})
+		id := ops.add(retainJob("1"))
+		stop := startRunner(t, r)
+		<-started
+		stop()
+		if n := len(ops.failCalls()); n != 1 {
+			t.Errorf("Fail calls = %d, want 1 (no retry of a release due now)", n)
+		}
+		if row := ops.row(id); row.status != domain.OperationStatusProcessing || row.worker != "w2" {
+			t.Errorf("row: status %s worker %s, want processing under w2", row.status, row.worker)
+		}
+	})
+	t.Run("backoff beyond the settle timeout: retried", func(t *testing.T) {
+		clock := clock.NewManual(time.Now().UTC().Truncate(time.Second)) // the retry stays in the database's future
+		ops := newOps(t)
+		fc := &flakyClaimer{Claimer: ops}
+		fc.failAckLost.Store(1)
+		r := testRunner(fc, clock, Config{})
+		r.Handle(domain.OperationKindRetainDocument, func(context.Context, *Run) error { return errors.New("boom") })
+		id := ops.add(retainJob("1"))
+		startRunner(t, r)
+		eventually(t, "Fail retried", func() bool { return len(ops.failCalls()) == 2 })
+		if row := ops.row(id); row.status != domain.OperationStatusPending || row.attempt != 1 {
+			t.Errorf("row: status %s attempt %d, want pending attempt 1 (the repeat is fenced)", row.status, row.attempt)
+		}
+	})
+}
+
+// A panicking handler is retried like a transient failure, and its slot is freed.
+func TestRunnerPanicRetries(t *testing.T) {
+	clock := newClock()
+	ops := newOps(t)
+	r := testRunner(ops, clock, Config{Slots: 1})
+	var runs atomic.Int32
+	r.Handle(domain.OperationKindRetainDocument, func(context.Context, *Run) error {
+		if runs.Add(1) == 1 {
+			panic("nil map")
+		}
+		return nil
+	})
+	id := ops.add(retainJob("1"))
+	other := ops.add(retainJob("2"))
+	startRunner(t, r)
+	eventually(t, "panic recorded as a retry", func() bool { return len(ops.failCalls()) == 1 })
+	if fc := ops.failCalls()[0]; fc.id != id || fc.retryAt == nil || fc.retryAt.Sub(clock.Now()) != RetryStep {
+		t.Fatalf("fail call = %+v, want a retry of %s after %v", fc, id, RetryStep)
+	}
+	eventually(t, "the other job ran in the freed slot", func() bool {
+		return ops.row(other).status == domain.OperationStatusCompleted
+	})
+}
+
+// On shutdown the runner cancels running handlers and releases their jobs for an immediate re-run.
+func TestRunnerShutdownReleasesJobs(t *testing.T) {
+	tests := []struct {
+		name   string
+		stopIn func(ctx context.Context, run *Run) error
+	}{
+		{"checkpoint error", func(ctx context.Context, run *Run) error {
+			return run.Report(ctx, domain.Progress{})
+		}},
+		{"error that drops context.Canceled", func(ctx context.Context, _ *Run) error {
+			return fmt.Errorf("%w: gateway: %s", domain.ErrUnavailable, ctx.Err().Error())
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := newClock()
+			ops := newOps(t)
+			started := make(chan struct{})
+			r := testRunner(ops, clock, Config{})
+			r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, run *Run) error {
+				close(started)
+				<-ctx.Done()
+				return tt.stopIn(ctx, run)
+			})
+			id := ops.add(store.Job{Bank: bankA, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:1", Attempt: 1})
+			stop := startRunner(t, r)
+			<-started
+			stop()
+			row := ops.row(id)
+			if row.status != domain.OperationStatusPending || !row.runAt.Equal(clock.Now()) {
+				t.Fatalf("after shutdown: status %s run_at %v, want pending now", row.status, row.runAt)
+			}
+			// Fail with a retry time always charges an attempt (frozen port): the release is not free.
+			if row.attempt != 2 {
+				t.Errorf("attempt after the release = %d, want 2", row.attempt)
+			}
+		})
+	}
+}
+
+// H3 mitigation: on shutdown the runner stops claiming and lets running handlers finish within the grace
+// period, so a job that finishes in time is completed, not released.
+func TestRunnerShutdownGraceLetsJobsFinish(t *testing.T) {
+	clock := newClock()
+	ops := newOps(t)
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	r := testRunner(ops, clock, Config{Slots: 1, ShutdownGrace: 5 * time.Second})
+	r.Handle(domain.OperationKindRetainDocument, func(ctx context.Context, _ *Run) error {
+		close(started)
+		return blockUntil(ctx, finish)
+	})
+	id := ops.add(retainJob("1"))
+	queued := ops.add(retainJob("2"))
+	stop := startRunner(t, r)
+	<-started
+	stopped := make(chan struct{})
+	go func() {
+		stop()
+		close(stopped)
+	}()
+	time.Sleep(20 * time.Millisecond) // shutdown has begun; the handler is still running
+	close(finish)
+	<-stopped
+	if row := ops.row(id); row.status != domain.OperationStatusCompleted || row.attempt != 0 {
+		t.Errorf("running job: status %s attempt %d, want completed at attempt 0", row.status, row.attempt)
+	}
+	if row := ops.row(queued); row.status != domain.OperationStatusPending {
+		t.Errorf("queued job claimed during shutdown: status %s", row.status)
+	}
+}
+
+// A handler's SetResult reaches Complete (a later call with a nil result only adds usage); a delete_bank
+// whose row went with its bank is done.
+func TestRunnerReportsResult(t *testing.T) {
+	clock := newClock()
+	ops := newOps(t)
+	r := testRunner(ops, clock, Config{})
+	r.Handle(domain.OperationKindRetainDocument, func(_ context.Context, run *Run) error {
+		run.SetResult(map[string]any{"units": 3}, domain.Usage{Slot: domain.ModelSlotExtract, InputTokens: 10})
+		run.SetResult(nil, domain.Usage{Slot: domain.ModelSlotExtract, OutputTokens: 5})
+		return nil
+	})
+	id := ops.add(retainJob("1"))
+	startRunner(t, r)
+	eventually(t, "completed", func() bool { return ops.row(id).status == domain.OperationStatusCompleted })
+	row := ops.row(id)
+	var res map[string]int
+	if err := json.Unmarshal(row.result, &res); err != nil || res["units"] != 3 || len(row.usage) != 2 {
+		t.Errorf("result %s usage %+v", row.result, row.usage)
+	}
+}

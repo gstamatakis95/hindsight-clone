@@ -7,7 +7,7 @@ package mockretain
 import (
 	"context"
 	"memd/internal/engine/retain"
-	"memd/internal/store"
+	"memd/internal/jobs"
 	"sync"
 )
 
@@ -93,7 +93,7 @@ var _ retain.Retainer = &Retainer{}
 //
 //		// make and configure a mocked retain.Retainer
 //		mockedRetainer := &Retainer{
-//			ProcessDocumentFunc: func(ctx context.Context, j store.Job) (retain.RetainResult, error) {
+//			ProcessDocumentFunc: func(ctx context.Context, run *jobs.Run) (retain.RetainResult, error) {
 //				panic("mock out the ProcessDocument method")
 //			},
 //		}
@@ -104,7 +104,7 @@ var _ retain.Retainer = &Retainer{}
 //	}
 type Retainer struct {
 	// ProcessDocumentFunc mocks the ProcessDocument method.
-	ProcessDocumentFunc func(ctx context.Context, j store.Job) (retain.RetainResult, error)
+	ProcessDocumentFunc func(ctx context.Context, run *jobs.Run) (retain.RetainResult, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -112,29 +112,29 @@ type Retainer struct {
 		ProcessDocument []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// J is the j argument value.
-			J store.Job
+			// Run is the run argument value.
+			Run *jobs.Run
 		}
 	}
 	lockProcessDocument sync.RWMutex
 }
 
 // ProcessDocument calls ProcessDocumentFunc.
-func (mock *Retainer) ProcessDocument(ctx context.Context, j store.Job) (retain.RetainResult, error) {
+func (mock *Retainer) ProcessDocument(ctx context.Context, run *jobs.Run) (retain.RetainResult, error) {
 	if mock.ProcessDocumentFunc == nil {
 		panic("Retainer.ProcessDocumentFunc: method is nil but Retainer.ProcessDocument was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   store.Job
+		Run *jobs.Run
 	}{
 		Ctx: ctx,
-		J:   j,
+		Run: run,
 	}
 	mock.lockProcessDocument.Lock()
 	mock.calls.ProcessDocument = append(mock.calls.ProcessDocument, callInfo)
 	mock.lockProcessDocument.Unlock()
-	return mock.ProcessDocumentFunc(ctx, j)
+	return mock.ProcessDocumentFunc(ctx, run)
 }
 
 // ProcessDocumentCalls gets all the calls that were made to ProcessDocument.
@@ -143,11 +143,11 @@ func (mock *Retainer) ProcessDocument(ctx context.Context, j store.Job) (retain.
 //	len(mockedRetainer.ProcessDocumentCalls())
 func (mock *Retainer) ProcessDocumentCalls() []struct {
 	Ctx context.Context
-	J   store.Job
+	Run *jobs.Run
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   store.Job
+		Run *jobs.Run
 	}
 	mock.lockProcessDocument.RLock()
 	calls = mock.calls.ProcessDocument

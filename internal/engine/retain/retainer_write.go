@@ -2,9 +2,9 @@ package retain
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"time"
@@ -58,7 +58,7 @@ func (r *retainer) prepare(
 		pb.chunks = append(pb.chunks, c)
 		facts, u, err := r.d.Extractor.Extract(ctx, extractInput{
 			Bank: rn.j.Bank, DocumentID: rn.p.DocumentID, ChunkIndex: c.Index, Text: c.Text, Context: rn.p.Context,
-			MentionedAt: rn.mentioned, Metadata: rn.p.Metadata, Hints: rn.p.hints(), Config: rn.cfg,
+			MentionedAt: rn.mentioned, Metadata: rn.p.Metadata, Hints: hints(rn.p), Config: rn.cfg,
 		})
 		usage = append(usage, u...)
 		if err != nil {
@@ -159,7 +159,7 @@ func (r *retainer) writeUnits(ctx context.Context, tx store.Tx, rn *run, pb *pre
 			return fmt.Errorf("retain: labels: %w", err)
 		}
 		entityIDs, err := r.d.Entities.Resolve(ctx, tx, b, ResolveInput{
-			Mentions: pf.fact.Entities, Hints: rn.p.hints(), Literal: !boolOr(rn.p.ResolveEntities, true),
+			Mentions: pf.fact.Entities, Hints: hints(rn.p), Literal: !boolOr(rn.p.ResolveEntities, true),
 			At: factTime(pf.fact, rn.mentioned), Threshold: rn.t.matchThreshold,
 		})
 		if err != nil {
@@ -238,10 +238,7 @@ func (r *retainer) replace(ctx context.Context, tx store.Tx, rn *run) error {
 	if _, err := tx.Units().DeleteByDocument(ctx, b, doc); err != nil {
 		return err
 	}
-	_, _, err = tx.Queue().Enqueue(ctx, store.Job{
-		Bank: b, Kind: domain.OperationKindGraphMaintenance, SerialKey: graphSerialKey,
-		Payload: json.RawMessage(`{}`), Dedupe: store.DedupePendingOrRunning,
-	})
+	_, _, err = jobs.EnqueueGraph(ctx, tx, b)
 	return err
 }
 
@@ -292,10 +289,7 @@ func (r *retainer) complete(ctx context.Context, rn *run) error {
 		if !consolidates(rn) {
 			return nil
 		}
-		_, _, err = tx.Queue().Enqueue(ctx, store.Job{
-			Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: consolidateSerialKey,
-			Payload: json.RawMessage(`{}`), Dedupe: store.DedupePending,
-		})
+		_, _, err = jobs.EnqueueConsolidate(ctx, tx, b)
 		return err
 	})
 	if err == nil {

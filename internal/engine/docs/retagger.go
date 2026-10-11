@@ -17,9 +17,3 @@ type Retagger interface {
 	// consolidation. A document that is gone is a no-op; running it twice is harmless.
 	Apply(ctx context.Context, j store.Job) error
 }
-
-// RetagPayload is the retag_document job payload (decision 1301); the tags live on the document row.
-type RetagPayload struct {
-	// DocumentID is the retagged document.
-	DocumentID domain.DocumentID `json:"document_id"`
-}

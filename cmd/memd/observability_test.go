@@ -3,8 +3,8 @@ package main
 import (
 	"io"
 	"log/slog"
+	"memd/internal/jobs"
 	"memd/internal/observability"
-	"memd/internal/worker"
 	"net"
 	"testing"
 	"time"
@@ -114,7 +114,7 @@ func checkRPCSpans(t *testing.T, spans []*mocktracer.Span) {
 func checkJobSpans(t *testing.T, spans []*mocktracer.Span) {
 	t.Helper()
 	job := findSpan(spans, isConsolidateJob)
-	if job == nil || job.Tag(observability.TagOutcome) != worker.OutcomeCompleted ||
+	if job == nil || job.Tag(observability.TagOutcome) != jobs.OutcomeCompleted ||
 		job.Tag(observability.TagBank) != "b" || job.Tag(observability.TagTenant) != "t" ||
 		job.Tag(observability.TagOperationID) == "" {
 		t.Fatalf("consolidate job span: %v", job)

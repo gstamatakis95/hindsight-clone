@@ -3,7 +3,9 @@ package bank
 import (
 	"context"
 	"fmt"
+	"memd/internal/clock"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 )
@@ -24,26 +26,18 @@ type TemplateCodec interface {
 	) (domain.Bank, []domain.Operation, error)
 }
 
-// RefreshQueuer enqueues mental-model refreshes; the mental-model engine (WP-12) owns the refresh payload
-// and its scheduling rules, so WP-13 never builds a refresh job itself (decision 1303).
-type RefreshQueuer interface {
-	// QueueRefresh enqueues (or joins) a refresh of model id of bank b inside tx and returns its operation
-	// id. The caller has already called tx.Seq(b).
-	QueueRefresh(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID) (domain.OperationID, error)
-}
-
 // templateCodec implements TemplateCodec over store.DB.
 type templateCodec struct {
-	s       store.DB
-	refresh RefreshQueuer
+	s     store.DB
+	clock clock.Clock
 }
 
 var _ TemplateCodec = (*templateCodec)(nil)
 
 // NewTemplateCodec returns the TemplateCodec over s (Export lists the model specs with
-// Reader.ListMentalModels); refresh enqueues the first build of each created model.
-func NewTemplateCodec(s store.DB, refresh RefreshQueuer) TemplateCodec {
-	return &templateCodec{s: s, refresh: refresh}
+// Reader.ListMentalModels); clock dates the first build of each created model (jobs.QueueModelRefresh).
+func NewTemplateCodec(s store.DB, clock clock.Clock) TemplateCodec {
+	return &templateCodec{s: s, clock: clock}
 }
 
 // Export reads the bank's own config and directives in one short transaction, then its model specs.
@@ -101,10 +95,6 @@ func (c *templateCodec) CreateNamed(
 	if err != nil {
 		return domain.Bank{}, nil, err
 	}
-	if len(specs) > 0 && c.refresh == nil {
-		return domain.Bank{}, nil, fmt.Errorf("%w: no refresh queuer wired for template builds",
-			domain.ErrFailedPrecondition)
-	}
 	var (
 		bank domain.Bank
 		ops  []domain.Operation
@@ -146,7 +136,7 @@ func (c *templateCodec) createModels(
 		if err := tx.MentalModels().Create(ctx, domain.MentalModel{Spec: spec, Bank: b}); err != nil {
 			return nil, err
 		}
-		id, err := c.refresh.QueueRefresh(ctx, tx, b, spec.ID)
+		id, err := jobs.QueueModelRefresh(ctx, tx, b, spec.ID, c.clock.Now())
 		if err != nil {
 			return nil, fmt.Errorf("queue first build of mental model %s: %w", spec.ID, err)
 		}

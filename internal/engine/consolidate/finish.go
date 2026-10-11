@@ -2,29 +2,12 @@ package consolidate
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"time"
 )
-
-// Refresh-trigger defaults.
-const (
-	// defaultDebounceSeconds is refresh_debounce_seconds when unset (the spec's 30).
-	defaultDebounceSeconds = 30
-	// refreshSerialPrefix prefixes a model id into its refresh serial key, mm:{model_id}.
-	refreshSerialPrefix = "mm:"
-)
-
-// RefreshPayload is the payload of the refresh_mental_model jobs consolidation triggers: the model only,
-// no flags (decision 1004). It marshals to the mentalmodel package's payload shape,
-// {"mental_model_id": ...}, which the refresh handler decodes (decision 1800). Nothing imports
-// mentalmodel, so the shape is mirrored here rather than shared.
-type RefreshPayload struct {
-	// ModelID is the mental model to refresh.
-	ModelID domain.MentalModelID `json:"mental_model_id"`
-}
 
 // finish runs the final transaction: stamps the planned units that had no scope left to decide (still
 // unchanged and still cited), checks whether unconsolidated units remain and if so enqueues the
@@ -61,7 +44,7 @@ func (r *run) finish(ctx context.Context) error {
 			return fmt.Errorf("unconsolidated units: %w", err)
 		}
 		if more = len(left) > 0; more {
-			if _, _, err := tx.Queue().Enqueue(ctx, NewJob(r.job.Bank, r.payload.Scopes, r.job.Overrides)); err != nil {
+			if _, _, err := jobs.EnqueueScopedConsolidate(ctx, tx, r.job.Bank, r.payload.Scopes, r.job.Overrides); err != nil {
 				return fmt.Errorf("enqueue continuation: %w", err)
 			}
 		}
@@ -133,40 +116,33 @@ func modelReaches(m domain.MentalModel, tags []string) bool {
 	return domain.MatchTags(tags, m.Spec.Tags, mode)
 }
 
-// enqueueRefreshes queues one refresh per model in the caller's tx (which already took tx.Seq), due after
-// refresh_debounce_seconds or at the end of the model's interval floor, whichever is later. A model with
-// a queued refresh joins it (refresh_mental_model always dedupes as pending).
+// enqueueRefreshes queues one refresh per model in the caller's tx (which already took tx.Seq), due at
+// domain.RefreshDueAt: after refresh_debounce_seconds or at the end of the model's interval floor, whichever
+// is later. A model with a queued refresh joins it (refresh_mental_model always dedupes as pending).
 func enqueueRefreshes(
 	ctx context.Context, tx store.Tx, b domain.BankRef, mm *domain.MentalModelConfig, models []domain.MentalModel,
 	now time.Time,
 ) error {
-	if mm == nil {
-		mm = &domain.MentalModelConfig{}
-	}
-	debounce := time.Duration(orDefault(mm.RefreshDebounceSeconds, defaultDebounceSeconds)) * time.Second
+	mc := refreshConfig(mm)
 	for _, m := range models {
-		runAt := now.Add(debounce)
-		floor := mm.MinRefreshIntervalSeconds
-		if m.Spec.Trigger.MinRefreshIntervalSeconds != nil {
-			floor = m.Spec.Trigger.MinRefreshIntervalSeconds
-		}
-		if floor != nil && *floor > 0 && m.LastRefreshedAt != nil {
-			if end := m.LastRefreshedAt.Add(time.Duration(*floor) * time.Second); end.After(runAt) {
-				runAt = end
-			}
-		}
-		payload, err := json.Marshal(RefreshPayload{ModelID: m.Spec.ID})
-		if err != nil {
-			return fmt.Errorf("refresh payload: %w", err)
-		}
-		_, _, err = tx.Queue().Enqueue(ctx, store.Job{
-			Bank: b, Kind: domain.OperationKindRefreshMentalModel,
-			SerialKey: refreshSerialPrefix + string(m.Spec.ID), Payload: payload, RunAt: runAt,
-			Dedupe: store.DedupePending,
-		})
-		if err != nil {
+		runAt, _ := domain.RefreshDueAt(m, mc, now)
+		req := jobs.RefreshRequest{Bank: b, ID: m.Spec.ID, RunAt: runAt}
+		if _, _, err := jobs.EnqueueRefresh(ctx, tx, req, now); err != nil {
 			return fmt.Errorf("enqueue refresh of %s: %w", m.Spec.ID, err)
 		}
 	}
 	return nil
+}
+
+// refreshConfig is mm as consolidation applies it to refresh triggers: an unset or non-positive
+// refresh_debounce_seconds is the default debounce (domain.DefaultRefreshDebounceSeconds).
+func refreshConfig(mm *domain.MentalModelConfig) *domain.MentalModelConfig {
+	if mm == nil {
+		return nil
+	}
+	out := *mm
+	if out.RefreshDebounceSeconds != nil && *out.RefreshDebounceSeconds <= 0 {
+		out.RefreshDebounceSeconds = nil
+	}
+	return &out
 }

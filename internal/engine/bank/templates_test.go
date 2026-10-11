@@ -71,7 +71,7 @@ func TestTemplateRoundTrip(t *testing.T) {
 		}
 		return nil
 	})
-	codec := NewTemplateCodec(e.store, refreshStub{})
+	codec := NewTemplateCodec(e.store, e.clock)
 
 	tmpl, err := codec.Export(e.ctx, src)
 	if err != nil {
@@ -123,7 +123,7 @@ func assertTemplateCopied(t *testing.T, e env, src, dst domain.BankRef) {
 func TestTemplateCreateRollsBackOnBadSpec(t *testing.T) {
 	e := newEnv(t)
 	b := domain.BankRef{Tenant: "t", Bank: "b"}
-	codec := NewTemplateCodec(e.store, refreshStub{})
+	codec := NewTemplateCodec(e.store, e.clock)
 	_, _, err := codec.CreateNamed(e.ctx, b, "x", domain.BankTemplate{MentalModels: []domain.MentalModelSpec{{}}})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("spec without id: %v", err)

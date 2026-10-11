@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
+	"memd/internal/store/postgres"
 	"slices"
 	"testing"
 	"time"
@@ -31,10 +33,13 @@ var workKinds = []domain.OperationKind{
 	domain.OperationKindGraphMaintenance, domain.OperationKindDeleteBank,
 }
 
+// The DB is the job runner's Claimer; the assertion lives in a test so the adapter never imports jobs.
+var _ jobs.Claimer = (*postgres.DB)(nil)
+
 // queueEnv is one queue subtest's store and claimer.
 type queueEnv struct {
 	s store.DB
-	c store.Claimer
+	c jobs.Claimer
 }
 
 // queueCase is one named queue subtest.
@@ -43,7 +48,7 @@ type queueCase struct {
 	fn   func(t *testing.T, q queueEnv)
 }
 
-// TestQueue covers store.Queue (through Tx.Queue) and store.Claimer: claim order, run_at, serial keys, dedupe,
+// TestQueue covers store.Queue (through Tx.Queue) and jobs.Claimer: claim order, run_at, serial keys, dedupe,
 // upgrade, reschedule, operation control (get, list, cancel, retry, prune), deleting banks, tenant isolation,
 // heartbeats, reclaim, fencing, retries and concurrent claims and enqueues (SPEC "Jobs" claim SQL and rules).
 // Each case runs in parallel on its own empty database.

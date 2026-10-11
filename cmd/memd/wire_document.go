@@ -13,5 +13,5 @@ func wireDocuments(c core, in infra, d *deps) {
 	d.server.Documents = docs.NewDocumentAdmin(docs.DocumentAdminDeps{
 		Store: c.db, Blob: in.blob, Source: c.read, Reprocessor: retain.NewReprocessor(c.db),
 	})
-	d.handlers.Retagger = retagger
+	d.handlers.retagger = retagger
 }

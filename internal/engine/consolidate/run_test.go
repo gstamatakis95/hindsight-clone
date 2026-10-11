@@ -126,7 +126,7 @@ func TestRunObservationCap(t *testing.T) {
 	// it, so the run fails and nothing is parked.
 	e.fact("f2", "Dana cycles", "x")
 	e.script(ok(reply([]create{{Text: "Dana cycles", SourceFactIDs: []string{"f2"}}}, nil)))
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+	if _, err := e.consolidator().Run(t.Context(), e.jobRun(autoJob())); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("over-cap create: err = %v", err)
 	}
 }
@@ -153,17 +153,17 @@ func TestRunEmptyPayloadDisabledAndBadPayload(t *testing.T) {
 	e.fact("f1", "Frank sings", "x")
 	j := autoJob()
 	j.Payload = nil
-	res, err := e.consolidator().Run(t.Context(), j)
+	res, err := e.consolidator().Run(t.Context(), e.jobRun(j))
 	if err != nil || res.Processed != 0 || len(e.calls(domain.ModelSlotConsolidate)) != 0 {
 		t.Fatalf("disabled: %+v, %v", res, err)
 	}
 	e.script(e.createEach("f1"))
 	j.Overrides = &domain.BankConfig{EnableObservations: ptr(true)}
-	if res, err = e.consolidator().Run(t.Context(), j); err != nil || res.Processed != 1 {
+	if res, err = e.consolidator().Run(t.Context(), e.jobRun(j)); err != nil || res.Processed != 1 {
 		t.Fatalf("enabled by the request: %+v, %v", res, err)
 	}
 	j.Payload = json.RawMessage(`{"scopes": 5}`)
-	if _, err := e.consolidator().Run(t.Context(), j); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := e.consolidator().Run(t.Context(), e.jobRun(j)); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("bad payload: err = %v", err)
 	}
 }
@@ -174,10 +174,7 @@ func TestRunManualScopes(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag}})
 	e.fact("f1", "Gina codes", "a", "b")
 	e.fact("f2", "Hank reads", "c")
-	j := NewJob(bank, []domain.TagSet{{Tags: []string{"A"}}}, nil)
-	if j.Dedupe != store.DedupeNone || string(j.Payload) != `{"scopes":[{"tags":["A"]}]}` {
-		t.Fatalf("manual job = %+v", j)
-	}
+	j := newJob([]domain.TagSet{{Tags: []string{"A"}}}, nil)
 	e.script(e.createEach("f1"))
 	res := e.run(j)
 	if res.Processed != 1 || e.unit("f2").ConsolidatedAt != nil || e.unit("f1").ConsolidatedAt == nil {
@@ -269,7 +266,7 @@ func TestRunTriggersRefreshes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, j := range jobs {
-		// The wire shape is the refresh handler's (mentalmodel.RefreshPayload): exactly the key
+		// The wire shape is the refresh handler's (jobs.RefreshPayload): exactly the key
 		// mental_model_id (decision 1800). Decoded by hand so a drift in this package's type is caught.
 		var keys map[string]string
 		if err := json.Unmarshal(j.Payload, &keys); err != nil {

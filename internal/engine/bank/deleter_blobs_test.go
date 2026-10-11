@@ -6,6 +6,7 @@ import (
 	"memd/internal/blob"
 	"memd/internal/domain"
 	"memd/internal/fake"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"strings"
@@ -47,14 +48,14 @@ func TestDeletePagesBlobsWithFencing(t *testing.T) {
 		e.tx(t, func(tx store.Tx) error { return tx.Banks().Delete(e.ctx, b) })
 		e.ensure(t, b)
 	}}
-	d := NewBankDeleter(e.store, hooked, e.store, e.clock, DeleterConfig{BlobPageSize: 1})
+	d := NewBankDeleter(e.store, hooked, e.clock, DeleterConfig{BlobPageSize: 1})
 	if _, err := d.Tombstone(e.ctx, b); err != nil {
 		t.Fatal(err)
 	}
 	j := claimDelete(t, e)
 	// The bank row went with this job's own operation, so the between-page fence stops the run (Alive is
 	// false: ErrCancelled); a duplicate run whose row survived would stop on the tombstone re-check instead.
-	if done, err := d.Run(e.ctx, j); done || !errors.Is(err, domain.ErrCancelled) {
+	if done, err := d.Run(e.ctx, jobs.NewRun(e.store, j)); done || !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("run: done=%v err=%v, want stopped with ErrCancelled", done, err)
 	}
 	if got := blobKeys(e, blob.BankPrefix(b)); !slices.Equal(got, keys[1:]) {
@@ -78,13 +79,13 @@ func TestRedeleteResumesHalfDeletedBank(t *testing.T) {
 	if err := e.store.Fail(e.ctx, claimed, errors.New("stopped"), nil); err != nil {
 		t.Fatal(err)
 	}
-	d := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{BatchSize: 1, MaxBatches: 1})
+	d := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{BatchSize: 1, MaxBatches: 1})
 	first, err := d.Tombstone(e.ctx, b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	j := claimDelete(t, e)
-	if done, err := d.Run(e.ctx, j); err != nil || done {
+	if done, err := d.Run(e.ctx, jobs.NewRun(e.store, j)); err != nil || done {
 		t.Fatalf("first run: done=%v err=%v, want rows left", done, err)
 	}
 	if err := e.store.Fail(e.ctx, j.ID, errors.New("gave up"), nil); err != nil {

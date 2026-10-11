@@ -19,11 +19,12 @@ import (
 	"memd/internal/engine/reflect"
 	"memd/internal/engine/retain"
 	"memd/internal/engine/timex"
+	"memd/internal/jobs"
+	"memd/internal/maintenance"
 	"memd/internal/observability"
 	"memd/internal/server"
 	"memd/internal/store"
 	"memd/internal/store/postgres"
-	"memd/internal/worker"
 	"net"
 	"net/http"
 	"os"
@@ -51,7 +52,7 @@ type modelGateway interface {
 // appear; tests build infra over pgtest and internal/fake.
 type infra struct {
 	db      store.DB
-	claimer store.Claimer
+	claimer jobs.Claimer
 	maint   store.Maintenance
 	blob    blob.Store
 	gw      modelGateway
@@ -63,10 +64,10 @@ type deps struct {
 	cfg         Config
 	log         *slog.Logger
 	server      server.Deps
-	handlers    worker.Handlers
-	maintenance worker.MaintenanceDeps
-	claimer     store.Claimer
-	pending     worker.PendingChecker
+	handlers    handlers
+	maintenance maintenance.Deps
+	claimer     jobs.Claimer
+	db          store.DB
 	clock       clock.Clock
 	// tel is the optional Datadog instrumentation; nil (the default) installs nothing.
 	tel *observability.Telemetry
@@ -192,7 +193,6 @@ type core struct {
 	retainer  retain.Retainer
 	recaller  recall.Recaller
 	reflector reflect.Reflector
-	queuer    mentalmodel.RefreshQueuer
 	dirs      bank.DirectiveSelector
 }
 
@@ -202,11 +202,8 @@ func wireEngines(
 ) *deps {
 	c := wireCore(in, tok, serverCfg, clk)
 	d := &deps{
-		cfg: cfg, log: log, claimer: in.claimer, clock: clk, pending: worker.NewPendingChecker(in.db, clk),
-		handlers: worker.Handlers{
-			Store: in.db, Clock: clk,
-			Checkpoint: func(j store.Job) worker.Checkpoint { return worker.NewCheckpoint(in.claimer, j.ID) },
-		},
+		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk,
+		handlers: handlers{db: in.db, clock: clk},
 		server: server.Deps{
 			DefaultDeadline: cfg.RPCDeadline,
 			Probes: []server.ReadinessProbe{
@@ -227,7 +224,7 @@ func wireEngines(
 
 // wireCore builds config resolution, routing, time normalization, retain's shared pieces, recall and reflect.
 func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock) core {
-	db, claimer, gw := in.db, in.claimer, in.gw
+	db, gw := in.db, in.gw
 	c := core{db: db, read: db.Read(), clock: clk, tok: tok, router: ai.NewRouter()}
 	c.matcher = consolidate.NewStrategyMatcher(c.read)
 	c.resolver = config.NewResolver(db, c.matcher, serverCfg)
@@ -239,13 +236,11 @@ func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk cloc
 		Store: db, Blob: in.blob, Config: c.resolver, Extractor: retain.NewExtractor(gw, c.router),
 		Dates: c.times, Embedder: gw, Entities: c.entities, Labels: retain.NewLabelResolver(), Linker: c.linker,
 		Scopes: c.scopes, Tokens: tok, Clock: clk,
-		Checkpoint: func(id domain.OperationID) retain.Checkpoint { return worker.NewCheckpoint(claimer, id) },
 	})
 	c.recaller = recall.NewRecaller(recall.RecallerDeps{
 		Reader: c.read, Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router, Times: c.times,
 		Clock: clk, Count: tok,
 	})
-	c.queuer = mentalmodel.NewRefreshQueuer(clk)
 	c.dirs = bank.NewDirectiveSelector(db)
 	pages := &pageReader{search: mentalmodel.NewPageSearcher(c.read, gw), s: db}
 	c.reflector = reflect.NewReflector(reflect.ReflectorDeps{
@@ -296,14 +291,17 @@ func newGRPCServer(d *deps) *grpc.Server {
 // grpc.health.v1 there.
 func runWorker(ctx context.Context, d *deps) error {
 	id := effectiveWorkerID(d.cfg.WorkerID, os.Hostname, uuid.NewString)
-	r := worker.NewRunner(d.claimer, worker.RunnerConfig{
+	r := jobs.New(d.claimer, jobs.Config{
 		WorkerID: id, Clock: d.clock, Slots: d.cfg.WorkerSlots, PollInterval: d.cfg.PollInterval,
-		HeartbeatInterval: d.cfg.HeartbeatInterval, StaleAfter: d.cfg.StaleAfter, Pending: d.pending, Logger: d.log,
+		HeartbeatInterval: d.cfg.HeartbeatInterval, StaleAfter: d.cfg.StaleAfter, DB: d.db, Logger: d.log,
 		TraceJob: d.tel.JobHook(),
 	})
-	worker.Register(r, d.handlers)
-	maint := d.maintenance
-	maint.TraceTick = d.tel.TickHook()
+	md := d.maintenance
+	md.TraceTick = d.tel.TickHook()
+	maint := maintenance.New(md)
+	h := d.handlers
+	h.graph = maint
+	h.register(r)
 	var lis net.Listener
 	if d.cfg.WorkerHealthAddr != "" {
 		var err error
@@ -313,7 +311,7 @@ func runWorker(ctx context.Context, d *deps) error {
 	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return r.Run(gctx) })
-	g.Go(func() error { return worker.RunMaintenance(gctx, maint) })
+	g.Go(func() error { return maint.Run(gctx) })
 	if lis != nil {
 		g.Go(func() error { return serveHealth(gctx, lis, d.server.Probes) })
 		d.log.Info("memd worker health serving", "addr", lis.Addr().String())
