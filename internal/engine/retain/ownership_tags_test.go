@@ -3,6 +3,7 @@ package retain
 import (
 	"errors"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"testing"
 )
@@ -19,7 +20,7 @@ func TestRetainOlderRunCannotOverwriteNewerTags(t *testing.T) {
 	}}})
 	j := e.claimRetain()
 	e.scriptChunks(1, true)
-	if _, err := e.retainer.ProcessDocument(e.ctx, j); !errors.Is(err, errExtract) {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); !errors.Is(err, errExtract) {
 		t.Fatalf("first run: %v", err)
 	}
 	e.scriptChunks(3, false)
@@ -28,7 +29,7 @@ func TestRetainOlderRunCannotOverwriteNewerTags(t *testing.T) {
 	}}})
 
 	e.scriptChunks(3, false)
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || res.Superseded {
 		t.Fatalf("older run = %+v, %v; want it to complete under the adopted tags", res, err)
 	}

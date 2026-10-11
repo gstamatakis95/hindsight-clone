@@ -5,10 +5,10 @@
 //
 // It is the only package that imports github.com/DataDog. depguard keeps Datadog out of internal/engine,
 // internal/domain and the boundary packages (store, ai, blob, clock), and only cmd/memd (main.go and wire.go) imports
-// this package. The worker and the gateway and S3 adapters expose vendor-free hooks, each nil by default
-// (worker.RunnerConfig.TraceJob, worker.MaintenanceDeps.TraceTick, gateway.Config.TraceCall, s3.Config.APIOptions), and
-// cmd/memd/wire.go fills them from a [Telemetry]. The package imports internal/domain and internal/store only for the
-// hook signatures and the error classes.
+// this package. The job runner, the maintenance tick and the gateway and S3 adapters expose vendor-free hooks, each
+// nil by default (jobs.Config.TraceJob, maintenance.Deps.TraceTick, gateway.Config.TraceCall, s3.Config.APIOptions),
+// and cmd/memd/wire.go fills them from a [Telemetry]. The package imports internal/domain and internal/store only
+// for the hook signatures and the error classes.
 //
 //	tel, stop := observability.Start(observability.Config{Enabled: on, Profiler: prof, Logger: base})
 //	defer stop()
@@ -47,11 +47,11 @@
 //     outermost interceptor (it sets grpc.UnaryInterceptor and grpc.StreamInterceptor, so the server only chains its
 //     own) so calls the tenant check rejects are traced too; tagged memd.tenant and memd.bank (the request's bank_id)
 //     by an inner interceptor that runs after the tenant check. Health checks and reflection are not traced.
-//   - Worker jobs ([Telemetry.JobHook] -> worker.RunnerConfig.TraceJob): one [SpanJob] span per run, resource = the job
+//   - Worker jobs ([Telemetry.JobHook] -> jobs.Config.TraceJob): one [SpanJob] span per run, resource = the job
 //     kind, tagged memd.operation_id, memd.tenant, memd.bank, memd.job.attempt and memd.job.outcome (completed, retry,
 //     failed, released, lost), error unless completed. The handler and the terminal Complete/Fail run under it, so
 //     their Postgres and gateway spans nest under the job.
-//   - Maintenance ([Telemetry.TickHook] -> worker.MaintenanceDeps.TraceTick): one [SpanTick] span per tick.
+//   - Maintenance ([Telemetry.TickHook] -> maintenance.Deps.TraceTick): one [SpanTick] span per tick.
 //   - Postgres ([Telemetry.TracePool]): one [SpanPostgresQuery] span per statement (begin and commit included) under an
 //     existing span, resource = the SQL text, tagged db.system and db.row_count. The tracer is memd's own
 //     pgx.QueryTracer, not dd-trace-go's pgx contrib: statements outside any span (claim polls, heartbeats) are not

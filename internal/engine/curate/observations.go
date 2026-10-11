@@ -47,12 +47,6 @@ type ObservationClearer interface {
 	ClearScopes(ctx context.Context, tx store.Tx, b domain.BankRef, scopes []domain.ScopeKey) ([]domain.UnitID, error)
 }
 
-// ConsolidatePayload is the payload of a manual consolidate job (decision 1301); an automatic one is {}.
-type ConsolidatePayload struct {
-	// Scopes limits the run to these scopes; empty (absent) = every scope.
-	Scopes []domain.TagSet `json:"scopes,omitempty"`
-}
-
 // ScopePage is one page of observation scopes; server.ScopePage becomes an alias of it (decision 1302).
 type ScopePage struct {
 	// Items are the page's scopes.

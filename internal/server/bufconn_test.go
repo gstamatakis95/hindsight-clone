@@ -30,8 +30,8 @@ import (
 	mockrecall "memd/internal/mocks/engine/recall"
 	mockreflect "memd/internal/mocks/engine/reflect"
 	mockretain "memd/internal/mocks/engine/retain"
+	mockjobs "memd/internal/mocks/jobs"
 	mockserver "memd/internal/mocks/server"
-	mockworker "memd/internal/mocks/worker"
 
 	pb "memd/gen/memory/v1"
 )
@@ -129,7 +129,7 @@ func newHarness(t *testing.T, opts ...func(*server.Deps)) *harness {
 		Previewer: &mockbank.PromptPreviewer{}, Deleter: &mockbank.BankDeleter{}, Templates: &mockbank.TemplateCodec{},
 		Retagger: &mockdocs.Retagger{}, Strategies: &mockconsolidate.StrategyMatcher{},
 		Refresher: &mockmentalmodel.RefreshRunner{}, Pages: &mockmentalmodel.PageSearcher{},
-		Control: &mockworker.OperationControl{}, Config: &mockconfig.Resolver{},
+		Control: &mockjobs.OperationControl{}, Config: &mockconfig.Resolver{},
 		Tenants: &mockserver.TenantAdmin{}, Banks: &mockserver.BankAdmin{}, Directives: &mockserver.DirectiveAdmin{},
 		Documents: &mockserver.DocumentAdmin{}, Observations: &mockserver.ObservationAdmin{},
 		MentalModels: &mockserver.MentalModelAdmin{}, Operations: &mockserver.OperationReader{},

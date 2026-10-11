@@ -135,7 +135,7 @@ func TestBankAdmin(t *testing.T) {
 	if err != nil || updated.Config.ObservationsMission != "obs" {
 		t.Fatalf("update creates the bank: %+v %v", updated, err)
 	}
-	if _, err := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{}).Tombstone(e.ctx, fresh); err != nil {
+	if _, err := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{}).Tombstone(e.ctx, fresh); err != nil {
 		t.Fatal(err)
 	}
 	got, err := banks.GetBank(e.ctx, fresh)

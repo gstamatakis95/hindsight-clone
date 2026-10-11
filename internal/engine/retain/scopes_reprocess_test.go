@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
+	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"testing"
@@ -48,7 +49,7 @@ func TestRetainAsyncScopesNoop(t *testing.T) {
 		e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
 		item := IngestItem{DocumentID: "d1", Content: "c", Tags: []string{"a"}, ObservationScopes: scopes}
 		e.ingest(IngestRequest{RunAsync: true, Items: []IngestItem{item}})
-		if _, err := e.retainer.ProcessDocument(e.ctx, e.claimRetain()); err != nil {
+		if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(e.claimRetain())); err != nil {
 			t.Fatal(err)
 		}
 		d := e.document("d1")
@@ -68,10 +69,10 @@ func TestRetainAsyncScopesNoop(t *testing.T) {
 }
 
 // reprocessJob claims the reprocess job and decodes its payload.
-func (e *env) reprocessJob() (store.Job, DocumentPayload) {
+func (e *env) reprocessJob() (store.Job, jobs.RetainPayload) {
 	e.t.Helper()
 	j := e.claimRetain()
-	p, err := DecodePayload(j.Payload)
+	p, err := decodePayload(j.Payload)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ var reprocessAt = time.Date(2025, 3, 4, 5, 6, 7, 0, time.UTC)
 
 // checkReprocessPayload fails the test unless the reprocess job carries the item's scopes, context,
 // metadata, mention time and content hash, is forced, and replays the stored overrides.
-func checkReprocessPayload(t *testing.T, j store.Job, p DocumentPayload) {
+func checkReprocessPayload(t *testing.T, j store.Job, p jobs.RetainPayload) {
 	t.Helper()
 	if p.ObservationScopes == nil || p.ObservationScopes.Mode != domain.ScopeModePerTag || !p.ForceReextract {
 		t.Errorf("payload scopes %+v, force %v; want per_tag and forced", p.ObservationScopes, p.ForceReextract)
@@ -125,7 +126,7 @@ func TestReprocessCarriesScopesAndOverrides(t *testing.T) {
 	}
 	checkReprocessPayload(t, j, p)
 	before := e.extractCalls()
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || res.Unchanged || e.extractCalls() != before+1 {
 		t.Fatalf("reprocess run = %+v, %v; %d extract calls, want 1 more", res, err, e.extractCalls()-before)
 	}

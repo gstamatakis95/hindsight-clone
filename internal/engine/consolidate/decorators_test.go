@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-// hookAt is a Checkpointer that runs fn at its n-th report (1-based), outside any transaction: a
+// hookAt is a progress hook that runs fn at its n-th report (1-based), outside any transaction: a
 // concurrent writer landing between two batches.
 type hookAt struct {
 	n, seen int

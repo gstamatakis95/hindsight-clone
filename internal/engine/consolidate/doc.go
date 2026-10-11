@@ -4,12 +4,13 @@
 //
 // # Where it sits
 //
-// consolidate is an engine package: it imports domain, the boundary packages, prompts and recall (for
-// recall.TokenCounter only) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
-// (depguard). It declares what it consumes: [Checkpointer] (worker.Checkpoint) and [ScopeLister] (store.Reader). It
-// does not import mentalmodel: [RefreshPayload] mirrors the refresh job's payload shape. cmd/memd/wire.go builds the
-// [Consolidator] for the worker's consolidate handler, the [ScopeExpander] for retain, the [StrategyMatcher] for
-// config.NewResolver and the server's strategy preview, and the [Invalidator] for curate's ClearObservations.
+// consolidate is an engine package: it imports domain, the boundary packages, jobs, prompts and recall (for
+// recall.TokenCounter only) and must never import adapters, server, gen, pgx, net/http, the S3 SDK or Datadog
+// (depguard). It declares what it consumes, such as [ScopeLister] (store.Reader), reports progress through the
+// jobs.Run it runs under, and enqueues its continuation and the refreshes it triggers through the jobs catalogue,
+// so it does not import mentalmodel. cmd/memd/wire.go builds the [Consolidator] for the consolidate job handler,
+// the [ScopeExpander] for retain, the [StrategyMatcher] for config.NewResolver and the server's strategy preview,
+// and the [Invalidator] for curate's ClearObservations.
 //
 // # Scopes
 //
@@ -25,7 +26,7 @@
 //
 // # Flow of Run
 //
-// [Consolidator.Run](ctx, job) takes a [Payload] ({} = automatic: every scope, bank config; with scopes =
+// [Consolidator.Run](ctx, run) takes a jobs.ConsolidatePayload ({} = automatic: every scope, bank config; with scopes =
 // a manual run over units tagged with one of those tag sets) and the job's overrides:
 //
 //  1. Resolve the effective config; with enable_observations false the run does nothing. List the bank's
@@ -69,15 +70,16 @@
 // again are parked: consolidation_failed_at is stamped in a tx.Seq transaction on facts still unchanged
 // since the plan, so a poison fact cannot block the bank. Two top-level batches in a row in which every call
 // failed fail the run with domain.ErrUnavailable. Any other error (reads, writes, embeddings, routing) stops
-// the run and the job retries; the worker retries consolidate without an attempt cap.
+// the run and the job retries; the job runner retries consolidate without an attempt cap.
 //
 // # Mental-model refreshes
 //
-// When a batch writes an observation, the same transaction enqueues refresh_mental_model ([RefreshPayload],
-// serial key "mm:{id}", DedupePending) for every listed model the scope reaches: its tag groups when set,
-// else its tags under its tags_match (unset = all_strict for a tagged model, any for an untagged one); the
-// shared scope never reaches a tagged model. The job is due after mental_models.refresh_debounce_seconds
-// (default 30) or at the end of the model's minimum refresh interval, whichever is later.
+// When a batch writes an observation, the same transaction enqueues refresh_mental_model (jobs.EnqueueRefresh:
+// payload jobs.RefreshPayload with the model id only, serial key "mm:{id}", DedupePending) for every listed
+// model the scope reaches: its tag groups when set, else its tags under its tags_match (unset = all_strict for a
+// tagged model, any for an untagged one); the shared scope never reaches a tagged model. The job is due at
+// domain.RefreshDueAt: after mental_models.refresh_debounce_seconds (default 30; an unset or non-positive value
+// counts as the default here) or at the end of the model's minimum refresh interval, whichever is later.
 //
 // # Other types
 //
@@ -88,9 +90,9 @@
 //   - [Invalidator] clears derived observations in the caller's transaction, taking tx.Seq first.
 //     ClearScopes (every scope when the list is empty) is what ObservationService.ClearObservations uses.
 //     Curation and docs clear citing observations with EvidenceRepo.DeleteCiting themselves.
-//   - [NewJob] builds a consolidate job: the automatic one ({}, no overrides) uses DedupePending and joins a
-//     pending consolidate of the bank; one with scopes or overrides is never deduplicated. The serial key is
-//     [SerialKey] ("consolidate"): one consolidation at a time per bank.
+//   - A run's continuation is jobs.EnqueueScopedConsolidate: the automatic one ({}, no overrides) uses
+//     DedupePending and joins a pending consolidate of the bank; one with scopes or overrides is never
+//     deduplicated. The serial key is "consolidate": one consolidation at a time per bank.
 //
 // # Config knobs and defaults
 //

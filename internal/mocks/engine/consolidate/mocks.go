@@ -8,7 +8,7 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/store"
+	"memd/internal/jobs"
 	"sync"
 )
 
@@ -22,7 +22,7 @@ var _ consolidate.Consolidator = &Consolidator{}
 //
 //		// make and configure a mocked consolidate.Consolidator
 //		mockedConsolidator := &Consolidator{
-//			RunFunc: func(ctx context.Context, j store.Job) (consolidate.ConsolidationResult, error) {
+//			RunFunc: func(ctx context.Context, job *jobs.Run) (consolidate.ConsolidationResult, error) {
 //				panic("mock out the Run method")
 //			},
 //		}
@@ -33,7 +33,7 @@ var _ consolidate.Consolidator = &Consolidator{}
 //	}
 type Consolidator struct {
 	// RunFunc mocks the Run method.
-	RunFunc func(ctx context.Context, j store.Job) (consolidate.ConsolidationResult, error)
+	RunFunc func(ctx context.Context, job *jobs.Run) (consolidate.ConsolidationResult, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -41,29 +41,29 @@ type Consolidator struct {
 		Run []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// J is the j argument value.
-			J store.Job
+			// Job is the job argument value.
+			Job *jobs.Run
 		}
 	}
 	lockRun sync.RWMutex
 }
 
 // Run calls RunFunc.
-func (mock *Consolidator) Run(ctx context.Context, j store.Job) (consolidate.ConsolidationResult, error) {
+func (mock *Consolidator) Run(ctx context.Context, job *jobs.Run) (consolidate.ConsolidationResult, error) {
 	if mock.RunFunc == nil {
 		panic("Consolidator.RunFunc: method is nil but Consolidator.Run was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   store.Job
+		Job *jobs.Run
 	}{
 		Ctx: ctx,
-		J:   j,
+		Job: job,
 	}
 	mock.lockRun.Lock()
 	mock.calls.Run = append(mock.calls.Run, callInfo)
 	mock.lockRun.Unlock()
-	return mock.RunFunc(ctx, j)
+	return mock.RunFunc(ctx, job)
 }
 
 // RunCalls gets all the calls that were made to Run.
@@ -72,11 +72,11 @@ func (mock *Consolidator) Run(ctx context.Context, j store.Job) (consolidate.Con
 //	len(mockedConsolidator.RunCalls())
 func (mock *Consolidator) RunCalls() []struct {
 	Ctx context.Context
-	J   store.Job
+	Job *jobs.Run
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   store.Job
+		Job *jobs.Run
 	}
 	mock.lockRun.RLock()
 	calls = mock.calls.Run

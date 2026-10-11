@@ -3,14 +3,14 @@
 //
 // # Where it sits
 //
-// curate is an engine package: it imports domain, the boundary packages and retain (for retain.ResolveInput and
-// retain.CauseMap) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
+// curate is an engine package: it imports domain, the boundary packages, jobs and retain (for retain.ResolveInput
+// and retain.CauseMap) and must never import adapters, server, gen, pgx, net/http, the S3 SDK or Datadog
 // (depguard). It declares what it consumes: [UnitSource], [UnitGetter], [CitingModels] and [ScopeSource]
-// (store.Reader methods), [EntityResolver] and [Linker] (retain.EntityResolver and retain.Linker),
-// [RefreshQueuer] (mentalmodel.RefreshQueuer, which owns the refresh payload) and [ObservationClearer]
-// (consolidate.Invalidator). cmd/memd/wire.go builds [NewMemoryLister], [NewCurator], [NewObservationAdmin]
-// and [NewRederiver]; the server's MemoryUnitService and ObservationService call the first three, and the
-// worker's rederive_memory handler calls [Rederiver.Rederive].
+// (store.Reader methods), [EntityResolver] and [Linker] (retain.EntityResolver and retain.Linker) and
+// [ObservationClearer] (consolidate.Invalidator); its jobs, including the refreshes of the models an invalidate
+// affects (jobs.QueueModelRefresh), go through the jobs catalogue. cmd/memd/wire.go builds [NewMemoryLister],
+// [NewCurator], [NewObservationAdmin] and [NewRederiver]; the server's MemoryUnitService and ObservationService
+// call the first three, and the rederive_memory job handler calls [Rederiver.Rederive].
 //
 // Observations are never curated directly; they re-derive from their sources. Curation never hard-deletes a
 // fact: invalidating moves it to memory_units_archive, and restoring moves it back (SPEC "Curation").
@@ -60,9 +60,9 @@
 //  3. entity changes are committed here, not in the job: the unit's attachments are detached and the new
 //     names (or a restore's snapshot names) are resolved with the [EntityResolver] (no model call) and
 //     attached; resolve_entities=false takes edited names literally;
-//  4. enqueue rederive_memory ([RederivePayload]: the unit id only; serial key "doc:{document}" so it never
-//     overlaps a retain of that document, or "unit:{id}" for a unit without one; DedupeNone; the request
-//     overrides ride on the job);
+//  4. enqueue rederive_memory (jobs.EnqueueRederive; jobs.RederivePayload: the unit id only; serial key
+//     "doc:{document}" so it never overlaps a retain of that document, or "unit:{id}" for a unit without one;
+//     DedupeNone; the request overrides ride on the job);
 //  5. restore and edit audit rows (before and after snapshots) and the memory_curated event.
 //
 // Stamping an edited or restored unit consolidated keeps consolidation from deciding on it while its
@@ -85,7 +85,8 @@
 //
 //   - [ObservationAdmin.Consolidate] queues a manual consolidation. It is a write: Banks().Ensure, then
 //     tx.Seq, then enqueue. Without scopes or overrides it is the automatic job ({}, DedupePending); with
-//     either it carries a [ConsolidatePayload] and/or the overrides and uses DedupeNone.
+//     either it carries a jobs.ConsolidatePayload and/or the overrides and uses DedupeNone
+//     (jobs.EnqueueScopedConsolidate).
 //   - [ObservationAdmin.ListScopes] pages the bank's observation scopes with counts, keyed by the scope's
 //     canonical string; the shared (untagged) scope's empty key maps to the cursor "0", which sorts before
 //     every tagged key, so paging past it never restarts the listing.

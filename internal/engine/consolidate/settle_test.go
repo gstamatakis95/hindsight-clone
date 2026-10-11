@@ -66,7 +66,7 @@ func TestSettleProbesTheScopeBinding(t *testing.T) {
 		}
 		return nil
 	}}
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+	if _, err := e.consolidator().Run(t.Context(), e.jobRun(autoJob())); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 	if want := []string{"broken", "broken"}; fmt.Sprint(models) != fmt.Sprint(want) {
@@ -131,7 +131,7 @@ func TestCircuitBreakerAfterTwoDeadBatches(t *testing.T) {
 	e.fact("f1", "One", "x")
 	e.fact("f2", "Two", "x")
 	e.script(fail(), ok(reply(nil, nil)), fail(), fail())
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+	if _, err := e.consolidator().Run(t.Context(), e.jobRun(autoJob())); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 	e.wantBatches([]string{"f1"}, []string{}, []string{"f1"}, []string{"f2"})

@@ -6,6 +6,7 @@ import (
 	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
+	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"memd/internal/store/postgres/pgtest"
@@ -42,24 +43,26 @@ func TestConsolidationTriggeredRefreshRunsAndStaysUnpaused(t *testing.T) {
 		"updates": []any{},
 	})
 	e.llm.Script(domain.ModelSlotConsolidate, prompts.ConsolidateSystem, fakeJSON(string(body)))
-	job := consolidate.NewJob(e.bank, nil, nil)
-	job.ID = opID("op-consolidate")
-	if _, err := cons.Run(e.ctx, job); err != nil {
+	job := store.Job{
+		ID: opID("op-consolidate"), Bank: e.bank, Kind: domain.OperationKindConsolidate,
+		SerialKey: jobs.SerialKeyConsolidate, Payload: []byte(`{}`),
+	}
+	if _, err := cons.Run(e.ctx, jobs.Inline(job)); err != nil {
 		t.Fatal(err)
 	}
 
 	e.clock.Advance(time.Minute) // past the refresh debounce
-	jobs := e.claimDue(domain.OperationKindRefreshMentalModel)
-	if len(jobs) != 1 {
-		t.Fatalf("claimed %d refresh jobs, want the one consolidation enqueued", len(jobs))
+	claimed := e.claimDue(domain.OperationKindRefreshMentalModel)
+	if len(claimed) != 1 {
+		t.Fatalf("claimed %d refresh jobs, want the one consolidation enqueued", len(claimed))
 	}
 	e.scriptSynthesize("## Status\n\nAlice leads the project.")
-	out, runErr := RunJob(e.ctx, e.runner, jobs[0])
+	out, runErr := RunJob(e.ctx, e.runner, claimed[0])
 	if runErr != nil {
-		if err := e.store.Fail(e.ctx, jobs[0].ID, runErr, nil); err != nil {
+		if err := e.store.Fail(e.ctx, claimed[0].ID, runErr, nil); err != nil {
 			t.Fatal(err)
 		}
-	} else if err := e.store.Complete(e.ctx, jobs[0].ID, nil, nil); err != nil {
+	} else if err := e.store.Complete(e.ctx, claimed[0].ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 

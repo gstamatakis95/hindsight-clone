@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/fake"
+	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"memd/internal/store/postgres/pgtest"
@@ -43,7 +44,7 @@ func TestRetainResumeAfterCrashReextractsOnlyRemainingChunks(t *testing.T) {
 	j := e.asyncRetain("d1", paragraphs(6, "one"), false)
 
 	e.scriptChunks(3, true)
-	if _, err := e.retainer.ProcessDocument(e.ctx, j); !errors.Is(err, errExtract) {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); !errors.Is(err, errExtract) {
 		t.Fatalf("first run: err = %v, want the scripted crash", err)
 	}
 	if got := e.extractCalls(); got != 4 {
@@ -54,7 +55,7 @@ func TestRetainResumeAfterCrashReextractsOnlyRemainingChunks(t *testing.T) {
 	}
 
 	e.scriptChunks(3, false)
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestRetainChangedDocumentCrashResumeKeepsAllFacts(t *testing.T) {
 	v2 := strings.Replace(v1, "Paragraph A talks about topic one", "Paragraph A talks about topic two", 1)
 	j := e.asyncRetain("d1", v2, false)
 	e.scriptChunks(3, true) // batch 1 (chunks 0-2) commits, batch 2 crashes on chunk 3
-	if _, err := e.retainer.ProcessDocument(e.ctx, j); !errors.Is(err, errExtract) {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); !errors.Is(err, errExtract) {
 		t.Fatalf("first run: err = %v, want the scripted crash", err)
 	}
 	if n := e.document("d1").UnitCount; n != 3 {
@@ -95,7 +96,7 @@ func TestRetainChangedDocumentCrashResumeKeepsAllFacts(t *testing.T) {
 	}
 
 	e.scriptChunks(3, false)
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -120,11 +121,11 @@ func TestRetainForceReextractCrashResume(t *testing.T) {
 
 	j := e.asyncRetain("d1", content, true)
 	e.scriptChunks(3, true)
-	if _, err := e.retainer.ProcessDocument(e.ctx, j); !errors.Is(err, errExtract) {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); !errors.Is(err, errExtract) {
 		t.Fatalf("first run: err = %v, want the scripted crash", err)
 	}
 	e.scriptChunks(3, false)
-	if _, err := e.retainer.ProcessDocument(e.ctx, j); err != nil {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
 	if got := e.extractCalls(); got != 3 {
@@ -140,10 +141,10 @@ func TestRetainCompletedJobReplayIsNoop(t *testing.T) {
 	e := newEnv(t, 0)
 	j := e.asyncRetain("d1", "Alice likes tea.", false)
 	e.scriptChunks(1, false)
-	if _, err := e.retainer.ProcessDocument(e.ctx, j); err != nil {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); err != nil {
 		t.Fatal(err)
 	}
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || !res.Unchanged {
 		t.Fatalf("replay = %+v, %v; want unchanged", res, err)
 	}

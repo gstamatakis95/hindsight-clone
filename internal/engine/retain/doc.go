@@ -4,12 +4,12 @@
 //
 // # Where it sits
 //
-// retain is an engine package: it imports domain, the boundary packages and prompts and must never import adapters,
-// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares what it consumes from other
-// engines: [DateNormalizer] (timex.TimeNormalizer), [ScopeExpander] (consolidate.ScopeExpander), [Checkpoint]
-// (worker.Checkpoint), [ConfigMerger] (config.Merge) and [TokenCounter]. Other engines reuse its pieces: curate
+// retain is an engine package: it imports domain, the boundary packages, jobs and prompts and must never import
+// adapters, server, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares what it consumes from other
+// engines: [DateNormalizer] (timex.TimeNormalizer), [ScopeExpander] (consolidate.ScopeExpander), [ConfigMerger]
+// (config.Merge) and [TokenCounter]; its jobs go through the jobs catalogue. Other engines reuse its pieces: curate
 // (EntityResolver, Linker), maintenance (Linker) and docs (Reprocessor). cmd/memd/wire.go builds everything; the
-// server's Retain RPC calls [Ingestor.Ingest], the worker's retain_document handler calls [Retainer.ProcessDocument],
+// server's Retain RPC calls [Ingestor.Ingest], the retain_document job handler calls [Retainer.ProcessDocument],
 // and DocumentService.ReprocessDocument reaches [Reprocessor.Reprocess] through docs.
 //
 // # Ingest: the Retain RPC
@@ -23,7 +23,7 @@
 //     has a custom_extraction_prompt, normalizes document + item tags, checks the observation-scope fan-out
 //     (ALL_COMBINATIONS over max_combinations is domain.ErrTooManyScopes, before anything is stored),
 //     generates a document id when the item has none, and pins the content hash, blob key, timestamp (now
-//     from clock.Clock when unset; none when timeless) and the resolved chunk sizes in a [DocumentPayload].
+//     from clock.Clock when unset; none when timeless) and the resolved chunk sizes in a jobs.RetainPayload.
 //     A document id that appears twice in one request is domain.ErrInvalidArgument.
 //  3. In one read transaction, rejects a tombstoned bank (domain.ErrBankDeleting, so no blob is written for
 //     a deleting bank) and marks an item Unchanged when its document's last completed retain had the same
@@ -34,7 +34,7 @@
 //  5. In one write transaction: Banks().Ensure, tx.Seq(bank) (taken before Enqueue for lock order), upsert
 //     each changed document (which clears extracted_at), and for run_async enqueue one retain_document job
 //     per changed document (serial key "doc:{id}", DedupeNone, the merged overrides on the job), under a
-//     retain_batch parent when more than one document changed. The worker's maintenance tick settles the
+//     retain_batch parent when more than one document changed. The maintenance tick settles the
 //     parent once its children are terminal.
 //  6. A sync retain then runs [Retainer.ProcessDocument] inline for each changed document, in item order,
 //     and returns units created and per-slot usage. If a newer retain took the document over meanwhile,
@@ -67,8 +67,8 @@
 //     RETAIN_COMPLETED event, and the bank's consolidate job ({}, serial key "consolidate", DedupePending)
 //     unless skip_consolidation is set or enable_observations / auto_consolidation is false.
 //
-// Before each batch the run reports progress through the job's [Checkpoint] (stage "retain_chunks"); a
-// cancelled job or context stops it with domain.ErrCancelled.
+// Before each batch the run reports progress through its jobs.Run (stage "retain_chunks"); a cancelled job or
+// context stops it with domain.ErrCancelled. A sync retain runs under jobs.Inline, which reports nothing.
 //
 // Replacement (the first batch's transaction): reopen the document if another retain of the same content
 // completed it meanwhile (clear extracted_at by re-upserting it as read under the lock, so a run that fails

@@ -4,7 +4,7 @@
 // # Where it sits
 //
 // recall is an engine package: it imports domain, the boundary packages and timex and must never import adapters,
-// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Everything it reads goes through store.Reader
+// server, gen, pgx, net/http, the S3 SDK or Datadog (depguard). Everything it reads goes through store.Reader
 // (the four searches, unit hydration, chunks, entity state, tag counts, stale scopes), ai.Embedder, ai.Reranker and
 // config.Resolver. cmd/memd/wire.go builds one [Recaller] with [NewRecaller]; the server's Recall RPC, reflect (its
 // recall and search_observations tools) and the single-shot mental-model synthesizer call [Recaller.Recall];

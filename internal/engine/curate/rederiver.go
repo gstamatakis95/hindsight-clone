@@ -19,12 +19,6 @@ type Rederiver interface {
 	Rederive(ctx context.Context, j store.Job) error
 }
 
-// RederivePayload is the rederive_memory job payload (decision 1301).
-type RederivePayload struct {
-	// UnitID is the edited or restored unit. The payload carries no entity names: the RPC committed them.
-	UnitID domain.UnitID `json:"unit_id"`
-}
-
 // EntityResolver is the part of retain.EntityResolver the curator consumes (no model call, so it runs
 // inside the RPC's transaction); retain.EntityResolver
 // satisfies it.

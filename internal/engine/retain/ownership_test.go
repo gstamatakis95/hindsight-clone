@@ -6,6 +6,7 @@ import (
 	"memd/internal/ai"
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"slices"
@@ -18,14 +19,14 @@ func TestRetainSupersededAfterInterveningRetain(t *testing.T) {
 	e := newEnv(t, 1)
 	j := e.asyncRetain("d1", paragraphs(6, "one"), false)
 	e.scriptChunks(3, true)
-	if _, err := e.retainer.ProcessDocument(e.ctx, j); !errors.Is(err, errExtract) {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); !errors.Is(err, errExtract) {
 		t.Fatalf("first run: %v", err)
 	}
 	e.scriptChunks(1, false)
 	e.ingest(IngestRequest{Items: []IngestItem{{DocumentID: "d1", Content: "Short B.", Overrides: chunkTokens(12)}}})
 
 	e.scriptChunks(6, false)
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || !res.Superseded {
 		t.Fatalf("resume = %+v, %v; want superseded", res, err)
 	}
@@ -42,13 +43,13 @@ func TestRetainRetryOperationAfterNewerRetain(t *testing.T) {
 	e := newEnv(t, 1)
 	j1 := e.asyncRetain("d1", paragraphs(6, "one"), false)
 	e.scriptChunks(3, true)
-	_, err := e.retainer.ProcessDocument(e.ctx, j1)
+	_, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j1))
 	if err := e.store.Fail(e.ctx, j1.ID, err, nil); err != nil {
 		t.Fatal(err)
 	}
 	j2 := e.asyncRetain("d1", "Short B.", false)
 	e.scriptChunks(1, false)
-	if _, err := e.retainer.ProcessDocument(e.ctx, j2); err != nil {
+	if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j2)); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.store.Complete(e.ctx, j2.ID, nil, nil); err != nil {
@@ -60,7 +61,7 @@ func TestRetainRetryOperationAfterNewerRetain(t *testing.T) {
 	})
 	j1b := e.claimRetain()
 	e.scriptChunks(6, false)
-	res, err := e.retainer.ProcessDocument(e.ctx, j1b)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j1b))
 	if err != nil || !res.Superseded {
 		t.Fatalf("retried J1 = %+v, %v; want superseded", res, err)
 	}
@@ -128,7 +129,7 @@ func TestRetainOverlappingRetainsOfOneDocument(t *testing.T) {
 					Overrides: chunkTokens(12),
 				}}})
 			}
-			res, err := e.hookedRetainer(4, overtake).ProcessDocument(e.ctx, j)
+			res, err := e.hookedRetainer(4, overtake).ProcessDocument(e.ctx, jobs.Inline(j))
 			if err != nil || !res.Superseded {
 				t.Fatalf("overtaken run = %+v, %v; want superseded", res, err)
 			}
@@ -193,14 +194,14 @@ func TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged(t *testing.T) 
 		}
 	}
 	e.scriptChunks(7, true) // 6 for the sync run, 1 for the job's first chunk, then the job's crash
-	if _, err := e.hookedRetainerBatch(1, 1, sync).ProcessDocument(e.ctx, j); !errors.Is(err, errExtract) {
+	if _, err := e.hookedRetainerBatch(1, 1, sync).ProcessDocument(e.ctx, jobs.Inline(j)); !errors.Is(err, errExtract) {
 		t.Fatalf("job first attempt: %v", err)
 	}
 	if d := e.document("d1"); d.ExtractedAt != nil {
 		t.Fatalf("after the failed attempt: document %+v is stamped complete with %d units", d, d.UnitCount)
 	}
 	e.scriptChunks(6, false)
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || res.Unchanged || res.ChunksSkipped != 1 || res.UnitsCreated != 5 {
 		t.Fatalf("job retry = %+v, %v; want a resume committing chunks 2-6", res, err)
 	}
@@ -224,7 +225,7 @@ func TestRetainSyncVictimPartialReplaceIsNotUnchanged(t *testing.T) {
 	e.ingest(IngestRequest{RunAsync: true, Items: []IngestItem{item}})
 	j := e.claimRetain()
 	runJob := func() {
-		if _, err := e.retainer.ProcessDocument(e.ctx, j); err != nil {
+		if _, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j)); err != nil {
 			t.Fatalf("job: %v", err)
 		}
 	}

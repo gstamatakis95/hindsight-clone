@@ -56,7 +56,7 @@ func TestCreateBankDeletingAndExisting(t *testing.T) {
 	_, err = NewBankAdmin(racingStore{e.store}).CreateBank(e.ctx, domain.Bank{Ref: b})
 	noSQL("lost race", err)
 
-	if _, err := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{}).Tombstone(e.ctx, b); err != nil {
+	if _, err := NewBankDeleter(e.store, e.blob, e.clock, DeleterConfig{}).Tombstone(e.ctx, b); err != nil {
 		t.Fatal(err)
 	}
 	_, err = banks.CreateBank(e.ctx, domain.Bank{Ref: b})

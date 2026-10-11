@@ -4,6 +4,7 @@ import (
 	"context"
 	"memd/internal/blob"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"sync/atomic"
 	"testing"
@@ -69,12 +70,12 @@ func TestDeleteFinalTxRechecksProcessingJobs(t *testing.T) {
 	hide := &atomic.Bool{}
 	hide.Store(true)
 	hiding := hidingStore{DB: e.store, hide: hide}
-	d := NewBankDeleter(hiding, unhideBlob{Store: e.blob, hide: hide}, e.store, e.clock, DeleterConfig{})
+	d := NewBankDeleter(hiding, unhideBlob{Store: e.blob, hide: hide}, e.clock, DeleterConfig{})
 	if _, err := d.Tombstone(e.ctx, b); err != nil {
 		t.Fatal(err)
 	}
 	j := claimDelete(t, e)
-	done, err := d.Run(e.ctx, j)
+	done, err := d.Run(e.ctx, jobs.NewRun(e.store, j))
 	if err != nil || done {
 		t.Fatalf("run: done=%v err=%v, want blocked by the in-tx re-check", done, err)
 	}

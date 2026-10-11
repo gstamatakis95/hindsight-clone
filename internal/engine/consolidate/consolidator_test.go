@@ -5,7 +5,6 @@ import (
 	"errors"
 	"maps"
 	"memd/internal/domain"
-	"memd/internal/store"
 	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
@@ -13,7 +12,7 @@ import (
 	"time"
 )
 
-// killAt is a Checkpointer that cancels the run at its n-th report (1-based).
+// killAt is a progress hook that cancels the run at its n-th report (1-based).
 type killAt struct {
 	n, seen int
 }
@@ -34,9 +33,9 @@ func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 	e.fact("f1", "Alice moved to Paris in May", "a", "b", "c")
 	e.script(e.createEach("f1"))
 	kill := &killAt{n: 3}
-	e.deps.Checkpoint = func(store.Job) Checkpointer { return kill }
+	e.hook = kill
 
-	res, err := e.consolidator().Run(t.Context(), autoJob())
+	res, err := e.consolidator().Run(t.Context(), e.jobRun(autoJob()))
 	if !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("killed run: err = %v, want ErrCancelled", err)
 	}
@@ -48,7 +47,7 @@ func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 			res.Processed)
 	}
 
-	e.deps.Checkpoint = nil
+	e.hook = nil
 	e.clock.Advance(time.Minute)
 	replayAt := e.clock.Now()
 	res = e.run(autoJob())
@@ -165,7 +164,7 @@ func TestRunOutageDoesNotPark(t *testing.T) {
 	e.fact("f1", "One", "x")
 	e.fact("f2", "Two", "x")
 	e.script(fail())
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+	if _, err := e.consolidator().Run(t.Context(), e.jobRun(autoJob())); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 	for _, id := range []string{"f1", "f2"} {
@@ -184,7 +183,7 @@ func TestRunOutageMidRunDoesNotPark(t *testing.T) {
 	e.fact("f2", "Lee rows", "b")
 	e.fact("f3", "Max surfs", "b")
 	e.script(e.createEach("f1"), fail())
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+	if _, err := e.consolidator().Run(t.Context(), e.jobRun(autoJob())); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 	if e.unit("f1").ConsolidatedAt == nil || len(e.observations()) != 1 {
@@ -221,8 +220,8 @@ func TestRunContinuationAtCap(t *testing.T) {
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("claim continuation: %d jobs, %v", len(jobs), err)
 	}
-	if jobs[0].SerialKey != SerialKey || string(jobs[0].Payload) != "{}" {
-		t.Fatalf("continuation = %+v, want serial key %q and payload {}", jobs[0], SerialKey)
+	if jobs[0].SerialKey != "consolidate" || string(jobs[0].Payload) != "{}" {
+		t.Fatalf("continuation = %+v, want serial key consolidate and payload {}", jobs[0])
 	}
 	if res := e.run(jobs[0]); res.More || res.Processed != 1 || e.unit("f5").ConsolidatedAt == nil {
 		t.Fatalf("continuation = %+v; want f5 done and nothing more", res)
@@ -257,7 +256,7 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 	}
 
 	e.fact("f3", "The team ships on Friday", "team")
-	j := NewJob(bank, nil, &domain.BankConfig{
+	j := newJob(nil, &domain.BankConfig{
 		ObservationsMission: "REQUEST-MISSION",
 		Models:              consolidateModel("request-model"),
 	})

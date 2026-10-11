@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"memd/internal/clock"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"strings"
 	"time"
@@ -22,8 +23,7 @@ type Triggers interface {
 	// F is not before the model's creation. Paused and fresh models and tombstoned banks are skipped; it
 	// returns how many it inserted. A fire time missed by more than cronGrace (the service was down) is
 	// skipped, so a refresh never runs off-schedule. It is idempotent under concurrent callers: due-ness
-	// is keyed on the fire time, and a second enqueue joins the queued one. It implements
-	// worker.CronRefresher.
+	// is keyed on the fire time, and a second enqueue joins the queued one. The maintenance tick runs it.
 	EnqueueDueCronRefreshes(ctx context.Context, now time.Time) (int, error)
 }
 
@@ -160,7 +160,7 @@ func (t *triggers) trigger(ctx context.Context, m domain.MentalModel) (bool, err
 			return err
 		}
 		var err error
-		_, joined, err = EnqueueRefresh(ctx, tx, RefreshRequest{Bank: m.Bank, ID: m.Spec.ID, RunAt: dec.Until}, now)
+		_, joined, err = jobs.EnqueueRefresh(ctx, tx, jobs.RefreshRequest{Bank: m.Bank, ID: m.Spec.ID, RunAt: dec.Until}, now)
 		return err
 	})
 	return err == nil && !joined, err

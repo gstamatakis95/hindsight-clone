@@ -36,7 +36,7 @@ func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
 		return err
 	})
 	c := NewCurator(CuratorDeps{
-		Store: e.store, Clock: e.clock, Citing: e.citing, Refresh: refreshStub{}, Resolver: resolverStub{},
+		Store: e.store, Clock: e.clock, Citing: e.citing, Resolver: resolverStub{},
 		Config: configStub{},
 		Archived: archivedStub{u: domain.Unit{
 			ID: idF1, Bank: testBank, State: domain.MemoryStateInvalidated, Entities: []string{"Alice"},

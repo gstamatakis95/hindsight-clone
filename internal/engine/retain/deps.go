@@ -22,13 +22,6 @@ type ScopeExpander interface {
 	Expand(b domain.BankRef, tags []string, s domain.ObservationScopes) ([]domain.ScopeKey, error)
 }
 
-// Checkpoint reports a job's progress and tells the handler to stop once the job is cancelled. It is
-// declared here by its consumer; worker.Checkpoint satisfies it.
-type Checkpoint interface {
-	// Report records p; it returns domain.ErrCancelled once the job is cancelled or its bank is gone.
-	Report(ctx context.Context, p domain.Progress) error
-}
-
 // ConfigMerger merges config levels, later levels winning field by field; config.Merge satisfies it.
 type ConfigMerger func(levels ...domain.BankConfig) domain.BankConfig
 

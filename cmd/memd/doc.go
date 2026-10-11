@@ -12,10 +12,11 @@
 // its boundary (store, blob, ai), builds the shared libraries once (config resolver, ai.Router, ai.Tokenizer,
 // timex, retain's shared pieces, recall, reflect) and runs the two modes. Each wire_<area>.go (memory, document,
 // observation, mentalmodel, bank, config, operation, maintenance) builds one area's engines and fills its part of
-// the gRPC server's dependencies (internal/server), the job handlers and the maintenance tick (internal/worker).
-// probes.go holds the readiness probes and the worker's health server, workerid.go the worker id, and glue.go the
-// small adapters no engine provides yet: the operation reader and the reflect page reader. Engines never import
-// this package; nothing here holds business logic.
+// the gRPC server's dependencies (internal/server), the job handlers (handlers.go adapts the engines to
+// jobs.Handler for the internal/jobs runner) and the maintenance service (internal/maintenance). probes.go holds
+// the readiness probes and the worker's health server, workerid.go the worker id, and glue.go the small adapters
+// no engine provides yet: the operation reader and the reflect page reader. Engines never import this package;
+// nothing here holds business logic.
 //
 // # Startup
 //
@@ -96,15 +97,16 @@
 //   - The maintenance tick's cross-bank scans (unconsolidated banks, stalled deletes, banks with graph work,
 //     stranded facts, retain_batch settlement, cron models, failed refreshes) are store.Maintenance, which
 //     postgres.DB implements.
-//   - With Datadog on, the pgx pool, S3 client, gateway client, gRPC server, job runs (worker TraceJob) and
-//     maintenance ticks (TraceTick) are traced; gRPC and job spans carry the tenant as a tag.
+//   - With Datadog on, the pgx pool, S3 client, gateway client, gRPC server, job runs (jobs.Config.TraceJob)
+//     and maintenance ticks (maintenance.Deps.TraceTick) are traced; gRPC and job spans carry the tenant as a tag.
 //
 // # Tests
 //
 // config_test.go covers settings from the environment and flags, validation (the blob provider and S3 keys
 // included), required slots, per-slot concurrency, the worker id and health server, and the embedding check;
 // wire_test.go runs the fully wired stack over a pgtest database and the model fakes and checks that no model call
-// happens inside a store transaction; glue_test.go checks ListEvents' default and cap; and
+// happens inside a store transaction; handlers_test.go pins each job's result keys and delete_bank's
+// continuations; glue_test.go checks ListEvents' default and cap; and
 // observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest, an unreachable agent
 // still serves). End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a gateway
 // emulator using these variable names. SPEC "Process model", "Model routing" and "File structure".

@@ -3,6 +3,7 @@ package retain
 import (
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"testing"
@@ -76,7 +77,7 @@ func (e *env) checkRetagged(stage string, tags ...string) {
 func (e *env) runRetaggedBetweenBatches(j store.Job) {
 	e.t.Helper()
 	e.scriptChunks(3, false)
-	res, err := e.hookedRetainerBatch(1, 2, func() { e.retag("new") }).ProcessDocument(e.ctx, j)
+	res, err := e.hookedRetainerBatch(1, 2, func() { e.retag("new") }).ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || res.Superseded || res.UnitsCreated != 3 {
 		e.t.Fatalf("retagged run = %+v, %v; want 3 units, not superseded", res, err)
 	}
@@ -133,7 +134,7 @@ func TestReprocessRetaggedBeforeFirstBatchCompletes(t *testing.T) {
 	e.retag("new")
 	j := e.claimRetain()
 	e.scriptChunks(3, false)
-	res, err := e.retainer.ProcessDocument(e.ctx, j)
+	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || res.Superseded || res.UnitsCreated != 3 {
 		t.Fatalf("reprocess after retag = %+v, %v; want 3 units, not superseded", res, err)
 	}
@@ -159,7 +160,7 @@ func TestRetainOverridesChangeMidRunSupersedes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	res, err := e.hookedRetainerBatch(1, 2, overtake).ProcessDocument(e.ctx, j)
+	res, err := e.hookedRetainerBatch(1, 2, overtake).ProcessDocument(e.ctx, jobs.Inline(j))
 	if err != nil || !res.Superseded {
 		t.Fatalf("run overtaken by new overrides = %+v, %v; want superseded", res, err)
 	}

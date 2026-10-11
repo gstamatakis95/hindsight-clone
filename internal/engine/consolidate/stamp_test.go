@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// hookAtStage is a Checkpointer that runs fn once, at the first report of stage.
+// hookAtStage is a progress hook that runs fn once, at the first report of stage.
 type hookAtStage struct {
 	stage string
 	fired bool
@@ -28,7 +28,7 @@ func (h *hookAtStage) Report(_ context.Context, p domain.Progress) error {
 // beforeScope installs a checkpoint hook that runs fn right before the run's first batch in scope tags.
 func (e *env) beforeScope(fn func(), tags ...string) *hookAtStage {
 	h := &hookAtStage{stage: "scope " + scopeOf(tags...).String(), fn: fn}
-	e.deps.Checkpoint = func(store.Job) Checkpointer { return h }
+	e.hook = h
 	return h
 }
 
@@ -46,7 +46,7 @@ func (e *env) continuation() ConsolidationResult {
 	if err != nil || len(jobs) != 1 {
 		e.t.Fatalf("claim continuation: %d jobs, %v", len(jobs), err)
 	}
-	e.deps.Checkpoint = nil
+	e.hook = nil
 	return e.run(jobs[0])
 }
 

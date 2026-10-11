@@ -8,6 +8,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
 	"memd/internal/engine/reflect"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"strings"
@@ -235,7 +236,7 @@ func (r *runner) repark(ctx context.Context, p *refreshPlan) error {
 		if _, err := tx.Seq(ctx, p.m.Bank); err != nil {
 			return err
 		}
-		_, _, err := EnqueueRefresh(ctx, tx, RefreshRequest{Bank: p.m.Bank, ID: p.m.Spec.ID, RunAt: end}, now)
+		_, _, err := jobs.EnqueueRefresh(ctx, tx, jobs.RefreshRequest{Bank: p.m.Bank, ID: p.m.Spec.ID, RunAt: end}, now)
 		return err
 	})
 	if err != nil {

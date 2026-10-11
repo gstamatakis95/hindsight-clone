@@ -23,19 +23,17 @@ func TestRunEditBetweenScopesIsNotStamped(t *testing.T) {
 	e := newEnv(t, perTag())
 	e.fact("f1", "Alice lives in Paris", "a", "b")
 	e.script(e.createEach("f1"))
-	e.deps.Checkpoint = func(store.Job) Checkpointer {
-		return &hookAt{n: 2, fn: func() {
-			e.tx(func(tx store.Tx) error {
-				u := e.unit("f1")
-				seq, err := tx.Seq(t.Context(), bank)
-				if err != nil {
-					return err
-				}
-				u.Text, u.Seq, u.Embedding = "Alice lives in Rome", seq, nil
-				return tx.Units().Update(t.Context(), u)
-			})
-		}}
-	}
+	e.hook = &hookAt{n: 2, fn: func() {
+		e.tx(func(tx store.Tx) error {
+			u := e.unit("f1")
+			seq, err := tx.Seq(t.Context(), bank)
+			if err != nil {
+				return err
+			}
+			u.Text, u.Seq, u.Embedding = "Alice lives in Rome", seq, nil
+			return tx.Units().Update(t.Context(), u)
+		})
+	}}
 	e.run(autoJob())
 	if e.unit("f1").ConsolidatedAt != nil {
 		t.Fatal("an edited fact was stamped")
@@ -66,18 +64,16 @@ func TestRunRetagMidRunIsNotStamped(t *testing.T) {
 		}})
 	})
 	e.script(e.createEach("f1"))
-	e.deps.Checkpoint = func(store.Job) Checkpointer {
-		return &hookAt{n: 2, fn: func() {
-			e.tx(func(tx store.Tx) error {
-				seq, err := tx.Seq(t.Context(), bank)
-				if err != nil {
-					return err
-				}
-				_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d1", []string{"alice", "x"}, []string{"bob"}, seq)
+	e.hook = &hookAt{n: 2, fn: func() {
+		e.tx(func(tx store.Tx) error {
+			seq, err := tx.Seq(t.Context(), bank)
+			if err != nil {
 				return err
-			})
-		}}
-	}
+			}
+			_, err = tx.Units().SetDocumentTags(t.Context(), bank, "d1", []string{"alice", "x"}, []string{"bob"}, seq)
+			return err
+		})
+	}}
 	e.run(autoJob())
 	if e.unit("f1").ConsolidatedAt != nil {
 		t.Fatal("a retagged fact was stamped")
@@ -144,7 +140,7 @@ func TestRunRefreshSurvivesFailedRun(t *testing.T) {
 	e.fact("f1", "Kim sails", "a")
 	e.fact("f2", "Lee rows", "b")
 	e.script(e.createEach("f1"), fail())
-	if _, err := e.consolidator().Run(t.Context(), autoJob()); !errors.Is(err, domain.ErrUnavailable) {
+	if _, err := e.consolidator().Run(t.Context(), e.jobRun(autoJob())); !errors.Is(err, domain.ErrUnavailable) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 	e.wantPending(domain.OperationKindRefreshMentalModel, 1)
@@ -157,14 +153,12 @@ func TestRunRecheckCitedScopesBeforeStamp(t *testing.T) {
 	e.fact("f1", "Max surfs", "a", "b")
 	e.seedObservation("obs-a", "Max surfs", []string{"a"}, false, "f1")
 	e.script(e.createEach("f1"))
-	e.deps.Checkpoint = func(store.Job) Checkpointer {
-		return &hookAt{n: 1, fn: func() {
-			e.tx(func(tx store.Tx) error {
-				_, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, uids("f1"))
-				return err
-			})
-		}}
-	}
+	e.hook = &hookAt{n: 1, fn: func() {
+		e.tx(func(tx store.Tx) error {
+			_, _, err := tx.Evidence().DeleteCiting(t.Context(), bank, uids("f1"))
+			return err
+		})
+	}}
 	e.run(autoJob())
 	e.wantBatches([]string{"f1"})
 	if e.unit("f1").ConsolidatedAt != nil {
@@ -182,11 +176,11 @@ func TestRunScopedContinuationNeverJoins(t *testing.T) {
 		if _, err := tx.Seq(t.Context(), bank); err != nil {
 			return err
 		}
-		_, _, err := tx.Queue().Enqueue(t.Context(), NewJob(bank, nil, nil))
+		_, _, err := tx.Queue().Enqueue(t.Context(), newJob(nil, nil))
 		return err
 	})
 	e.script(e.createEach("f1"))
-	j := NewJob(bank, []domain.TagSet{{Tags: []string{"a"}}}, nil)
+	j := newJob([]domain.TagSet{{Tags: []string{"a"}}}, nil)
 	j.ID = pgtest.ID[domain.OperationID]("op-manual")
 	if res := e.run(j); !res.More {
 		t.Fatalf("result %+v, want More", res)

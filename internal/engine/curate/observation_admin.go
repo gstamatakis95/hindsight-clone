@@ -2,9 +2,9 @@ package curate
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 )
 
@@ -29,45 +29,26 @@ func normalizeScopes(scopes []domain.TagSet) []domain.TagSet {
 	return out
 }
 
-// consolidateJob builds a consolidate job: {} with DedupePending when automatic, the scopes payload with
-// DedupeNone when it carries scopes or overrides (decision 1301).
-func consolidateJob(b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (store.Job, error) {
-	j := store.Job{
-		Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: consolidateKey, Payload: emptyPayload,
-		Overrides: overrides, Dedupe: store.DedupePending,
-	}
-	if len(scopes) > 0 {
-		raw, err := json.Marshal(ConsolidatePayload{Scopes: scopes})
-		if err != nil {
-			return store.Job{}, fmt.Errorf("encode consolidate payload: %w", err)
-		}
-		j.Payload = raw
-	}
-	if len(scopes) > 0 || overrides != nil {
-		j.Dedupe = store.DedupeNone
-	}
-	return j, nil
-}
-
-// enqueueAndGet enqueues j in tx and returns its operation row.
-func enqueueAndGet(ctx context.Context, tx store.Tx, j store.Job) (domain.Operation, error) {
-	id, _, err := tx.Queue().Enqueue(ctx, j)
+// enqueueConsolidation enqueues a consolidate in tx (jobs.EnqueueScopedConsolidate: {} with DedupePending when
+// automatic, the scopes payload with DedupeNone when it carries scopes or overrides) and returns its
+// operation row.
+func enqueueConsolidation(
+	ctx context.Context, tx store.Tx, b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig,
+) (domain.Operation, error) {
+	id, _, err := jobs.EnqueueScopedConsolidate(ctx, tx, b, scopes, overrides)
 	if err != nil {
 		return domain.Operation{}, err
 	}
-	return tx.Queue().Get(ctx, j.Bank, id)
+	return tx.Queue().Get(ctx, b, id)
 }
 
 // Consolidate queues a manual consolidation; it is a write, so an unknown bank is created.
 func (a *observationAdmin) Consolidate(
 	ctx context.Context, b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig,
 ) (domain.Operation, error) {
-	j, err := consolidateJob(b, normalizeScopes(scopes), overrides)
-	if err != nil {
-		return domain.Operation{}, err
-	}
+	scopes = normalizeScopes(scopes)
 	var op domain.Operation
-	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		op = domain.Operation{}
 		if _, err := tx.Banks().Ensure(ctx, b); err != nil {
 			return err
@@ -76,7 +57,7 @@ func (a *observationAdmin) Consolidate(
 			return err
 		}
 		var err error
-		op, err = enqueueAndGet(ctx, tx, j)
+		op, err = enqueueConsolidation(ctx, tx, b, scopes, overrides)
 		return err
 	})
 	if err != nil {
@@ -129,12 +110,8 @@ func (a *observationAdmin) ClearObservations(
 	for i, s := range scopes {
 		keys[i] = domain.NewScopeKey(b, s.Tags)
 	}
-	j, err := consolidateJob(b, scopes, nil)
-	if err != nil {
-		return ClearResult{}, err
-	}
 	var res ClearResult
-	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		res = ClearResult{}
 		if _, err := tx.Seq(ctx, b); err != nil {
 			return err
@@ -144,10 +121,10 @@ func (a *observationAdmin) ClearObservations(
 			return fmt.Errorf("clear scopes: %w", err)
 		}
 		res.Deleted = int64(len(deleted))
-		if err := enqueueGraph(ctx, tx, b); err != nil {
+		if _, _, err := jobs.EnqueueGraph(ctx, tx, b); err != nil {
 			return err
 		}
-		return reconsolidateInto(ctx, tx, j, reconsolidate, &res)
+		return reconsolidateInto(ctx, tx, b, scopes, reconsolidate, &res)
 	})
 	if err != nil {
 		return ClearResult{}, fmt.Errorf("clear observations: %w", err)
@@ -155,12 +132,15 @@ func (a *observationAdmin) ClearObservations(
 	return res, nil
 }
 
-// reconsolidateInto enqueues j and records its operation on res when reconsolidate is set.
-func reconsolidateInto(ctx context.Context, tx store.Tx, j store.Job, reconsolidate bool, res *ClearResult) error {
+// reconsolidateInto enqueues the consolidation of scopes (every scope when empty) and records its operation on
+// res when reconsolidate is set.
+func reconsolidateInto(
+	ctx context.Context, tx store.Tx, b domain.BankRef, scopes []domain.TagSet, reconsolidate bool, res *ClearResult,
+) error {
 	if !reconsolidate {
 		return nil
 	}
-	op, err := enqueueAndGet(ctx, tx, j)
+	op, err := enqueueConsolidation(ctx, tx, b, scopes, nil)
 	if err != nil {
 		return err
 	}
@@ -172,12 +152,8 @@ func reconsolidateInto(ctx context.Context, tx store.Tx, j store.Job, reconsolid
 func (a *observationAdmin) ClearMemoryObservations(
 	ctx context.Context, b domain.BankRef, id domain.UnitID, reconsolidate bool,
 ) (ClearResult, error) {
-	j, err := consolidateJob(b, nil, nil)
-	if err != nil {
-		return ClearResult{}, err
-	}
 	var res ClearResult
-	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		res = ClearResult{}
 		seq, err := tx.Seq(ctx, b)
 		if err != nil {
@@ -198,10 +174,10 @@ func (a *observationAdmin) ClearMemoryObservations(
 		if err := resetOwnConsolidation(ctx, tx, us[0], seq); err != nil {
 			return err
 		}
-		if err := enqueueGraph(ctx, tx, b); err != nil {
+		if _, _, err := jobs.EnqueueGraph(ctx, tx, b); err != nil {
 			return err
 		}
-		return reconsolidateInto(ctx, tx, j, reconsolidate, &res)
+		return reconsolidateInto(ctx, tx, b, nil, reconsolidate, &res)
 	})
 	if err != nil {
 		return ClearResult{}, fmt.Errorf("clear observations of memory %s: %w", id, err)

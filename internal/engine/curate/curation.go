@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
 	"time"
@@ -138,10 +139,10 @@ func (c *curator) invalidate(
 	if err := c.audit(ctx, tx, u, domain.CurationInvalidate, req.Reason, snapshotOf(u), nil, ""); err != nil {
 		return domain.Unit{}, err
 	}
-	if _, err := enqueueConsolidate(ctx, tx, req.Bank); err != nil {
+	if _, _, err := jobs.EnqueueConsolidate(ctx, tx, req.Bank); err != nil {
 		return domain.Unit{}, err
 	}
-	if err := enqueueGraph(ctx, tx, req.Bank); err != nil {
+	if _, _, err := jobs.EnqueueGraph(ctx, tx, req.Bank); err != nil {
 		return domain.Unit{}, err
 	}
 	if err := c.queueRefreshes(ctx, tx, req.Bank, models); err != nil {
@@ -157,7 +158,7 @@ func (c *curator) invalidate(
 // citingModels reads, before the invalidate's transaction (so no pool read runs while the transaction holds
 // a connection), the models citing the unit or an observation citing it. Other requests read nothing.
 func (c *curator) citingModels(ctx context.Context, req UpdateMemoryRequest) ([]domain.MentalModelID, error) {
-	if req.State != domain.MemoryStateInvalidated || c.d.Citing == nil || c.d.Refresh == nil {
+	if req.State != domain.MemoryStateInvalidated || c.d.Citing == nil {
 		return nil, nil
 	}
 	models, err := c.d.Citing.ModelsCiting(ctx, req.Bank, []domain.UnitID{req.ID})
@@ -177,7 +178,7 @@ func (c *curator) queueRefreshes(
 			continue
 		}
 		seen[m] = true
-		if _, err := c.d.Refresh.QueueRefresh(ctx, tx, b, m); err != nil {
+		if _, err := jobs.QueueModelRefresh(ctx, tx, b, m, c.d.Clock.Now()); err != nil {
 			return fmt.Errorf("queue refresh of model %s: %w", m, err)
 		}
 	}
@@ -216,7 +217,7 @@ func (c *curator) restoreOrEdit(
 	if u, err = c.commitEntities(ctx, tx, u, req, restored, change); err != nil {
 		return domain.Unit{}, "", err
 	}
-	op, err := enqueueRederive(ctx, tx, u, req)
+	op, _, err := jobs.EnqueueRederive(ctx, tx, u, req.Overrides)
 	if err != nil {
 		return domain.Unit{}, "", err
 	}
@@ -302,7 +303,7 @@ func (c *curator) applyEdit(
 	if _, _, err := tx.Evidence().DeleteCiting(ctx, u.Bank, []domain.UnitID{u.ID}); err != nil {
 		return domain.Unit{}, err
 	}
-	if err := enqueueGraph(ctx, tx, u.Bank); err != nil {
+	if _, _, err := jobs.EnqueueGraph(ctx, tx, u.Bank); err != nil {
 		return domain.Unit{}, err
 	}
 	if req.Entities != nil {

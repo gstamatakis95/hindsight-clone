@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 )
 
@@ -22,7 +23,7 @@ func NewRederiver(d RederiverDeps) Rederiver {
 
 // Rederive re-embeds and re-links the job's unit and enqueues consolidation.
 func (r *rederiver) Rederive(ctx context.Context, j store.Job) error {
-	var p RederivePayload
+	var p jobs.RederivePayload
 	if err := json.Unmarshal(j.Payload, &p); err != nil {
 		return fmt.Errorf("%w: rederive_memory payload %s: %w", domain.ErrInvalidArgument, j.Payload, err)
 	}
@@ -83,9 +84,9 @@ func (r *rederiver) write(
 	if err := r.d.Linker.Link(ctx, tx, b, []domain.Unit{u}, nil); err != nil {
 		return fmt.Errorf("relink unit %s: %w", id, err)
 	}
-	if err := enqueueGraph(ctx, tx, b); err != nil {
+	if _, _, err := jobs.EnqueueGraph(ctx, tx, b); err != nil {
 		return err
 	}
-	_, err = enqueueConsolidate(ctx, tx, b)
+	_, _, err = jobs.EnqueueConsolidate(ctx, tx, b)
 	return err
 }

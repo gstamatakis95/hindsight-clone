@@ -10,6 +10,7 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"time"
 
@@ -24,9 +25,10 @@ type Retainer interface {
 	// clears extracted_at if an overlapping retain completed the document meanwhile (decision 2200); a
 	// retried job skips chunks already committed with a matching hash. Runs inline for sync Retain, else
 	// as a job.
-	// j.Payload is a DocumentPayload and j.Overrides the merged request < item overrides. A job with an id
-	// resumes across retries; an inline run (empty j.ID) starts fresh.
-	ProcessDocument(ctx context.Context, j store.Job) (RetainResult, error)
+	// run.Job.Payload is a jobs.RetainPayload and run.Job.Overrides the merged request < item overrides. A
+	// claimed run resumes across retries and reports progress through run; an inline run (jobs.Inline, no
+	// id) starts fresh and reports nothing.
+	ProcessDocument(ctx context.Context, run *jobs.Run) (RetainResult, error)
 }
 
 // RetainResult summarizes one processed document.
@@ -81,8 +83,6 @@ type RetainerDeps struct {
 	Tokens TokenCounter
 	// Clock stamps events and progress.
 	Clock clock.Clock
-	// Checkpoint returns the progress reporter of a job; nil = no progress (inline runs never report).
-	Checkpoint func(domain.OperationID) Checkpoint
 	// NewID generates unit, chunk and run ids; nil = uuid.NewString.
 	NewID func() string
 	// BatchChunks is how many chunks one transaction commits; 0 = DefaultBatchChunks.
@@ -119,8 +119,9 @@ var errSuperseded = errors.New("retain: run superseded")
 
 // run is one ProcessDocument call's state.
 type run struct {
+	job       *jobs.Run // reports progress; inline runs report nothing
 	j         store.Job
-	p         DocumentPayload
+	p         jobs.RetainPayload
 	cfg       domain.BankConfig
 	t         tuning
 	oh        string // no-op hash: overrides + item scopes (stamped on the document)
@@ -133,13 +134,13 @@ type run struct {
 }
 
 // ProcessDocument implements Retainer.
-func (r *retainer) ProcessDocument(ctx context.Context, j store.Job) (RetainResult, error) {
-	rn, err := r.start(ctx, j)
+func (r *retainer) ProcessDocument(ctx context.Context, job *jobs.Run) (RetainResult, error) {
+	rn, err := r.start(ctx, job)
 	if err != nil {
 		return RetainResult{}, err
 	}
 	res := RetainResult{DocumentID: rn.p.DocumentID}
-	doc, committed, err := r.readState(ctx, j.Bank, rn.p.DocumentID)
+	doc, committed, err := r.readState(ctx, rn.j.Bank, rn.p.DocumentID)
 	if err != nil {
 		return res, err
 	}
@@ -183,7 +184,7 @@ func (r *retainer) processChunks(
 		if len(pending) == 0 {
 			continue
 		}
-		if err := r.checkpoint(ctx, rn.j.ID, start, len(chunks)); err != nil {
+		if err := r.checkpoint(ctx, rn, start, len(chunks)); err != nil {
 			return err
 		}
 		ids, usage, err := r.processBatch(ctx, rn, pending)
@@ -197,8 +198,9 @@ func (r *retainer) processChunks(
 }
 
 // start decodes the job and resolves its config.
-func (r *retainer) start(ctx context.Context, j store.Job) (*run, error) {
-	p, err := DecodePayload(j.Payload)
+func (r *retainer) start(ctx context.Context, job *jobs.Run) (*run, error) {
+	j := job.Job
+	p, err := decodePayload(j.Payload)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +221,7 @@ func (r *retainer) start(ctx context.Context, j store.Job) (*run, error) {
 		return nil, err
 	}
 	rn := &run{
-		j: j, p: p, cfg: cfg, t: p.pinTuning(tuningOf(cfg)), oh: oh, ownOH: ownOH,
+		job: job, j: j, p: p, cfg: cfg, t: pinTuning(p, tuningOf(cfg)), oh: oh, ownOH: ownOH,
 		tags: domain.NormalizeTags(p.Tags),
 	}
 	switch {
@@ -398,18 +400,11 @@ func scopeMode(item *domain.ObservationScopes, cfg domain.BankConfig) domain.Obs
 }
 
 // checkpoint reports progress for a job and stops it once cancelled.
-func (r *retainer) checkpoint(ctx context.Context, id domain.OperationID, done, total int) error {
+func (r *retainer) checkpoint(ctx context.Context, rn *run, done, total int) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: %w", domain.ErrCancelled, err)
 	}
-	if id == "" || r.d.Checkpoint == nil {
-		return nil
-	}
-	cp := r.d.Checkpoint(id)
-	if cp == nil {
-		return nil
-	}
-	if err := cp.Report(ctx, domain.Progress{
+	if err := rn.job.Report(ctx, domain.Progress{
 		Stage: "retain_chunks", At: r.now(), Processed: int64(done), Total: int64(total),
 	}); err != nil {
 		return fmt.Errorf("retain: checkpoint: %w", err)

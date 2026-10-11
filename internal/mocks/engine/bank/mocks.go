@@ -8,7 +8,7 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
-	"memd/internal/store"
+	"memd/internal/jobs"
 	"sync"
 )
 
@@ -22,7 +22,7 @@ var _ bank.BankDeleter = &BankDeleter{}
 //
 //		// make and configure a mocked bank.BankDeleter
 //		mockedBankDeleter := &BankDeleter{
-//			RunFunc: func(ctx context.Context, j store.Job) (bool, error) {
+//			RunFunc: func(ctx context.Context, run *jobs.Run) (bool, error) {
 //				panic("mock out the Run method")
 //			},
 //			TombstoneFunc: func(ctx context.Context, b domain.BankRef) (domain.Operation, error) {
@@ -36,7 +36,7 @@ var _ bank.BankDeleter = &BankDeleter{}
 //	}
 type BankDeleter struct {
 	// RunFunc mocks the Run method.
-	RunFunc func(ctx context.Context, j store.Job) (bool, error)
+	RunFunc func(ctx context.Context, run *jobs.Run) (bool, error)
 
 	// TombstoneFunc mocks the Tombstone method.
 	TombstoneFunc func(ctx context.Context, b domain.BankRef) (domain.Operation, error)
@@ -47,8 +47,8 @@ type BankDeleter struct {
 		Run []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// J is the j argument value.
-			J store.Job
+			// Run is the run argument value.
+			Run *jobs.Run
 		}
 		// Tombstone holds details about calls to the Tombstone method.
 		Tombstone []struct {
@@ -63,21 +63,21 @@ type BankDeleter struct {
 }
 
 // Run calls RunFunc.
-func (mock *BankDeleter) Run(ctx context.Context, j store.Job) (bool, error) {
+func (mock *BankDeleter) Run(ctx context.Context, run *jobs.Run) (bool, error) {
 	if mock.RunFunc == nil {
 		panic("BankDeleter.RunFunc: method is nil but BankDeleter.Run was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   store.Job
+		Run *jobs.Run
 	}{
 		Ctx: ctx,
-		J:   j,
+		Run: run,
 	}
 	mock.lockRun.Lock()
 	mock.calls.Run = append(mock.calls.Run, callInfo)
 	mock.lockRun.Unlock()
-	return mock.RunFunc(ctx, j)
+	return mock.RunFunc(ctx, run)
 }
 
 // RunCalls gets all the calls that were made to Run.
@@ -86,11 +86,11 @@ func (mock *BankDeleter) Run(ctx context.Context, j store.Job) (bool, error) {
 //	len(mockedBankDeleter.RunCalls())
 func (mock *BankDeleter) RunCalls() []struct {
 	Ctx context.Context
-	J   store.Job
+	Run *jobs.Run
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   store.Job
+		Run *jobs.Run
 	}
 	mock.lockRun.RLock()
 	calls = mock.calls.Run

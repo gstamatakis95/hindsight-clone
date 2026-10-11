@@ -3,7 +3,7 @@
 //
 // # Where it sits
 //
-// config sits beside the engines: it imports domain, store and ai only and never an adapter, server, worker
+// config sits beside the engines: it imports domain, store and ai only and never an adapter, server, jobs
 // or engine package. It declares the one engine piece it needs, [StrategyMatcher], so
 // consolidate.StrategyMatcher satisfies it without config importing consolidate. cmd/memd/wire.go builds the
 // server level with [ServerDefaults] and the resolver with [NewResolver]; engines consume the resolver as

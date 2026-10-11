@@ -6,7 +6,7 @@
 // # Where it sits
 //
 // mentalmodel is an engine package: it imports domain, the boundary packages, prompts, recall and reflect (for their
-// request types) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard);
+// request types) and must never import adapters, server, gen, pgx, net/http, the S3 SDK or Datadog (depguard);
 // recall and reflect never import it. It declares the small interfaces it consumes: [Reflector], [Recaller],
 // [Projector], [DirectiveSelector] (bank.DirectiveSelector) and the store.Reader subsets in reads.go ([ScopeReader],
 // [ModelLister], [CronSource], [FailureSource]). cmd/memd/wire.go builds:
@@ -15,7 +15,6 @@
 //     and the DryRunRefresh RPC;
 //   - [NewAdmin] for the MentalModelService RPCs, and [NewPageSearcher] for SearchPages and for reflect's
 //     page tools;
-//   - [NewRefreshQueuer] for bank templates (first builds) and curation (refreshes after an invalidate);
 //   - [NewTriggers] (its cron sweep runs in the worker's maintenance tick) and
 //     [NewRefreshFailureReconciler] (also run by the tick).
 //
@@ -73,20 +72,20 @@
 //
 // # Scheduling and queuing
 //
-// A model has at most one queued refresh (serial key [SerialKey] "mm:{id}", so refreshes of one model never
-// overlap). [EnqueueRefresh] queues a refresh in the caller's transaction (which must have taken tx.Seq
-// first) or joins the queued one and upgrades it: force_full OR-ed, strategy and overrides replaced when
-// given, manual set; a manual request also releases a parked refresh (run_at = now).
+// A model has at most one queued refresh (serial key jobs.RefreshSerialKey "mm:{id}", so refreshes of one
+// model never overlap). jobs.EnqueueRefresh queues a refresh in the caller's transaction (which must have
+// taken tx.Seq first) or joins the queued one and upgrades it: force_full OR-ed, strategy and overrides
+// replaced when given, manual set; a manual request also releases a parked refresh (run_at = now).
 //
 // [RefreshScheduler.Decide] (outside any transaction) skips a paused or fresh model and otherwise parks the
 // refresh until the later of now + refresh_debounce_seconds (default 30) and last_refreshed_at +
-// min_refresh_interval_seconds (trigger value over config; default 0). [RefreshQueuer.QueueRefresh] does
-// the same inside a transaction without a config resolver: it reads the model's overrides over the bank's own
-// config, skips paused or deleted models, and runs a never-refreshed model now and in full. [Triggers]
+// min_refresh_interval_seconds (trigger value over config; default 0), as domain.RefreshDueAt computes it.
+// jobs.QueueModelRefresh does the same inside a transaction without a config resolver: it reads the model's
+// overrides over the bank's own config, skips paused or deleted models, and runs a never-refreshed model now
+// and in full; bank templates (first builds) and curation (refreshes after an invalidate) use it. [Triggers]
 // enqueues automatic refreshes through the scheduler: EnqueueDueCronRefreshes serves each refresh_cron
 // schedule (5 fields, UTC) whose latest fire time within the last 5 minutes has no refresh yet; it is what
-// the maintenance tick runs. Consolidation enqueues its refreshes in its own apply transaction and
-// curation uses the RefreshQueuer.
+// the maintenance tick runs. Consolidation enqueues its refreshes in its own apply transaction.
 //
 // # Failures and pausing
 //

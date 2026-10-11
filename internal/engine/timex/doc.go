@@ -5,7 +5,7 @@
 // # Where it sits
 //
 // timex is an engine package: it imports domain, the boundary packages and prompts and must never import adapters,
-// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It works on domain.ExtractedFact rather than a
+// server, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It works on domain.ExtractedFact rather than a
 // retain type so that retain can import timex without a cycle. cmd/memd/wire.go builds one [TimeNormalizer] with
 // [NewNormalizer](gateway, router, clock) and hands it to retain (its DateNormalizer) and recall (its query parser).
 //

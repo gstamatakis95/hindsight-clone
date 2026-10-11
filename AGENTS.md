@@ -8,22 +8,25 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - api/memory/v1/memory.proto: the whole API, one file (rules in api/AGENTS.md). Run `make gen` after any change.
 - internal/domain: plain types and errors.
 - Boundaries (interfaces), each with its adapter (rules in internal/store/AGENTS.md):
-  - internal/store (DB, Tx, Reader = Search + Catalog + Freshness, repos, Queue, Claimer, Maintenance) —
-    internal/store/postgres (sqlc in postgres/db, test harness in postgres/pgtest)
+  - internal/store (DB, Tx, Reader = Search + Catalog + Freshness, repos, Queue, Maintenance) —
+    internal/store/postgres (sqlc in postgres/db, test harness in postgres/pgtest; also implements jobs.Claimer)
   - internal/ai (LLM, Embedder, Reranker; Router and Tokenizer are concrete) — internal/ai/gateway
   - internal/blob (Store, Key; contract suite in blob/blobtest) — internal/blob/s3, chosen by MEMD_BLOB_PROVIDER
   - internal/clock (Clock; System and Manual)
 - internal/config: config resolution, merge, defaults, validation. internal/prompts: templates.
-- internal/engine/*: business logic over the boundaries; internal/server: gRPC handlers; internal/worker: jobs and
-  the maintenance tick.
+- internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
+  kind's payload, serial key and Enqueue helper. internal/maintenance: the 60 s tick and the graph_maintenance job.
+- internal/engine/*: business logic over the boundaries; internal/server: gRPC handlers.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
-  area builds its engines, server dependencies and job handlers.
+  area builds its engines and server dependencies; handlers.go adapts the engines to job handlers.
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
 
 ## Rules
 - The boundaries (store, ai, blob, clock) are interfaces; put `var _ Iface = (*impl)(nil)` next to each
   implementation. ai.Router, ai.Tokenizer and clock.System are concrete.
-- Engines never import adapters, server, worker, gen, pgx, net/http or the S3 SDK (depguard enforces this).
+- Engines never import adapters, server, maintenance, gen, pgx, net/http or the S3 SDK (depguard enforces this).
+- Enqueue jobs only through the jobs.Enqueue* helpers (jobs/kinds.go), inside the transaction of the change. The
+  helpers never call tx.Seq: call tx.Seq(bank) first yourself when the transaction changes memory content.
 - Inject clock.Clock; never call time.Now for logic. Every LLM call resolves its binding with ai.Router.
 - Doc comment on every exported identifier, every method in an interface and every package (doc.go).
 - McCabe complexity <= 15 and lines <= 120. Split the function; don't suppress the linter.
@@ -31,7 +34,8 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - Prompts live in internal/prompts/templates. Never inline prompt text in Go.
 - New behaviour knobs go in BankConfig and must be overridable per request unless the spec says otherwise.
 - No per-memory delete API. Invalidate archives a unit; upsert and reprocess replace a document's units.
-- Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim.
+- Job handlers are idempotent and re-read state from Postgres; a job can run twice after a reclaim. Report
+  progress and results through jobs.Run; keep result keys stable (GetOperation shows them).
 - Never call an LLM, embedder or reranker inside DB.InTx. Call first, then write in a short tx.
   tools/txcheck enforces the lexical case (a model call written inside the InTx literal).
 - Any tx that changes memory content calls tx.Seq(bank) and stamps the rows it writes with it.

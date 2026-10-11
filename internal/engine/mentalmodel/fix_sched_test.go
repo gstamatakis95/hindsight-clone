@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"testing"
 	"time"
@@ -148,7 +149,7 @@ func TestRunJobErrorKindAndOptions(t *testing.T) {
 	if len(r.calls) != 0 {
 		t.Fatalf("a malformed payload ran: %+v", r.calls)
 	}
-	payload, _ := json.Marshal(RefreshPayload{
+	payload, _ := json.Marshal(jobs.RefreshPayload{
 		MentalModelID: "status", ForceFull: true, Manual: true, Strategy: domain.RefreshStrategyAgentic,
 	})
 	over := &domain.BankConfig{ReflectMission: "be brief"}

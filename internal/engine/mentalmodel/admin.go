@@ -8,6 +8,7 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"reflect"
 	"regexp"
@@ -156,7 +157,7 @@ func (a *admin) CreateMentalModel(
 			return err
 		}
 		req := RefreshRequest{Bank: b, ID: spec.ID, Manual: true, ForceFull: true}
-		id, _, err := EnqueueRefresh(ctx, tx, req, a.d.Clock.Now())
+		id, _, err := jobs.EnqueueRefresh(ctx, tx, req.job(), a.d.Clock.Now())
 		if err != nil {
 			return err
 		}
@@ -258,7 +259,7 @@ func (a *admin) RefreshMentalModel(ctx context.Context, req RefreshRequest) (dom
 		if _, err := tx.Seq(ctx, req.Bank); err != nil {
 			return err
 		}
-		id, j, err := EnqueueRefresh(ctx, tx, req, a.d.Clock.Now())
+		id, j, err := jobs.EnqueueRefresh(ctx, tx, req.job(), a.d.Clock.Now())
 		if err != nil {
 			return err
 		}

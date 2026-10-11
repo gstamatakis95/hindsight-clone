@@ -22,11 +22,12 @@ These rules add to the root AGENTS.md.
   test with errors.Is.
 
 ## Types and wiring
-- Adapters return concrete types (`*postgres.DB` implements store.DB, store.Claimer and store.Maintenance;
+- Adapters return concrete types (`*postgres.DB` implements store.DB, store.Maintenance and jobs.Claimer;
   `*s3.Store`; `*gateway.Client`). cmd/memd is the only place they are built and narrowed to their interfaces.
 - Assert each interface at compile time next to the implementation: `var _ store.DB = (*DB)(nil)`.
 - An adapter imports its own boundary package, internal/domain (and internal/jsonschema for the gateway), never an
-  engine, the server or the worker.
+  engine, the server, jobs or maintenance. `*postgres.DB` satisfies jobs.Claimer structurally; the
+  compile-time assertion sits in a test file.
 
 ## Transactions
 - InTx runs at READ COMMITTED and retries the whole closure on 40P01, 40001 and pruned-entity conflicts.

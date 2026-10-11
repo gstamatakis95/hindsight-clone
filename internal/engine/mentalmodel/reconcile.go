@@ -8,6 +8,7 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/store"
 	"strings"
 )
@@ -26,8 +27,7 @@ const (
 	FailureUnexpected = "unexpected_error"
 )
 
-// RefreshFailureReconciler turns failed refreshes into paused models; it implements
-// worker.RefreshFailureReconciler.
+// RefreshFailureReconciler turns failed refreshes into paused models; the maintenance tick runs it.
 type RefreshFailureReconciler interface {
 	// ReconcileFailedRefreshes looks, per model, at the latest terminal refresh operation. When it failed
 	// after the model's last completed refresh and is not recorded yet, it sets auto_refresh_paused and
@@ -163,20 +163,20 @@ func RunJob(ctx context.Context, r RefreshRunner, j store.Job) (RefreshOutcome, 
 
 // decodeRefreshPayload reads a refresh_mental_model payload. Rows queued by consolidation before decision
 // 1800 carry the model under "model_id"; that key is read when "mental_model_id" is missing.
-func decodeRefreshPayload(raw []byte) (RefreshPayload, error) {
+func decodeRefreshPayload(raw []byte) (jobs.RefreshPayload, error) {
 	var p struct {
-		RefreshPayload
+		jobs.RefreshPayload
 		// LegacyModelID is the pre-1800 consolidation key.
 		LegacyModelID domain.MentalModelID `json:"model_id"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
+		return jobs.RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
 	}
 	if p.MentalModelID == "" {
 		p.MentalModelID = p.LegacyModelID
 	}
 	if p.MentalModelID == "" {
-		return RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
+		return jobs.RefreshPayload{}, fmt.Errorf("%w: refresh_mental_model payload %s", domain.ErrInvalidArgument, raw)
 	}
 	return p.RefreshPayload, nil
 }

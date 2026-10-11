@@ -17,9 +17,9 @@ func wireMemory(c core, in infra, d *deps) {
 	d.server.Reflector = c.reflector
 	d.server.Lister = curate.NewMemoryLister(c.read)
 	d.server.Curator = curate.NewCurator(curate.CuratorDeps{
-		Store: c.db, Clock: c.clock, Citing: c.read, Refresh: c.queuer, Resolver: c.entities,
+		Store: c.db, Clock: c.clock, Citing: c.read, Resolver: c.entities,
 		Config: c.resolver, Archived: c.read,
 	})
-	d.handlers.Retainer = c.retainer
-	d.handlers.Rederiver = curate.NewRederiver(curate.RederiverDeps{Store: c.db, Embedder: in.gw, Linker: c.linker})
+	d.handlers.retainer = c.retainer
+	d.handlers.rederiver = curate.NewRederiver(curate.RederiverDeps{Store: c.db, Embedder: in.gw, Linker: c.linker})
 }

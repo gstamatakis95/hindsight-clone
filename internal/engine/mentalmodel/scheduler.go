@@ -2,11 +2,10 @@ package mentalmodel
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/store"
+	"memd/internal/jobs"
 	"time"
 )
 
@@ -14,7 +13,7 @@ import (
 //
 // A refresh_mental_model operation that ends FAILED (handler Fail(nil) or reclaim past max attempts) is
 // turned into auto_refresh_paused plus a REFRESH_FAILED history entry by an idempotent reconcile in
-// RunMaintenance (RefreshFailureReconciler), which finds models whose latest terminal refresh operation
+// the maintenance tick (RefreshFailureReconciler), which finds models whose latest terminal refresh operation
 // failed and that are not yet paused or recorded (decision 012, R10'). The Claimer never touches
 // mental-model tables.
 type RefreshScheduler interface {
@@ -35,16 +34,12 @@ const (
 	decisionSkip decisionKind = "skip"
 )
 
-// Skip and park reasons.
+// Skip reasons; a park's reason is domain.RefreshReasonDebounce or domain.RefreshReasonIntervalFloor.
 const (
 	// ReasonPaused: auto_refresh_paused is set; only a manual refresh runs.
 	ReasonPaused = "auto_refresh_paused"
 	// ReasonNotStale: nothing in scope changed and no source was retracted.
 	ReasonNotStale = "not_stale"
-	// ReasonDebounce: parked for refresh_debounce_seconds so a burst joins one refresh.
-	ReasonDebounce = "debounce"
-	// ReasonIntervalFloor: parked until min_refresh_interval_seconds after the last refresh.
-	ReasonIntervalFloor = "min_refresh_interval"
 )
 
 // refreshDecision is a RefreshScheduler's verdict for one model.
@@ -88,51 +83,14 @@ func (s *scheduler) Decide(ctx context.Context, m domain.MentalModel, now time.T
 	if err != nil {
 		return refreshDecision{}, fmt.Errorf("mentalmodel: config: %w", err)
 	}
-	until, reason := dueAt(m, cfg, now)
+	until, reason := domain.RefreshDueAt(m, cfg.MentalModels, now)
 	if !until.After(now) {
 		return refreshDecision{Kind: decisionRunNow}, nil
 	}
 	return refreshDecision{Kind: decisionPark, Until: until, Reason: reason}, nil
 }
 
-// dueAt is when an automatic refresh of m may run: now + refresh_debounce_seconds, or the end of the
-// interval floor when that is later.
-func dueAt(m domain.MentalModel, cfg domain.BankConfig, now time.Time) (time.Time, string) {
-	debounce, floor := defaultDebounceSeconds, 0
-	if mc := cfg.MentalModels; mc != nil {
-		if mc.RefreshDebounceSeconds != nil {
-			debounce = *mc.RefreshDebounceSeconds
-		}
-		if mc.MinRefreshIntervalSeconds != nil {
-			floor = *mc.MinRefreshIntervalSeconds
-		}
-	}
-	if m.Spec.Trigger.MinRefreshIntervalSeconds != nil {
-		floor = *m.Spec.Trigger.MinRefreshIntervalSeconds
-	}
-	at, reason := now.Add(time.Duration(max(debounce, 0))*time.Second), ReasonDebounce
-	if floor > 0 && m.LastRefreshedAt != nil {
-		if end := m.LastRefreshedAt.Add(time.Duration(floor) * time.Second); end.After(at) {
-			at, reason = end, ReasonIntervalFloor
-		}
-	}
-	return at, reason
-}
-
-// RefreshPayload is the refresh_mental_model job payload. Optional keys are omitted when unset, so
-// Queue.Upgrade keeps a queued row's value unless a joiner sets it (force_full is OR-ed).
-type RefreshPayload struct {
-	// MentalModelID is the model refreshed.
-	MentalModelID domain.MentalModelID `json:"mental_model_id"`
-	// ForceFull rewrites in full even when delta mode would apply.
-	ForceFull bool `json:"force_full,omitempty"`
-	// Strategy overrides the trigger's strategy for this refresh.
-	Strategy domain.RefreshStrategy `json:"strategy,omitempty"`
-	// Manual marks a user-requested refresh; its success clears auto_refresh_paused.
-	Manual bool `json:"manual,omitempty"`
-}
-
-// RefreshRequest asks for one refresh of a model.
+// RefreshRequest asks for one refresh of a model (the RefreshMentalModel RPC).
 type RefreshRequest struct {
 	// Bank owns the model.
 	Bank domain.BankRef
@@ -151,42 +109,10 @@ type RefreshRequest struct {
 	RunAt time.Time
 }
 
-// SerialKey is the refresh_mental_model serial key of model id: refreshes of one model never overlap.
-func SerialKey(id domain.MentalModelID) string { return "mm:" + string(id) }
-
-// EnqueueRefresh queues req's refresh in tx, or joins the model's queued (PENDING) refresh and upgrades
-// it: force_full OR-ed, strategy and overrides replaced when given, manual set. A manual request also
-// releases a parked refresh (run_at = now). joined reports a join. The caller calls tx.Seq(req.Bank)
-// first (the Seq-before-Enqueue lock order).
-func EnqueueRefresh(
-	ctx context.Context, tx store.Tx, req RefreshRequest, now time.Time,
-) (id domain.OperationID, joined bool, err error) {
-	payload, err := json.Marshal(RefreshPayload{
-		MentalModelID: req.ID, ForceFull: req.ForceFull, Strategy: req.Strategy, Manual: req.Manual,
-	})
-	if err != nil {
-		return "", false, fmt.Errorf("mentalmodel: refresh payload: %w", err)
+// job is the request as the job catalogue takes it.
+func (r RefreshRequest) job() jobs.RefreshRequest {
+	return jobs.RefreshRequest{
+		Bank: r.Bank, ID: r.ID, Manual: r.Manual, ForceFull: r.ForceFull, Overrides: r.Overrides, Strategy: r.Strategy,
+		RunAt: r.RunAt,
 	}
-	runAt := req.RunAt
-	if req.Manual || runAt.IsZero() {
-		runAt = now
-	}
-	id, joined, err = tx.Queue().Enqueue(ctx, store.Job{
-		Bank: req.Bank, Kind: domain.OperationKindRefreshMentalModel, SerialKey: SerialKey(req.ID),
-		Payload: payload, Overrides: req.Overrides, RunAt: runAt, Dedupe: store.DedupePending,
-	})
-	if err != nil || !joined {
-		return id, joined, err
-	}
-	if req.ForceFull || req.Manual || req.Strategy != domain.RefreshStrategyUnspecified || req.Overrides != nil {
-		if err := tx.Queue().Upgrade(ctx, id, payload, req.Overrides); err != nil {
-			return "", false, err
-		}
-	}
-	if req.Manual {
-		if err := tx.Queue().Reschedule(ctx, id, now); err != nil {
-			return "", false, err
-		}
-	}
-	return id, true, nil
 }
