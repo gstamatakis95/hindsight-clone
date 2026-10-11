@@ -11,7 +11,7 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// Converters for MemoryService's listing and curation, and for GetObservationHistory.
+// Converters for MemoryService's listing and curation.
 
 // listMemoriesRequestFromProto converts a ListMemoriesRequest; Bank carries only bank_id (the handler sets
 // the tenant).
@@ -37,25 +37,6 @@ func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (memory.ListRequest
 // listMemoriesPageToProto converts a memory page to a ListMemoriesResponse.
 func listMemoriesPageToProto(p memory.Page) *pb.ListMemoriesResponse {
 	return &pb.ListMemoriesResponse{Memories: unitsToProto(p.Items), NextPageToken: p.NextPageToken}
-}
-
-// observationVersionToProto converts an ObservationVersion.
-func observationVersionToProto(v domain.ObservationVersion) *pb.ObservationVersion {
-	return &pb.ObservationVersion{
-		Version: v.Version, Text: v.Text, SourceIds: strs[string](v.SourceIDs), At: tsToProto(v.At),
-	}
-}
-
-// observationHistoryToProto converts an observation's versions, in the order given.
-func observationHistoryToProto(in []domain.ObservationVersion) *pb.GetObservationHistoryResponse {
-	out := &pb.GetObservationHistoryResponse{}
-	if in != nil {
-		out.Versions = make([]*pb.ObservationVersion, len(in))
-		for i := range in {
-			out.Versions[i] = observationVersionToProto(in[i])
-		}
-	}
-	return out
 }
 
 // memoryEditFields returns the MemoryEdit fields an UpdateMemory applies: the mask's paths, each of which

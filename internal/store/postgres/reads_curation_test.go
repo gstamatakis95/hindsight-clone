@@ -408,8 +408,8 @@ func testCrListUnits(t *testing.T, s store.DB) {
 
 // ---------- ObservationHistory ----------
 
-// testCrObservationHistory: ObservationHistory returns the versions newest first whatever the write order;
-// an unknown, malformed or version-less id is ErrNotFound.
+// testCrObservationHistory: ObservationHistory returns the versions newest first whatever the write order and
+// pages by version; an unknown, malformed or version-less id is ErrNotFound.
 func testCrObservationHistory(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA)
 	f, o := fact(bankA, "source"), observation(bankA, "obs")
@@ -428,7 +428,7 @@ func testCrObservationHistory(t *testing.T, s store.DB) {
 		}
 		return nil
 	})
-	got, err := s.Read().ObservationHistory(t.Context(), bankA, o.ID)
+	got, err := s.Read().ObservationHistory(t.Context(), bankA, o.ID, 0, 100)
 	if err != nil {
 		t.Fatalf("ObservationHistory: %v", err)
 	}
@@ -442,10 +442,18 @@ func testCrObservationHistory(t *testing.T, s store.DB) {
 		wantSet(t, fmt.Sprintf("version %d source ids", v.Version), v.SourceIDs, want.SourceIDs)
 	}
 	wantSeq(t, "ObservationHistory versions", nums, []int64{3, 2, 1})
+	// The keyset: below version 3, one row; below the oldest version, an empty result rather than NotFound.
+	if got, err := s.Read().ObservationHistory(t.Context(), bankA, o.ID, 3, 1); err != nil || len(got) != 1 ||
+		got[0].Version != 2 {
+		t.Errorf("ObservationHistory(before 3, limit 1) = %v, %v; want version 2", got, err)
+	}
+	if got, err := s.Read().ObservationHistory(t.Context(), bankA, o.ID, 1, 100); err != nil || len(got) != 0 {
+		t.Errorf("ObservationHistory(before 1) = %v, %v; want empty", got, err)
+	}
 	for what, id := range map[string]domain.UnitID{
 		"unknown id": newID[domain.UnitID](), "malformed id": "not-a-uuid", "a fact without versions": f.ID,
 	} {
-		_, err := s.Read().ObservationHistory(t.Context(), bankA, id)
+		_, err := s.Read().ObservationHistory(t.Context(), bankA, id, 0, 100)
 		wantErrIs(t, "ObservationHistory("+what+")", err, domain.ErrNotFound)
 	}
 }
@@ -903,7 +911,7 @@ func crWantAllNotFound(t *testing.T, s store.DB, what string, b domain.BankRef, 
 	wantErrIs(t, "GetUnit("+what+")", err, domain.ErrNotFound)
 	_, err = r.ListUnits(ctx, store.UnitQuery{Bank: b, Limit: 10})
 	wantErrIs(t, "ListUnits("+what+")", err, domain.ErrNotFound)
-	_, err = r.ObservationHistory(ctx, b, obs)
+	_, err = r.ObservationHistory(ctx, b, obs, 0, 100)
 	wantErrIs(t, "ObservationHistory("+what+")", err, domain.ErrNotFound)
 	_, err = r.BankStats(ctx, b)
 	wantErrIs(t, "BankStats("+what+")", err, domain.ErrNotFound)
@@ -926,7 +934,7 @@ func testCrErrorRegimes(t *testing.T, s store.DB) {
 	upsertObservation(t, s, &o)
 	crCreateModels(t, s, bankA, crModelSeeds()[:1])
 	crGetUnit(t, s, bankA, f.ID)
-	if _, err := s.Read().ObservationHistory(t.Context(), bankA, o.ID); err != nil {
+	if _, err := s.Read().ObservationHistory(t.Context(), bankA, o.ID, 0, 100); err != nil {
 		t.Fatalf("ObservationHistory(live bank): %v", err)
 	}
 	crWantAllNotFound(t, s, "unknown bank", crUnknownBank, f.ID, o.ID)
@@ -1007,7 +1015,7 @@ func crCheckTenant(t *testing.T, s store.DB, b domain.BankRef, mine, theirs crTe
 	crGetUnit(t, s, b, mine.fact)
 	_, err := s.Read().GetUnit(t.Context(), b, theirs.fact)
 	wantErrIs(t, "GetUnit("+what+", their unit)", err, domain.ErrNotFound)
-	_, err = s.Read().ObservationHistory(t.Context(), b, theirs.obs)
+	_, err = s.Read().ObservationHistory(t.Context(), b, theirs.obs, 0, 100)
 	wantErrIs(t, "ObservationHistory("+what+", their observation)", err, domain.ErrNotFound)
 	crWantStats(t, "BankStats("+what+")", crBankStats(t, s, b), crWithBankRow(t, s, b, mine.stats))
 	wantSet(t, "ListDocuments("+what+")", crDocIDs(crListDocs(t, s, store.DocumentQuery{Bank: b, Limit: 50})),

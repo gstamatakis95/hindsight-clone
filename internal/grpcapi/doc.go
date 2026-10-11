@@ -19,9 +19,9 @@
 //	s := grpcapi.New(h, grpcapi.Options{DefaultDeadline: d, Probes: probes}, grpc.ChainUnaryInterceptor(extra...))
 //	err := s.Serve(lis)
 //
-// [New] registers each non-nil handler of [Handlers] ([MemoryHandler], [MemoryUnitHandler], [TenantHandler],
-// [BankHandler], [DocumentHandler], [ObservationHandler], [MentalModelHandler], [OperationHandler]) plus
-// grpc.health.v1. A nil handler leaves its service unregistered, so its RPCs answer UNIMPLEMENTED.
+// [New] registers each non-nil handler of [Handlers] ([MemoryHandler], [TenantHandler], [BankHandler],
+// [DocumentHandler], [ObservationHandler], [MentalModelHandler], [OperationHandler]) plus grpc.health.v1. A
+// nil handler leaves its service unregistered, so its RPCs answer UNIMPLEMENTED.
 //
 // # Interceptors
 //

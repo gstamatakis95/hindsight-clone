@@ -392,13 +392,17 @@ const readsObservationHistory = `-- name: ReadsObservationHistory :many
 SELECT v.version, v.text, v.source_ids, v.at
 FROM observation_versions v
 WHERE v.tenant_id = $1 AND v.bank_id = $2 AND v.observation_id = $3
-ORDER BY v.version DESC, v.at DESC, v.id DESC
+  AND ($4::bigint IS NULL OR v.version < $4::bigint)
+ORDER BY v.version DESC
+LIMIT $5::int
 `
 
 type ReadsObservationHistoryParams struct {
 	TenantID      string
 	BankID        string
 	ObservationID uuid.UUID
+	BeforeVersion *int64
+	Lim           int32
 }
 
 type ReadsObservationHistoryRow struct {
@@ -408,9 +412,16 @@ type ReadsObservationHistoryRow struct {
 	At        time.Time
 }
 
-// ReadsObservationHistory returns an observation's version rows, newest first.
+// ReadsObservationHistory returns up to lim of an observation's version rows, newest first, below
+// before_version (NULL = from the newest). Versions are unique per observation, so version is the cursor.
 func (q *Queries) ReadsObservationHistory(ctx context.Context, arg ReadsObservationHistoryParams) ([]ReadsObservationHistoryRow, error) {
-	rows, err := q.db.Query(ctx, readsObservationHistory, arg.TenantID, arg.BankID, arg.ObservationID)
+	rows, err := q.db.Query(ctx, readsObservationHistory,
+		arg.TenantID,
+		arg.BankID,
+		arg.ObservationID,
+		arg.BeforeVersion,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

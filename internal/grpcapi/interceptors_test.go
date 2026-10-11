@@ -105,10 +105,10 @@ func TestPagingInterceptor(t *testing.T) {
 		req   proto.Message
 		field string
 	}{
-		{&pb.ListScopesRequest{PageSize: -1}, "page_size"},
+		{&pb.ListObservationScopesRequest{PageSize: -1}, "page_size"},
 		{&pb.ListEventsRequest{PageSize: -1}, "page_size"},
 		{&pb.SearchMentalModelsRequest{MaxResults: -1}, "max_results"},
-		{&pb.ListScopesRequest{}, ""},
+		{&pb.ListObservationScopesRequest{}, ""},
 		{&pb.ListEventsRequest{PageSize: 5}, ""},
 	}
 	for _, tc := range tests {

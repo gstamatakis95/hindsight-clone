@@ -10,15 +10,15 @@ import (
 // documentToProto converts a stored document without its original text.
 func documentToProto(x domain.Document) *pb.Document {
 	return &pb.Document{
-		Id:              string(x.ID),
-		ContentHash:     x.ContentHash,
-		Tags:            x.Tags,
-		MemoryUnitCount: x.UnitCount,
-		UnitsByFactType: mapToProto(x.UnitsByFactType),
-		RetainOverrides: retainOverridesToProto(x.Overrides),
-		CreatedAt:       tsToProto(x.CreatedAt),
-		UpdatedAt:       tsToProto(x.UpdatedAt),
-		ExtractedAt:     tsPtrToProto(x.ExtractedAt),
+		Id:                 string(x.ID),
+		ContentHash:        x.ContentHash,
+		Tags:               x.Tags,
+		MemoryCount:        x.UnitCount,
+		MemoriesByFactType: mapToProto(x.UnitsByFactType),
+		RetainOverrides:    retainOverridesToProto(x.Overrides),
+		CreatedAt:          tsToProto(x.CreatedAt),
+		UpdatedAt:          tsToProto(x.UpdatedAt),
+		ExtractedAt:        tsPtrToProto(x.ExtractedAt),
 	}
 }
 
@@ -33,14 +33,14 @@ func documentViewToProto(v document.View) *pb.Document {
 func listDocumentsFromProto(r *pb.ListDocumentsRequest) (document.ListRequest, error) {
 	var d decoder
 	out := document.ListRequest{
-		Bank:      domain.BankRef{Bank: r.GetBankId()},
-		Q:         r.GetQ(),
-		Tags:      d.tagFilter(r.GetTags()),
-		Start:     d.tsPtr(r.GetStart()),
-		End:       d.tsPtr(r.GetEnd()),
-		TimeField: fromEnum[domain.DocTimeField](&d, r.GetTimeField()),
-		PageSize:  int(r.GetPageSize()),
-		PageToken: r.GetPageToken(),
+		Bank:               domain.BankRef{Bank: r.GetBankId()},
+		DocumentIDContains: r.GetDocumentIdContains(),
+		Tags:               d.tagFilter(r.GetTags()),
+		Start:              d.tsPtr(r.GetStart()),
+		End:                d.tsPtr(r.GetEnd()),
+		TimeField:          fromEnum[domain.DocTimeField](&d, r.GetTimeField()),
+		PageSize:           int(r.GetPageSize()),
+		PageToken:          r.GetPageToken(),
 	}
 	return out, d.err
 }

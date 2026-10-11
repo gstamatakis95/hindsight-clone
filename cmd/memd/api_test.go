@@ -38,7 +38,8 @@ func fillRequest(m protoreflect.Message) {
 }
 
 // TestEveryRPCWired calls every memory.v1 RPC (enumerated from the service descriptors) with a minimal request and
-// checks each reaches a wired handler: no UNIMPLEMENTED, and no INTERNAL or UNKNOWN from the services.
+// checks each reaches a wired handler: no UNIMPLEMENTED, and no INTERNAL or UNKNOWN from the services. The server
+// must serve exactly the RPCs the descriptors declare.
 func TestEveryRPCWired(t *testing.T) {
 	w := startWired(t)
 	n := 0
@@ -53,8 +54,14 @@ func TestEveryRPCWired(t *testing.T) {
 		}
 		return true
 	})
-	if n != 50 {
-		t.Fatalf("found %d RPCs, want 50", n)
+	served := 0
+	for name, info := range w.srv.GetServiceInfo() {
+		if strings.HasPrefix(name, "memory.v1.") {
+			served += len(info.Methods)
+		}
+	}
+	if n == 0 || n != served {
+		t.Fatalf("the descriptors declare %d RPCs and the server serves %d; want the same, non-zero", n, served)
 	}
 }
 
@@ -234,8 +241,8 @@ func TestSpecOverridesValidated(t *testing.T) {
 	}
 }
 
-// TestUpdateDocumentTags checks a missing tag set is rejected and an empty one clears the document's tags.
-func TestUpdateDocumentTags(t *testing.T) {
+// TestRetagDocumentTags checks a missing tag set is rejected and an empty one clears the document's tags.
+func TestRetagDocumentTags(t *testing.T) {
 	w := startWired(t)
 	ctx := w.ctx(t)
 	if _, err := pb.NewMemoryServiceClient(w.conn).Retain(ctx, &pb.RetainRequest{
@@ -246,11 +253,11 @@ func TestUpdateDocumentTags(t *testing.T) {
 	}
 	w.idle(t, "b")
 	documents := pb.NewDocumentServiceClient(w.conn)
-	_, err := documents.UpdateDocument(ctx, &pb.UpdateDocumentRequest{BankId: "b", DocumentId: "d"})
+	_, err := documents.RetagDocument(ctx, &pb.RetagDocumentRequest{BankId: "b", DocumentId: "d"})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("nil tags: err = %v, want INVALID_ARGUMENT", err)
 	}
-	resp, err := documents.UpdateDocument(ctx, &pb.UpdateDocumentRequest{
+	resp, err := documents.RetagDocument(ctx, &pb.RetagDocumentRequest{
 		BankId: "b", DocumentId: "d", Tags: &pb.TagSet{},
 	})
 	if err != nil || resp.GetOperation() == nil {
@@ -260,6 +267,46 @@ func TestUpdateDocumentTags(t *testing.T) {
 	doc, err := documents.GetDocument(ctx, &pb.GetDocumentRequest{BankId: "b", DocumentId: "d"})
 	if err != nil || len(doc.GetDocument().GetTags()) != 0 {
 		t.Fatalf("after clearing: %v, %v; want no tags", doc, err)
+	}
+}
+
+// TestClearObservationsNeedsTarget checks a ClearObservations that names no target, or an empty scope list,
+// is INVALID_ARGUMENT and deletes nothing.
+func TestClearObservationsNeedsTarget(t *testing.T) {
+	w := startWired(t)
+	ctx := w.ctx(t)
+	mem := pb.NewMemoryServiceClient(w.conn)
+	if _, err := mem.Retain(ctx, &pb.RetainRequest{
+		BankId: "b", Items: []*pb.RetainItem{{Content: "Alice moved to Lisbon in 2021. Alice works as a nurse."}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.idle(t, "b")
+	countObservations := func() int {
+		resp, err := mem.ListMemories(ctx, &pb.ListMemoriesRequest{
+			BankId: "b", FactTypes: []pb.FactType{pb.FactType_FACT_TYPE_OBSERVATION},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(resp.GetMemories())
+	}
+	before := countObservations()
+	if before == 0 {
+		t.Fatal("no observations to protect")
+	}
+	observations := pb.NewObservationServiceClient(w.conn)
+	for name, req := range map[string]*pb.ClearObservationsRequest{
+		"no target":   {BankId: "b"},
+		"no scopes":   {BankId: "b", Target: &pb.ClearObservationsRequest_Scopes{Scopes: &pb.TagSetList{}}},
+		"all = false": {BankId: "b", Target: &pb.ClearObservationsRequest_All{All: false}},
+	} {
+		if _, err := observations.ClearObservations(ctx, req); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("%s: err = %v, want INVALID_ARGUMENT", name, err)
+		}
+	}
+	if after := countObservations(); after != before {
+		t.Errorf("observations = %d after the rejected clears, want %d", after, before)
 	}
 }
 

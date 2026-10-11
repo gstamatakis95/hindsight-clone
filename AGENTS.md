@@ -31,9 +31,10 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   - internal/memory: MemoryService (Retain, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory,
     InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
     sweeps.
-  - internal/observation: ObservationService and GetObservationHistory; consolidate; the consolidation
-    reconcile sweep.
-  - internal/document: DocumentService (list, get, retag, reprocess); retag_document.
+  - internal/observation: ObservationService (Consolidate, ListObservationScopes, ListObservationHistory,
+    ClearObservations, PreviewConsolidationStrategies); consolidate; the consolidation reconcile sweep.
+  - internal/document: DocumentService (ListDocuments, GetDocument, RetagDocument, ReprocessDocument);
+    retag_document.
   - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
   - internal/bank: BankService's bank lifecycle (create, from a template too, get, delete, stats, tags, export);
     delete_bank; the stalled-delete sweep.

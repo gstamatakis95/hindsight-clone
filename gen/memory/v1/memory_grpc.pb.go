@@ -537,117 +537,9 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	MemoryUnitService_GetObservationHistory_FullMethodName = "/memory.v1.MemoryUnitService/GetObservationHistory"
-)
-
-// MemoryUnitServiceClient is the client API for MemoryUnitService service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-//
-// MemoryUnitService reads the version history of observations.
-type MemoryUnitServiceClient interface {
-	// GetObservationHistory returns every version of an observation, oldest first.
-	GetObservationHistory(ctx context.Context, in *GetObservationHistoryRequest, opts ...grpc.CallOption) (*GetObservationHistoryResponse, error)
-}
-
-type memoryUnitServiceClient struct {
-	cc grpc.ClientConnInterface
-}
-
-func NewMemoryUnitServiceClient(cc grpc.ClientConnInterface) MemoryUnitServiceClient {
-	return &memoryUnitServiceClient{cc}
-}
-
-func (c *memoryUnitServiceClient) GetObservationHistory(ctx context.Context, in *GetObservationHistoryRequest, opts ...grpc.CallOption) (*GetObservationHistoryResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetObservationHistoryResponse)
-	err := c.cc.Invoke(ctx, MemoryUnitService_GetObservationHistory_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// MemoryUnitServiceServer is the server API for MemoryUnitService service.
-// All implementations must embed UnimplementedMemoryUnitServiceServer
-// for forward compatibility.
-//
-// MemoryUnitService reads the version history of observations.
-type MemoryUnitServiceServer interface {
-	// GetObservationHistory returns every version of an observation, oldest first.
-	GetObservationHistory(context.Context, *GetObservationHistoryRequest) (*GetObservationHistoryResponse, error)
-	mustEmbedUnimplementedMemoryUnitServiceServer()
-}
-
-// UnimplementedMemoryUnitServiceServer must be embedded to have
-// forward compatible implementations.
-//
-// NOTE: this should be embedded by value instead of pointer to avoid a nil
-// pointer dereference when methods are called.
-type UnimplementedMemoryUnitServiceServer struct{}
-
-func (UnimplementedMemoryUnitServiceServer) GetObservationHistory(context.Context, *GetObservationHistoryRequest) (*GetObservationHistoryResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetObservationHistory not implemented")
-}
-func (UnimplementedMemoryUnitServiceServer) mustEmbedUnimplementedMemoryUnitServiceServer() {}
-func (UnimplementedMemoryUnitServiceServer) testEmbeddedByValue()                           {}
-
-// UnsafeMemoryUnitServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to MemoryUnitServiceServer will
-// result in compilation errors.
-type UnsafeMemoryUnitServiceServer interface {
-	mustEmbedUnimplementedMemoryUnitServiceServer()
-}
-
-func RegisterMemoryUnitServiceServer(s grpc.ServiceRegistrar, srv MemoryUnitServiceServer) {
-	// If the following call panics, it indicates UnimplementedMemoryUnitServiceServer was
-	// embedded by pointer and is nil.  This will cause panics if an
-	// unimplemented method is ever invoked, so we test this at initialization
-	// time to prevent it from happening at runtime later due to I/O.
-	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
-		t.testEmbeddedByValue()
-	}
-	s.RegisterService(&MemoryUnitService_ServiceDesc, srv)
-}
-
-func _MemoryUnitService_GetObservationHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetObservationHistoryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MemoryUnitServiceServer).GetObservationHistory(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MemoryUnitService_GetObservationHistory_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MemoryUnitServiceServer).GetObservationHistory(ctx, req.(*GetObservationHistoryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-// MemoryUnitService_ServiceDesc is the grpc.ServiceDesc for MemoryUnitService service.
-// It's only intended for direct use with grpc.RegisterService,
-// and not to be introspected or modified (even as a copy)
-var MemoryUnitService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "memory.v1.MemoryUnitService",
-	HandlerType: (*MemoryUnitServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetObservationHistory",
-			Handler:    _MemoryUnitService_GetObservationHistory_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "memory/v1/memory.proto",
-}
-
-const (
 	DocumentService_ListDocuments_FullMethodName     = "/memory.v1.DocumentService/ListDocuments"
 	DocumentService_GetDocument_FullMethodName       = "/memory.v1.DocumentService/GetDocument"
-	DocumentService_UpdateDocument_FullMethodName    = "/memory.v1.DocumentService/UpdateDocument"
+	DocumentService_RetagDocument_FullMethodName     = "/memory.v1.DocumentService/RetagDocument"
 	DocumentService_ReprocessDocument_FullMethodName = "/memory.v1.DocumentService/ReprocessDocument"
 )
 
@@ -661,10 +553,11 @@ type DocumentServiceClient interface {
 	ListDocuments(ctx context.Context, in *ListDocumentsRequest, opts ...grpc.CallOption) (*ListDocumentsResponse, error)
 	// GetDocument returns one document, optionally with its original text from the blob store.
 	GetDocument(ctx context.Context, in *GetDocumentRequest, opts ...grpc.CallOption) (*GetDocumentResponse, error)
-	// UpdateDocument replaces the document's tag set. A set-equal update is a no-op; a real change clears
-	// the document's observations and enqueues a retag_document job that re-consolidates under the new tags.
-	UpdateDocument(ctx context.Context, in *UpdateDocumentRequest, opts ...grpc.CallOption) (*UpdateDocumentResponse, error)
-	// ReprocessDocument re-extracts the document from its original text, replacing its units and resetting
+	// RetagDocument replaces the document's tag set. A set-equal retag is a no-op. A real change rewrites the
+	// tags of the document's memories at once and, as a side effect, enqueues a retag_document job that clears
+	// every observation citing those memories and re-consolidates them under the new tags.
+	RetagDocument(ctx context.Context, in *RetagDocumentRequest, opts ...grpc.CallOption) (*RetagDocumentResponse, error)
+	// ReprocessDocument re-extracts the document from its original text, replacing its memories and resetting
 	// their curation. Replays the stored overrides unless new ones are given.
 	ReprocessDocument(ctx context.Context, in *ReprocessDocumentRequest, opts ...grpc.CallOption) (*ReprocessDocumentResponse, error)
 }
@@ -697,10 +590,10 @@ func (c *documentServiceClient) GetDocument(ctx context.Context, in *GetDocument
 	return out, nil
 }
 
-func (c *documentServiceClient) UpdateDocument(ctx context.Context, in *UpdateDocumentRequest, opts ...grpc.CallOption) (*UpdateDocumentResponse, error) {
+func (c *documentServiceClient) RetagDocument(ctx context.Context, in *RetagDocumentRequest, opts ...grpc.CallOption) (*RetagDocumentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(UpdateDocumentResponse)
-	err := c.cc.Invoke(ctx, DocumentService_UpdateDocument_FullMethodName, in, out, cOpts...)
+	out := new(RetagDocumentResponse)
+	err := c.cc.Invoke(ctx, DocumentService_RetagDocument_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -727,10 +620,11 @@ type DocumentServiceServer interface {
 	ListDocuments(context.Context, *ListDocumentsRequest) (*ListDocumentsResponse, error)
 	// GetDocument returns one document, optionally with its original text from the blob store.
 	GetDocument(context.Context, *GetDocumentRequest) (*GetDocumentResponse, error)
-	// UpdateDocument replaces the document's tag set. A set-equal update is a no-op; a real change clears
-	// the document's observations and enqueues a retag_document job that re-consolidates under the new tags.
-	UpdateDocument(context.Context, *UpdateDocumentRequest) (*UpdateDocumentResponse, error)
-	// ReprocessDocument re-extracts the document from its original text, replacing its units and resetting
+	// RetagDocument replaces the document's tag set. A set-equal retag is a no-op. A real change rewrites the
+	// tags of the document's memories at once and, as a side effect, enqueues a retag_document job that clears
+	// every observation citing those memories and re-consolidates them under the new tags.
+	RetagDocument(context.Context, *RetagDocumentRequest) (*RetagDocumentResponse, error)
+	// ReprocessDocument re-extracts the document from its original text, replacing its memories and resetting
 	// their curation. Replays the stored overrides unless new ones are given.
 	ReprocessDocument(context.Context, *ReprocessDocumentRequest) (*ReprocessDocumentResponse, error)
 	mustEmbedUnimplementedDocumentServiceServer()
@@ -749,8 +643,8 @@ func (UnimplementedDocumentServiceServer) ListDocuments(context.Context, *ListDo
 func (UnimplementedDocumentServiceServer) GetDocument(context.Context, *GetDocumentRequest) (*GetDocumentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDocument not implemented")
 }
-func (UnimplementedDocumentServiceServer) UpdateDocument(context.Context, *UpdateDocumentRequest) (*UpdateDocumentResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateDocument not implemented")
+func (UnimplementedDocumentServiceServer) RetagDocument(context.Context, *RetagDocumentRequest) (*RetagDocumentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RetagDocument not implemented")
 }
 func (UnimplementedDocumentServiceServer) ReprocessDocument(context.Context, *ReprocessDocumentRequest) (*ReprocessDocumentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ReprocessDocument not implemented")
@@ -812,20 +706,20 @@ func _DocumentService_GetDocument_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _DocumentService_UpdateDocument_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(UpdateDocumentRequest)
+func _DocumentService_RetagDocument_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetagDocumentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(DocumentServiceServer).UpdateDocument(ctx, in)
+		return srv.(DocumentServiceServer).RetagDocument(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: DocumentService_UpdateDocument_FullMethodName,
+		FullMethod: DocumentService_RetagDocument_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DocumentServiceServer).UpdateDocument(ctx, req.(*UpdateDocumentRequest))
+		return srv.(DocumentServiceServer).RetagDocument(ctx, req.(*RetagDocumentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -864,8 +758,8 @@ var DocumentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _DocumentService_GetDocument_Handler,
 		},
 		{
-			MethodName: "UpdateDocument",
-			Handler:    _DocumentService_UpdateDocument_Handler,
+			MethodName: "RetagDocument",
+			Handler:    _DocumentService_RetagDocument_Handler,
 		},
 		{
 			MethodName: "ReprocessDocument",
@@ -878,9 +772,9 @@ var DocumentService_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	ObservationService_Consolidate_FullMethodName                    = "/memory.v1.ObservationService/Consolidate"
-	ObservationService_ListScopes_FullMethodName                     = "/memory.v1.ObservationService/ListScopes"
+	ObservationService_ListObservationScopes_FullMethodName          = "/memory.v1.ObservationService/ListObservationScopes"
+	ObservationService_ListObservationHistory_FullMethodName         = "/memory.v1.ObservationService/ListObservationHistory"
 	ObservationService_ClearObservations_FullMethodName              = "/memory.v1.ObservationService/ClearObservations"
-	ObservationService_ClearMemoryObservations_FullMethodName        = "/memory.v1.ObservationService/ClearMemoryObservations"
 	ObservationService_PreviewConsolidationStrategies_FullMethodName = "/memory.v1.ObservationService/PreviewConsolidationStrategies"
 )
 
@@ -888,19 +782,18 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// ObservationService runs and inspects consolidation.
+// ObservationService runs consolidation and lists, inspects and clears observations.
 type ObservationServiceClient interface {
 	// Consolidate enqueues a manual consolidation, optionally limited to scopes and with its own overrides.
 	// A job carrying overrides or scopes is never merged into another queued job.
 	Consolidate(ctx context.Context, in *ConsolidateRequest, opts ...grpc.CallOption) (*ConsolidateResponse, error)
-	// ListScopes pages through the bank's observation scopes with counts.
-	ListScopes(ctx context.Context, in *ListScopesRequest, opts ...grpc.CallOption) (*ListScopesResponse, error)
-	// ClearObservations deletes observations in the given scopes (or all) and resets their sources,
-	// optionally re-consolidating.
+	// ListObservationScopes pages through the bank's observation scopes with counts.
+	ListObservationScopes(ctx context.Context, in *ListObservationScopesRequest, opts ...grpc.CallOption) (*ListObservationScopesResponse, error)
+	// ListObservationHistory pages through the versions of one observation, newest first.
+	ListObservationHistory(ctx context.Context, in *ListObservationHistoryRequest, opts ...grpc.CallOption) (*ListObservationHistoryResponse, error)
+	// ClearObservations deletes the observations of exact scopes, of one memory or of the whole bank, resets
+	// their sources for re-consolidation, and optionally re-consolidates at once.
 	ClearObservations(ctx context.Context, in *ClearObservationsRequest, opts ...grpc.CallOption) (*ClearObservationsResponse, error)
-	// ClearMemoryObservations deletes the observations citing one unit and resets their co-sources,
-	// optionally re-consolidating.
-	ClearMemoryObservations(ctx context.Context, in *ClearMemoryObservationsRequest, opts ...grpc.CallOption) (*ClearMemoryObservationsResponse, error)
 	// PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes without
 	// saving them.
 	PreviewConsolidationStrategies(ctx context.Context, in *PreviewConsolidationStrategiesRequest, opts ...grpc.CallOption) (*PreviewConsolidationStrategiesResponse, error)
@@ -924,10 +817,20 @@ func (c *observationServiceClient) Consolidate(ctx context.Context, in *Consolid
 	return out, nil
 }
 
-func (c *observationServiceClient) ListScopes(ctx context.Context, in *ListScopesRequest, opts ...grpc.CallOption) (*ListScopesResponse, error) {
+func (c *observationServiceClient) ListObservationScopes(ctx context.Context, in *ListObservationScopesRequest, opts ...grpc.CallOption) (*ListObservationScopesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ListScopesResponse)
-	err := c.cc.Invoke(ctx, ObservationService_ListScopes_FullMethodName, in, out, cOpts...)
+	out := new(ListObservationScopesResponse)
+	err := c.cc.Invoke(ctx, ObservationService_ListObservationScopes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *observationServiceClient) ListObservationHistory(ctx context.Context, in *ListObservationHistoryRequest, opts ...grpc.CallOption) (*ListObservationHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListObservationHistoryResponse)
+	err := c.cc.Invoke(ctx, ObservationService_ListObservationHistory_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -938,16 +841,6 @@ func (c *observationServiceClient) ClearObservations(ctx context.Context, in *Cl
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ClearObservationsResponse)
 	err := c.cc.Invoke(ctx, ObservationService_ClearObservations_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *observationServiceClient) ClearMemoryObservations(ctx context.Context, in *ClearMemoryObservationsRequest, opts ...grpc.CallOption) (*ClearMemoryObservationsResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ClearMemoryObservationsResponse)
-	err := c.cc.Invoke(ctx, ObservationService_ClearMemoryObservations_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -968,19 +861,18 @@ func (c *observationServiceClient) PreviewConsolidationStrategies(ctx context.Co
 // All implementations must embed UnimplementedObservationServiceServer
 // for forward compatibility.
 //
-// ObservationService runs and inspects consolidation.
+// ObservationService runs consolidation and lists, inspects and clears observations.
 type ObservationServiceServer interface {
 	// Consolidate enqueues a manual consolidation, optionally limited to scopes and with its own overrides.
 	// A job carrying overrides or scopes is never merged into another queued job.
 	Consolidate(context.Context, *ConsolidateRequest) (*ConsolidateResponse, error)
-	// ListScopes pages through the bank's observation scopes with counts.
-	ListScopes(context.Context, *ListScopesRequest) (*ListScopesResponse, error)
-	// ClearObservations deletes observations in the given scopes (or all) and resets their sources,
-	// optionally re-consolidating.
+	// ListObservationScopes pages through the bank's observation scopes with counts.
+	ListObservationScopes(context.Context, *ListObservationScopesRequest) (*ListObservationScopesResponse, error)
+	// ListObservationHistory pages through the versions of one observation, newest first.
+	ListObservationHistory(context.Context, *ListObservationHistoryRequest) (*ListObservationHistoryResponse, error)
+	// ClearObservations deletes the observations of exact scopes, of one memory or of the whole bank, resets
+	// their sources for re-consolidation, and optionally re-consolidates at once.
 	ClearObservations(context.Context, *ClearObservationsRequest) (*ClearObservationsResponse, error)
-	// ClearMemoryObservations deletes the observations citing one unit and resets their co-sources,
-	// optionally re-consolidating.
-	ClearMemoryObservations(context.Context, *ClearMemoryObservationsRequest) (*ClearMemoryObservationsResponse, error)
 	// PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes without
 	// saving them.
 	PreviewConsolidationStrategies(context.Context, *PreviewConsolidationStrategiesRequest) (*PreviewConsolidationStrategiesResponse, error)
@@ -997,14 +889,14 @@ type UnimplementedObservationServiceServer struct{}
 func (UnimplementedObservationServiceServer) Consolidate(context.Context, *ConsolidateRequest) (*ConsolidateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Consolidate not implemented")
 }
-func (UnimplementedObservationServiceServer) ListScopes(context.Context, *ListScopesRequest) (*ListScopesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ListScopes not implemented")
+func (UnimplementedObservationServiceServer) ListObservationScopes(context.Context, *ListObservationScopesRequest) (*ListObservationScopesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListObservationScopes not implemented")
+}
+func (UnimplementedObservationServiceServer) ListObservationHistory(context.Context, *ListObservationHistoryRequest) (*ListObservationHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListObservationHistory not implemented")
 }
 func (UnimplementedObservationServiceServer) ClearObservations(context.Context, *ClearObservationsRequest) (*ClearObservationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ClearObservations not implemented")
-}
-func (UnimplementedObservationServiceServer) ClearMemoryObservations(context.Context, *ClearMemoryObservationsRequest) (*ClearMemoryObservationsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ClearMemoryObservations not implemented")
 }
 func (UnimplementedObservationServiceServer) PreviewConsolidationStrategies(context.Context, *PreviewConsolidationStrategiesRequest) (*PreviewConsolidationStrategiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreviewConsolidationStrategies not implemented")
@@ -1048,20 +940,38 @@ func _ObservationService_Consolidate_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ObservationService_ListScopes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ListScopesRequest)
+func _ObservationService_ListObservationScopes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListObservationScopesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(ObservationServiceServer).ListScopes(ctx, in)
+		return srv.(ObservationServiceServer).ListObservationScopes(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: ObservationService_ListScopes_FullMethodName,
+		FullMethod: ObservationService_ListObservationScopes_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ObservationServiceServer).ListScopes(ctx, req.(*ListScopesRequest))
+		return srv.(ObservationServiceServer).ListObservationScopes(ctx, req.(*ListObservationScopesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ObservationService_ListObservationHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListObservationHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ObservationServiceServer).ListObservationHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ObservationService_ListObservationHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ObservationServiceServer).ListObservationHistory(ctx, req.(*ListObservationHistoryRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1080,24 +990,6 @@ func _ObservationService_ClearObservations_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ObservationServiceServer).ClearObservations(ctx, req.(*ClearObservationsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ObservationService_ClearMemoryObservations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ClearMemoryObservationsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ObservationServiceServer).ClearMemoryObservations(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ObservationService_ClearMemoryObservations_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ObservationServiceServer).ClearMemoryObservations(ctx, req.(*ClearMemoryObservationsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1132,16 +1024,16 @@ var ObservationService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ObservationService_Consolidate_Handler,
 		},
 		{
-			MethodName: "ListScopes",
-			Handler:    _ObservationService_ListScopes_Handler,
+			MethodName: "ListObservationScopes",
+			Handler:    _ObservationService_ListObservationScopes_Handler,
+		},
+		{
+			MethodName: "ListObservationHistory",
+			Handler:    _ObservationService_ListObservationHistory_Handler,
 		},
 		{
 			MethodName: "ClearObservations",
 			Handler:    _ObservationService_ClearObservations_Handler,
-		},
-		{
-			MethodName: "ClearMemoryObservations",
-			Handler:    _ObservationService_ClearMemoryObservations_Handler,
 		},
 		{
 			MethodName: "PreviewConsolidationStrategies",

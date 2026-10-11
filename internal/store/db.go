@@ -101,9 +101,12 @@ type Catalog interface {
 	// ListUnits returns up to q.Limit units matching q, newest first (created_at, then id, both descending),
 	// strictly after q.After, filled like GetUnit. Unknown or tombstoned bank: domain.ErrNotFound.
 	ListUnits(ctx context.Context, q UnitQuery) ([]domain.Unit, error)
-	// ObservationHistory returns the observation_versions rows of observation id, newest first. Unknown id,
-	// or unknown or tombstoned bank: domain.ErrNotFound.
-	ObservationHistory(ctx context.Context, b domain.BankRef, id domain.UnitID) ([]domain.ObservationVersion, error)
+	// ObservationHistory returns up to limit observation_versions rows of observation id, newest first, with a
+	// version below before (0 = from the newest). Unknown or tombstoned bank, or no rows when before is 0:
+	// domain.ErrNotFound; no rows below a non-zero before is an empty result.
+	ObservationHistory(
+		ctx context.Context, b domain.BankRef, id domain.UnitID, before int64, limit int,
+	) ([]domain.ObservationVersion, error)
 	// ListDocuments returns up to q.Limit documents matching q, newest first (created_at, then id, both
 	// descending), strictly after q.After, with UnitCount and UnitsByFactType filled. Unknown or tombstoned
 	// bank: domain.ErrNotFound.

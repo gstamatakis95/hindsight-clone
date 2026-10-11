@@ -200,7 +200,7 @@ const (
 // DocTimeField selects the timestamp ListDocuments filters on.
 type DocTimeField string
 
-// Document time fields, mirroring memory.v1.DocTimeField.
+// Document time fields, mirroring memory.v1.ListDocumentsRequest.TimeField.
 const (
 	// DocTimeFieldUnspecified is the zero value (created_at).
 	DocTimeFieldUnspecified DocTimeField = ""

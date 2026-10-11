@@ -24,8 +24,6 @@ type Client struct {
 	Tenant string
 	// Memory is MemoryService (Retain, Recall, Reflect, memory listing and curation).
 	Memory memoryv1.MemoryServiceClient
-	// Units is MemoryUnitService (observation history).
-	Units memoryv1.MemoryUnitServiceClient
 	// Documents is DocumentService.
 	Documents memoryv1.DocumentServiceClient
 	// Banks is BankService.
@@ -59,8 +57,8 @@ func newClient(conn *grpc.ClientConn, tenant string) *Client {
 	cc := tenantConn{cc: conn, tenant: tenant}
 	return &Client{
 		Conn: conn, Tenant: tenant,
-		Memory: memoryv1.NewMemoryServiceClient(cc), Units: memoryv1.NewMemoryUnitServiceClient(cc),
-		Documents: memoryv1.NewDocumentServiceClient(cc), Banks: memoryv1.NewBankServiceClient(cc),
+		Memory: memoryv1.NewMemoryServiceClient(cc), Documents: memoryv1.NewDocumentServiceClient(cc),
+		Banks:        memoryv1.NewBankServiceClient(cc),
 		MentalModels: memoryv1.NewMentalModelServiceClient(cc), Observations: memoryv1.NewObservationServiceClient(cc),
 		Operations: memoryv1.NewOperationServiceClient(cc), Tenants: memoryv1.NewTenantServiceClient(cc),
 	}
