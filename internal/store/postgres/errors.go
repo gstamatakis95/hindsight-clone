@@ -69,7 +69,7 @@ func pgClass(code string) error {
 	}
 	if strings.HasPrefix(code, classDataException) {
 		// Bad input (NUL bytes, invalid encodings, out-of-range values; 22P02 included): deterministic, so
-		// the job fails at once instead of retrying (SPEC "Jobs").
+		// the job fails at once instead of retrying.
 		return domain.ErrInvalidArgument
 	}
 	return domain.ErrUnavailable

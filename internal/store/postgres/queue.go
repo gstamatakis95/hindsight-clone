@@ -24,7 +24,7 @@ var _ store.Queue = (*queue)(nil)
 
 // Enqueue inserts j, or joins (and locks FOR UPDATE) a joinable row under its effective dedupe policy. It
 // takes FOR KEY SHARE on the bank row first and the dedupe advisory lock in its own statement before the
-// lookup. A deadlock with another enqueuer surfaces as domain.ErrConflict (decision 110).
+// lookup. A deadlock with another enqueuer surfaces as domain.ErrConflict.
 func (r *queue) Enqueue(ctx context.Context, j store.Job) (domain.OperationID, bool, error) {
 	b := j.Bank
 	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, ID: b.Bank})
@@ -46,7 +46,7 @@ func (r *queue) Enqueue(ctx context.Context, j store.Job) (domain.OperationID, b
 }
 
 // effectiveDedupe is the policy Enqueue applies to j: refresh_mental_model always dedupes as Pending, a job
-// with overrides never dedupes, and a job without a serial key never dedupes (decision 112).
+// with overrides never dedupes, and a job without a serial key never dedupes.
 func effectiveDedupe(j store.Job) store.DedupePolicy {
 	switch {
 	case j.SerialKey == "":

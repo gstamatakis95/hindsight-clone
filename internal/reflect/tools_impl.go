@@ -136,7 +136,7 @@ func checkQuery(tool, query string) (toolResult, bool) {
 	return toolResult{}, true
 }
 
-// estimateTokens approximates a text's token count as one token per four bytes (decision 1104).
+// estimateTokens approximates a text's token count as one token per four bytes.
 func estimateTokens(s string) int { return (len(s) + 3) / 4 }
 
 // memoryOut is one memory or observation as the tools show it to the model.

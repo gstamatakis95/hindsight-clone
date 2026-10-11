@@ -215,7 +215,7 @@ func (r *unitRepo) IDsByDocument(
 }
 
 // Unconsolidated returns up to limit of the bank's facts with neither consolidation stamp and with an
-// embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), oldest
+// embedding (a unit awaiting its rederive is no consolidation candidate), oldest
 // created_at then id first, with their entity names. With scopes, only units whose tags contain every tag
 // of at least one scope are returned (so the shared scope matches every unit); the scopes' banks are
 // ignored in favour of b.

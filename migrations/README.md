@@ -39,7 +39,7 @@ creates the whole schema. A schema change edits it in place:
 
 1. Edit the area of `0001_baseline.py` the change belongs to (tables are grouped by area, each
    with its indexes) and, for a new table, add it to `TABLES` so `downgrade()` drops it. Put
-   `tenant_id` on every new table and follow `docs/decisions/004-schema-conventions.md`.
+   `tenant_id` on every new table and follow `docs/design/storage.md#conventions`.
 2. Rebuild your dev database: its `alembic_version` still says `0001`, so `make migrate` alone
    would not re-run the edited baseline. Either run `make downgrade` before editing, then
    `make migrate`, or start over with `docker compose down -v && make up && make migrate`. The

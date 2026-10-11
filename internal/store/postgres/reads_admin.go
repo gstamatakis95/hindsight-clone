@@ -28,7 +28,7 @@ func containsPattern(s string) string {
 }
 
 // tagFilterArgs maps a listing's flat tag filter onto the queries' (tags_match, filter_tags) parameters: no
-// tags is no filter (decision 1500: the filter applies only when tags are set), else the normalized tags under
+// tags is no filter (the filter applies only when tags are set), else the normalized tags under
 // mode. The SQL treats unspecified and unknown modes as any, like domain.MatchTags.
 func tagFilterArgs(tags []string, mode domain.TagsMatch) (match string, filter []string) {
 	if len(tags) == 0 {

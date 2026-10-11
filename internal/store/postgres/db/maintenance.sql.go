@@ -25,7 +25,7 @@ type BanksWithGraphWorkRow struct {
 }
 
 // BanksWithGraphWork returns, in byte order, the banks that are not tombstoned and have graph_dirty or
-// entity_maintenance rows queued (WP-20, decision 2002).
+// entity_maintenance rows queued, for the tick's graph_reconcile step (docs/design/architecture.md#maintenance-tick).
 func (q *Queries) BanksWithGraphWork(ctx context.Context) ([]BanksWithGraphWorkRow, error) {
 	rows, err := q.db.Query(ctx, banksWithGraphWork)
 	if err != nil {
@@ -108,8 +108,8 @@ type StalledBankDeletesRow struct {
 }
 
 // StalledBankDeletes returns, in byte order, the tombstoned banks with no pending or processing delete_bank
-// operation (WP-20, decision 2001): their delete was failed by ReclaimStale or a shutdown release at the
-// attempt cap, or failed for good.
+// operation: their delete was failed by ReclaimStale or a shutdown release at the attempt cap, or failed for
+// good, and the maintenance tick re-enqueues it (docs/design/storage.md#bank-deletion).
 func (q *Queries) StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesRow, error) {
 	rows, err := q.db.Query(ctx, stalledBankDeletes)
 	if err != nil {

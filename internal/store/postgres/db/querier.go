@@ -56,7 +56,7 @@ type Querier interface {
 	// BankDeleteUnits deletes up to lim memory_units rows of the bank.
 	BankDeleteUnits(ctx context.Context, arg BankDeleteUnitsParams) (int64, error)
 	// BanksWithGraphWork returns, in byte order, the banks that are not tombstoned and have graph_dirty or
-	// entity_maintenance rows queued (WP-20, decision 2002).
+	// entity_maintenance rows queued, for the tick's graph_reconcile step (docs/design/architecture.md#maintenance-tick).
 	BanksWithGraphWork(ctx context.Context) ([]BanksWithGraphWorkRow, error)
 	// BumpBankSeq increments a live bank's change_seq and returns it; the row lock is held until commit.
 	BumpBankSeq(ctx context.Context, arg BumpBankSeqParams) (int64, error)
@@ -280,7 +280,7 @@ type Querier interface {
 	// domain.MatchTags semantics under tags_match (filter tags normalized, never NULL); refresh_after keeps only
 	// models whose schedule sets after_consolidation. A NULL lim returns all.
 	ReadsListMentalModels(ctx context.Context, arg ReadsListMentalModelsParams) ([]MentalModel, error)
-	// WP-15 unit reads (decision 1500): GetUnit and ListUnits over live and archived units.
+	// Unit reads: GetUnit and ListUnits over live and archived units.
 	// ReadsListUnits returns up to lim units of a bank, newest first ((created_at, id) descending) and strictly
 	// before the cursor (NULL after_created_at = first page), from memory_units (include_live) and
 	// memory_units_archive (include_archived). Optional filters: unit_id, types (empty = all), text_like ('' =
@@ -294,7 +294,7 @@ type Querier interface {
 	// ReadsObservationHistory returns up to lim of an observation's version rows, newest first, below
 	// before_version (NULL = from the newest). Versions are unique per observation, so version is the cursor.
 	ReadsObservationHistory(ctx context.Context, arg ReadsObservationHistoryParams) ([]ReadsObservationHistoryRow, error)
-	// WP-15 admin reads (decision 1500): tag counts, bank stats, observation history, mental-model listings, cron and
+	// Admin reads: tag counts, bank stats, observation history, mental-model listings, cron and
 	// failed-refresh sweeps, and document listings. Text keysets and orderings use COLLATE "C" (byte order). LIKE
 	// patterns arrive already escaped (%, _ and \ literal) from the Go side.
 	// ReadsTagCounts counts, per tag, the items of one source ('memories': live units, 'mental_models',
@@ -308,17 +308,17 @@ type Querier interface {
 	// ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListObservationScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
 	ScopeUnconsolidated(ctx context.Context, arg ScopeUnconsolidatedParams) ([]ScopeUnconsolidatedRow, error)
 	// SettleRetainBatches ends every PENDING retain_batch parent whose retain_document children are all terminal
-	// (SPEC "Operations": the parent's status aggregates its children; WP-14b, decision 1453): FAILED when a child
+	// (the parent's status aggregates its children; docs/design/architecture.md#maintenance-tick): FAILED when a child
 	// failed, else CANCELLED when a child was cancelled, else COMPLETED, with the counts as its result. A parent is
 	// never claimed or run; the worker's maintenance tick calls this. It is idempotent: settled parents are no
 	// longer PENDING.
 	SettleRetainBatches(ctx context.Context) (int64, error)
 	// StalledBankDeletes returns, in byte order, the tombstoned banks with no pending or processing delete_bank
-	// operation (WP-20, decision 2001): their delete was failed by ReclaimStale or a shutdown release at the
-	// attempt cap, or failed for good.
+	// operation: their delete was failed by ReclaimStale or a shutdown release at the attempt cap, or failed for
+	// good, and the maintenance tick re-enqueues it (docs/design/storage.md#bank-deletion).
 	StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesRow, error)
 	// StrandedFacts returns live facts left with a NULL embedding by a rederive_memory operation that ended
-	// FAILED or CANCELLED (WP-14b, decision 1452), on banks that are not tombstoned, when no rederive of the unit
+	// FAILED or CANCELLED, on banks that are not tombstoned, when no rederive of the unit
 	// is pending or processing and none ended within retry_after_seconds. It walks the operations table (pruned
 	// after the retention period), not memory_units, so the maintenance tick never scans every unit.
 	StrandedFacts(ctx context.Context, arg StrandedFactsParams) ([]StrandedFactsRow, error)
@@ -373,7 +373,7 @@ type Querier interface {
 	UnitSetDocumentTags(ctx context.Context, arg UnitSetDocumentTagsParams) ([]uuid.UUID, error)
 	// UnitTakeArchived deletes a bank's archived unit and returns its row.
 	UnitTakeArchived(ctx context.Context, arg UnitTakeArchivedParams) (MemoryUnitsArchive, error)
-	// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
+	// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (a unit awaiting its rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
 	UnitUnconsolidated(ctx context.Context, arg UnitUnconsolidatedParams) ([]UnitUnconsolidatedRow, error)
 	// UnitUpdate replaces a live fact's curated fields and embedding and clears its consolidation stamps.
 	UnitUpdate(ctx context.Context, arg UnitUpdateParams) (int64, error)

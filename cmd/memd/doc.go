@@ -74,7 +74,7 @@
 // collects without marking lines as errors). The json format (observability.NewJSONHandler) writes one object per
 // line with Datadog's reserved attributes (timestamp, status, message, logger.name), so the agent parses it without
 // a pipeline; an explicit MEMD_LOG_FORMAT wins either way, and with Datadog off the default is the text format on
-// stderr, as before.
+// stderr.
 //
 // With MEMD_DATADOG_ENABLED the standard Datadog variables apply, read by dd-trace-go, datadog-go or
 // internal/observability: DD_AGENT_HOST, DD_TRACE_AGENT_PORT or DD_TRACE_AGENT_URL (traces), DD_DOGSTATSD_URL or
@@ -121,5 +121,6 @@
 // reflect's based_on); and observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest,
 // a retain emits the gRPC, gateway and job metrics with bounded tags, an unreachable agent still serves) and the
 // log format and stream switch. End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a
-// gateway emulator using these variable names. SPEC "Process model", "Model routing" and "File structure".
+// gateway emulator using these variable names. Design: docs/design/architecture.md#process-model and
+// docs/design/configuration.md.
 package main

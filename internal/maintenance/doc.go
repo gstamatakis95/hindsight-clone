@@ -75,5 +75,6 @@
 //
 // The tests run against a pgtest database: step order and isolation, concurrent ticks with no duplicate
 // enqueues, each reconcile, the prunes, and the graph job (top-up and prune, budget, tombstone, re-check and
-// re-enqueue). SPEC "Jobs" and "Behavioural rules" (graph maintenance after removals).
+// re-enqueue). Design: docs/design/architecture.md#maintenance-tick and
+// docs/design/retain.md#graph-maintenance.
 package maintenance

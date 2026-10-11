@@ -284,7 +284,7 @@ message RetainResponse {
   // The retain_batch parent operation; set when run_async enqueued more than one document. Its status
   // aggregates the retain_document children.
   Operation batch_operation = 2;
-  // Token usage per slot and model of the LLM and embedding calls a synchronous retain made; empty when
+  // Token usage per slot and model of the extraction (EXTRACT) calls a synchronous retain made; empty when
   // run_async (the usage is then on the retain_document operations).
   repeated SlotUsage usage = 3;
 }

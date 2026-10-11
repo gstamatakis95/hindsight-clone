@@ -71,8 +71,8 @@
 //     becomes an explicit clear;
 //   - an absent or empty mask means every populated leaf of the request (set nested messages are recursed
 //     into; lists, maps and Structs are leaves), so such a request never clears anything;
-//   - under an implicit mask, models (and a spec's overrides.models) merge per slot into the stored list, so
-//     binding one slot never drops another; an explicit models path replaces the whole list;
+//   - each model binding is one leaf (models.extract), so an implicit mask binds only the slots the request
+//     sets and never drops another; an explicit models path replaces the whole group;
 //   - ResetTenantConfig and ResetBankConfig reset the paths of their reset_mask ("*" = the whole level; an
 //     empty mask is INVALID_ARGUMENT naming reset_mask);
 //   - UpdateDirective copies the masked name, rules, tags and active fields (configsvc.DirectivePatch);
@@ -117,9 +117,9 @@
 // domain.TagFilter (an unset one is the zero filter); the receiving service checks it (both forms set, groups on
 // a list RPC). An Operation goes out with its bank_id, and its kind-specific result as debug_summary, compact
 // JSON text that is not a stable contract.
-// Mental-model detail is trimmed here: METADATA is the spec plus status, CONTENT adds content and structured
-// output, FULL adds source ids and the last trace; Get defaults to FULL, List to METADATA, and Create, Update and
-// Clear return FULL.
+// Mental-model views are trimmed here: BASIC is the spec plus status, CONTENT adds content and structured
+// output, FULL adds stale, the source memory ids and the last trace; Get defaults to FULL, List to BASIC, and
+// Create and Update return FULL.
 //
 // # Health
 //
@@ -134,5 +134,5 @@
 // others cover the interceptors, error mapping and details, the tag filter of every request, the Operation shape,
 // enum mapping, FieldMask patches, override lists, mental-model detail and health. The API's behaviour through the
 // real engines (every RPC wired, config-write validation, spec overrides, document retags, reflect's based_on) is
-// tested in cmd/memd over the wired stack. SPEC "gRPC surface", "Code standards" and "Behavioural rules".
+// tested in cmd/memd over the wired stack. Design: docs/design/curation-and-operations.md.
 package grpcapi

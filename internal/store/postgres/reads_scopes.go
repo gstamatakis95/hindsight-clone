@@ -162,7 +162,7 @@ func (r *reader) ListObservationScopes(
 	return out, nil
 }
 
-// scopesBankListable returns domain.ErrNotFound for an unknown or tombstoned bank (decision 1500).
+// scopesBankListable returns domain.ErrNotFound for an unknown or tombstoned bank.
 func (r *reader) scopesBankListable(ctx context.Context, b domain.BankRef) error {
 	bank, err := r.queries().GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
 	if err != nil {

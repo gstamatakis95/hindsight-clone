@@ -157,7 +157,7 @@ type ReadsListUnitsRow struct {
 	Stale                 bool
 }
 
-// WP-15 unit reads (decision 1500): GetUnit and ListUnits over live and archived units.
+// Unit reads: GetUnit and ListUnits over live and archived units.
 // ReadsListUnits returns up to lim units of a bank, newest first ((created_at, id) descending) and strictly
 // before the cursor (NULL after_created_at = first page), from memory_units (include_live) and
 // memory_units_archive (include_archived). Optional filters: unit_id, types (empty = all), text_like (” =

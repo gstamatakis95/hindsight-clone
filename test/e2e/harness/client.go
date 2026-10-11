@@ -105,7 +105,7 @@ func (c *Client) Pending(ctx context.Context, bank string) (map[string]int64, er
 }
 
 // WaitIdle polls the bank every poll until pending_operations_by_kind is empty on two consecutive polls
-// (decision 702: one idle poll can fall between a job finishing and its follow-up being enqueued). It returns
+// (one idle poll can fall between a job finishing and its follow-up being enqueued). It returns
 // an error naming what was still pending when ctx ends.
 func (c *Client) WaitIdle(ctx context.Context, bank string, poll time.Duration) error {
 	idle := 0

@@ -1,5 +1,5 @@
 # Local dependencies for memd: Postgres (pgvector + pg_search + pg_trgm) and MinIO.
-# The LLM gateway is external. Image choices: docs/decisions/003-postgres-image.md.
+# The LLM gateway is external. Image choices: docs/design/storage.md#runtime-requirements.
 # Host ports are configurable so several checkouts can run side by side; the compose
 # project name is left directory-based for the same reason.
 

@@ -1,7 +1,8 @@
 # api/AGENTS.md: rules for editing the memd proto
 
 `api/memory/v1/memory.proto` is the whole API in one file (package `memory.v1`, Go package
-`memd/gen/memory/v1;memoryv1`). SPEC.md "gRPC surface" is the source of truth for behaviour.
+`memd/gen/memory/v1;memoryv1`). The behaviour behind it is described in docs/design (see
+docs/design/curation-and-operations.md for the services and their conventions).
 
 ## Layout
 
@@ -77,4 +78,4 @@ Where a new type goes:
   Never hand-edit `gen/`.
 - Before you finish, run `buf format -d --exit-code` and `make lint` (which runs `buf lint`). Until the first
   release there is no `buf breaking` check; after it, `buf breaking` runs against the release tag.
-- Update SPEC.md with any change to the wire contract.
+- Update the docs/design section and the README feature list for any change to the wire contract.

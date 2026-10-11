@@ -17,10 +17,11 @@ Alembic owns memd's Postgres schema. Go never runs DDL.
   extensions), so a missed drop fails the next upgrade loudly.
 - **Docstrings:** every revision has a module docstring, and `upgrade()` and `downgrade()`
   each have one (ruff `D` rules enforce this).
-- **`tenant_id text NOT NULL` on every table.** Follow docs/decisions/004-schema-conventions.md
+- **`tenant_id text NOT NULL` on every table.** Follow docs/design/storage.md#conventions
   for ids, types, CHECKs and indexes.
 - **Regenerate `schema/schema.sql`** with `make migrate` after any change, then `make gen`
   (sqlc reads the dump), and commit all three. `make migrate-check` must pass (the CI diff check).
 - **Verify** before finishing: `make downgrade && make migrate`, then `make migrate-check`,
   `make ruff` and `make gen`.
-- Never touch the compose image tag without following docs/decisions/003-postgres-image.md.
+- Change the Postgres image tag in docker-compose.yml and pgtest.Image together, then run `make migrate` and
+  commit any schema.sql change (docs/design/storage.md#runtime-requirements).

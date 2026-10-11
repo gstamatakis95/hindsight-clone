@@ -90,6 +90,6 @@
 // # Testing
 //
 // scope_test.go and tags_test.go cover the scope encoding (round trips, no collisions, canonical-only parsing) and the
-// tag normalization and matching rules. Governing documents: SPEC "Ports", "Behavioural rules" and "Decisions"
-// (tenancy, embedding: [EmbeddingDim] is 768).
+// tag normalization and matching rules. [EmbeddingDim] is 768: one embedding model per
+// deployment (docs/design/configuration.md#model-routing).
 package domain

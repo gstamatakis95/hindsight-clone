@@ -13,8 +13,8 @@ import (
 
 // TestReads runs the contract tests of the id-keyed Reader lookups and small reads:
 // GetChunks, EntityStates, StaleScopes, TagCounts, CountObservations, NewestSeqInScope, ModelsCiting, the
-// temporal relevance filter and Document.ObservationScopeModes. It asserts the semantics pinned in
-// docs/decisions/1500-wp15-read-semantics.md, including tenant isolation for every method.
+// temporal relevance filter and Document.ObservationScopeModes. It asserts the semantics the internal/store
+// interface comments state, including tenant isolation for every method.
 func TestReads(t *testing.T) {
 	t.Parallel()
 	runStoreCases(t, []storeCase{
@@ -848,7 +848,7 @@ func rdSeededLookups(t *testing.T, s store.DB, b domain.BankRef, ids []domain.Un
 // testRdErrorRegimes: on an unknown bank and on a tombstoned empty bank, the id-keyed lookups (GetChunks,
 // EntityStates, StaleScopes, CountObservations, NewestSeqInScope, ModelsCiting, and the repositories'
 // IDsByDocument and CitingScopes) return empty with no error, and TagCounts is ErrNotFound. On a tombstoned
-// bank that still holds rows, the Reader's id-keyed lookups give no error (decision 1500: whether they return
+// bank that still holds rows, the Reader's id-keyed lookups give no error (whether they return
 // the rows is unspecified), and TagCounts is ErrNotFound.
 func testRdErrorRegimes(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA, bankOtherTenant)

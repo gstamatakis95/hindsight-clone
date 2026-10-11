@@ -168,7 +168,7 @@ func reconsolidateInto(
 // (embedding kept, seq = the tx's) and clears consolidated_at and consolidation_failed_at. Observations
 // have no consolidation stamps and are left alone. A fact without an embedding is waiting for its rederive,
 // which clears the stamps when it writes the embedding, so it is left alone too: resetting it now would let
-// consolidation decide on a NULL embedding (decision 1305).
+// consolidation decide on a NULL embedding.
 func resetOwnConsolidation(ctx context.Context, tx store.Tx, u domain.Unit, seq int64) error {
 	if u.Type == domain.FactTypeObservation || u.Embedding == nil {
 		return nil

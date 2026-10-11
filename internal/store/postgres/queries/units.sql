@@ -81,7 +81,7 @@ VALUES (
     COALESCE(sqlc.narg(at)::timestamptz, now())
 );
 
--- UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
+-- UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (a unit awaiting its rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
 -- name: UnitUnconsolidated :many
 SELECT sqlc.embed(u),
     COALESCE((SELECT array_agg(e.canonical_name ORDER BY e.canonical_name)

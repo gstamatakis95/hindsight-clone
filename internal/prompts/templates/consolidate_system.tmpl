@@ -4,7 +4,7 @@ Source: Hindsight hindsight_api/engine/consolidation/prompts.py — build_consol
 observation delete action, so the deletes array, its field rules and its example are dropped: a superseded
 observation is UPDATEd to the current state instead, and "none" is both arrays empty. Language rules dropped.
 Bank-agnostic on purpose (mission and data ride in consolidate_user). Response schema:
-consolidate_system.schema.json; as in Hindsight's per-batch response model, the consolidation engine (WP-10)
+consolidate_system.schema.json; as in Hindsight's per-batch response model, the consolidation engine
 injects per call the batch's fact ids as the source_fact_ids items enum (plus minItems: 1) and the
 remaining observation capacity as creates.maxItems — the static schema leaves them open.
 Data (ConsolidateData): none read.

@@ -1,8 +1,8 @@
 # AGENTS.md — memd
 
 memd is a Go gRPC memory service: retain, recall, reflect, observations, mental models.
-The spec is the source of truth for behaviour; this file is the source of truth for how to change code.
-The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
+The design documents in docs/design are the source of truth for behaviour (docs/design/README.md is the index;
+docs/design/rules-to-tests.md maps each rule to its tests); this file is the source of truth for how to change code.
 
 ## Layout
 - api/memory/v1/memory.proto: the whole API, one file (rules in api/AGENTS.md). Run `make gen` after any change.
@@ -22,10 +22,10 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - internal/jobs: the job runner, jobs.Run (progress, liveness, result) and kinds.go, the catalogue of every job
   kind's payload, serial key and Enqueue helper.
 - Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, Arms, CheckArms, CompileTags,
-  SearchMentalModels, ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking
-  (Linker, Resolver, LabelResolver). Recall arms are the one extension point inside a library: the recall.Arm
-  interface, the built-in vector, text, graph and temporal arms in internal/recall/arms (one file each), and their
-  contract suite in internal/recall/armtest.
+  SearchMentalModels, ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer),
+  internal/linking (Linker, Resolver, LabelResolver). Recall arms are the one extension point inside a library:
+  the recall.Arm interface, the built-in vector, text, graph and temporal arms in internal/recall/arms (one file
+  each), and their contract suite in internal/recall/armtest.
 - Services, one package per gRPC service area, each exporting one `Service` built by `New(Deps)`; each owns its RPC
   logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
   - internal/memory: MemoryService (Retain, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory,
@@ -49,12 +49,12 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   (wire_maintenance.go runs last). config.go reads the environment (deployment, infrastructure and secrets only),
   configfile.go the server config file (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
-- examples/: runnable scenarios written against the generated client only (never internal/); examples/internal/exampleutil
-  is their shared helper. Keep each short, and make it exit non-zero when the behaviour it shows does not hold:
-  test/e2e TestExamples runs them all.
-- examples/: runnable scenarios written against the generated client only (never internal/); examples/internal/exampleutil
-  is their shared helper. Keep each short, and make it exit non-zero when the behaviour it shows does not hold:
-  test/e2e TestExamples runs them all.
+- examples/: runnable scenarios written against the generated client only (never internal/);
+  examples/internal/exampleutil is their shared helper. Keep each short, and make it exit non-zero when the
+  behaviour it shows does not hold: test/e2e TestExamples runs them all.
+- eval/: the benchmark harness (LoCoMo, LongMemEval, golden fixtures; eval/README.md). test/e2e: the end-to-end
+  suites, their harness and the gateway emulator. tools/: ifacedoc, txcheck (its own module) and the mockery pin.
+- docs/design: the design documents, known limitations and the rules-to-tests map.
 
 ## Rules
 - Interfaces exist only at I/O boundaries (store, graph, ai, blob, clock, jobs.Claimer, grpcapi.ReadinessProbe) and
@@ -102,8 +102,10 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - make up       # docker compose: postgres, minio
 - make migrate  # alembic upgrade head, then dump schema/schema.sql
 - make run      # memd all
+- make e2e      # compose stack + gateway emulator + memd processes + every example; run it alone
 - make examples # build and run every example against a running memd (ADDR=, TENANT=)
-- make examples # build and run every example against a running memd (ADDR=, TENANT=)
+- make migrate-check  # fail if schema/schema.sql is stale
+- make bench    # run a benchmark against memd (eval/README.md)
 
 ## Before you finish
 - make gen && make lint && make test pass, with no diff left in gen/, schema/ or internal/mocks/.
@@ -115,6 +117,8 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - Each _test.go sits next to the code it tests. API behaviour through the real services is tested in cmd/memd on
   the wired stack (stack_test.go: pgtest, the gateway emulator, the worker).
 - A proto change comments every new element.
+- A behaviour change updates its docs/design section and its row in docs/design/rules-to-tests.md. Update
+  README.md and these agent files (CLAUDE.md is a symlink to AGENTS.md) where your change makes them stale.
 
 ## API changes
 Until the first release tag, the API may change freely, including renames and renumbering; make lint runs

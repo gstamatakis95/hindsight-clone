@@ -36,7 +36,7 @@ func citedBasedOn(st *agentState, cited []string) BasedOn {
 }
 
 // allBasedOn builds BasedOn from everything retrieved, for answers synthesised without a done call (the
-// answer drew on every tool result; decision 1102). Ids are sorted so the result is deterministic.
+// answer drew on every tool result). Ids are sorted so the result is deterministic.
 func allBasedOn(st *agentState) BasedOn {
 	var b BasedOn
 	ids := make([]domain.UnitID, 0, len(st.RetrievedUnits))

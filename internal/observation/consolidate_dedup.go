@@ -40,7 +40,7 @@ type deduper struct {
 
 // newDeduper returns the deduper. It probes with store.Reader.SearchVector (exact cosine over the scope's
 // observations) instead of recall: the threshold is a cosine similarity, which fused recall scores
-// are not (decision 1001).
+// are not.
 func newDeduper(llm ai.LLM, router *ai.Router, r store.Reader) *deduper {
 	return &deduper{llm: llm, router: router, read: r}
 }

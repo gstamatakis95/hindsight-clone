@@ -235,7 +235,7 @@ func (c *curator) snapshotNames(ctx context.Context, req curation) ([]string, er
 
 // restoreIfArchived moves an archived unit back; a unit that is not archived reports false (the caller
 // then finds it live or not at all). The restored unit is stamped consolidated so consolidation never
-// decides on it while its embedding is empty; the rederive's write clears the stamp (decision 1305).
+// decides on it while its embedding is empty; the rederive's write clears the stamp.
 func (c *curator) restoreIfArchived(
 	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.UnitID,
 ) (bool, error) {
@@ -251,7 +251,7 @@ func (c *curator) restoreIfArchived(
 }
 
 // applyEdit writes the new curated values (embedding cleared until rederive), keeps the unit stamped
-// consolidated until the rederive writes its new embedding (decision 1305), deletes the observations citing
+// consolidated until the rederive writes its new embedding, deletes the observations citing
 // the unit, resetting their co-sources, queues graph maintenance for the removed observations and refreshes
 // of the mental models citing them.
 func (c *curator) applyEdit(

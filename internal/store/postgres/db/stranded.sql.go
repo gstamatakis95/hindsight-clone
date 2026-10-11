@@ -44,7 +44,7 @@ type StrandedFactsRow struct {
 }
 
 // StrandedFacts returns live facts left with a NULL embedding by a rederive_memory operation that ended
-// FAILED or CANCELLED (WP-14b, decision 1452), on banks that are not tombstoned, when no rederive of the unit
+// FAILED or CANCELLED, on banks that are not tombstoned, when no rederive of the unit
 // is pending or processing and none ended within retry_after_seconds. It walks the operations table (pruned
 // after the retention period), not memory_units, so the maintenance tick never scans every unit.
 func (q *Queries) StrandedFacts(ctx context.Context, arg StrandedFactsParams) ([]StrandedFactsRow, error) {

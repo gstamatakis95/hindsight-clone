@@ -7,8 +7,9 @@
 // # Architecture
 //
 // The package is the adapter of internal/store. It imports internal/store, internal/domain, its own db subpackage, pgx
-// and pgvector, and never internal/engine, internal/grpcapi or internal/jobs. It holds no business logic: scoring,
-// budgets, config merging and deciding what to enqueue belong to the engines (internal/store/AGENTS.md). Alembic owns
+// and pgvector, and never a service, a library, internal/grpcapi or internal/jobs. It holds no business logic:
+// scoring, budgets, config merging and deciding what to enqueue belong to the services and libraries
+// (internal/store/AGENTS.md). Alembic owns
 // the schema (migrations/, dumped to schema/schema.sql); this package never runs DDL.
 //
 // [New] returns the concrete *DB; cmd/memd, the only composition root, narrows it to store.DB, store.Maintenance and
@@ -76,12 +77,12 @@
 // looks up the oldest joinable row FOR UPDATE, and inserts only when there is none, so two concurrent enqueuers of one
 // key never both insert. The effective dedupe policy: no serial key never dedupes, refresh_mental_model always dedupes
 // as Pending, a job with overrides never dedupes. New ids are UUIDv7 and created_at is clock_timestamp(), so jobs of
-// one transaction keep their order. List pages newest first with a keyset token (created_at, id), page size default 50,
-// cap 500.
+// one transaction keep their order. List pages newest first with a keyset token (created_at, id) and domain.ListPage
+// bounds (default 100, cap 1000).
 //
 // The Claimer methods run on the pool, outside any caller transaction:
 //
-//   - [DB.Claim] runs the SPEC "Jobs" claim SQL verbatim (only $1 gains a ::text[] cast): due pending jobs of the
+//   - [DB.Claim] runs the claim (docs/design/architecture.md#claim-and-serial-keys): due pending jobs of the
 //     given kinds whose serial key is free, oldest first, FOR UPDATE OF o SKIP LOCKED, then marks them PROCESSING under
 //     the worker. A lost race on the unique processing index or a deadlock between claimers retries in a new
 //     transaction, up to 5 tries, and then returns an empty batch, never an error. A row whose stored overrides can't
@@ -160,5 +161,5 @@
 // raw SQL or load: seq order, claims, reclaim, the small-bank HNSW search and
 // TestAttachAfterConcurrentPruneReresolves. The config-patch locking is tested in internal/configsvc.
 //
-// Governing SPEC sections: "Ports", "Jobs", "Behavioural rules" and "Recall pipeline".
+// Design: docs/design/storage.md and docs/design/architecture.md#transactions-and-the-change-sequence.
 package postgres

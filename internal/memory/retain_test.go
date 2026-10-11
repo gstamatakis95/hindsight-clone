@@ -113,7 +113,7 @@ func TestIngestFanOutRejectionStoresNothing(t *testing.T) {
 	}}})
 }
 
-// TestIngestDeletingBankStoresNoBlob (WP-20 item 3): a retain to a bank being deleted fails with
+// TestIngestDeletingBankStoresNoBlob: a retain to a bank being deleted fails with
 // ErrBankDeleting (FAILED_PRECONDITION) before the blob Put, so no blob lands under the bank's prefix.
 func TestIngestDeletingBankStoresNoBlob(t *testing.T) {
 	e := newEnv(t, 0)

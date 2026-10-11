@@ -82,6 +82,7 @@
 //
 // The tests run the client against httptest servers that script responses, failures, delays and overflow bodies
 // (chat_test.go, embed_rerank_test.go, limits_test.go, overflow_test.go). End-to-end, test/e2e drives it against the
-// deterministic gateway emulator in test/e2e/gatewayemu. Governing documents: SPEC "Model routing" and "Ports" (LLM,
-// Embedder, Reranker). Structured-output schemas use the JSON Schema subset internal/jsonschema supports.
+// deterministic gateway emulator in test/e2e/gatewayemu. Design: docs/design/architecture.md#model-gateway and
+// docs/design/configuration.md#model-routing. Structured-output schemas use the JSON Schema subset internal/jsonschema
+// supports.
 package gateway

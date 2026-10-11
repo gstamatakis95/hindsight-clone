@@ -57,7 +57,7 @@ func TestStackUpDown(t *testing.T) {
 }
 
 // TestMemdSmoke runs memd as separate api and worker processes against the stack and the emulator, checks the
-// api serves, and kills and restarts the worker. It skips while cmd/memd is the placeholder (until WP-14b).
+// api serves, and kills and restarts the worker.
 func TestMemdSmoke(t *testing.T) {
 	bin := harness.BuildMemd(t)
 	s := harness.StartStack(t)

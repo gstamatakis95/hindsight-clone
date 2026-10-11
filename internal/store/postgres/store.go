@@ -40,9 +40,9 @@ const txAttempts = 3
 
 // InTx runs fn in one READ COMMITTED transaction and commits when fn returns nil. Any error or panic
 // rolls back; a panic is re-raised after the rollback. fn's error is returned unchanged. A transaction that
-// fails with a deadlock (40P01), a serialization failure (40001) or errEntityGone (decision 2501) is rolled
+// fails with a deadlock (40P01), a serialization failure (40001) or errEntityGone is rolled
 // back and run again, up to txAttempts times in all: fn never calls a model (store.DB), so re-running it
-// only repeats short database work (decision 100).
+// only repeats short database work.
 func (s *DB) InTx(ctx context.Context, fn func(store.Tx) error) error {
 	var err error
 	for range txAttempts {

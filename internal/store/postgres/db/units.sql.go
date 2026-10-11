@@ -714,7 +714,7 @@ type UnitUnconsolidatedRow struct {
 	EntityNames []string
 }
 
-// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (decision 1500: a unit awaiting rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
+// UnitUnconsolidated returns a bank's oldest facts with neither consolidation stamp and with an embedding (a unit awaiting its rederive is no consolidation candidate), with their entity names; with filter_scopes, only those whose tags contain one of the tag sets in scopes (a JSON array of arrays). The predicate is written to match the partial index memory_units_unconsolidated_idx.
 func (q *Queries) UnitUnconsolidated(ctx context.Context, arg UnitUnconsolidatedParams) ([]UnitUnconsolidatedRow, error) {
 	rows, err := q.db.Query(ctx, unitUnconsolidated,
 		arg.TenantID,

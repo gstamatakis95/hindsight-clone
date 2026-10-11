@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Temporal arm SQL (decision 122). A unit's time span is [us, ue]:
+// Temporal arm SQL (docs/design/storage.md#search-query-shapes). A unit's time span is [us, ue]:
 //
 //	us = COALESCE(occurred_start, occurred_end, mentioned_at)
 //	ue = COALESCE(occurred_end, occurred_start, mentioned_at)
@@ -44,8 +44,7 @@ func windowAnchor(w store.TemporalQuery) *float64 {
 	}
 }
 
-// temporalFilterOn reports whether the relevance filter applies: an embedding and a positive floor
-// (decision 1500).
+// temporalFilterOn reports whether the relevance filter applies: an embedding and a positive floor.
 func temporalFilterOn(q store.TemporalQuery) bool {
 	return len(q.Embedding) > 0 && q.MinSimilarity > 0
 }

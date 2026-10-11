@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	// claimTries bounds Claim's retries after a lost race on the unique processing index (decision 113).
+	// claimTries bounds Claim's retries after a lost race on the unique processing index.
 	claimTries = 5
 	// processingKeyIndex is the unique index that allows one processing job per serial key.
 	processingKeyIndex = "operations_processing_serial_key_uniq"

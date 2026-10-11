@@ -156,6 +156,6 @@
 // [NewMetrics] with a fake statsd.ClientInterface that records each sample; the real client is checked once against a
 // local UDP listener (namespace and unified service tags). Tracer state is global, so those tests never run in
 // parallel. cmd/memd's TestDatadogUnreachableAgentStillServes starts the real tracer, profiler and DogStatsD client
-// against an unreachable agent (a closed local port) to show memd still serves. The SPEC says nothing about
-// observability; the design above is the whole contract.
+// against an unreachable agent (a closed local port) to show memd still serves. The design above is the whole
+// contract; docs/design/architecture.md#observability summarizes it.
 package observability

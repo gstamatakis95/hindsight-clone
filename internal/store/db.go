@@ -125,7 +125,7 @@ type Catalog interface {
 	// ListObservationScopes returns up to limit (> 0) of b's observation scopes (its observation_scopes rows: every
 	// scope that has held an observation) ordered by ScopeKey.String() in byte order, starting strictly
 	// after after ("" = from the start, shared scope included). The shared scope's key is "", so to continue
-	// after a page that ends at it, pass "0" (decision 1560). Observations counts the scope's live
+	// after a page that ends at it, pass "0". Observations counts the scope's live
 	// observations and UnconsolidatedMemories the facts StaleScopes would match. Unknown or tombstoned bank:
 	// domain.ErrNotFound.
 	ListObservationScopes(ctx context.Context, b domain.BankRef, after string, limit int) ([]domain.ScopeInfo, error)

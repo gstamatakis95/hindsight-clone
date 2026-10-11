@@ -49,7 +49,7 @@ var dataFor = map[string]func() any{
 	"time_parse_user":                func() any { return &map[string]any{} },
 }
 
-// optionalTemplates may be registered before their template exists (owned by another work package).
+// optionalTemplates are named by timex itself and read its own data, so they have no fixture data struct here.
 var optionalTemplates = map[string]bool{"time_parse_system": true, "time_parse_user": true}
 
 // emptyWhenZero are fragments that render nothing for zero data (the engine does not use them then).
@@ -220,7 +220,7 @@ func TestSchemasPairWithTemplates(t *testing.T) {
 		}
 		stem := strings.TrimSuffix(e.Name(), schemaExt)
 		if strings.HasPrefix(stem, "time_parse") {
-			continue // owned by another work package, which follows its own schema conventions
+			continue // timex names these templates itself and follows its own schema conventions
 		}
 		if !names[stem] {
 			t.Errorf("%s has no templates/%s.tmpl, so no Version covers it", e.Name(), stem)

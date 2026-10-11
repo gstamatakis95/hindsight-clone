@@ -14,7 +14,7 @@ import (
 
 // TestCurationReads runs the contract tests of the curation listings: GetUnit, ListUnits,
 // ObservationHistory, BankStats, ListDocuments and ListMentalModels. The pinned semantics are
-// docs/decisions/1500-wp15-read-semantics.md.
+// the internal/store interface comments.
 func TestCurationReads(t *testing.T) {
 	t.Parallel()
 	runStoreCases(t, []storeCase{

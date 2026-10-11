@@ -159,7 +159,7 @@ func fromWindowArm(c candidate, windowed map[string]bool) bool {
 // 1 - min(|best - mid| / half, 1), where best is the unit's occurrence midpoint, else occurred_start, else
 // occurred_end, else mentioned_at; mid is the window's midpoint and half its half-width in days. An undated
 // unit is neutral (0.5) and a zero-length window gives 1. A window with one open bound anchors on the set
-// bound with horizonDays as the scale (decision 901).
+// bound with horizonDays as the scale.
 func temporalProximity(u domain.Unit, w domain.TimeWindow, horizonDays int) float64 {
 	best := bestDate(u)
 	if best == nil {

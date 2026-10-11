@@ -38,7 +38,7 @@ type applyOutput struct {
 // A fact edited, retagged or removed since it was planned (different seq or tags, or gone) is not live.
 // An action citing a fact that is not live, or updating an observation that is gone or left the scope, is
 // skipped whole (never rewritten or trimmed), and then no fact of the batch is stamped: the next run
-// re-decides them (decision 1000).
+// re-decides them (docs/design/consolidation.md#stamping).
 func (c *consolidator) apply(ctx context.Context, in applyInput) (applyOutput, error) {
 	var out applyOutput
 	err := c.d.DB.InTx(ctx, func(tx store.Tx) error {
@@ -135,7 +135,7 @@ func liveFacts(
 // stampable returns those of ids that are live and still cited in every scope of cited: the scopes the
 // plan skipped because they already cited the unit, and the scopes this run wrote an observation citing it
 // in. A concurrent clear, retag or invalidate may have deleted that observation since, resetting the unit
-// without changing its seq (decision 1801). The caller holds tx.Seq, so no clear can commit in between.
+// without changing its seq. The caller holds tx.Seq, so no clear can commit in between.
 func stampable(
 	ctx context.Context, tx store.Tx, ids []domain.UnitID, live map[domain.UnitID]domain.Unit,
 	cited map[domain.UnitID][]domain.ScopeKey,

@@ -148,7 +148,7 @@ func (e *env) runRetaggedBetweenBatches(j store.Job) {
 			stale++
 		}
 	}
-	if stale != 0 { // RetagDocument retags the first batch's units in its own tx (decision 1900)
+	if stale != 0 { // RetagDocument retags the first batch's units in its own tx
 		e.t.Errorf("%d units with stale tags before retag_document, want 0", stale)
 	}
 	e.applyRetag(j)

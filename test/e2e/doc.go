@@ -31,6 +31,6 @@
 //     example exits non-zero when the behaviour it demonstrates does not hold.
 //
 // Scenarios wait for background work with the harness's two-quiet-polls barrier on
-// BankStats.pending_operations_by_kind, and inspect MinIO directly where blob state matters (bank delete). Governing
-// SPEC sections: "Process model", "Jobs" and "Behavioural rules".
+// BankStats.pending_operations_by_kind, and inspect MinIO directly where blob state matters (bank delete). Design:
+// docs/design/architecture.md and docs/design/rules-to-tests.md.
 package e2e

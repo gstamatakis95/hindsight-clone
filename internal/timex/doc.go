@@ -93,6 +93,6 @@
 // use. corpus_test.go and timex_test.go run a query corpus at a fixed reference (including non-UTC zones),
 // check that no cue means no LLM call, that the fallback runs only with a cue and no rule, and that every
 // fallback failure degrades; rules_test.go and cue_test.go pin individual rules and cues. The LLM is the
-// generated mockai mock, with the real ai.Router and a clock.Manual. SPEC "Model routing" (the TIME_PARSE slot)
-// and "Recall pipeline" (the temporal arm).
+// generated mockai mock, with the real ai.Router and a clock.Manual. Design:
+// docs/design/retain.md#time-normalization.
 package timex

@@ -34,7 +34,7 @@ WHERE p.id = s.parent_id AND p.kind = 'retain_batch' AND p.status = 'pending'
 `
 
 // SettleRetainBatches ends every PENDING retain_batch parent whose retain_document children are all terminal
-// (SPEC "Operations": the parent's status aggregates its children; WP-14b, decision 1453): FAILED when a child
+// (the parent's status aggregates its children; docs/design/architecture.md#maintenance-tick): FAILED when a child
 // failed, else CANCELLED when a child was cancelled, else COMPLETED, with the counts as its result. A parent is
 // never claimed or run; the worker's maintenance tick calls this. It is idempotent: settled parents are no
 // longer PENDING.

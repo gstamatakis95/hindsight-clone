@@ -318,7 +318,7 @@ var overflowMarkers = []string{
 
 // contextOverflow reports whether a response with status code and body raw (the whole body read, capped at
 // maxResponseBytes, not the 512-byte message snippet) is a 400 or 413 saying the prompt did not fit the
-// model's context window (CCR WP-11-1).
+// model's context window.
 func contextOverflow(code int, raw []byte) bool {
 	if code != http.StatusBadRequest && code != http.StatusRequestEntityTooLarge {
 		return false

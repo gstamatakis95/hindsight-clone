@@ -99,7 +99,7 @@ func (r *bankRepo) TenantConfig(ctx context.Context, tenant string) (domain.Bank
 	return cfg, unmarshal("tenant config", raw, &cfg)
 }
 
-// LockTenantConfig takes the tenant config's transaction-scoped advisory lock (decision 2500).
+// LockTenantConfig takes the tenant config's transaction-scoped advisory lock.
 func (r *bankRepo) LockTenantConfig(ctx context.Context, tenant string) error {
 	return mapErr("lock tenant config", r.q.TenantConfigLock(ctx, tenant))
 }

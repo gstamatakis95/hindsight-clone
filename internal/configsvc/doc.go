@@ -24,8 +24,7 @@
 // Reads of an unknown or tombstoned bank are domain.ErrNotFound. Writes call BankRepo.Ensure, which creates an unknown
 // bank with tenant defaults, or reports domain.ErrBankDeleting (FAILED_PRECONDITION) for a tombstoned one;
 // UpdateDirective and DeleteDirective must not create a bank, so they report an unknown bank as domain.ErrNotFound
-// instead. SPEC
-// "Behavioural rules" (Banks and documents).
+// instead (docs/design/curation-and-operations.md#common-rules).
 //
 // # Config writes
 //

@@ -9,7 +9,7 @@ import (
 // TestWiredStackNoModelCallInsideTransaction runs the composition root's whole graph (every engine as
 // wire.go builds it, over internal/fake and the emulated gateway) through retain, consolidation, recall,
 // reflect, both refresh strategies and curation, and checks that no gateway call was ever made while a
-// transaction was open (SPEC "Jobs": no model calls inside a transaction).
+// transaction was open (docs/design/architecture.md#transactions-and-the-change-sequence).
 func TestWiredStackNoModelCallInsideTransaction(t *testing.T) {
 	w := startWired(t)
 	const bank = "b"

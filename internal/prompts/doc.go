@@ -56,9 +56,9 @@
 // schema when one exists, followed by every tool file of its operation (templates/<op>_tool*.json and
 // <op>_tool*.tmpl, sorted, where <op> is the name up to the first underscore; so reflect_system's version
 // covers reflect_tools.json and the done variants). Callers put the system template's name in
-// ai.StructuredRequest.Name or ai.ChatRequest.Name, and the call records that version, so traces and
-// scripted fakes can tell prompt revisions apart. Editing only a user template does not change the
-// recorded version (an accepted trade-off). An unknown name has version "".
+// ai.StructuredRequest.Name or ai.ChatRequest.Name. No call site records the version yet
+// (docs/design/known-limitations.md#platform); editing only a user template would not change it. An unknown
+// name has version "".
 //
 // # Concurrency
 //
@@ -72,6 +72,6 @@
 // and with zero data, renders rarely taken branches, pairs schemas with templates, validates every JSON
 // asset, and pins Hindsight parity points (fact_type labels, id-less source memories, the N/A marker, the
 // narrator rule, the gated causal section, directive rules in done tools, tool files in Version).
-// reflect_golden_test.go compares reflect_system without the recall tool against a golden file. SPEC
-// "Function signatures" (internal/prompts) defines Render and Version; "Model routing" names the slots.
+// reflect_golden_test.go compares reflect_system without the recall tool against a golden file. Design:
+// docs/design/architecture.md#prompts.
 package prompts

@@ -97,6 +97,6 @@
 //
 // The runner tests run against the Postgres Claimer on a pgtest database (ops_test.go records Fail calls and
 // ages heartbeats with SQL): slot reservation, retry policy and caps, lost-job fencing, shutdown release,
-// settle retries, progress checkpoints and results. kinds_test.go pins every helper's row. SPEC "Jobs",
-// "Process model" and "Behavioural rules" (Operations).
+// settle retries, progress checkpoints and results. kinds_test.go pins every helper's row. Design:
+// docs/design/architecture.md#job-queue.
 package jobs

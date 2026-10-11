@@ -17,7 +17,7 @@ import (
 // Without tracing (disabled, or metrics only), it leaves cfg untouched.
 //
 // memd uses this small tracer instead of dd-trace-go's contrib/jackc/pgx.v5, which traces every statement,
-// connect and acquire as its own trace when there is no parent (decision 2400).
+// connect and acquire as its own trace when there is no parent.
 func (t *Telemetry) TracePool(cfg *pgxpool.Config) {
 	if !t.traces() || cfg == nil {
 		return

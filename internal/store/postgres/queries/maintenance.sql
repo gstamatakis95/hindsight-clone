@@ -16,8 +16,8 @@ WHERE b.deleting_at IS NULL
 ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C";
 
 -- StalledBankDeletes returns, in byte order, the tombstoned banks with no pending or processing delete_bank
--- operation (WP-20, decision 2001): their delete was failed by ReclaimStale or a shutdown release at the
--- attempt cap, or failed for good.
+-- operation: their delete was failed by ReclaimStale or a shutdown release at the attempt cap, or failed for
+-- good, and the maintenance tick re-enqueues it (docs/design/storage.md#bank-deletion).
 -- name: StalledBankDeletes :many
 SELECT b.tenant_id, b.id FROM banks b
 WHERE b.deleting_at IS NOT NULL AND NOT EXISTS (
@@ -28,7 +28,7 @@ WHERE b.deleting_at IS NOT NULL AND NOT EXISTS (
 ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C";
 
 -- BanksWithGraphWork returns, in byte order, the banks that are not tombstoned and have graph_dirty or
--- entity_maintenance rows queued (WP-20, decision 2002).
+-- entity_maintenance rows queued, for the tick's graph_reconcile step (docs/design/architecture.md#maintenance-tick).
 -- name: BanksWithGraphWork :many
 SELECT b.tenant_id, b.id FROM banks b
 WHERE b.deleting_at IS NULL AND (

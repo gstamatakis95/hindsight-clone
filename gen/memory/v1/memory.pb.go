@@ -1744,7 +1744,7 @@ type RetainResponse struct {
 	// The retain_batch parent operation; set when run_async enqueued more than one document. Its status
 	// aggregates the retain_document children.
 	BatchOperation *Operation `protobuf:"bytes,2,opt,name=batch_operation,json=batchOperation,proto3" json:"batch_operation,omitempty"`
-	// Token usage per slot and model of the LLM and embedding calls a synchronous retain made; empty when
+	// Token usage per slot and model of the extraction (EXTRACT) calls a synchronous retain made; empty when
 	// run_async (the usage is then on the retain_document operations).
 	Usage         []*SlotUsage `protobuf:"bytes,3,rep,name=usage,proto3" json:"usage,omitempty"`
 	unknownFields protoimpl.UnknownFields
