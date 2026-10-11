@@ -19,7 +19,7 @@
 //	s := grpcapi.New(h, grpcapi.Options{DefaultDeadline: d, Probes: probes}, grpc.ChainUnaryInterceptor(extra...))
 //	err := s.Serve(lis)
 //
-// [New] registers each non-nil handler of [Handlers] ([MemoryHandler], [TenantHandler], [BankHandler],
+// [New] registers each non-nil handler of [Handlers] ([MemoryHandler], [BankHandler], [ConfigHandler],
 // [DocumentHandler], [ObservationHandler], [MentalModelHandler], [OperationHandler]) plus grpc.health.v1. A
 // nil handler leaves its service unregistered, so its RPCs answer UNIMPLEMENTED.
 //
@@ -53,9 +53,10 @@
 // convert_overrides.go turns each into the BankConfig level the services merge, and reads stored levels back (a
 // document's retain_overrides, a model's spec overrides). PreviewPrompt takes one of them, matching its
 // operation. Every config the server is given passes config.Validate before the service sees it: request and
-// item overrides, mental-model specs, and whole levels (CreateBank, CreateBankFromTemplate, UpdateBankConfig,
-// UpdateTenantConfig), the latter against the patched level inside the patch. ResetBankConfig is not checked:
-// it only unsets fields; it needs at least one path, and "*" resets everything.
+// item overrides, mental-model specs, and whole levels (CreateBank with a config or a template, UpdateBankConfig,
+// UpdateTenantConfig), the latter against the patched level inside the patch. ResetTenantConfig and
+// ResetBankConfig are not checked: they only unset fields; their reset_mask needs at least one path, and "*"
+// resets everything.
 //
 // # FieldMask patches
 //
@@ -72,8 +73,10 @@
 //     into; lists, maps and Structs are leaves), so such a request never clears anything;
 //   - under an implicit mask, models (and a spec's overrides.models) merge per slot into the stored list, so
 //     binding one slot never drops another; an explicit models path replaces the whole list;
-//   - ResetBankConfig resets the given paths ("*" = the whole bank override);
-//   - a mental model's id cannot be patched.
+//   - ResetTenantConfig and ResetBankConfig reset the paths of their reset_mask ("*" = the whole level; an
+//     empty mask is INVALID_ARGUMENT naming reset_mask);
+//   - UpdateDirective copies the masked name, rules, tags and active fields (configsvc.DirectivePatch);
+//   - a mental model's or a directive's id cannot be patched.
 //
 // # Error mapping
 //

@@ -124,6 +124,59 @@ func (q *Queries) InsertBankIfMissing(ctx context.Context, arg InsertBankIfMissi
 	return err
 }
 
+const listBanks = `-- name: ListBanks :many
+SELECT tenant_id, id, name, config, change_seq, deleting_at, last_memory_write_at, created_at, updated_at FROM banks
+WHERE tenant_id = $1 AND deleting_at IS NULL
+  AND starts_with(id, $2::text)
+  AND id COLLATE "C" > $3::text
+ORDER BY id COLLATE "C"
+LIMIT $4::int
+`
+
+type ListBanksParams struct {
+	TenantID string
+	IDPrefix string
+	AfterID  string
+	Lim      int32
+}
+
+// ListBanks returns one keyset page of a tenant's live banks (tombstoned ones left out) whose id starts with
+// id_prefix, in byte order of id, after after_id ("" = from the start).
+func (q *Queries) ListBanks(ctx context.Context, arg ListBanksParams) ([]Bank, error) {
+	rows, err := q.db.Query(ctx, listBanks,
+		arg.TenantID,
+		arg.IDPrefix,
+		arg.AfterID,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Bank{}
+	for rows.Next() {
+		var i Bank
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.ID,
+			&i.Name,
+			&i.Config,
+			&i.ChangeSeq,
+			&i.DeletingAt,
+			&i.LastMemoryWriteAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markBankDeleting = `-- name: MarkBankDeleting :execrows
 UPDATE banks SET deleting_at = COALESCE(deleting_at, $3::timestamptz), updated_at = now()
 WHERE tenant_id = $1 AND id = $2

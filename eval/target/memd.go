@@ -31,6 +31,7 @@ var (
 type Memd struct {
 	memory memoryv1.MemoryServiceClient
 	banks  memoryv1.BankServiceClient
+	config memoryv1.ConfigServiceClient
 	ops    memoryv1.OperationServiceClient
 	tenant string
 }
@@ -40,6 +41,7 @@ func NewMemd(conn grpc.ClientConnInterface, tenant string) *Memd {
 	return &Memd{
 		memory: memoryv1.NewMemoryServiceClient(conn),
 		banks:  memoryv1.NewBankServiceClient(conn),
+		config: memoryv1.NewConfigServiceClient(conn),
 		ops:    memoryv1.NewOperationServiceClient(conn),
 		tenant: tenant,
 	}
@@ -127,14 +129,15 @@ func (m *Memd) Recall(
 	return out, nil
 }
 
-// Models returns the model of every slot bound in bank's resolved config (server < tenant < bank).
+// Models returns the model of every slot bound in bank's effective config (server < tenant < bank).
 func (m *Memd) Models(ctx context.Context, bank string) (map[string]string, error) {
-	resp, err := m.banks.GetBankConfig(m.out(ctx), &memoryv1.GetBankConfigRequest{BankId: bank})
+	resp, err := m.config.GetBankConfig(m.out(ctx), &memoryv1.GetBankConfigRequest{BankId: bank})
 	if err != nil {
 		return nil, fmt.Errorf("memd: bank config %s: %w", bank, err)
 	}
 	models := map[string]string{}
-	resp.GetResolved().GetModels().ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+	effective := resp.GetConfig().GetEffective()
+	effective.GetModels().ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		if b, ok := v.Message().Interface().(*memoryv1.ModelBinding); ok && fd.Name() != "default" {
 			models[strings.ToUpper(string(fd.Name()))] = b.GetModel()
 		}

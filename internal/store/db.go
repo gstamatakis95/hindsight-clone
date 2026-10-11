@@ -92,8 +92,11 @@ type Search interface {
 	CountObservations(ctx context.Context, s domain.ScopeKey) (int, error)
 }
 
-// Catalog serves the listing and admin reads of one bank.
+// Catalog serves the listing and admin reads: a tenant's banks, and one bank's contents.
 type Catalog interface {
+	// ListBanks returns up to q.Limit of q.Tenant's banks whose id starts with q.IDPrefix, ordered by id in byte
+	// order and strictly after q.After; tombstoned banks are left out.
+	ListBanks(ctx context.Context, q BankQuery) ([]domain.Bank, error)
 	// GetUnit returns one unit of b, live (State valid) or archived (State invalidated), with Entities,
 	// SourceIDs and, for observations, Stale filled; an archived unit's Entities are its snapshot names.
 	// Unknown unit, or unknown or tombstoned bank: domain.ErrNotFound.

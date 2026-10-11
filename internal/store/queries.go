@@ -218,6 +218,18 @@ type DocumentCursor struct {
 	ID domain.DocumentID `json:"i"`
 }
 
+// BankQuery selects one page of a tenant's live banks (Catalog.ListBanks).
+type BankQuery struct {
+	// Tenant is the tenant listed.
+	Tenant string
+	// IDPrefix keeps banks whose id starts with it; empty = all.
+	IDPrefix string
+	// After continues a listing: only banks whose id sorts strictly after it in byte order; empty = first page.
+	After string
+	// Limit caps the result (> 0).
+	Limit int
+}
+
 // DirectiveQuery selects one page of a bank's directives (DirectiveRepo.Page). Zero fields do not filter.
 type DirectiveQuery struct {
 	// Bank is the bank listed.

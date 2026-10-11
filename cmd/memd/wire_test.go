@@ -47,7 +47,7 @@ func TestWiredStackNoModelCallInsideTransaction(t *testing.T) {
 	// Invalidating the fact deletes the observations citing it and refreshes the models citing those: no
 	// debounce, so that refresh runs before the stack goes idle.
 	debounce := int32(0)
-	if _, err := pb.NewBankServiceClient(w.conn).UpdateBankConfig(w.ctx(t), &pb.UpdateBankConfigRequest{
+	if _, err := pb.NewConfigServiceClient(w.conn).UpdateBankConfig(w.ctx(t), &pb.UpdateBankConfigRequest{
 		BankId: bank, Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
 	}); err != nil {
 		t.Fatal(err)

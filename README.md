@@ -123,6 +123,31 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","document_id":"d1"
   localhost:50051 memory.v1.DocumentService/RetagDocument
 ```
 
+### Banks, config and directives
+
+`BankService` manages banks: `CreateBank` (with initial config, or from a template that `ExportBankTemplate`
+produced, whose mental-model builds it returns as `mental_model_operations`), `GetBank`, `ListBanks`,
+`GetBankStats`, `ListTags` and `DeleteBank`. A write to an unknown bank also creates it. `ConfigService` holds
+how banks behave: the tenant and bank config levels, each returned as a `ConfigView` with the level's `own`
+overrides and the `effective` config they resolve to, `PreviewPrompt`, and the bank's directives
+(`CreateDirective` takes a name that is unique in the bank; `UpdateDirective` patches with an `update_mask`).
+
+```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"page_size":50}' localhost:50051 memory.v1.BankService/ListBanks
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.ConfigService/GetBankConfig
+grpcurl -plaintext -H 'x-tenant-id: acme' \
+  -d '{"bank_id":"b1","directive":{"name":"tone","rules":["Answer formally."],"active":true}}' \
+  localhost:50051 memory.v1.ConfigService/CreateDirective
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","reset_mask":"reflect.disposition"}' \
+  localhost:50051 memory.v1.ConfigService/ResetBankConfig
+```
+
+`DeleteBank` tombstones the bank at once: from then on its reads are `NOT_FOUND` (`BANK_NOT_FOUND`) and its writes
+`FAILED_PRECONDITION` (`BANK_DELETING`), and it drops out of `ListBanks`. The background delete removes everything,
+blobs included. To learn when it is done, poll `OperationService.GetOperation` with the operation `DeleteBank`
+returned: it answers while the delete runs and is `NOT_FOUND` once the bank is gone, since the last step removes
+the bank with all its operations. After that, a write creates a new, empty bank.
+
 ### API conventions
 
 The header of `api/memory/v1/memory.proto` states these once:
@@ -231,10 +256,10 @@ make bench-compare A=eval-results/<run> B=eval-results/<run>
 One `BankConfig` shape is used at every level and merged server < tenant < bank < consolidation strategy <
 request (< item for retain). It is grouped by phase: `retain`, `observations`, `recall`, `reflect`,
 `mental_models` and `models`. Scalars: set replaces unset; groups merge field by field; a model binding is used
-whole; lists replace. The server level is the `defaults:` block of the server config file; `TenantService` and
-`BankService` read and patch the tenant and bank levels with FieldMask paths such as
-`observations.dedup_threshold` or `models.extract`, and `ResetBankConfig` makes paths inherit again (`"*"` resets
-everything).
+whole; lists replace. The server level is the `defaults:` block of the server config file; `ConfigService` reads
+and patches the tenant and bank levels with FieldMask paths such as `observations.dedup_threshold` or
+`models.extract`, and `ResetTenantConfig` / `ResetBankConfig` make the paths in their `reset_mask` inherit again
+(`"*"` resets everything; an empty mask is `INVALID_ARGUMENT`).
 
 Each RPC that does work takes its own overrides message, holding only what that call can change:
 
@@ -286,7 +311,7 @@ Swap every step for one bank, then one step for one call:
 ```sh
 grpcurl -plaintext -H 'x-tenant-id: acme' \
   -d '{"bank_id":"b1","config":{"models":{"default":{"model":"claude-sonnet"}}},"update_mask":"models.default"}' \
-  localhost:50051 memory.v1.BankService/UpdateBankConfig
+  localhost:50051 memory.v1.ConfigService/UpdateBankConfig
 grpcurl -plaintext -H 'x-tenant-id: acme' \
   -d '{"bank_id":"b1","query":"Where does Alice live?","overrides":{"reflect_model":{"model":"gpt-4o","temperature":0}}}' \
   localhost:50051 memory.v1.MemoryService/Reflect

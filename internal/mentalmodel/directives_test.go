@@ -23,7 +23,7 @@ func TestSynthesizeDirectivesMatchReflect(t *testing.T) {
 			{Name: "off", Rules: []string{"o"}, Tags: []string{"team"}},
 		} {
 			d.Bank = e.bank
-			if _, err := tx.Directives().Upsert(e.ctx, d); err != nil {
+			if _, err := tx.Directives().Create(e.ctx, d); err != nil {
 				return err
 			}
 		}

@@ -40,6 +40,7 @@ const (
 var (
 	_ memoryv1.MemoryServiceServer    = (*Server)(nil)
 	_ memoryv1.BankServiceServer      = (*Server)(nil)
+	_ memoryv1.ConfigServiceServer    = (*Server)(nil)
 	_ memoryv1.OperationServiceServer = (*Server)(nil)
 )
 
@@ -73,10 +74,12 @@ type bankKey struct {
 	bank   string
 }
 
-// Server implements the subset of memd's MemoryService, BankService and OperationService the eval uses.
+// Server implements the subset of memd's MemoryService, BankService, ConfigService and OperationService the eval
+// uses.
 type Server struct {
 	memoryv1.UnimplementedMemoryServiceServer
 	memoryv1.UnimplementedBankServiceServer
+	memoryv1.UnimplementedConfigServiceServer
 	memoryv1.UnimplementedOperationServiceServer
 
 	opts    Options
@@ -92,10 +95,11 @@ func New(o Options) *Server {
 	return &Server{opts: o, banks: map[bankKey]*bank{}}
 }
 
-// Register registers the stub's three services on g.
+// Register registers the stub's four services on g.
 func (s *Server) Register(g *grpc.Server) {
 	memoryv1.RegisterMemoryServiceServer(g, s)
 	memoryv1.RegisterBankServiceServer(g, s)
+	memoryv1.RegisterConfigServiceServer(g, s)
 	memoryv1.RegisterOperationServiceServer(g, s)
 }
 
@@ -179,7 +183,7 @@ func (s *Server) GetBankStats(
 	}}, nil
 }
 
-// GetBankConfig reports a resolved config that binds every LLM slot the stub reports usage for to the
+// GetBankConfig reports an effective config that binds every LLM slot the stub reports usage for to the
 // stub's model name.
 func (s *Server) GetBankConfig(
 	ctx context.Context, req *memoryv1.GetBankConfigRequest,
@@ -190,10 +194,12 @@ func (s *Server) GetBankConfig(
 		return nil, err
 	}
 	stub := func() *memoryv1.ModelBinding { return &memoryv1.ModelBinding{Model: stubModel} }
-	resolved := &memoryv1.BankConfig{Models: &memoryv1.ModelBindings{
+	effective := &memoryv1.BankConfig{Models: &memoryv1.ModelBindings{
 		Extract: stub(), Consolidate: stub(), Reflect: stub(),
 	}}
-	return &memoryv1.GetBankConfigResponse{Resolved: resolved}, nil
+	return &memoryv1.GetBankConfigResponse{Config: &memoryv1.ConfigView{
+		Own: &memoryv1.BankConfig{}, Effective: effective,
+	}}, nil
 }
 
 // Recall returns the stored lines that share the most query words, best first.

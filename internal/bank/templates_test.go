@@ -22,7 +22,7 @@ func seedTemplateSource(t *testing.T, e env, src domain.BankRef) {
 			{Bank: src, Name: "global", Rules: []string{"be polite"}, Active: true},
 			{Bank: src, Name: "team", Rules: []string{"cite"}, Tags: []string{"team"}, Active: false},
 		} {
-			if _, err := tx.Directives().Upsert(e.ctx, d); err != nil {
+			if _, err := tx.Directives().Create(e.ctx, d); err != nil {
 				return err
 			}
 		}

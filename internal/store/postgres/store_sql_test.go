@@ -196,8 +196,8 @@ func TestRejectUnnormalizedTags(t *testing.T) {
 			return tx.Documents().Upsert(t.Context(), domain.Document{ID: "doc-2", Bank: fuBank, Tags: bad})
 		},
 		"Documents().SetTags": func(tx store.Tx) error { return tx.Documents().SetTags(t.Context(), fuBank, "doc-1", bad) },
-		"Directives().Upsert": func(tx store.Tx) error {
-			_, err := tx.Directives().Upsert(t.Context(), domain.Directive{Bank: fuBank, Name: "d", Tags: bad})
+		"Directives().Create": func(tx store.Tx) error {
+			_, err := tx.Directives().Create(t.Context(), domain.Directive{Bank: fuBank, Name: "d", Tags: bad})
 			return err
 		},
 	}

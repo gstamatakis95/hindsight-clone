@@ -91,9 +91,9 @@ func TestConcurrentTenantConfigPatchesKeepBoth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.GetRetain().Mission != "A" || got.GetReflect().Mission != "B" {
+	if got.Own.GetRetain().Mission != "A" || got.Own.GetReflect().Mission != "B" {
 		t.Fatalf("lost update: stored tenant config is retain.mission=%q reflect.mission=%q, want A and B",
-			got.GetRetain().Mission, got.GetReflect().Mission)
+			got.Own.GetRetain().Mission, got.Own.GetReflect().Mission)
 	}
 }
 

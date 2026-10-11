@@ -110,6 +110,61 @@ func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask) (configsvc.P
 	}, nil
 }
 
+// resetPaths returns the paths of a Reset*Config reset_mask: the BankConfig paths to unset, or config.ResetAll
+// alone when the mask holds "*". An empty mask, and a path that is not a BankConfig path, are
+// domain.ErrInvalidArgument on reset_mask.
+func resetPaths(mask *fieldmaskpb.FieldMask) ([]string, error) {
+	if len(mask.GetPaths()) == 0 {
+		return nil, domain.InvalidField("reset_mask", "reset_mask is required (%q resets everything)", config.ResetAll)
+	}
+	if slices.Contains(mask.GetPaths(), config.ResetAll) {
+		return []string{config.ResetAll}, nil
+	}
+	m := &fieldmaskpb.FieldMask{Paths: append([]string(nil), mask.GetPaths()...)}
+	if !m.IsValid(&pb.BankConfig{}) {
+		return nil, domain.InvalidField("reset_mask", "invalid reset_mask %v for memory.v1.BankConfig", mask.GetPaths())
+	}
+	m.Normalize()
+	return m.GetPaths(), nil
+}
+
+// directiveFields are the Directive paths UpdateDirective may name.
+var directiveFields = []string{"name", "rules", "tags", "active"}
+
+// directivePatch builds the DirectivePatch of UpdateDirective: each masked path (name, rules, tags, active) is
+// copied from the request's directive, so a masked field left unset clears it. The id cannot be changed.
+func directivePatch(patch *pb.Directive, mask *fieldmaskpb.FieldMask) (configsvc.DirectivePatch, error) {
+	if patch == nil {
+		patch = &pb.Directive{}
+	}
+	paths, err := maskPaths(patch, mask, "id")
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range paths {
+		if !slices.Contains(directiveFields, p) {
+			return nil, domain.InvalidField("update_mask", "invalid update_mask path %q", p)
+		}
+	}
+	src := directiveFromProto(patch)
+	return func(cur domain.Directive) (domain.Directive, error) {
+		out := cur
+		for _, p := range paths {
+			switch p {
+			case "name":
+				out.Name = src.Name
+			case "rules":
+				out.Rules = slices.Clone(src.Rules)
+			case "tags":
+				out.Tags = slices.Clone(src.Tags)
+			case "active":
+				out.Active = src.Active
+			}
+		}
+		return out, nil
+	}, nil
+}
+
 // scheduleWhen pairs the members of RefreshSchedule's when oneof: a path to one also applies the other, so
 // setting one member clears the other, as on the wire.
 var scheduleWhen = map[string]string{

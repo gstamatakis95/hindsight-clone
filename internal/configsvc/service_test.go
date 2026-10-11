@@ -2,16 +2,22 @@ package configsvc
 
 import (
 	"errors"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"slices"
 	"testing"
 )
 
+// TestTenantConfig: the view shows the tenant's own config and the effective one over the server defaults; a
+// failing patch stores nothing; ResetTenantConfig unsets the paths (so the server default shows through again)
+// and refuses no paths.
 func TestTenantConfig(t *testing.T) {
 	e := newEnv(t)
+	server := domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "server"}}
+	e.svc = New(Deps{DB: e.store, Config: config.NewResolver(e.store, server)})
 	cfg, err := e.svc.GetTenantConfig(e.ctx, "t")
-	if err != nil || cfg.GetRetain().Mission != "" {
-		t.Fatalf("unset tenant config = %+v %v", cfg, err)
+	if err != nil || cfg.Own.GetRetain().Mission != "" || cfg.Effective.GetReflect().Mission != "server" {
+		t.Fatalf("unset tenant config = %+v %v; want an empty own config over the server defaults", cfg, err)
 	}
 	cfg, err = e.svc.UpdateTenantConfig(e.ctx, "t", func(cur domain.BankConfig) (domain.BankConfig, error) {
 		retGrp := cur.GetRetain()
@@ -19,7 +25,8 @@ func TestTenantConfig(t *testing.T) {
 		cur.Retain = &retGrp
 		return cur, nil
 	})
-	if err != nil || cfg.GetRetain().Mission != "tenant mission" {
+	if err != nil || cfg.Own.GetRetain().Mission != "tenant mission" ||
+		cfg.Effective.GetRetain().Mission != "tenant mission" {
 		t.Fatalf("patched tenant config = %+v %v", cfg, err)
 	}
 	boom := errors.New("boom")
@@ -28,6 +35,13 @@ func TestTenantConfig(t *testing.T) {
 	})
 	if !errors.Is(err, boom) {
 		t.Errorf("failing patch: %v", err)
+	}
+	if _, err := e.svc.ResetTenantConfig(e.ctx, "t", nil); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("reset with no paths: %v, want ErrInvalidArgument", err)
+	}
+	cfg, err = e.svc.ResetTenantConfig(e.ctx, "t", []string{"retain.mission"})
+	if err != nil || cfg.Own.GetRetain().Mission != "" || cfg.Effective.GetReflect().Mission != "server" {
+		t.Fatalf("reset tenant config = %+v %v", cfg, err)
 	}
 }
 
@@ -47,7 +61,7 @@ func TestBankConfig(t *testing.T) {
 		cur.Observations = &domain.ObservationConfig{Mission: "obs"}
 		return cur, nil
 	})
-	if err != nil || updated.Config.GetObservations().Mission != "obs" {
+	if err != nil || updated.Own.GetObservations().Mission != "obs" {
 		t.Fatalf("update creates the bank: %+v %v", updated, err)
 	}
 	view, err := e.svc.GetBankConfig(e.ctx, b)
@@ -59,7 +73,7 @@ func TestBankConfig(t *testing.T) {
 		t.Errorf("reset with no paths: %v, want ErrInvalidArgument", err)
 	}
 	reset, err := e.svc.ResetBankConfig(e.ctx, b, []string{"observations.mission"})
-	if err != nil || reset.Config.GetObservations().Mission != "" {
+	if err != nil || reset.Own.GetObservations().Mission != "" {
 		t.Fatalf("reset = %+v %v", reset, err)
 	}
 	e.tombstone(t, b)
@@ -81,12 +95,15 @@ func seedDirectives(t *testing.T, e env, b domain.BankRef) {
 		{Bank: b, Name: "sales", Tags: []string{"sales", "emea"}, Active: true},
 		{Bank: b, Name: "off", Tags: []string{"team"}, Active: false},
 	} {
-		if _, err := e.svc.UpsertDirective(e.ctx, d); err != nil {
+		if _, err := e.svc.CreateDirective(e.ctx, d); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
+// TestDirectives: CreateDirective creates the bank, assigns an id, normalizes tags and refuses a taken or empty
+// name; UpdateDirective patches by id and refuses a taken name and an unknown directive; listing, deleting and a
+// tombstoned bank.
 func TestDirectives(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc
@@ -94,19 +111,20 @@ func TestDirectives(t *testing.T) {
 	if _, err := s.ListDirectives(e.ctx, ListDirectivesRequest{Bank: b}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("list on unknown bank: %v", err)
 	}
-	stored, err := s.UpsertDirective(e.ctx, domain.Directive{Bank: b, Name: "a", Tags: []string{"B", "a"}})
+	stored, err := s.CreateDirective(e.ctx, domain.Directive{ID: "ignored", Bank: b, Name: "a", Tags: []string{"B", "a"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.ID == "" || !slices.Equal(stored.Tags, []string{"a", "b"}) {
-		t.Fatalf("stored = %+v (upsert creates the bank and normalizes tags)", stored)
+	if stored.ID == "" || stored.ID == "ignored" || !slices.Equal(stored.Tags, []string{"a", "b"}) {
+		t.Fatalf("stored = %+v (create creates the bank, assigns an id and normalizes tags)", stored)
 	}
-	stored.Active, stored.Name = true, "renamed"
-	replaced, err := s.UpsertDirective(e.ctx, stored)
-	if err != nil || replaced.ID != stored.ID || replaced.Name != "renamed" {
-		t.Fatalf("replace = %+v %v", replaced, err)
+	if _, err := s.CreateDirective(e.ctx, domain.Directive{Bank: b, Name: "a"}); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Errorf("create with a taken name: %v, want ErrAlreadyExists", err)
 	}
-	seedDirectives(t, e, b)
+	if _, err := s.CreateDirective(e.ctx, domain.Directive{Bank: b}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("create without a name: %v, want ErrInvalidArgument", err)
+	}
+	checkDirectiveUpdates(t, e, stored)
 	checkDirectiveListing(t, e, b)
 	if err := s.DeleteDirective(e.ctx, b, stored.ID); err != nil {
 		t.Fatal(err)
@@ -115,12 +133,37 @@ func TestDirectives(t *testing.T) {
 		t.Errorf("second delete: %v", err)
 	}
 	e.tombstone(t, b)
-	if _, err := s.UpsertDirective(e.ctx, domain.Directive{Bank: b, Name: "x"}); !errors.Is(err,
+	if _, err := s.CreateDirective(e.ctx, domain.Directive{Bank: b, Name: "x"}); !errors.Is(err,
 		domain.ErrBankDeleting) {
-		t.Errorf("UpsertDirective on a deleting bank: %v, want ErrBankDeleting", err)
+		t.Errorf("CreateDirective on a deleting bank: %v, want ErrBankDeleting", err)
 	}
 	if _, err := s.ListDirectives(e.ctx, ListDirectivesRequest{Bank: b}); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("ListDirectives on a deleting bank: %v, want ErrNotFound", err)
+	}
+}
+
+// checkDirectiveUpdates renames stored (and activates it), then refuses an unknown directive and, once the seed
+// directives exist, a rename onto a taken name.
+func checkDirectiveUpdates(t *testing.T, e env, stored domain.Directive) {
+	t.Helper()
+	s, b := e.svc, stored.Bank
+	rename := func(name string) DirectivePatch {
+		return func(cur domain.Directive) (domain.Directive, error) {
+			cur.Name, cur.Active = name, true
+			return cur, nil
+		}
+	}
+	updated, err := s.UpdateDirective(e.ctx, b, stored.ID, rename("renamed"))
+	if err != nil || updated.ID != stored.ID || updated.Name != "renamed" || !updated.Active ||
+		!slices.Equal(updated.Tags, stored.Tags) {
+		t.Fatalf("update = %+v %v", updated, err)
+	}
+	if _, err := s.UpdateDirective(e.ctx, b, "missing", rename("x")); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("update of an unknown directive: %v, want ErrNotFound", err)
+	}
+	seedDirectives(t, e, b)
+	if _, err := s.UpdateDirective(e.ctx, b, stored.ID, rename("global")); !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Errorf("rename onto a taken name: %v, want ErrAlreadyExists", err)
 	}
 }
 

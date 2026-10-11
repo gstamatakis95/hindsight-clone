@@ -23,14 +23,27 @@ func New(d Deps) *Service {
 	return &Service{d: d}
 }
 
-// GetOperation returns one operation of b; an unknown operation, or an unknown or tombstoned bank, is
-// domain.ErrNotFound.
+// GetOperation returns one operation of b; an unknown operation or bank is domain.ErrNotFound. A tombstoned bank
+// answers only for its delete_bank operations (any other id is domain.ErrBankNotFound, like every read of a bank
+// being deleted), so a client can poll the operation DeleteBank returned until the delete's last step removes it
+// with the bank.
 func (s *Service) GetOperation(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	var op domain.Operation
-	err := s.readBank(ctx, b, func(tx store.Tx) error {
-		var err error
-		op, err = tx.Queue().Get(ctx, b, id)
-		return err
+	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
+		op = domain.Operation{}
+		bank, err := tx.Banks().Get(ctx, b)
+		if err != nil {
+			return err
+		}
+		got, err := tx.Queue().Get(ctx, b, id)
+		switch {
+		case bank.Deleting() && (err != nil || got.Kind != domain.OperationKindDeleteBank):
+			return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b.Bank)
+		case err != nil:
+			return err
+		}
+		op = got
+		return nil
 	})
 	return op, err
 }

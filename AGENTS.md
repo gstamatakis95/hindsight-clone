@@ -36,9 +36,9 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
   - internal/document: DocumentService (ListDocuments, GetDocument, RetagDocument, ReprocessDocument);
     retag_document.
   - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
-  - internal/bank: BankService's bank lifecycle (create, from a template too, get, delete, stats, tags, export);
+  - internal/bank: BankService (create, from a template too, get, list, delete, stats, tags, export);
     delete_bank; the stalled-delete sweep.
-  - internal/configsvc: TenantService and BankService's config, directive and prompt-preview RPCs.
+  - internal/configsvc: ConfigService (tenant and bank config views, reset, prompt preview, directives).
   - internal/operation: OperationService (operation and event reads, cancel, retry).
 - internal/maintenance: the 60 s tick (ordered steps calling the services' sweeps) and the graph_maintenance job.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per proto service (holding only the services it

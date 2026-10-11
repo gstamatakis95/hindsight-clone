@@ -12,8 +12,8 @@
 //
 // [Start] serves a new [Server] on a loopback port and returns the address and a stop function that waits for the
 // server to exit; [New] and [Server.Register] put the stub on a caller's *grpc.Server. The stub implements the
-// generated memoryv1 MemoryService, BankService and OperationService server interfaces; every other RPC returns
-// UNIMPLEMENTED.
+// generated memoryv1 MemoryService, BankService, ConfigService and OperationService server interfaces; every other
+// RPC returns UNIMPLEMENTED.
 //
 // # Behaviour
 //
@@ -30,7 +30,8 @@
 //     line order.
 //   - Reflect answers with the top 3 recalled lines joined by newlines, or "I don't know.", and reports REFLECT usage
 //     of 100 input and 20 output tokens.
-//   - GetBankConfig reports EXTRACT, CONSOLIDATE and REFLECT bound to the stub's model, for the run metadata.
+//   - GetBankConfig reports an effective config with EXTRACT, CONSOLIDATE and REFLECT bound to the stub's model, for
+//     the run metadata.
 //   - ListOperations returns the bank's recorded operations in one page, filtered by status and kind; Options.FailedOps
 //     seeds that many FAILED consolidate operations into each new bank.
 //

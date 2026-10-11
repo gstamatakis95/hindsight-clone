@@ -3,8 +3,6 @@ package grpcapi
 import (
 	"context"
 	"memd/internal/bank"
-	"memd/internal/configsvc"
-	"memd/internal/domain"
 
 	pb "memd/gen/memory/v1"
 )
@@ -12,16 +10,14 @@ import (
 // BankHandler serves memory.v1.BankService.
 type BankHandler struct {
 	pb.UnimplementedBankServiceServer
-	// Banks serves CreateBank, CreateBankFromTemplate, GetBank, DeleteBank, GetBankStats, ListTags and
-	// ExportBankTemplate.
+	// Banks serves every BankService RPC.
 	Banks *bank.Service
-	// Config serves GetBankConfig, UpdateBankConfig, ResetBankConfig, PreviewPrompt and the directive RPCs.
-	Config *configsvc.Service
 }
 
 var _ pb.BankServiceServer = (*BankHandler)(nil)
 
-// CreateBank creates a bank with its own config overrides; they must pass config.Validate.
+// CreateBank creates a bank with its own config overrides, or from a template; the config and the template's
+// mental-model overrides must pass config.Validate.
 func (h *BankHandler) CreateBank(ctx context.Context, req *pb.CreateBankRequest) (*pb.CreateBankResponse, error) {
 	b, err := bankRef(ctx, req.GetBankId())
 	if err != nil {
@@ -31,18 +27,28 @@ func (h *BankHandler) CreateBank(ctx context.Context, req *pb.CreateBankRequest)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	if err := validate(&in.Config); err != nil {
+	in.Bank.Ref = b
+	if err := validate(&in.Bank.Config); err != nil {
 		return nil, toStatus(err)
 	}
-	in.Ref = b
-	out, _, err := h.Banks.CreateBank(ctx, bank.CreateRequest{Bank: in})
+	if t := in.Template; t != nil {
+		if err := validate(&t.Config); err != nil {
+			return nil, toStatus(err)
+		}
+		for i := range t.MentalModels {
+			if err := validate(t.MentalModels[i].Overrides); err != nil {
+				return nil, toStatus(err)
+			}
+		}
+	}
+	out, builds, err := h.Banks.CreateBank(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.CreateBankResponse{Bank: bankToProto(out)}, nil
+	return &pb.CreateBankResponse{Bank: bankToProto(out), MentalModelOperations: operationsToProto(builds)}, nil
 }
 
-// GetBank returns a bank and its own config overrides.
+// GetBank returns a live bank.
 func (h *BankHandler) GetBank(ctx context.Context, req *pb.GetBankRequest) (*pb.GetBankResponse, error) {
 	b, err := bankRef(ctx, req.GetBankId())
 	if err != nil {
@@ -55,56 +61,23 @@ func (h *BankHandler) GetBank(ctx context.Context, req *pb.GetBankRequest) (*pb.
 	return &pb.GetBankResponse{Bank: bankToProto(out)}, nil
 }
 
-// GetBankConfig returns the resolved config and the bank's own overrides.
-func (h *BankHandler) GetBankConfig(
-	ctx context.Context, req *pb.GetBankConfigRequest,
-) (*pb.GetBankConfigResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+// ListBanks pages the calling tenant's live banks in id order.
+func (h *BankHandler) ListBanks(ctx context.Context, req *pb.ListBanksRequest) (*pb.ListBanksResponse, error) {
+	t, err := tenant(ctx)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	view, err := h.Config.GetBankConfig(ctx, b)
+	out, err := h.Banks.ListBanks(ctx, bank.ListBanksRequest{
+		Tenant: t, IDPrefix: req.GetIdPrefix(), PageSize: int(req.GetPageSize()), PageToken: req.GetPageToken(),
+	})
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.GetBankConfigResponse{
-		Resolved: configValueToProto(view.Effective), Overrides: configValueToProto(view.Own),
-	}, nil
-}
-
-// UpdateBankConfig patches the bank's own overrides with the masked fields of the request config; the
-// patched overrides must pass config.Validate (checked inside the patch).
-func (h *BankHandler) UpdateBankConfig(
-	ctx context.Context, req *pb.UpdateBankConfigRequest,
-) (*pb.UpdateBankConfigResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
+	banks := make([]*pb.Bank, len(out.Banks))
+	for i := range out.Banks {
+		banks[i] = bankToProto(out.Banks[i])
 	}
-	patch, err := configPatch(req.GetConfig(), req.GetUpdateMask())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	out, err := h.Config.UpdateBankConfig(ctx, b, patch)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.UpdateBankConfigResponse{Bank: bankToProto(out)}, nil
-}
-
-// ResetBankConfig resets the given override paths (all when empty) so they inherit again.
-func (h *BankHandler) ResetBankConfig(
-	ctx context.Context, req *pb.ResetBankConfigRequest,
-) (*pb.ResetBankConfigResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	out, err := h.Config.ResetBankConfig(ctx, b, req.GetPaths())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.ResetBankConfigResponse{Bank: bankToProto(out)}, nil
+	return &pb.ListBanksResponse{Banks: banks, NextPageToken: out.NextPageToken}, nil
 }
 
 // GetBankStats returns the bank's counts.
@@ -138,32 +111,6 @@ func (h *BankHandler) ListTags(ctx context.Context, req *pb.ListTagsRequest) (*p
 	return tagPageToProto(out), nil
 }
 
-// PreviewPrompt renders the messages an operation would send, with request overrides on top.
-func (h *BankHandler) PreviewPrompt(
-	ctx context.Context, req *pb.PreviewPromptRequest,
-) (*pb.PreviewPromptResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	op, overrides, err := previewPromptFromProto(req)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	if err := validate(overrides); err != nil {
-		return nil, toStatus(err)
-	}
-	var o domain.BankConfig
-	if overrides != nil {
-		o = *overrides
-	}
-	out, err := h.Config.PreviewPrompt(ctx, b, op, o)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.PreviewPromptResponse{Preview: promptPreviewToProto(out)}, nil
-}
-
 // DeleteBank tombstones the bank and returns the delete_bank operation.
 func (h *BankHandler) DeleteBank(ctx context.Context, req *pb.DeleteBankRequest) (*pb.DeleteBankResponse, error) {
 	b, err := bankRef(ctx, req.GetBankId())
@@ -190,94 +137,4 @@ func (h *BankHandler) ExportBankTemplate(
 		return nil, toStatus(err)
 	}
 	return &pb.ExportBankTemplateResponse{Template: bankTemplateToProto(out)}, nil
-}
-
-// CreateBankFromTemplate creates a bank from a template.
-func (h *BankHandler) CreateBankFromTemplate(
-	ctx context.Context, req *pb.CreateBankFromTemplateRequest,
-) (*pb.CreateBankFromTemplateResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	t, err := bankTemplateFromProto(req.GetTemplate())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	if err := validate(&t.Config); err != nil {
-		return nil, toStatus(err)
-	}
-	for i := range t.MentalModels {
-		if err := validate(t.MentalModels[i].Overrides); err != nil {
-			return nil, toStatus(err)
-		}
-	}
-	out, builds, err := h.Banks.CreateBank(ctx, bank.CreateRequest{
-		Bank: domain.Bank{Ref: b, Name: req.GetName()}, Template: &t,
-	})
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.CreateBankFromTemplateResponse{
-		Bank: bankToProto(out), MentalModelOperations: operationsToProto(builds),
-	}, nil
-}
-
-// UpsertDirective creates or replaces a directive.
-func (h *BankHandler) UpsertDirective(
-	ctx context.Context, req *pb.UpsertDirectiveRequest,
-) (*pb.UpsertDirectiveResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	if req.GetDirective() == nil {
-		return nil, toStatus(domain.InvalidField("directive", "directive is required"))
-	}
-	in := upsertDirectiveFromProto(req)
-	in.Bank = b
-	out, err := h.Config.UpsertDirective(ctx, in)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.UpsertDirectiveResponse{Directive: directiveToProto(out)}, nil
-}
-
-// ListDirectives pages the bank's directives, filtered by tags and activity.
-func (h *BankHandler) ListDirectives(
-	ctx context.Context, req *pb.ListDirectivesRequest,
-) (*pb.ListDirectivesResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	in, err := listDirectivesFromProto(req)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	in.Bank = b
-	out, err := h.Config.ListDirectives(ctx, in)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.ListDirectivesResponse{
-		Directives: directivesToProto(out.Items), NextPageToken: out.NextPageToken,
-	}, nil
-}
-
-// DeleteDirective removes one directive.
-func (h *BankHandler) DeleteDirective(
-	ctx context.Context, req *pb.DeleteDirectiveRequest,
-) (*pb.DeleteDirectiveResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	if err := requireID("directive_id", req.GetDirectiveId()); err != nil {
-		return nil, toStatus(err)
-	}
-	if err := h.Config.DeleteDirective(ctx, b, domain.DirectiveID(req.GetDirectiveId())); err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.DeleteDirectiveResponse{}, nil
 }

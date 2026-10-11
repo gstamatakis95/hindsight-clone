@@ -109,7 +109,7 @@ func (e *env) consolidationRecallReflect(t *testing.T) {
 		t.Fatal("no observations after consolidation")
 	}
 	stats, err := e.c.Banks.GetBankStats(e.ctx(t), &pb.GetBankStatsRequest{BankId: bank})
-	if err != nil || stats.GetStats().GetUnconsolidatedUnits() != 0 {
+	if err != nil || stats.GetStats().GetUnconsolidatedMemories() != 0 {
 		t.Fatalf("stats after consolidation: %+v %v", stats.GetStats(), err)
 	}
 	if got := e.recall(t, bank, "Where does Alice live? Lisbon"); !anyContains(got, "Lisbon") {
@@ -170,8 +170,8 @@ func (e *env) mentalModels(t *testing.T) {
 func (e *env) consolidationTriggersRefresh(t *testing.T) {
 	const bank = "sc-mm-after-consolidation"
 	debounce := int32(1)
-	_, err := e.c.Banks.CreateBank(e.ctx(t), &pb.CreateBankRequest{BankId: bank, Config: &pb.BankConfig{
-		MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce},
+	_, err := e.c.Banks.CreateBank(e.ctx(t), &pb.CreateBankRequest{BankId: bank, Initial: &pb.CreateBankRequest_Config{
+		Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -418,10 +418,11 @@ func (e *env) crashReclaim(t *testing.T) {
 	e.idle(t, bank)
 }
 
-// bankDelete: DeleteBank tombstones at once (reads NOT_FOUND, writes FAILED_PRECONDITION), the delete_bank
-// job removes everything, including the bank's blob prefix in MinIO, and a later write creates a fresh,
-// empty bank. The worker is stopped across the DeleteBank call, so the delete is still pending when the
-// write arrives and FAILED_PRECONDITION is the only acceptable answer.
+// bankDelete: DeleteBank tombstones at once (GetBank reads NOT_FOUND, writes FAILED_PRECONDITION) while
+// GetOperation keeps answering for the returned delete_bank operation; the delete_bank job removes everything,
+// including the bank's blob prefix in MinIO, after which GetOperation of that operation is NOT_FOUND (the client's
+// completion signal), and a later write creates a fresh, empty bank. The worker is stopped across the DeleteBank
+// call, so the delete is still pending when the write arrives and FAILED_PRECONDITION is the only acceptable answer.
 func (e *env) bankDelete(t *testing.T) {
 	const bank = "sc-delete"
 	e.retain(t, bank, aliceDoc, aliceText)
@@ -433,20 +434,28 @@ func (e *env) bankDelete(t *testing.T) {
 	if err := e.worker.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.c.Banks.DeleteBank(e.ctx(t), &pb.DeleteBankRequest{BankId: bank}); err != nil {
+	del, err := e.c.Banks.DeleteBank(e.ctx(t), &pb.DeleteBankRequest{BankId: bank})
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{{Content: "x"}}})
+	opID := del.GetOperation().GetId()
+	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{{Content: "x"}}})
 	wantCode(t, "write to a deleting bank", err, codes.FailedPrecondition)
+	_, err = e.c.Banks.GetBank(e.ctx(t), &pb.GetBankRequest{BankId: bank})
+	wantCode(t, "GetBank of a deleting bank", err, codes.NotFound)
+	op, err := e.c.Operations.GetOperation(e.ctx(t), &pb.GetOperationRequest{BankId: bank, OperationId: opID})
+	if err != nil || op.GetOperation().GetStatus() != pb.OperationStatus_OPERATION_STATUS_PENDING {
+		t.Fatalf("delete_bank operation while the worker is stopped: %v %v", op, err)
+	}
 	e.worker.Restart()
 	ctx := e.ctx(t)
 	for {
-		_, err := e.c.Banks.GetBank(ctx, &pb.GetBankRequest{BankId: bank})
+		_, err := e.c.Operations.GetOperation(ctx, &pb.GetOperationRequest{BankId: bank, OperationId: opID})
 		if codeOf(err) == codes.NotFound {
 			break
 		}
 		if ctx.Err() != nil {
-			t.Fatalf("bank still there: %v\n%s", err, tail(e.worker.Logs(), 4000))
+			t.Fatalf("delete not done: %v\n%s", err, tail(e.worker.Logs(), 4000))
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

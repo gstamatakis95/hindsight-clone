@@ -1,7 +1,7 @@
-// Package bank owns the bank lifecycle. Its one type, [Service], built by [New] from [Deps], serves the bank part
-// of memory.v1.BankService: creating a bank (plain or from a template), reading it, its stats and tag listings,
-// exporting it as a template and the two-step delete. It runs the delete_bank job ([Service.RunDeleteJob]) and
-// the maintenance tick's resume_bank_deletes sweep ([Service.ResumeStalledDeletes]).
+// Package bank owns the bank lifecycle. Its one type, [Service], built by [New] from [Deps], serves
+// memory.v1.BankService: creating a bank (plain or from a template), reading and listing banks, their stats and tag
+// listings, exporting a bank as a template and the two-step delete. It runs the delete_bank job
+// ([Service.RunDeleteJob]) and the maintenance tick's resume_bank_deletes sweep ([Service.ResumeStalledDeletes]).
 //
 // # Where it sits
 //
@@ -14,8 +14,8 @@
 //
 // The public surface:
 //
-//   - RPCs: [Service.CreateBank] (CreateBank and CreateBankFromTemplate), [Service.GetBank], [Service.DeleteBank],
-//     [Service.GetBankStats], [Service.ListTags] and [Service.ExportBankTemplate].
+//   - RPCs: [Service.CreateBank] (with a config or a template), [Service.GetBank], [Service.ListBanks],
+//     [Service.DeleteBank], [Service.GetBankStats], [Service.ListTags] and [Service.ExportBankTemplate].
 //   - Job: [Service.RunDeleteJob] handles delete_bank.
 //   - Sweep: [Service.ResumeStalledDeletes].
 //
@@ -27,18 +27,22 @@
 //
 // # Create
 //
-// [Service.CreateBank] without a template inserts the bank with its own config: an existing bank is
+// [Service.CreateBank] inserts the bank row through one check, with or without a template: an existing bank is
 // domain.ErrAlreadyExists (with its own message, never the store's, also when a concurrent create wins the race)
-// and a tombstoned one domain.ErrBankDeleting. It takes no change seq.
+// and a tombstoned one domain.ErrBankDeleting. Without a template it stores the request's config and takes no
+// change seq.
 //
-// With a template it creates the bank in one transaction: Banks().Create, tx.Seq(bank), the directives with new
-// ids, each mental model, and each model's first build enqueued with jobs.QueueModelRefresh (which expects tx.Seq
-// to have been taken); it returns the build operations in template order. An existing bank fails in Create, a
-// template model without an id is domain.ErrInvalidArgument, and any failure rolls the whole bank back.
+// With a template the template is checked first (every directive needs a name, unique within the template, since
+// directive names are unique in a bank; every model needs an id), then one transaction inserts the bank with the
+// template's config, takes tx.Seq(bank), creates the directives with new ids, each mental model, and each model's
+// first build enqueued with jobs.QueueModelRefresh (which expects tx.Seq to have been taken); it returns the build
+// operations in template order. Any failure rolls the whole bank back.
 //
-// [Service.GetBank] returns a tombstoned bank too, with DeletingAt set; a client watches for NOT_FOUND to learn
-// that a delete finished. [Service.ExportBankTemplate] returns a bank's own config, its directives (ids, bank refs
-// and timestamps dropped) and its mental-model specs, with no memories.
+// [Service.GetBank] returns a live bank: an unknown or tombstoned one is domain.ErrBankNotFound, like every read of
+// a bank being deleted. [Service.ListBanks] pages a tenant's live banks in byte order of id (Catalog.ListBanks, a
+// keyset on the id; the page token carries the last id), optionally under an id prefix. [Service.ExportBankTemplate]
+// returns a bank's own config, its directives (ids, bank refs and timestamps dropped) and its mental-model specs,
+// with no memories.
 //
 // # Stats and tags
 //
@@ -77,9 +81,11 @@
 //
 // A run that finds the bank gone, or no longer tombstoned (a fresh bank took the id), is done and deletes no
 // blobs, so a stale duplicate run never touches a new bank's data. No job outlives its bank. The returned
-// operation can complete, or vanish with the bank row, while a continuation still runs; GetBank returning
-// NOT_FOUND is the completion signal. Defaults ([DeleteConfig] zero values): [DefaultDeleteBatchSize] 1000 rows,
-// [DefaultDeleteMaxBatches] 100 batches per run, [DefaultDeleteBlobPageSize] 1000 keys.
+// operation can complete while a continuation still runs, and every operation of the bank vanishes with the bank
+// row; OperationService.GetOperation answers for a tombstoned bank's delete_bank operations, so a client polls the
+// returned operation until it is NOT_FOUND, the completion signal. Defaults ([DeleteConfig] zero values):
+// [DefaultDeleteBatchSize] 1000 rows, [DefaultDeleteMaxBatches] 100 batches per run, [DefaultDeleteBlobPageSize]
+// 1000 keys.
 //
 // # Blob delete
 //
@@ -99,7 +105,8 @@
 //
 // # Tests
 //
-// Tests run on a pgtest database and fake.Blob: bank create and its error cases, stats and tag paging, template
+// Tests run on a pgtest database and fake.Blob: bank create and its error cases, GetBank of a deleting bank, bank
+// listing, stats and tag paging, template
 // round trip and rollback, and the delete lifecycle (idempotent tombstone, resumption of a half-deleted bank,
 // paged blob deletes with fencing, the processing-job re-check in the final transaction, a cancelled run, the
 // continuation and attempt-cap requeue).

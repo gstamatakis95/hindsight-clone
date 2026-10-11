@@ -7,6 +7,7 @@ import (
 	"memd/internal/graph"
 	"memd/internal/store"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,7 +20,7 @@ func curationCases() []storeCase {
 		{"UnitsSetDocumentTags", testSetDocumentTags},
 		{"UnitsSetDocumentTagsKeepsExtraTags", testSetDocumentTagsKeepsExtraTags},
 		{"UpdateAndRetagResetConsolidation", testResetConsolidation},
-		{"DirectivesUpsertListDelete", testDirectives},
+		{"DirectivesCreateUpdateListDelete", testDirectives},
 		{"LinksCountDirtyClearDirty", testLinksDirty},
 		{"EntitiesPendingMaintenancePruneOrphans", testEntityMaintenance},
 		{"RederiveDetachAndDeleteLinks", testRederiveDetach},
@@ -213,16 +214,22 @@ func testResetConsolidation(t *testing.T, s store.DB) {
 
 // ---------- DirectiveRepo ----------
 
-// upsertDirective upserts d in its own transaction and returns the id.
-func upsertDirective(t *testing.T, s store.DB, d domain.Directive) domain.DirectiveID {
+// createDirective creates d in its own transaction and returns the id.
+func createDirective(t *testing.T, s store.DB, d domain.Directive) domain.DirectiveID {
 	t.Helper()
 	var id domain.DirectiveID
 	inTx(t, s, func(tx store.Tx) error {
 		var err error
-		id, err = tx.Directives().Upsert(t.Context(), d)
+		id, err = tx.Directives().Create(t.Context(), d)
 		return err
 	})
 	return id
+}
+
+// updateDirective replaces d (by id) in its own transaction.
+func updateDirective(t *testing.T, s store.DB, d domain.Directive) {
+	t.Helper()
+	inTx(t, s, func(tx store.Tx) error { return tx.Directives().Update(t.Context(), d) })
 }
 
 // listDirectives lists bank b's directives.
@@ -256,17 +263,27 @@ func compareDirective(t *testing.T, got, want domain.Directive) {
 	}
 }
 
-// testDirectives: Upsert assigns ids and replaces by id; List is oldest first and filters inactive ones;
-// Delete removes, and deleting again is ErrNotFound; banks are isolated.
+// testDirectives: Create assigns ids and refuses a taken name with no SQL text; Update replaces by id, refuses a
+// taken name and an unknown id; List is oldest first and filters inactive ones; Delete removes, and deleting
+// again is ErrNotFound; banks are isolated.
 func testDirectives(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA, bankB)
 	d1 := domain.Directive{Bank: bankA, Name: "tone", Rules: []string{"be brief", "cite sources"}, Active: true}
 	d2 := domain.Directive{Bank: bankA, Name: "legal", Rules: []string{"no advice"}, Tags: []string{"legal"}}
-	d1.ID = upsertDirective(t, s, d1)
-	d2.ID = upsertDirective(t, s, d2)
+	d1.ID = createDirective(t, s, d1)
+	d2.ID = createDirective(t, s, d2)
 	if d1.ID == "" || d2.ID == "" || d1.ID == d2.ID {
-		t.Fatalf("Upsert ids = %q, %q; want two distinct ids", d1.ID, d2.ID)
+		t.Fatalf("Create ids = %q, %q; want two distinct ids", d1.ID, d2.ID)
 	}
+	err := txErr(t, s, func(tx store.Tx) error {
+		_, err := tx.Directives().Create(t.Context(), domain.Directive{Bank: bankA, Name: "tone"})
+		return err
+	})
+	wantErrIs(t, "Create(taken name)", err, domain.ErrAlreadyExists)
+	if err != nil && strings.Contains(err.Error(), "SQLSTATE") {
+		t.Errorf("Create(taken name) leaks driver text: %v", err)
+	}
+	createDirective(t, s, domain.Directive{Bank: bankB, Name: "tone"}) // names are per bank
 	all := listDirectives(t, s, bankA, false)
 	wantSeq(t, "List(all)", directiveIDs(all), []domain.DirectiveID{d1.ID, d2.ID})
 	if len(all) == 2 {
@@ -275,19 +292,27 @@ func testDirectives(t *testing.T, s store.DB) {
 	}
 	wantSeq(t, "List(active)", directiveIDs(listDirectives(t, s, bankA, true)), []domain.DirectiveID{d1.ID})
 	d1.Name, d1.Active = "tone v2", false
-	if id := upsertDirective(t, s, d1); id != d1.ID {
-		t.Errorf("Upsert with id %s returned %s", d1.ID, id)
-	}
+	updateDirective(t, s, d1)
 	wantSeq(t, "List(active) after deactivating", directiveIDs(listDirectives(t, s, bankA, true)), nil)
+	err = txErr(t, s, func(tx store.Tx) error {
+		return tx.Directives().Update(t.Context(), domain.Directive{ID: d1.ID, Bank: bankA, Name: "legal"})
+	})
+	wantErrIs(t, "Update(taken name)", err, domain.ErrAlreadyExists)
+	err = txErr(t, s, func(tx store.Tx) error {
+		return tx.Directives().Update(t.Context(), domain.Directive{ID: "missing", Bank: bankA, Name: "x"})
+	})
+	wantErrIs(t, "Update(unknown)", err, domain.ErrNotFound)
 	inTx(t, s, func(tx store.Tx) error { return tx.Directives().Delete(t.Context(), bankA, d2.ID) })
 	all = listDirectives(t, s, bankA, false)
 	wantSeq(t, "List(all) after Delete", directiveIDs(all), []domain.DirectiveID{d1.ID})
 	if len(all) == 1 {
 		compareDirective(t, all[0], d1)
 	}
-	err := txErr(t, s, func(tx store.Tx) error { return tx.Directives().Delete(t.Context(), bankA, d2.ID) })
+	err = txErr(t, s, func(tx store.Tx) error { return tx.Directives().Delete(t.Context(), bankA, d2.ID) })
 	wantErrIs(t, "Delete(deleted)", err, domain.ErrNotFound)
-	wantSeq(t, "List(bank B)", directiveIDs(listDirectives(t, s, bankB, false)), nil)
+	if n := len(listDirectives(t, s, bankB, false)); n != 1 {
+		t.Errorf("List(bank B) = %d directives, want 1", n)
+	}
 }
 
 // ---------- graph and entity maintenance queues ----------
@@ -525,7 +550,7 @@ func fillBank(t *testing.T, s store.DB, b domain.BankRef) []domain.UnitID {
 		if err := tx.Evidence().Add(t.Context(), obs.ID, []domain.Evidence{{Unit: f1.ID, Quote: "f1"}}); err != nil {
 			return err
 		}
-		if _, err := tx.Directives().Upsert(t.Context(), domain.Directive{Bank: b, Name: "d", Active: true}); err != nil {
+		if _, err := tx.Directives().Create(t.Context(), domain.Directive{Bank: b, Name: "d", Active: true}); err != nil {
 			return err
 		}
 		return tx.MentalModels().Create(t.Context(), sampleModel(b, "model"))

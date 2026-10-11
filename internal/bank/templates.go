@@ -7,6 +7,7 @@ import (
 	"memd/internal/jobs"
 	"memd/internal/store"
 	"slices"
+	"strings"
 )
 
 // ExportBankTemplate returns bank b's own config, directives and mental-model specs (no memories); an unknown or
@@ -50,45 +51,22 @@ func portableDirective(d domain.Directive) domain.Directive {
 	}
 }
 
-// createFromTemplate creates the bank, its directives (new ids) and its mental models, and enqueues each model's
-// first build, all in one transaction. An existing bank is domain.ErrAlreadyExists.
-func (s *Service) createFromTemplate(
-	ctx context.Context, b domain.BankRef, name string, t domain.BankTemplate,
-) (domain.Bank, []domain.Operation, error) {
-	specs, err := templateSpecs(t.MentalModels)
-	if err != nil {
-		return domain.Bank{}, nil, err
+// applyTemplate creates the template's directives (new ids) and mental models in tx, and enqueues each model's first
+// build, returning the build operations. The bank row is new in tx, so the change seq it takes first is the bank's
+// first.
+func (s *Service) applyTemplate(
+	ctx context.Context, tx store.Tx, b domain.BankRef, t domain.BankTemplate,
+) ([]domain.Operation, error) {
+	if _, err := tx.Seq(ctx, b); err != nil {
+		return nil, err
 	}
-	var (
-		bank domain.Bank
-		ops  []domain.Operation
-	)
-	err = s.d.DB.InTx(ctx, func(tx store.Tx) error {
-		bank, ops = domain.Bank{}, nil
-		if err := tx.Banks().Create(ctx, domain.Bank{Ref: b, Name: name, Config: t.Config}); err != nil {
-			return err
+	for _, d := range t.Directives {
+		d.Bank = b
+		if _, err := tx.Directives().Create(ctx, d); err != nil {
+			return nil, err
 		}
-		if _, err := tx.Seq(ctx, b); err != nil {
-			return err
-		}
-		for _, d := range t.Directives {
-			d = portableDirective(d)
-			d.Bank = b
-			if _, err := tx.Directives().Upsert(ctx, d); err != nil {
-				return err
-			}
-		}
-		var err error
-		if ops, err = s.createModels(ctx, tx, b, specs); err != nil {
-			return err
-		}
-		bank, err = tx.Banks().Get(ctx, b)
-		return err
-	})
-	if err != nil {
-		return domain.Bank{}, nil, err
 	}
-	return bank, ops, nil
+	return s.createModels(ctx, tx, b, t.MentalModels)
 }
 
 // createModels creates each model in tx and enqueues its first build, returning the build operations.
@@ -113,15 +91,29 @@ func (s *Service) createModels(
 	return ops, nil
 }
 
-// templateSpecs validates the template's model specs and normalizes their tags.
-func templateSpecs(in []domain.MentalModelSpec) ([]domain.MentalModelSpec, error) {
-	out := make([]domain.MentalModelSpec, 0, len(in))
-	for _, s := range in {
-		if s.ID == "" {
-			return nil, fmt.Errorf("%w: template mental model without an id", domain.ErrInvalidArgument)
+// checkTemplate validates a template before any write and returns it normalized: directives need a name, unique
+// within the template (they become the bank's directives, whose names are unique), and keep only what a template
+// carries; mental models need an id and get normalized tags.
+func checkTemplate(t domain.BankTemplate) (domain.BankTemplate, error) {
+	out := domain.BankTemplate{Config: t.Config}
+	names := make(map[string]bool, len(t.Directives))
+	for i, d := range t.Directives {
+		field := fmt.Sprintf("template.directives[%d].name", i)
+		switch {
+		case strings.TrimSpace(d.Name) == "":
+			return domain.BankTemplate{}, domain.InvalidField(field, "a template directive needs a name")
+		case names[d.Name]:
+			return domain.BankTemplate{}, domain.InvalidField(field, "directive name %q is used twice", d.Name)
 		}
-		s.Tags = domain.NormalizeTags(s.Tags)
-		out = append(out, s)
+		names[d.Name] = true
+		out.Directives = append(out.Directives, portableDirective(d))
+	}
+	for _, m := range t.MentalModels {
+		if m.ID == "" {
+			return domain.BankTemplate{}, fmt.Errorf("%w: template mental model without an id", domain.ErrInvalidArgument)
+		}
+		m.Tags = domain.NormalizeTags(m.Tags)
+		out.MentalModels = append(out.MentalModels, m)
 	}
 	return out, nil
 }

@@ -1,10 +1,18 @@
--- DirectiveUpsert creates a directive or replaces its name, rules, tags and active flag.
--- name: DirectiveUpsert :exec
+-- DirectiveCreate inserts a directive; a taken id or name in the bank is a unique violation.
+-- name: DirectiveCreate :exec
 INSERT INTO directives (tenant_id, bank_id, id, name, rules, tags, active)
-VALUES (@tenant_id, @bank_id, @id, @name, @rules, @tags, @active)
-ON CONFLICT (tenant_id, bank_id, id) DO UPDATE
-SET name = EXCLUDED.name, rules = EXCLUDED.rules, tags = EXCLUDED.tags, active = EXCLUDED.active,
-    updated_at = now();
+VALUES (@tenant_id, @bank_id, @id, @name, @rules, @tags, @active);
+
+-- DirectiveUpdate replaces a directive's name, rules, tags and active flag, keeping created_at; a taken name
+-- is a unique violation.
+-- name: DirectiveUpdate :execrows
+UPDATE directives
+SET name = @name, rules = @rules, tags = @tags, active = @active, updated_at = now()
+WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND id = @id;
+
+-- DirectiveGet returns one directive, locked for update until the transaction ends.
+-- name: DirectiveGet :one
+SELECT * FROM directives WHERE tenant_id = @tenant_id AND bank_id = @bank_id AND id = @id FOR UPDATE;
 
 -- DirectiveList returns a bank's directives (only active ones when active_only), oldest first.
 -- name: DirectiveList :many
