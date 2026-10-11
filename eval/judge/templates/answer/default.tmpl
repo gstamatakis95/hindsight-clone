@@ -1,0 +1,12 @@
+You are a helpful assistant. Answer the following question based ONLY on the provided context.
+{{if .QueryTime}}
+The question is being asked on: {{.QueryTime}} UTC
+{{end}}
+Context:
+{{.Context}}
+
+Question: {{.Question}}
+
+Think step by step about what the context says, then provide your answer.
+
+Reply with only a JSON object of the form {"reasoning": "<step-by-step explanation of how you used the context to arrive at the answer>", "answer": "<the final concise answer to the question; if the context lacks the information, say so>"}.

@@ -1,4 +1,6 @@
-// Package golden holds the golden retain -> recall fixtures (*.yaml in this directory) and their loader.
+// Package golden holds the golden retain -> recall fixtures (*.yaml in this directory, built into the binary) and
+// their loader, and registers them with eval/benchmark as "golden": recall mode, the substring judge, a 200 ms poll
+// and a 90 s barrier, and a gate that fails the run unless every check passed.
 //
 // Each fixture is one bank: its sessions are retained, then each check recalls a query and passes when a recalled
 // memory contains one of the accepted substrings, case-insensitively. The checks are graded by judge.Contains, with no
@@ -24,15 +26,15 @@
 //
 // # Loading
 //
-// [Load] reads every *.yaml file of a directory in file-name order and returns one harness.Conversation per fixture:
-// the conversation id is the fixture name (names must be unique across files), sessions map one to one, and each check
-// becomes a question whose category is the check's category, else the fixture name, with the first accepted string as
-// its answer.
+// [Load] reads every *.yaml file of a directory (the built-in fixtures when the directory is "") in file-name order and
+// returns one harness.Conversation per fixture: the conversation id is the fixture name (names must be unique across
+// files), sessions map one to one, and each check becomes a question whose category is the check's category, else the
+// fixture name, with the first accepted string as its answer.
 //
-//	convs, err := golden.Load("eval/golden")
+//	convs, err := golden.Load("")
 //
 // # Testing
 //
-// golden_test.go loads the fixtures in this directory, rejects malformed ones, and runs all of them through the harness
-// against eval/stub in recall mode, failing if any check fails or the run takes two minutes or longer.
+// golden_test.go rejects malformed fixtures and runs the built-in ones through the harness against eval/stub in recall
+// mode, failing if any check fails or the run takes two minutes or longer.
 package golden

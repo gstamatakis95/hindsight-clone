@@ -106,22 +106,28 @@ func TestHindsightRetain(t *testing.T) {
 func TestHindsightRecall(t *testing.T) {
 	h, f := newFakeHindsight(t)
 	ctx := context.Background()
-	texts, err := h.Recall(ctx, "b/1", "what does Alice like?", time.Time{})
+	rec, err := h.Recall(ctx, "b/1", "what does Alice like?", time.Time{}, harness.RecallOptions{})
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	if !reflect.DeepEqual(texts, []string{"Alice likes tea", "Bob likes coffee"}) {
+	if texts := rec.Texts(); !reflect.DeepEqual(texts, []string{"Alice likes tea", "Bob likes coffee"}) {
 		t.Fatalf("Recall = %q", texts)
 	}
 	got := f.bodies["POST /memories/recall"]
-	if !reflect.DeepEqual(got, map[string]any{"query": "what does Alice like?"}) {
+	want := map[string]any{"query": "what does Alice like?", "include": map[string]any{"entities": nil}}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("recall body = %v (zero time must omit query_timestamp)", got)
 	}
-	if _, err := h.Recall(ctx, "b/1", "q", at); err != nil {
+	opts := harness.RecallOptions{Budget: "high", MaxTokens: 32768, ChunkTokens: 16384}
+	if _, err := h.Recall(ctx, "b/1", "q", at, opts); err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	if got := f.bodies["POST /memories/recall"]["query_timestamp"]; got != "2024-05-01T10:00:00Z" {
-		t.Fatalf("query_timestamp = %v", got)
+	want = map[string]any{
+		"query": "q", "query_timestamp": "2024-05-01T10:00:00Z", "budget": "high", "max_tokens": float64(32768),
+		"include": map[string]any{"entities": nil, "chunks": map[string]any{"max_tokens": float64(16384)}},
+	}
+	if got := f.bodies["POST /memories/recall"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("recall body = %v, want %v", got, want)
 	}
 }
 
@@ -169,7 +175,7 @@ func TestHindsightError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	h := target.NewHindsight(srv.URL, "", srv.Client())
-	_, err := h.Recall(context.Background(), "b", "q", time.Time{})
+	_, err := h.Recall(context.Background(), "b", "q", time.Time{}, harness.RecallOptions{})
 	if err == nil {
 		t.Fatal("Recall on a 500 returned no error")
 	}

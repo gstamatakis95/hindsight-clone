@@ -1,6 +1,8 @@
-// Package longmemeval loads the LongMemEval benchmark (longmemeval_s, _m or _oracle,
-// https://github.com/xiaowu0162/LongMemEval) into eval/harness conversations. The dataset is not vendored; download it
-// yourself.
+// Package longmemeval loads the LongMemEval benchmark (https://github.com/xiaowu0162/LongMemEval) into eval/harness
+// conversations and registers it with eval/benchmark twice: longmemeval (longmemeval_s_cleaned.json) and
+// longmemeval-oracle (longmemeval_oracle.json, the evidence sessions only), both downloaded from the cleaned release on
+// Hugging Face at a pinned revision and checked against their sha256. Both run in reflect mode with the LLM judge by
+// default.
 //
 // # Mapping
 //

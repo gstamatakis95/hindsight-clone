@@ -61,11 +61,11 @@ func TestMemdRetainRecallReflect(t *testing.T) {
 		}
 	}
 
-	texts, err := m.Recall(ctx, "bank-1", "Where did I move to, Lisbon?", time.Time{})
+	rec, err := m.Recall(ctx, "bank-1", "Where did I move to, Lisbon?", time.Time{}, harness.RecallOptions{Budget: "high"})
 	if err != nil {
 		t.Fatalf("Recall: %v", err)
 	}
-	if len(texts) != 1 || texts[0] != "user: I moved to Lisbon" {
+	if texts := rec.Texts(); len(texts) != 1 || texts[0] != "user: I moved to Lisbon" {
 		t.Fatalf("Recall = %q", texts)
 	}
 

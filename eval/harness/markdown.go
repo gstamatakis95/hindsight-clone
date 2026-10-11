@@ -14,7 +14,7 @@ const maxListedErrors = 20
 // stock Hindsight read side by side.
 func (r Report) WriteMarkdown(w io.Writer) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Eval report: %s (%s)\n\n", r.Dataset, r.Mode)
+	fmt.Fprintf(&b, "# Eval report: %s (%s)\n\n", r.Benchmark, r.Mode)
 	r.accuracyTable(&b)
 	r.usageTable(&b)
 	r.latencyTable(&b)
@@ -120,6 +120,9 @@ func (r Report) problems(b *strings.Builder) {
 	for _, t := range r.Targets {
 		fmt.Fprintf(b, "- %s: %d conversations, %d failed background operations, %d conversation errors\n",
 			t.Target, t.Conversations, t.FailedOperations, len(t.Errors))
+		if t.Pending > 0 {
+			fmt.Fprintf(b, "  - %d questions not run yet (resume the run to finish them)\n", t.Pending)
+		}
 		for i, e := range t.Errors {
 			if i == maxListedErrors {
 				fmt.Fprintf(b, "  - ... %d more in the JSON report\n", len(t.Errors)-i)

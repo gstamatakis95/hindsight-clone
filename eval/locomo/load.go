@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -21,12 +20,14 @@ var dateLayouts = []string{"3:04 pm on 2 January, 2006", "3:04 pm on 2 Jan, 2006
 // sessionKey matches the conversation keys that hold a session's turns.
 var sessionKey = regexp.MustCompile(`^session_(\d+)$`)
 
-// adversarial is the LoCoMo category with no gold answer; its questions are skipped.
+// adversarial is the LoCoMo category whose questions have no answer in the conversation; it is excluded,
+// as in Hindsight's published runs.
 const adversarial = 5
 
-// categoryNames maps LoCoMo category numbers to report bucket names. The names follow the mapping most
-// published LoCoMo evals use; it is not stated in the dataset itself, so the number stays in the name
-// (decision 703).
+// categoryNames maps LoCoMo category numbers to report buckets. The dataset does not name its
+// categories; these names follow the questions themselves (category 1 questions cite several turns,
+// category 4 questions one turn, category 3 questions ask for inference), and the number stays in the
+// name so results can be matched with evals that label the numbers differently.
 var categoryNames = map[int]string{1: "1-multi-hop", 2: "2-temporal", 3: "3-open-domain", 4: "4-single-hop"}
 
 // sample is one LoCoMo conversation with its questions.
@@ -43,13 +44,6 @@ type qa struct {
 	Category int             `json:"category"`
 }
 
-// turn is one utterance inside a LoCoMo session.
-type turn struct {
-	Speaker     string `json:"speaker"`
-	Text        string `json:"text"`
-	BlipCaption string `json:"blip_caption"`
-}
-
 // Load reads a LoCoMo JSON file (locomo10.json) and returns one conversation per sample.
 func Load(path string) ([]harness.Conversation, error) {
 	f, err := os.Open(filepath.Clean(path))
@@ -60,8 +54,8 @@ func Load(path string) ([]harness.Conversation, error) {
 	return Parse(f)
 }
 
-// Parse decodes a LoCoMo JSON array and returns one conversation per sample: its sessions ordered by
-// session number and its questions, skipping adversarial (category 5) ones.
+// Parse decodes a LoCoMo JSON array and returns one conversation per sample: its non-empty sessions in
+// session-number order and its questions, without the adversarial ones.
 func Parse(r io.Reader) ([]harness.Conversation, error) {
 	var samples []sample
 	if err := json.NewDecoder(r).Decode(&samples); err != nil {
@@ -80,14 +74,15 @@ func Parse(r io.Reader) ([]harness.Conversation, error) {
 
 // convert maps one sample to a harness conversation.
 func convert(s *sample) (harness.Conversation, error) {
-	sessions, err := sessionsOf(s)
+	keys, err := sessionKeys(s)
 	if err != nil {
 		return harness.Conversation{}, err
 	}
-	var queryTime time.Time
-	if len(sessions) > 0 {
-		queryTime = sessions[len(sessions)-1].Time
+	sessions, err := sessionsOf(s, keys)
+	if err != nil {
+		return harness.Conversation{}, err
 	}
+	queryTime := referenceTime(s, keys)
 	questions := make([]harness.Question, 0, len(s.QA))
 	for i, q := range s.QA {
 		if q.Category == adversarial {
@@ -97,24 +92,20 @@ func convert(s *sample) (harness.Conversation, error) {
 		if err != nil {
 			return harness.Conversation{}, fmt.Errorf("qa[%d]: %w", i, err)
 		}
-		kind := harness.KindDefault
-		if q.Category == 2 {
-			kind = harness.KindTemporal
-		}
 		questions = append(questions, harness.Question{
-			ID:        s.SampleID + "-q" + strconv.Itoa(i),
+			ID:        s.SampleID + "_q" + strconv.Itoa(i),
 			Category:  categoryName(q.Category),
 			Query:     q.Question,
 			Answer:    answer,
-			Kind:      kind,
+			Kind:      harness.KindLoCoMo,
 			QueryTime: queryTime,
 		})
 	}
 	return harness.Conversation{ID: s.SampleID, Sessions: sessions, Questions: questions}, nil
 }
 
-// sessionsOf builds the sample's sessions ordered by session number.
-func sessionsOf(s *sample) ([]harness.Session, error) {
+// sessionKeys returns the sample's session numbers in ascending order.
+func sessionKeys(s *sample) ([]int, error) {
 	var nums []int
 	for key := range s.Conversation {
 		if m := sessionKey.FindStringSubmatch(key); m != nil {
@@ -126,39 +117,76 @@ func sessionsOf(s *sample) ([]harness.Session, error) {
 		}
 	}
 	sort.Ints(nums)
+	return nums, nil
+}
+
+// referenceTime is the questions' query time. Hindsight's benchmark takes the date of the last session
+// key in string order ("session_9" sorts after "session_19") whose date parses with the full month name,
+// which in locomo10.json is session 9 rather than the final session; it is reproduced here so the answer
+// prompt's current date, and so the scores, stay comparable. Zero when no session date parses.
+func referenceTime(s *sample, nums []int) time.Time {
+	keys := make([]string, 0, len(nums))
+	for _, n := range nums {
+		keys = append(keys, "session_"+strconv.Itoa(n))
+	}
+	sort.Strings(keys)
+	for i := len(keys) - 1; i >= 0; i-- {
+		var date string
+		if json.Unmarshal(s.Conversation[keys[i]+"_date_time"], &date) != nil {
+			continue
+		}
+		if t, err := time.ParseInLocation(dateLayouts[0], date, time.UTC); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+// sessionsOf builds the sample's sessions for the given session numbers, skipping empty ones.
+func sessionsOf(s *sample, nums []int) ([]harness.Session, error) {
 	speakerA, speakerB, err := speakers(s.Conversation)
 	if err != nil {
 		return nil, err
 	}
-	sessCtx := "Conversation between " + speakerA + " and " + speakerB + "."
 	sessions := make([]harness.Session, 0, len(nums))
 	for _, n := range nums {
-		sess, err := session(s, n)
+		sess, empty, err := session(s, n)
 		if err != nil {
 			return nil, err
 		}
-		sess.Context = sessCtx
+		if empty {
+			continue
+		}
+		sess.Context = fmt.Sprintf("Conversation between %s and %s (session_%d of %s)", speakerA, speakerB, n, s.SampleID)
 		sessions = append(sessions, sess)
 	}
 	return sessions, nil
 }
 
-// session decodes session number n of a sample, without its context.
-func session(s *sample, n int) (harness.Session, error) {
+// session decodes session number n of a sample, without its context. Its content is the session's turns
+// as a compact JSON array, every field as in the dataset (speaker, dia_id, text, image captions).
+func session(s *sample, n int) (harness.Session, bool, error) {
 	key := "session_" + strconv.Itoa(n)
-	var turns []turn
+	var turns []json.RawMessage
 	if err := json.Unmarshal(s.Conversation[key], &turns); err != nil {
-		return harness.Session{}, fmt.Errorf("%s: decode: %w", key, err)
+		return harness.Session{}, false, fmt.Errorf("%s: decode: %w", key, err)
+	}
+	if len(turns) == 0 {
+		return harness.Session{}, true, nil
+	}
+	var content bytes.Buffer
+	if err := json.Compact(&content, s.Conversation[key]); err != nil {
+		return harness.Session{}, false, fmt.Errorf("%s: compact: %w", key, err)
 	}
 	var date string
 	if err := json.Unmarshal(s.Conversation[key+"_date_time"], &date); err != nil {
-		return harness.Session{}, fmt.Errorf("%s_date_time: decode: %w", key, err)
+		return harness.Session{}, false, fmt.Errorf("%s_date_time: decode: %w", key, err)
 	}
 	t, err := parseDate(date)
 	if err != nil {
-		return harness.Session{}, fmt.Errorf("%s_date_time: %w", key, err)
+		return harness.Session{}, false, fmt.Errorf("%s_date_time: %w", key, err)
 	}
-	return harness.Session{ID: s.SampleID + "-" + key, Time: t, Content: render(turns)}, nil
+	return harness.Session{ID: s.SampleID + "_" + key, Time: t, Content: content.String()}, false, nil
 }
 
 // speakers decodes the two speaker names of a conversation.
@@ -170,19 +198,6 @@ func speakers(conv map[string]json.RawMessage) (a, b string, err error) {
 		return "", "", fmt.Errorf("speaker_b: %w", err)
 	}
 	return a, b, nil
-}
-
-// render formats turns as "speaker: text" lines, noting shared images by their caption.
-func render(turns []turn) string {
-	lines := make([]string, 0, len(turns))
-	for _, t := range turns {
-		line := t.Speaker + ": " + t.Text
-		if t.BlipCaption != "" {
-			line += " [shared an image: " + t.BlipCaption + "]"
-		}
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
 }
 
 // parseDate parses a LoCoMo session timestamp as UTC.

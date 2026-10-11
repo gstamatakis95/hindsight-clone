@@ -21,3 +21,20 @@ type Verdict struct {
 	// Usage is the judge's own token usage, reported under the JUDGE slot.
 	Usage []Usage
 }
+
+// Answerer writes the answer to a question from recalled memories (rag mode), the way a client
+// application puts recall results in front of its own model.
+type Answerer interface {
+	// Answer answers q from the memories in recalled.
+	Answer(ctx context.Context, q Question, recalled Recalled) (Answer, error)
+}
+
+// Answer is an Answerer's reply.
+type Answer struct {
+	// Text is the final answer.
+	Text string
+	// Reasoning is the model's explanation, when it gave one.
+	Reasoning string
+	// Usage is the answer model's token usage, reported under the ANSWER slot.
+	Usage []Usage
+}

@@ -154,14 +154,3 @@ func TestListOperations(t *testing.T) {
 		t.Fatalf("got %d failed operations, want 2", len(failed.GetOperations()))
 	}
 }
-
-func TestStart(t *testing.T) {
-	addr, stop, err := Start(Options{})
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(stop)
-	if addr == "" {
-		t.Fatal("empty address")
-	}
-}

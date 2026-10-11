@@ -22,7 +22,9 @@
       "session_2": [
         {"speaker": "Melanie", "dia_id": "D2:1", "text": "I ran a charity race last Saturday."}
       ],
-      "session_2_date_time": "10:37 am on 27 June, 2023"
+      "session_2_date_time": "10:37 am on 27 June, 2023",
+      "session_3": [],
+      "session_3_date_time": "9:55 am on 22 Oct, 2023"
     },
     "qa": [
       {"question": "When did Caroline go to the support group?", "answer": "7 May 2023", "evidence": ["D1:1"], "category": 2},

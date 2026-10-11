@@ -1,0 +1,43 @@
+# LoCoMo against a local `memd all`, scored the way Hindsight's published LoCoMo numbers are: memd's
+# Recall (budget high, 32768 result tokens, source chunks up to 16384 tokens), an answer model writing the
+# answer from the recalled memories (rag mode), and the LoCoMo judge prompt.
+#
+#   export MEMD_EVAL_JUDGE_API_KEY=...        # API keys come only from the environment
+#   make bench CONFIG=eval/configs/locomo.yaml
+#   make bench CONFIG=eval/configs/locomo.yaml ARGS='-limit 1 -questions 20'   # quick subset
+#
+# Flags override any value here (go run ./eval/cmd/eval run -h). Leave a key out to keep the benchmark's
+# default. The run directory gets the resolved config, so `make bench-resume RUN=<dir>` needs no flags.
+benchmark: locomo
+mode: rag # rag | reflect (memd's own answer) | recall (graded on the recalled memories)
+
+memd:
+  addr: localhost:50051
+  tenant: eval
+
+# The eval's own models, through any OpenAI-compatible gateway (it can be the one memd uses). Hindsight's
+# published runs answer and judge with Gemini models (judge: gemini-2.5-flash-lite); use the same models to
+# compare numbers. Use a judge model other than the one memd is configured with.
+judge:
+  kind: llm
+  url: http://localhost:4000/v1
+  model: gemini-2.5-flash-lite
+answer:
+  model: gemini-2.5-flash-lite # url defaults to judge.url; key MEMD_EVAL_ANSWER_API_KEY, else the judge's
+
+parallel: 4 # conversations at once; LoCoMo has 10
+call_timeout: 5m
+
+barrier:
+  poll: 1s
+  quiet_polls: 2
+  settle_timeout: 30m # a LoCoMo conversation is 19 to 32 sessions of background consolidation
+
+# subset:
+#   conversations: 1
+#   questions: 20
+#   categories: [2-temporal]
+
+out_dir: eval-results
+# data_dir: /path/to/cache       # where locomo10.json is downloaded, sha256-checked (default ~/.cache/memd-eval)
+# data: /path/to/locomo10.json   # or use a local copy

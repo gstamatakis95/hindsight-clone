@@ -7,6 +7,7 @@
 #   make up       docker compose: postgres, minio
 #   make migrate  alembic upgrade head, then dump schema/schema.sql
 #   make run      memd all
+#   make bench    run a benchmark against memd (eval/README.md)
 
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
@@ -25,7 +26,7 @@ export MEMD_PG_PORT ?= 55432
 export MEMD_DSN ?= postgresql+psycopg://memd:memd@localhost:$(MEMD_PG_PORT)/memd
 
 .PHONY: help gen gen-proto gen-sqlc gen-mocks lint lint-go lint-ifacedoc lint-proto lint-py ruff fmt test e2e \
-	up down migrate migrate-check downgrade run tools venv
+	up down migrate migrate-check downgrade run tools venv bench bench-resume bench-compare bench-list
 
 help: ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -127,3 +128,22 @@ downgrade: venv ## alembic downgrade base
 
 run: ## memd all
 	go run ./cmd/memd all
+
+# ---------- benchmarks (eval/README.md) ----------
+
+BENCH  ?=
+CONFIG ?=
+ARGS   ?=
+EVAL   := go run ./eval/cmd/eval
+
+bench: ## run a benchmark: make bench BENCH=locomo CONFIG=eval/configs/locomo.yaml [ARGS='-limit 1']
+	$(EVAL) run $(if $(CONFIG),-config $(CONFIG)) $(if $(BENCH),-benchmark $(BENCH)) $(ARGS)
+
+bench-resume: ## finish an interrupted run: make bench-resume RUN=eval-results/locomo-<time>
+	$(EVAL) run -resume $(RUN) $(ARGS)
+
+bench-compare: ## compare two runs: make bench-compare A=eval-results/<run> B=eval-results/<run>
+	$(EVAL) compare $(A) $(B)
+
+bench-list: ## list the registered benchmarks
+	$(EVAL) list
