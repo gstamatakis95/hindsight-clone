@@ -457,96 +457,6 @@ func (mock *Ingestor) IngestCalls() []struct {
 	return calls
 }
 
-// Ensure that DocumentScopesWriter does implement retain.DocumentScopesWriter.
-// If this is not the case, regenerate this file with mockery.
-var _ retain.DocumentScopesWriter = &DocumentScopesWriter{}
-
-// DocumentScopesWriter is a mock implementation of retain.DocumentScopesWriter.
-//
-//	func TestSomethingThatUsesDocumentScopesWriter(t *testing.T) {
-//
-//		// make and configure a mocked retain.DocumentScopesWriter
-//		mockedDocumentScopesWriter := &DocumentScopesWriter{
-//			SetObservationScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes) error {
-//				panic("mock out the SetObservationScopes method")
-//			},
-//		}
-//
-//		// use mockedDocumentScopesWriter in code that requires retain.DocumentScopesWriter
-//		// and then make assertions.
-//
-//	}
-type DocumentScopesWriter struct {
-	// SetObservationScopesFunc mocks the SetObservationScopes method.
-	SetObservationScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes) error
-
-	// calls tracks calls to the methods.
-	calls struct {
-		// SetObservationScopes holds details about calls to the SetObservationScopes method.
-		SetObservationScopes []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// Tx is the tx argument value.
-			Tx port.Tx
-			// B is the b argument value.
-			B port.BankRef
-			// Doc is the doc argument value.
-			Doc port.DocumentID
-			// S is the s argument value.
-			S *domain.ObservationScopes
-		}
-	}
-	lockSetObservationScopes sync.RWMutex
-}
-
-// SetObservationScopes calls SetObservationScopesFunc.
-func (mock *DocumentScopesWriter) SetObservationScopes(ctx context.Context, tx port.Tx, b port.BankRef, doc port.DocumentID, s *domain.ObservationScopes) error {
-	if mock.SetObservationScopesFunc == nil {
-		panic("DocumentScopesWriter.SetObservationScopesFunc: method is nil but DocumentScopesWriter.SetObservationScopes was just called")
-	}
-	callInfo := struct {
-		Ctx context.Context
-		Tx  port.Tx
-		B   port.BankRef
-		Doc port.DocumentID
-		S   *domain.ObservationScopes
-	}{
-		Ctx: ctx,
-		Tx:  tx,
-		B:   b,
-		Doc: doc,
-		S:   s,
-	}
-	mock.lockSetObservationScopes.Lock()
-	mock.calls.SetObservationScopes = append(mock.calls.SetObservationScopes, callInfo)
-	mock.lockSetObservationScopes.Unlock()
-	return mock.SetObservationScopesFunc(ctx, tx, b, doc, s)
-}
-
-// SetObservationScopesCalls gets all the calls that were made to SetObservationScopes.
-// Check the length with:
-//
-//	len(mockedDocumentScopesWriter.SetObservationScopesCalls())
-func (mock *DocumentScopesWriter) SetObservationScopesCalls() []struct {
-	Ctx context.Context
-	Tx  port.Tx
-	B   port.BankRef
-	Doc port.DocumentID
-	S   *domain.ObservationScopes
-} {
-	var calls []struct {
-		Ctx context.Context
-		Tx  port.Tx
-		B   port.BankRef
-		Doc port.DocumentID
-		S   *domain.ObservationScopes
-	}
-	mock.lockSetObservationScopes.RLock()
-	calls = mock.calls.SetObservationScopes
-	mock.lockSetObservationScopes.RUnlock()
-	return calls
-}
-
 // Ensure that LabelResolver does implement retain.LabelResolver.
 // If this is not the case, regenerate this file with mockery.
 var _ retain.LabelResolver = &LabelResolver{}
@@ -981,6 +891,90 @@ func (mock *ExtractionStrategy) PromptCalls() []struct {
 	mock.lockPrompt.RLock()
 	calls = mock.calls.Prompt
 	mock.lockPrompt.RUnlock()
+	return calls
+}
+
+// Ensure that Reprocessor does implement retain.Reprocessor.
+// If this is not the case, regenerate this file with mockery.
+var _ retain.Reprocessor = &Reprocessor{}
+
+// Reprocessor is a mock implementation of retain.Reprocessor.
+//
+//	func TestSomethingThatUsesReprocessor(t *testing.T) {
+//
+//		// make and configure a mocked retain.Reprocessor
+//		mockedReprocessor := &Reprocessor{
+//			ReprocessFunc: func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (port.OperationID, error) {
+//				panic("mock out the Reprocess method")
+//			},
+//		}
+//
+//		// use mockedReprocessor in code that requires retain.Reprocessor
+//		// and then make assertions.
+//
+//	}
+type Reprocessor struct {
+	// ReprocessFunc mocks the Reprocess method.
+	ReprocessFunc func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (port.OperationID, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Reprocess holds details about calls to the Reprocess method.
+		Reprocess []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.DocumentID
+			// Overrides is the overrides argument value.
+			Overrides *domain.BankConfig
+		}
+	}
+	lockReprocess sync.RWMutex
+}
+
+// Reprocess calls ReprocessFunc.
+func (mock *Reprocessor) Reprocess(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (port.OperationID, error) {
+	if mock.ReprocessFunc == nil {
+		panic("Reprocessor.ReprocessFunc: method is nil but Reprocessor.Reprocess was just called")
+	}
+	callInfo := struct {
+		Ctx       context.Context
+		B         port.BankRef
+		ID        port.DocumentID
+		Overrides *domain.BankConfig
+	}{
+		Ctx:       ctx,
+		B:         b,
+		ID:        id,
+		Overrides: overrides,
+	}
+	mock.lockReprocess.Lock()
+	mock.calls.Reprocess = append(mock.calls.Reprocess, callInfo)
+	mock.lockReprocess.Unlock()
+	return mock.ReprocessFunc(ctx, b, id, overrides)
+}
+
+// ReprocessCalls gets all the calls that were made to Reprocess.
+// Check the length with:
+//
+//	len(mockedReprocessor.ReprocessCalls())
+func (mock *Reprocessor) ReprocessCalls() []struct {
+	Ctx       context.Context
+	B         port.BankRef
+	ID        port.DocumentID
+	Overrides *domain.BankConfig
+} {
+	var calls []struct {
+		Ctx       context.Context
+		B         port.BankRef
+		ID        port.DocumentID
+		Overrides *domain.BankConfig
+	}
+	mock.lockReprocess.RLock()
+	calls = mock.calls.Reprocess
+	mock.lockReprocess.RUnlock()
 	return calls
 }
 

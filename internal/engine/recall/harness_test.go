@@ -51,12 +51,12 @@ func arm(name string, ids ...port.UnitID) *stubArm {
 
 // env is a recall test environment over the fakes.
 type env struct {
-	store   *fake.Store
-	clock   *fake.Clock
-	emb     *fake.Embedder
-	rr      *fake.Reranker
-	llm     *fake.LLM
-	rc      Recaller
+	store *fake.Store
+	clock *fake.Clock
+	emb   *fake.Embedder
+	rr    *fake.Reranker
+	llm   *fake.LLM
+	rc    Recaller
 }
 
 // envOpts tweaks newEnv.
