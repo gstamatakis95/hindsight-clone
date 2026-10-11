@@ -21,7 +21,8 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
 
 ## Rules
-- Every component is an interface; put `var _ Iface = (*impl)(nil)` next to each implementation.
+- The boundaries (store, ai, blob, clock) are interfaces; put `var _ Iface = (*impl)(nil)` next to each
+  implementation. ai.Router, ai.Tokenizer and clock.System are concrete.
 - Engines never import adapters, server, worker, gen, pgx, net/http or the S3 SDK (depguard enforces this).
 - Inject clock.Clock; never call time.Now for logic. Every LLM call resolves its binding with ai.Router.
 - Doc comment on every exported identifier, every method in an interface and every package (doc.go).
