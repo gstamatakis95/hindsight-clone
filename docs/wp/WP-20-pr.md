@@ -69,7 +69,28 @@ Gates on the rebased branch:
 - 2003: manual-consolidate retry, handler progress, and the retain bank check.
 - 2004: cmd/memd hardening and the API error surface.
 
+SPEC deviation: SPEC "Operations" says Cancel works on PENDING and PROCESSING operations. This branch
+refuses Cancel on delete_bank (decision 2001), because a stopped delete would leave its bank tombstoned.
+
+## rules.md rows for the orchestrator (WP-20 doesn't own docs/rules.md)
+- **Operations / Cancel:** works on PENDING and PROCESSING operations, except delete_bank, which is
+  FAILED_PRECONDITION (decision 2001). Test: `worker.TestControlDeleteBankAndDeletingBank`.
+- **Operations / Retry:** refused with FAILED_PRECONDITION on a deleting bank for every kind except
+  delete_bank. Same test.
+- **Jobs / maintenance tick.** Tests for each step:
+  - config filter and grace: `worker.TestConsolidationReconcileSkipsDisabledBanks` and
+    `worker.TestConsolidationReconcileGrace`;
+  - delete resume: `worker.TestMaintenanceResumesStalledBankDelete`;
+  - graph reconcile: `worker.TestMaintenanceEnqueuesGraphMaintenance`.
+- **Operations / handlers write progress at checkpoints:** also covered by
+  `worker_test.TestHandlersReportProgress`.
+
 ## Known gaps
+- The resumed row is an ordinary delete_bank: payload `{}`, key `bank`, attempt 0. Running it to bank
+  removal is covered by the existing deleter tests, not end to end. e2e BankDelete doesn't go through the
+  resume path.
+- The unbound-slot RPC message includes the worker sentinel's text
+  (`failed precondition: permanent job failure: no model bound ...`). This is cosmetic.
 - Progress is written once, at the start of refresh, rederive and retag. Progress between the turns of an
   agentic refresh needs checkpoint parameters in the mentalmodel, curate and docs engines, which are outside
   WP-20's paths.
