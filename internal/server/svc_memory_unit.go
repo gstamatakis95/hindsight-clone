@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"memd/internal/port"
+	"memd/internal/domain"
 
 	pb "memd/gen/memory/v1"
 )
@@ -20,15 +20,15 @@ var _ pb.MemoryUnitServiceServer = (*memoryUnitServer)(nil)
 func newMemoryUnitServer(d Deps) *memoryUnitServer { return &memoryUnitServer{d: d} }
 
 // unitRef resolves the bank and a required unit id field of a request.
-func unitRef(ctx context.Context, bankID, field, id string) (port.BankRef, port.UnitID, error) {
+func unitRef(ctx context.Context, bankID, field, id string) (domain.BankRef, domain.UnitID, error) {
 	b, err := bankRef(ctx, bankID)
 	if err != nil {
-		return port.BankRef{}, "", err
+		return domain.BankRef{}, "", err
 	}
 	if err := requireID(field, id); err != nil {
-		return port.BankRef{}, "", err
+		return domain.BankRef{}, "", err
 	}
-	return b, port.UnitID(id), nil
+	return b, domain.UnitID(id), nil
 }
 
 // ListMemories lists live and archived units with filters and keyset pagination.

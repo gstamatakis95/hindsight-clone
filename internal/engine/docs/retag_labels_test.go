@@ -4,7 +4,7 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"testing"
 )
@@ -15,7 +15,7 @@ func (f fixture) addLabelledUnit(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	tags := []string{"a", "b", "topic:x"}
-	err := f.store.InTx(ctx, func(tx port.Tx) error {
+	err := f.store.InTx(ctx, func(tx store.Tx) error {
 		seq, err := tx.Seq(ctx, testBank)
 		if err != nil {
 			return err
@@ -37,10 +37,10 @@ func (f fixture) addLabelledUnit(t *testing.T) {
 }
 
 // restore brings archived unit id back.
-func (f fixture) restore(t *testing.T, id port.UnitID) {
+func (f fixture) restore(t *testing.T, id domain.UnitID) {
 	t.Helper()
 	ctx := context.Background()
-	err := f.store.InTx(ctx, func(tx port.Tx) error {
+	err := f.store.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Seq(ctx, testBank); err != nil {
 			return err
 		}

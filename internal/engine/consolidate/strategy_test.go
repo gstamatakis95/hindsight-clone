@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"testing"
 )
 
@@ -54,7 +53,7 @@ func TestStrategyMatch(t *testing.T) {
 type manyScopes struct{}
 
 // ListScopes returns limit scopes when asked for previewScopeLimit+1 of them.
-func (manyScopes) ListScopes(_ context.Context, _ port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
+func (manyScopes) ListScopes(_ context.Context, _ domain.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
 	if after != "" || limit != previewScopeLimit+1 {
 		return nil, errors.New("unexpected paging")
 	}
@@ -90,7 +89,7 @@ func TestStrategyPreview(t *testing.T) {
 	if !p.Complete || len(p.Matches) != 2 {
 		t.Fatalf("preview = %+v", p)
 	}
-	keys := func(ss []port.ScopeKey) []string {
+	keys := func(ss []domain.ScopeKey) []string {
 		var out []string
 		for _, s := range ss {
 			out = append(out, s.String())

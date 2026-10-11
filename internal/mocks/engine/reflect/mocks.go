@@ -9,7 +9,6 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
 	"memd/internal/engine/reflect"
-	"memd/internal/port"
 	"sync"
 )
 
@@ -167,10 +166,10 @@ var _ reflect.PageReader = &PageReader{}
 //
 //		// make and configure a mocked reflect.PageReader
 //		mockedPageReader := &PageReader{
-//			ReadPagesFunc: func(ctx context.Context, b port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error) {
+//			ReadPagesFunc: func(ctx context.Context, b domain.BankRef, ids []domain.MentalModelID) ([]domain.MentalModel, error) {
 //				panic("mock out the ReadPages method")
 //			},
-//			SearchPagesFunc: func(ctx context.Context, b port.BankRef, query string, limit int) ([]domain.PageHit, error) {
+//			SearchPagesFunc: func(ctx context.Context, b domain.BankRef, query string, limit int) ([]domain.PageHit, error) {
 //				panic("mock out the SearchPages method")
 //			},
 //		}
@@ -181,10 +180,10 @@ var _ reflect.PageReader = &PageReader{}
 //	}
 type PageReader struct {
 	// ReadPagesFunc mocks the ReadPages method.
-	ReadPagesFunc func(ctx context.Context, b port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error)
+	ReadPagesFunc func(ctx context.Context, b domain.BankRef, ids []domain.MentalModelID) ([]domain.MentalModel, error)
 
 	// SearchPagesFunc mocks the SearchPages method.
-	SearchPagesFunc func(ctx context.Context, b port.BankRef, query string, limit int) ([]domain.PageHit, error)
+	SearchPagesFunc func(ctx context.Context, b domain.BankRef, query string, limit int) ([]domain.PageHit, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -193,16 +192,16 @@ type PageReader struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Ids is the ids argument value.
-			Ids []port.MentalModelID
+			Ids []domain.MentalModelID
 		}
 		// SearchPages holds details about calls to the SearchPages method.
 		SearchPages []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Query is the query argument value.
 			Query string
 			// Limit is the limit argument value.
@@ -214,14 +213,14 @@ type PageReader struct {
 }
 
 // ReadPages calls ReadPagesFunc.
-func (mock *PageReader) ReadPages(ctx context.Context, b port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error) {
+func (mock *PageReader) ReadPages(ctx context.Context, b domain.BankRef, ids []domain.MentalModelID) ([]domain.MentalModel, error) {
 	if mock.ReadPagesFunc == nil {
 		panic("PageReader.ReadPagesFunc: method is nil but PageReader.ReadPages was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		Ids []port.MentalModelID
+		B   domain.BankRef
+		Ids []domain.MentalModelID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -239,13 +238,13 @@ func (mock *PageReader) ReadPages(ctx context.Context, b port.BankRef, ids []por
 //	len(mockedPageReader.ReadPagesCalls())
 func (mock *PageReader) ReadPagesCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	Ids []port.MentalModelID
+	B   domain.BankRef
+	Ids []domain.MentalModelID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		Ids []port.MentalModelID
+		B   domain.BankRef
+		Ids []domain.MentalModelID
 	}
 	mock.lockReadPages.RLock()
 	calls = mock.calls.ReadPages
@@ -254,13 +253,13 @@ func (mock *PageReader) ReadPagesCalls() []struct {
 }
 
 // SearchPages calls SearchPagesFunc.
-func (mock *PageReader) SearchPages(ctx context.Context, b port.BankRef, query string, limit int) ([]domain.PageHit, error) {
+func (mock *PageReader) SearchPages(ctx context.Context, b domain.BankRef, query string, limit int) ([]domain.PageHit, error) {
 	if mock.SearchPagesFunc == nil {
 		panic("PageReader.SearchPagesFunc: method is nil but PageReader.SearchPages was just called")
 	}
 	callInfo := struct {
 		Ctx   context.Context
-		B     port.BankRef
+		B     domain.BankRef
 		Query string
 		Limit int
 	}{
@@ -281,13 +280,13 @@ func (mock *PageReader) SearchPages(ctx context.Context, b port.BankRef, query s
 //	len(mockedPageReader.SearchPagesCalls())
 func (mock *PageReader) SearchPagesCalls() []struct {
 	Ctx   context.Context
-	B     port.BankRef
+	B     domain.BankRef
 	Query string
 	Limit int
 } {
 	var calls []struct {
 		Ctx   context.Context
-		B     port.BankRef
+		B     domain.BankRef
 		Query string
 		Limit int
 	}

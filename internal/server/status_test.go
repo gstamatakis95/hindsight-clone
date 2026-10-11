@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -31,7 +31,7 @@ func TestToStatus(t *testing.T) {
 		{"resource exhausted", wrap(domain.ErrResourceExhausted), codes.ResourceExhausted},
 		{"operation cancelled", domain.ErrCancelled, codes.Aborted},
 		{"conflict", domain.ErrConflict, codes.Aborted},
-		{"lost jobs", &port.LostJobsError{IDs: []port.OperationID{"x"}}, codes.Aborted},
+		{"lost jobs", &store.LostJobsError{IDs: []domain.OperationID{"x"}}, codes.Aborted},
 		{"context cancelled", wrap(context.Canceled), codes.Canceled},
 		{"deadline", wrap(context.DeadlineExceeded), codes.DeadlineExceeded},
 		{

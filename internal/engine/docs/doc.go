@@ -3,9 +3,9 @@
 //
 // # Where it sits
 //
-// docs is an engine package: it imports domain and port only and must never import adapters, server,
+// docs is an engine package: it imports domain and the boundary packages only and must never import adapters, server,
 // worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares the small interfaces it
-// consumes instead of importing other engines: [DocumentSource] (port.Reader satisfies it) and
+// consumes instead of importing other engines: [DocumentSource] (store.Reader satisfies it) and
 // [Reprocessor] (retain.NewReprocessor satisfies it, since the retain engine owns the retain_document
 // payload). cmd/memd/wire.go builds [NewRetagger](store) and [NewDocumentAdmin]; the server's
 // DocumentService calls both, and the worker's retag_document handler calls [Retagger.Apply]. The request,
@@ -14,7 +14,7 @@
 //
 // # Retag: UpdateDocument
 //
-// [Retagger.Retag](ctx, bank, doc, tags) runs in one Store.InTx:
+// [Retagger.Retag](ctx, bank, doc, tags) runs in one DB.InTx:
 //
 //  1. Read the bank (unknown = domain.ErrNotFound, tombstoned = domain.ErrBankDeleting) and the document
 //     (unknown = domain.ErrNotFound).
@@ -73,7 +73,7 @@
 //     re-extracts the document from its stored text (replacing its stored overrides when given), and then
 //     returns that operation, read in a second short transaction.
 //
-// No method here calls a model, so every transaction is short; the Postgres Store.InTx re-runs a
+// No method here calls a model, so every transaction is short; the Postgres DB.InTx re-runs a
 // transaction up to 3 times in all after a deadlock (40P01) or serialization failure (40001), and every
 // transaction body here re-reads its state, so a re-run is safe.
 //

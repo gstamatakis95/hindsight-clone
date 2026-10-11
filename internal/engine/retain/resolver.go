@@ -4,7 +4,7 @@ import (
 	"context"
 	"math"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"regexp"
 	"slices"
 	"strings"
@@ -19,13 +19,13 @@ type EntityResolver interface {
 	// at or above the threshold, else creates an entity. It
 	// runs inside the chunk batch's transaction and makes no model call. It returns one id per distinct
 	// name, in mention order (mentions first, then hints).
-	Resolve(ctx context.Context, tx port.Tx, b port.BankRef, in ResolveInput) ([]port.EntityID, error)
+	Resolve(ctx context.Context, tx store.Tx, b domain.BankRef, in ResolveInput) ([]domain.EntityID, error)
 }
 
 // ResolveInput is the entity mentions of one fact to resolve.
 type ResolveInput struct {
 	// Mentions are the fact's extracted mentions.
-	Mentions []Mention
+	Mentions []domain.Mention
 	// Hints are the retain item's caller-supplied entities, merged with Mentions (deduplicated by name,
 	// case-insensitively).
 	Hints []domain.EntityHint
@@ -83,8 +83,8 @@ type nameIn struct {
 
 // Resolve implements EntityResolver.
 func (r *entityResolver) Resolve(
-	ctx context.Context, tx port.Tx, b port.BankRef, in ResolveInput,
-) ([]port.EntityID, error) {
+	ctx context.Context, tx store.Tx, b domain.BankRef, in ResolveInput,
+) ([]domain.EntityID, error) {
 	names := mergeNames(in)
 	cands := make([][]domain.EntityCandidate, len(names))
 	for i, n := range names {
@@ -98,8 +98,8 @@ func (r *entityResolver) Resolve(
 			}
 		}
 	}
-	ids := make([]port.EntityID, 0, len(names))
-	seen := map[port.EntityID]bool{}
+	ids := make([]domain.EntityID, 0, len(names))
+	seen := map[domain.EntityID]bool{}
 	for i, n := range names {
 		id, err := r.resolveOne(ctx, tx, b, n, cands[i], nearby(names, cands, i), len(names)-1, in)
 		if err != nil {
@@ -116,9 +116,9 @@ func (r *entityResolver) Resolve(
 // resolveOne merges n into its best candidate or creates a new entity. others are the existing entities of
 // the fact's other names; nOthers is how many other names the fact has (the co-occurrence denominator).
 func (r *entityResolver) resolveOne(
-	ctx context.Context, tx port.Tx, b port.BankRef, n nameIn, cands []domain.EntityCandidate,
-	others []port.EntityID, nOthers int, in ResolveInput,
-) (port.EntityID, error) {
+	ctx context.Context, tx store.Tx, b domain.BankRef, n nameIn, cands []domain.EntityCandidate,
+	others []domain.EntityID, nOthers int, in ResolveInput,
+) (domain.EntityID, error) {
 	var best *domain.EntityCandidate
 	bestScore := 0.0
 	for i := range cands {
@@ -202,7 +202,7 @@ func scoreCandidate(c domain.EntityCandidate, name string, cooc, others int, at 
 }
 
 // touchEntity widens the merged entity's first / last seen to include at and returns its id.
-func touchEntity(ctx context.Context, tx port.Tx, e domain.Entity, at time.Time) (port.EntityID, error) {
+func touchEntity(ctx context.Context, tx store.Tx, e domain.Entity, at time.Time) (domain.EntityID, error) {
 	if at.IsZero() {
 		return e.ID, nil
 	}
@@ -223,8 +223,8 @@ func touchEntity(ctx context.Context, tx port.Tx, e domain.Entity, at time.Time)
 // candidate that passes the gates and has an identical name. These are the fact's other entities for the
 // co-occurrence signal. As in Hindsight, which matches co-occurring entities by name, a merely similar
 // entity does not count.
-func nearby(names []nameIn, cands [][]domain.EntityCandidate, self int) []port.EntityID {
-	var out []port.EntityID
+func nearby(names []nameIn, cands [][]domain.EntityCandidate, self int) []domain.EntityID {
+	var out []domain.EntityID
 	for i, cs := range cands {
 		if i == self {
 			continue

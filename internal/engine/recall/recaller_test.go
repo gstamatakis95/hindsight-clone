@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 	"sync"
@@ -13,20 +13,20 @@ import (
 
 // spyReader records the arm floors each search was given.
 type spyReader struct {
-	port.Reader
+	store.Reader
 	mu      sync.Mutex
-	vectors []port.VectorQuery
-	texts   []port.TextQuery
+	vectors []store.VectorQuery
+	texts   []store.TextQuery
 }
 
-func (s *spyReader) SearchVector(ctx context.Context, q port.VectorQuery) ([]port.Hit, error) {
+func (s *spyReader) SearchVector(ctx context.Context, q store.VectorQuery) ([]store.Hit, error) {
 	s.mu.Lock()
 	s.vectors = append(s.vectors, q)
 	s.mu.Unlock()
 	return s.Reader.SearchVector(ctx, q)
 }
 
-func (s *spyReader) SearchText(ctx context.Context, q port.TextQuery) ([]port.Hit, error) {
+func (s *spyReader) SearchText(ctx context.Context, q store.TextQuery) ([]store.Hit, error) {
 	s.mu.Lock()
 	s.texts = append(s.texts, q)
 	s.mu.Unlock()
@@ -285,7 +285,7 @@ func TestRecallArmsAndTrace(t *testing.T) {
 	e.add(t, seed, fact("hop", "unrelated words entirely"))
 	e.link(t, "seed", "hop", 0.8)
 	e.add(t, fact("tnext", "zzz qqq"))
-	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
+	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
 		return tx.Links().Insert(ctx, []domain.Link{{
 			Bank: testBank, From: uid("seed"), To: uid("tnext"), Kind: domain.LinkTemporal, Weight: 1,
 		}})
@@ -333,14 +333,14 @@ func TestRecallIncludes(t *testing.T) {
 	e.add(t, fact("f1", "source fact"), f2)
 	e.add(t, domain.Unit{ID: uid("o1"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs"})
 	e.cite(t, "o1", "f1")
-	var alice port.EntityID
-	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
+	var alice domain.EntityID
+	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
 		var err error
 		if alice, err = tx.Entities().Upsert(ctx, domain.Entity{Bank: testBank, CanonicalName: "Alice"}); err != nil {
 			return err
 		}
 		for _, u := range uids("f1", "f2") {
-			if err := tx.Entities().Attach(ctx, u, []port.EntityID{alice}); err != nil {
+			if err := tx.Entities().Attach(ctx, u, []domain.EntityID{alice}); err != nil {
 				return err
 			}
 		}
@@ -363,14 +363,15 @@ func TestRecallIncludes(t *testing.T) {
 
 func TestRecallUnknownBank(t *testing.T) {
 	e := newEnv(t, envOpts{})
-	_, err := e.rc.Recall(context.Background(), RecallRequest{Bank: port.BankRef{Tenant: "t1", Bank: "nope"}, Query: "x"})
+	nope := domain.BankRef{Tenant: "t1", Bank: "nope"}
+	_, err := e.rc.Recall(context.Background(), RecallRequest{Bank: nope, Query: "x"})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("err = %v, want NOT_FOUND", err)
 	}
 	if len(e.emb.Calls()) != 0 {
 		t.Fatal("embedded a query for an unknown bank")
 	}
-	_, err = e.rc.Recall(context.Background(), RecallRequest{Bank: port.BankRef{Tenant: "t1", Bank: "nope"}, Query: "  "})
+	_, err = e.rc.Recall(context.Background(), RecallRequest{Bank: nope, Query: "  "})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("blank query: err = %v", err)
 	}
@@ -417,7 +418,7 @@ func TestRecallSeqSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.add(t, fact("late", "late fact")) // written after the snapshot; the stub arm still returns it
-	res := e.recall(t, RecallRequest{Query: "fact", Seq: port.SeqUpTo(0, snapshot)})
+	res := e.recall(t, RecallRequest{Query: "fact", Seq: store.SeqUpTo(0, snapshot)})
 	if got := ids(res); !slices.Equal(got, []string{"old"}) {
 		t.Fatalf("snapshot results = %v, want [old]", got)
 	}

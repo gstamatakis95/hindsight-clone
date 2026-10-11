@@ -54,10 +54,25 @@ make run       # memd all (api + worker in one process) on :50051; MEMD_DSN come
 
 `memd <api|worker|all>` reads its settings from `MEMD_*` environment variables or the matching flags
 (`MEMD_GRPC_ADDR` = `-grpc-addr`); run `go run ./cmd/memd` to list them all. At startup memd checks that the
-gateway's embedding model returns 768 dimensions, that EXTRACT and REFLECT have a model, and that both S3
-keys are set. A worker's id is `<MEMD_WORKER_ID or hostname>-<uuid>`, unique per process; set
+gateway's embedding model returns 768 dimensions, that EXTRACT and REFLECT have a model, and that the blob
+storage is configured. A worker's id is `<MEMD_WORKER_ID or hostname>-<uuid>`, unique per process; set
 `MEMD_WORKER_HEALTH_ADDR` to serve grpc.health from a worker. In production run `memd api` and `memd worker` as two
 Deployments over the same Postgres and bucket.
+
+Original document texts go to blob storage. `MEMD_BLOB_PROVIDER` picks the provider; `s3` (the default, and the
+only one today) works with AWS S3 and any S3-compatible store such as MinIO:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MEMD_BLOB_PROVIDER` | `s3` | Blob storage provider; any other value fails startup. |
+| `MEMD_S3_BUCKET` | (required) | Bucket for original texts; it must exist. |
+| `MEMD_S3_ACCESS_KEY`, `MEMD_S3_SECRET_KEY` | (required) | Static credentials (no AWS credential chain). |
+| `MEMD_S3_ENDPOINT` | AWS | S3 API URL, e.g. `http://localhost:59000` for the compose MinIO. |
+| `MEMD_S3_REGION` | `us-east-1` | Signing region. |
+| `MEMD_S3_PATH_STYLE` | `false` | Path-style addressing (MinIO needs `true`). |
+
+Other providers (GCS, Azure Blob Storage) plug in behind the provider-neutral `blob.Store` interface; see
+`internal/blob/doc.go` for the steps.
 
 ## grpcurl examples
 
@@ -95,7 +110,7 @@ make e2e       # compose stack + emulated gateway + memd api/worker processes: e
 ```
 
 Every test that touches the store gets its own database, cloned from a migrated template
-(`internal/adapter/postgres/pgtest`). One ParadeDB container serves the whole `go test ./...` run and is
+(`internal/store/postgres/pgtest`). One ParadeDB container serves the whole `go test ./...` run and is
 removed when it ends. Environment:
 
 - `MEMD_TEST_DATABASE_URL` (or `DATABASE_URL`): use an existing server instead of a container, e.g.
@@ -103,8 +118,8 @@ removed when it ends. Environment:
   be allowed to create databases; templates are named `memd_tpl_<migrations hash>`, test databases
   `memd_t_<random>` (dropped after each test). The HNSW acceptance test builds its index in parallel when the
   server has enough shared memory (compose sets `shm_size: 1g`) and serially, slower, otherwise.
-- `MEMD_REQUIRE_DOCKER=1`: fail, rather than skip, the database tests when neither Docker nor a URL is
-  available (CI sets it).
+- `MEMD_REQUIRE_DOCKER=1`: fail, rather than skip, the database and MinIO tests when Docker (or, for the
+  database, a URL) is not available (CI sets it).
 - `MEMD_ALEMBIC`: the alembic binary that migrates the template (default `.venv/bin/alembic`, built by
   `make tools`).
 

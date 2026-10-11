@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"slices"
 	"strings"
@@ -16,17 +17,17 @@ import (
 type DirectiveSelector interface {
 	// Select returns bank b's active directives that are global or match tags; all = every active
 	// directive regardless of tags.
-	Select(ctx context.Context, b port.BankRef, tags []string, all bool) ([]domain.Directive, error)
+	Select(ctx context.Context, b domain.BankRef, tags []string, all bool) ([]domain.Directive, error)
 }
 
 // ModelDeps are what the synthesizers need to make their own LLM calls.
 type ModelDeps struct {
 	// LLM makes the SYNTHESIZE and MENTAL_MODEL_DELTA calls.
-	LLM port.LLM
+	LLM ai.LLM
 	// Router resolves each slot's binding from the merged config.
-	Router port.ModelRouter
+	Router *ai.Router
 	// Clock dates the prompts.
-	Clock port.Clock
+	Clock clock.Clock
 	// Directives selects the directives for SYNTHESIZE; nil = none.
 	Directives DirectiveSelector
 }
@@ -126,7 +127,7 @@ func (p deltaPlanner) call(
 		return nil, domain.Usage{}, fmt.Errorf("mentalmodel: delta schema: %w", err)
 	}
 	var resp deltaResponse
-	usage, err := p.d.LLM.Structured(ctx, port.StructuredRequest{
+	usage, err := p.d.LLM.Structured(ctx, ai.StructuredRequest{
 		Slot: domain.ModelSlotMentalModelDelta, Binding: binding, Name: prompts.MentalModelStructuredDeltaSystem,
 		System: system, User: user, Schema: schema,
 	}, &resp)
@@ -193,8 +194,8 @@ func promptFacts(units []domain.Unit) (observations, facts []prompts.SourceFact)
 }
 
 // unitIDs returns the ids of units, deduplicated, in first-seen order.
-func unitIDs(units []domain.Unit) []port.UnitID {
-	out := make([]port.UnitID, 0, len(units))
+func unitIDs(units []domain.Unit) []domain.UnitID {
+	out := make([]domain.UnitID, 0, len(units))
 	for _, u := range units {
 		if !slices.Contains(out, u.ID) {
 			out = append(out, u.ID)

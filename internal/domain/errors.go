@@ -19,6 +19,10 @@ var (
 	ErrFailedPrecondition = errors.New("failed precondition")
 	// ErrBankDeleting: a write to a tombstoned bank. Wraps ErrFailedPrecondition.
 	ErrBankDeleting = fmt.Errorf("%w: bank is being deleted", ErrFailedPrecondition)
+	// ErrModelUnbound: an LLM slot has no model bound in the effective config (the deployment or the tenant or bank
+	// config lacks a binding; the request itself is fine). Wraps ErrFailedPrecondition; a job that hits it fails at
+	// once instead of retrying.
+	ErrModelUnbound = fmt.Errorf("%w: model slot unbound", ErrFailedPrecondition)
 	// ErrUnavailable: a dependency (database, gateway, embedder, reranker) failed. gRPC UNAVAILABLE.
 	ErrUnavailable = errors.New("unavailable")
 	// ErrContextOverflow: the prompt did not fit the model's context window. Wraps ErrUnavailable; reflect

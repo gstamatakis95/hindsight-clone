@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"net/http"
 
 	awstrace "github.com/DataDog/dd-trace-go/contrib/aws/aws-sdk-go-v2/v2/aws"
@@ -18,7 +18,7 @@ import (
 // JobHook returns the worker's job tracing hook (assign it to worker.RunnerConfig.TraceJob): one SpanJob
 // span per run, resource = the job kind, tagged with the operation id, tenant, bank, attempt and outcome,
 // and marked as an error when the run did not complete. Disabled, it returns nil.
-func (t *Telemetry) JobHook() func(context.Context, port.Job) (context.Context, func(string, error)) {
+func (t *Telemetry) JobHook() func(context.Context, store.Job) (context.Context, func(string, error)) {
 	if t == nil {
 		return nil
 	}
@@ -26,7 +26,7 @@ func (t *Telemetry) JobHook() func(context.Context, port.Job) (context.Context, 
 }
 
 // traceJob starts the span of one run of j.
-func traceJob(ctx context.Context, j port.Job) (context.Context, func(string, error)) {
+func traceJob(ctx context.Context, j store.Job) (context.Context, func(string, error)) {
 	span, ctx := tracer.StartSpanFromContext(ctx, SpanJob,
 		tracer.ResourceName(string(j.Kind)),
 		tracer.Tag(ext.SpanKind, ext.SpanKindInternal),

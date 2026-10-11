@@ -58,10 +58,10 @@ with raw SQL in `upgrade()` and its exact reverse in `downgrade()`.
 inside the compose Postgres container, so client and server versions match. It excludes
 `alembic_version` and strips the per-run `\restrict` / `\unrestrict` keys and the version
 header, so the dump is byte-identical across runs. The result is `schema/schema.sql`, which
-`internal/adapter/postgres/sqlc.yaml` uses as its `schema:` input. Run `make gen` after the
+`internal/store/postgres/sqlc.yaml` uses as its `schema:` input. Run `make gen` after the
 schema changes.
 
-Tests do not use the dev database: `internal/adapter/postgres/pgtest` migrates a template
+Tests do not use the dev database: `internal/store/postgres/pgtest` migrates a template
 database named after a hash of `versions/*.py` and `env.py`, so an edit to the baseline gets a
 fresh template automatically.
 

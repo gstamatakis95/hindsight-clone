@@ -3,7 +3,7 @@ package server
 import (
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/port"
+	"memd/internal/engine/curate"
 
 	pb "memd/gen/memory/v1"
 )
@@ -27,7 +27,7 @@ func scopeInfoFromProto(m *pb.ScopeInfo) domain.ScopeInfo {
 }
 
 // scopePageToProto converts a ScopePage to a ListScopesResponse.
-func scopePageToProto(p ScopePage) *pb.ListScopesResponse {
+func scopePageToProto(p curate.ScopePage) *pb.ListScopesResponse {
 	var scopes []*pb.ScopeInfo
 	if p.Items != nil {
 		scopes = make([]*pb.ScopeInfo, len(p.Items))
@@ -39,7 +39,7 @@ func scopePageToProto(p ScopePage) *pb.ListScopesResponse {
 }
 
 // scopePageFromProto converts a ListScopesResponse to a ScopePage.
-func scopePageFromProto(m *pb.ListScopesResponse) ScopePage {
+func scopePageFromProto(m *pb.ListScopesResponse) curate.ScopePage {
 	var scopes []domain.ScopeInfo
 	if m.GetScopes() != nil {
 		scopes = make([]domain.ScopeInfo, len(m.GetScopes()))
@@ -47,26 +47,26 @@ func scopePageFromProto(m *pb.ListScopesResponse) ScopePage {
 			scopes[i] = scopeInfoFromProto(s)
 		}
 	}
-	return ScopePage{Items: scopes, NextPageToken: m.GetNextPageToken()}
+	return curate.ScopePage{Items: scopes, NextPageToken: m.GetNextPageToken()}
 }
 
 // clearResultToObservationsProto converts a ClearResult to a ClearObservationsResponse.
-func clearResultToObservationsProto(r ClearResult) *pb.ClearObservationsResponse {
+func clearResultToObservationsProto(r curate.ClearResult) *pb.ClearObservationsResponse {
 	return &pb.ClearObservationsResponse{Deleted: r.Deleted, Operation: operationPtrToProto(r.Operation)}
 }
 
 // clearResultToMemoryProto converts a ClearResult to a ClearMemoryObservationsResponse.
-func clearResultToMemoryProto(r ClearResult) *pb.ClearMemoryObservationsResponse {
+func clearResultToMemoryProto(r curate.ClearResult) *pb.ClearMemoryObservationsResponse {
 	return &pb.ClearMemoryObservationsResponse{Deleted: r.Deleted, Operation: operationPtrToProto(r.Operation)}
 }
 
 // clearResult converts the fields of either Clear*Response to a ClearResult.
-func (d *decoder) clearResult(deleted int64, op *pb.Operation) ClearResult {
-	return ClearResult{Deleted: deleted, Operation: d.operationPtr(op)}
+func (d *decoder) clearResult(deleted int64, op *pb.Operation) curate.ClearResult {
+	return curate.ClearResult{Deleted: deleted, Operation: d.operationPtr(op)}
 }
 
 // scopeKeysToProto encodes scope keys as length-prefixed tag strings; the bank is not on the wire.
-func scopeKeysToProto(in []port.ScopeKey) []string {
+func scopeKeysToProto(in []domain.ScopeKey) []string {
 	if in == nil {
 		return nil
 	}
@@ -79,17 +79,17 @@ func scopeKeysToProto(in []port.ScopeKey) []string {
 
 // scopeKeys decodes length-prefixed tag strings structurally (no normalization); a malformed one fails the
 // decoder with INVALID_ARGUMENT.
-func (d *decoder) scopeKeys(in []string) []port.ScopeKey {
+func (d *decoder) scopeKeys(in []string) []domain.ScopeKey {
 	if in == nil {
 		return nil
 	}
-	out := make([]port.ScopeKey, len(in))
+	out := make([]domain.ScopeKey, len(in))
 	for i, s := range in {
 		tags, err := domain.DecodeScopeTags(s)
 		if err != nil {
 			d.fail(err)
 		}
-		out[i] = port.ScopeKey{Tags: tags}
+		out[i] = domain.ScopeKey{Tags: tags}
 	}
 	return out
 }

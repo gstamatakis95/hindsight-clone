@@ -3,15 +3,14 @@
 //
 // # Where it sits
 //
-// bank is an engine package: it imports domain, port and prompts and must never import adapters, server,
-// worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares the small interfaces it consumes
-// instead of importing other engines: [StatsSource] (port.Reader satisfies it), [JobFence] (port.Claimer),
-// [BlobLister] (port.Blob) and [RefreshQueuer] (mentalmodel.RefreshQueuer, since the mental-model engine
+// bank is an engine package: it imports domain, store, blob, clock and prompts and must never import adapters,
+// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares the small interfaces it consumes
+// instead of importing other engines: [StatsSource] (store.Reader satisfies it), [JobFence] (store.Claimer)
+// and [RefreshQueuer] (mentalmodel.RefreshQueuer, since the mental-model engine
 // owns the refresh payload and its scheduling rules). cmd/memd/wire.go builds every engine here; the
 // server's BankService calls them, the worker's delete_bank handler calls [BankDeleter.Run], and the
 // mental-model synthesizers and the prompt previewer use the [DirectiveSelector]. Several interfaces have
-// the exact method set of the matching server interface and [ConfigPatch] is aliased by the server, so the
-// implementations plug into the server directly.
+// the exact method set of the matching server interface, so the implementations plug into the server directly.
 //
 // # Bank existence rules
 //
@@ -45,7 +44,7 @@
 // active only) and deletes directives. [DirectiveSelector.Select] returns the active directives a request
 // sees: untagged directives are global and always apply; tagged ones apply when they share a tag with the
 // request; with no request tags only global ones apply; all=true (apply_all_directives) returns every
-// active directive. Directives are read in a short transaction because port.Reader has no directive read.
+// active directive. Directives are read in a short transaction because store.Reader has no directive read.
 //
 // # Stats and tags
 //
@@ -94,9 +93,9 @@
 //     operation, else domain.ErrCancelled) and that the bank is still tombstoned; if another job of the bank
 //     is still PROCESSING (a handler winding down after the tombstone) it enqueues its own continuation
 //     [DeleteBlockedDelay] (5 s) later and returns done=false; otherwise it deletes the blobs under
-//     {tenant}/{bank}/ (page by page via BlobLister with a fence check between pages; wire.go configures
-//     this), then in a last transaction re-checks for processing jobs and calls BankRepo.Delete, which
-//     removes the bank row with its remaining events and operations.
+//     {tenant}/{bank}/ (page by page: list one page, delete its keys, check the fence before the next), then
+//     in a last transaction re-checks for processing jobs and calls BankRepo.Delete, which removes the bank row
+//     with its remaining events and operations.
 //
 // A run that finds the bank gone, or no longer tombstoned (a fresh bank took the id), is done and deletes no
 // blobs, so a stale duplicate run never touches a new bank's data. No job outlives its bank. The returned
@@ -108,7 +107,7 @@
 //
 // # Transactions
 //
-// Every transaction here is short and calls no model; the Postgres Store.InTx re-runs a transaction up to
+// Every transaction here is short and calls no model; the Postgres DB.InTx re-runs a transaction up to
 // 3 times in all after a deadlock (40P01) or serialization failure (40001), and every body resets its
 // outputs and re-reads its state, so a re-run is safe.
 //

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // Serial keys of the jobs this package enqueues (SPEC "Jobs", decision 1301).
@@ -20,19 +20,19 @@ const (
 var emptyPayload = json.RawMessage(`{}`)
 
 // enqueueConsolidate enqueues an automatic consolidation (payload {}, DedupePending) in tx.
-func enqueueConsolidate(ctx context.Context, tx port.Tx, b port.BankRef) (port.OperationID, error) {
-	id, _, err := tx.Queue().Enqueue(ctx, port.Job{
+func enqueueConsolidate(ctx context.Context, tx store.Tx, b domain.BankRef) (domain.OperationID, error) {
+	id, _, err := tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: consolidateKey,
-		Payload: emptyPayload, Dedupe: port.DedupePending,
+		Payload: emptyPayload, Dedupe: store.DedupePending,
 	})
 	return id, err
 }
 
 // enqueueGraph enqueues graph maintenance after a removal (payload {}, DedupePendingOrRunning) in tx.
-func enqueueGraph(ctx context.Context, tx port.Tx, b port.BankRef) error {
-	_, _, err := tx.Queue().Enqueue(ctx, port.Job{
+func enqueueGraph(ctx context.Context, tx store.Tx, b domain.BankRef) error {
+	_, _, err := tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindGraphMaintenance, SerialKey: graphKey,
-		Payload: emptyPayload, Dedupe: port.DedupePendingOrRunning,
+		Payload: emptyPayload, Dedupe: store.DedupePendingOrRunning,
 	})
 	return err
 }
@@ -48,15 +48,15 @@ func rederiveKey(u domain.Unit) string {
 
 // enqueueRederive enqueues rederive_memory for u in tx (DedupeNone, request overrides on the job).
 func enqueueRederive(
-	ctx context.Context, tx port.Tx, u domain.Unit, req UpdateMemoryRequest,
-) (port.OperationID, error) {
+	ctx context.Context, tx store.Tx, u domain.Unit, req UpdateMemoryRequest,
+) (domain.OperationID, error) {
 	payload, err := json.Marshal(RederivePayload{UnitID: u.ID})
 	if err != nil {
 		return "", fmt.Errorf("encode rederive payload: %w", err)
 	}
-	id, _, err := tx.Queue().Enqueue(ctx, port.Job{
+	id, _, err := tx.Queue().Enqueue(ctx, store.Job{
 		Bank: u.Bank, Kind: domain.OperationKindRederiveMemory, SerialKey: rederiveKey(u),
-		Payload: payload, Overrides: req.Overrides, Dedupe: port.DedupeNone,
+		Payload: payload, Overrides: req.Overrides, Dedupe: store.DedupeNone,
 	})
 	return id, err
 }

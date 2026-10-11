@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/reflect"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"slices"
 	"strings"
 )
@@ -39,7 +39,7 @@ func (*agentic) Strategy() domain.RefreshStrategy { return domain.RefreshStrateg
 
 // Full runs the reflect loop over everything in scope with seq <= upTo.
 func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (draft, error) {
-	req, err := a.request(m, cfg, port.SeqUpTo(0, upTo))
+	req, err := a.request(m, cfg, store.SeqUpTo(0, upTo))
 	if err != nil {
 		return draft{}, err
 	}
@@ -67,7 +67,7 @@ func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.Ban
 func (a *agentic) Delta(
 	ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64,
 ) (deltaDraft, error) {
-	req, err := a.request(m, cfg, port.SeqUpTo(m.LastSeqSeen, upTo))
+	req, err := a.request(m, cfg, store.SeqUpTo(m.LastSeqSeen, upTo))
 	if err != nil {
 		return deltaDraft{ContentMD: m.ContentMD}, err
 	}
@@ -88,7 +88,7 @@ func (a *agentic) Delta(
 // answering as a document, with the rendered mm_refresh_context as its context. The model itself is always
 // excluded from the page tools.
 func (a *agentic) request(
-	m domain.MentalModel, cfg domain.BankConfig, window port.SeqRange,
+	m domain.MentalModel, cfg domain.BankConfig, window store.SeqRange,
 ) (reflect.ReflectRequest, error) {
 	scope := resolveScope(m)
 	t := m.Spec.Trigger
@@ -112,7 +112,7 @@ func (a *agentic) request(
 
 // refreshContext renders the reflect context of an agentic refresh over window: the document's name and
 // whether the loop sees only the delta window.
-func refreshContext(m domain.MentalModel, window port.SeqRange) (string, error) {
+func refreshContext(m domain.MentalModel, window store.SeqRange) (string, error) {
 	out, err := prompts.Render(prompts.MentalModelRefreshContext,
 		prompts.RefreshContextData{Name: m.Spec.Name, Delta: window.After > 0})
 	if err != nil {
@@ -146,7 +146,7 @@ func observationsFirst(units []domain.Unit) []domain.Unit {
 }
 
 // appendUnique appends id when ids does not hold it yet.
-func appendUnique(ids []port.MentalModelID, id port.MentalModelID) []port.MentalModelID {
+func appendUnique(ids []domain.MentalModelID, id domain.MentalModelID) []domain.MentalModelID {
 	if slices.Contains(ids, id) {
 		return ids
 	}

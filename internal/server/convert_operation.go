@@ -2,7 +2,7 @@ package server
 
 import (
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 
 	pb "memd/gen/memory/v1"
 )
@@ -50,14 +50,14 @@ func operationsToProto(in []domain.Operation) []*pb.Operation {
 // operation converts an Operation; nil = the zero operation.
 func (d *decoder) operation(m *pb.Operation) domain.Operation {
 	return domain.Operation{
-		ID:                 port.OperationID(m.GetId()),
+		ID:                 domain.OperationID(m.GetId()),
 		Kind:               fromEnum[domain.OperationKind](d, m.GetKind()),
 		Status:             fromEnum[domain.OperationStatus](d, m.GetStatus()),
 		Error:              m.GetError(),
 		Result:             d.jsonFromStruct(m.GetResult()),
 		Usage:              d.usages(m.GetUsage()),
 		EffectiveOverrides: d.configPtr(m.GetEffectiveOverrides()),
-		ParentID:           port.OperationID(m.GetParentId()),
+		ParentID:           domain.OperationID(m.GetParentId()),
 		Progress:           d.progress(m.GetProgress()),
 		CreatedAt:          d.ts(m.GetCreatedAt()),
 		UpdatedAt:          d.ts(m.GetUpdatedAt()),
@@ -105,11 +105,11 @@ func (d *decoder) progress(m *pb.Progress) *domain.Progress {
 }
 
 // listOperationsFromProto converts a ListOperationsRequest to an OperationFilter (the bank is separate).
-func listOperationsFromProto(r *pb.ListOperationsRequest) (port.OperationFilter, error) {
+func listOperationsFromProto(r *pb.ListOperationsRequest) (store.OperationFilter, error) {
 	var d decoder
-	out := port.OperationFilter{
+	out := store.OperationFilter{
 		Status:         fromEnum[domain.OperationStatus](&d, r.GetStatus()),
-		Kind:           fromEnum[port.JobKind](&d, r.GetKind()),
+		Kind:           fromEnum[domain.OperationKind](&d, r.GetKind()),
 		ExcludeParents: r.GetExcludeParents(),
 		PageSize:       int(r.GetPageSize()),
 		PageToken:      r.GetPageToken(),
@@ -118,7 +118,7 @@ func listOperationsFromProto(r *pb.ListOperationsRequest) (port.OperationFilter,
 }
 
 // listOperationsRequestToProto converts an OperationFilter back to a ListOperationsRequest without a bank.
-func listOperationsRequestToProto(f port.OperationFilter) *pb.ListOperationsRequest {
+func listOperationsRequestToProto(f store.OperationFilter) *pb.ListOperationsRequest {
 	return &pb.ListOperationsRequest{
 		Status:         toEnum[pb.OperationStatus](f.Status),
 		Kind:           toEnum[pb.OperationKind](f.Kind),
@@ -157,9 +157,9 @@ func (d *decoder) event(m *pb.LifecycleEvent) domain.LifecycleEvent {
 	return domain.LifecycleEvent{
 		Seq:         m.GetSeq(),
 		Type:        fromEnum[domain.EventType](d, m.GetType()),
-		Bank:        port.BankRef{Bank: m.GetBankId()},
+		Bank:        domain.BankRef{Bank: m.GetBankId()},
 		At:          d.ts(m.GetAt()),
-		OperationID: port.OperationID(m.GetOperationId()),
+		OperationID: domain.OperationID(m.GetOperationId()),
 		SubjectID:   m.GetSubjectId(),
 	}
 }

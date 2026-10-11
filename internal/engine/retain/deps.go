@@ -3,7 +3,6 @@ package retain
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"time"
 )
 
@@ -20,7 +19,7 @@ type DateNormalizer interface {
 type ScopeExpander interface {
 	// Expand returns the scopes for tags under s; ALL_COMBINATIONS beyond max_combinations returns
 	// domain.ErrTooManyScopes.
-	Expand(b port.BankRef, tags []string, s domain.ObservationScopes) ([]port.ScopeKey, error)
+	Expand(b domain.BankRef, tags []string, s domain.ObservationScopes) ([]domain.ScopeKey, error)
 }
 
 // Checkpoint reports a job's progress and tells the handler to stop once the job is cancelled. It is

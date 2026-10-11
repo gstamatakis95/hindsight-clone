@@ -5,19 +5,19 @@ import (
 	"errors"
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
 // cancellingStore cancels the caller's context while its transaction runs, so the commit is aborted.
 type cancellingStore struct {
-	port.Store
+	store.DB
 	cancel context.CancelFunc
 }
 
 // InTx runs fn after cancelling the context, simulating a cancel that lands mid-transaction.
-func (s cancellingStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
-	return s.Store.InTx(ctx, func(tx port.Tx) error {
+func (s cancellingStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
+	return s.DB.InTx(ctx, func(tx store.Tx) error {
 		s.cancel()
 		return fn(tx)
 	})
@@ -34,7 +34,7 @@ func TestRetagApplyCancelledMidTx(t *testing.T) {
 	job := f.claimRetag(t)
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	err := docs.NewRetagger(cancellingStore{Store: f.store, cancel: cancel}).Apply(cctx, job)
+	err := docs.NewRetagger(cancellingStore{DB: f.store, cancel: cancel}).Apply(cctx, job)
 	if !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("Apply cancelled mid-tx: %v, want ErrCancelled", err)
 	}

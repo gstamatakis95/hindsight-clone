@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/engine/retain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -56,7 +56,7 @@ func (c *curator) threshold(ctx context.Context, req UpdateMemoryRequest) (float
 	}
 	cfg, err := c.d.Config.Effective(ctx, req.Bank, ov...)
 	if err != nil {
-		return 0, err
+		return 0, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
 	}
 	if cfg.Retain != nil && cfg.Retain.EntityMatchThreshold != nil {
 		return *cfg.Retain.EntityMatchThreshold, nil
@@ -67,7 +67,7 @@ func (c *curator) threshold(ctx context.Context, req UpdateMemoryRequest) (float
 // commitEntities applies change to u in tx when the request names entities or a restore brought the unit
 // back (its snapshot names), and returns u with the names now attached.
 func (c *curator) commitEntities(
-	ctx context.Context, tx port.Tx, u domain.Unit, req UpdateMemoryRequest, restored bool, change *entityChange,
+	ctx context.Context, tx store.Tx, u domain.Unit, req UpdateMemoryRequest, restored bool, change *entityChange,
 ) (domain.Unit, error) {
 	if change == nil || (req.Entities == nil && !restored) {
 		return u, nil
@@ -82,7 +82,7 @@ func (c *curator) commitEntities(
 
 // applyEntities replaces u's entity attachments with the resolution of ch in tx (Detach queues the old
 // entities for maintenance; Resolve makes no model call) and returns the names now attached.
-func (c *curator) applyEntities(ctx context.Context, tx port.Tx, u domain.Unit, ch *entityChange) ([]string, error) {
+func (c *curator) applyEntities(ctx context.Context, tx store.Tx, u domain.Unit, ch *entityChange) ([]string, error) {
 	if err := tx.Entities().Detach(ctx, u.ID); err != nil {
 		return nil, err
 	}

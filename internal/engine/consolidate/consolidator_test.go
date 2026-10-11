@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
 	"testing"
@@ -34,7 +34,7 @@ func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 	e.fact("f1", "Alice moved to Paris in May", "a", "b", "c")
 	e.script(e.createEach("f1"))
 	kill := &killAt{n: 3}
-	e.deps.Checkpoint = func(port.Job) Checkpointer { return kill }
+	e.deps.Checkpoint = func(store.Job) Checkpointer { return kill }
 
 	res, err := e.consolidator().Run(t.Context(), autoJob())
 	if !errors.Is(err, domain.ErrCancelled) {
@@ -69,12 +69,12 @@ func TestRunReplayAfterKillAtThirdScope(t *testing.T) {
 }
 
 // perScope counts observations per scope key and checks each cites exactly source.
-func perScope(t *testing.T, obs []domain.Unit, source port.UnitID) map[string]int {
+func perScope(t *testing.T, obs []domain.Unit, source domain.UnitID) map[string]int {
 	t.Helper()
 	out := map[string]int{}
 	for _, o := range obs {
 		out[o.Scope().String()]++
-		if !slices.Equal(o.SourceIDs, []port.UnitID{uid(string(source))}) {
+		if !slices.Equal(o.SourceIDs, []domain.UnitID{uid(string(source))}) {
 			t.Errorf("observation %s cites %v, want [%s]", o.ID, o.SourceIDs, source)
 		}
 	}
@@ -217,7 +217,7 @@ func TestRunContinuationAtCap(t *testing.T) {
 		t.Fatalf("second run = %+v; want Processed 2, More true", res)
 	}
 	e.wantPending(domain.OperationKindConsolidate, 1)
-	jobs, err := e.store.Claim(t.Context(), "w1", []port.JobKind{domain.OperationKindConsolidate}, 10)
+	jobs, err := e.store.Claim(t.Context(), "w1", []domain.OperationKind{domain.OperationKindConsolidate}, 10)
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("claim continuation: %d jobs, %v", len(jobs), err)
 	}
@@ -261,7 +261,7 @@ func TestRunStrategyOverridesBankNotRequest(t *testing.T) {
 		ObservationsMission: "REQUEST-MISSION",
 		Models:              consolidateModel("request-model"),
 	})
-	j.ID = pgtest.ID[port.OperationID]("op-manual")
+	j.ID = pgtest.ID[domain.OperationID]("op-manual")
 	e.run(j)
 	calls := e.calls(domain.ModelSlotConsolidate)
 	last := calls[len(calls)-1]
@@ -308,7 +308,7 @@ func TestRunDedupMerge(t *testing.T) {
 	if e.unit("f1").ConsolidatedAt == nil || len(res.Changed) != 1 {
 		t.Fatalf("f1 not stamped or changed scopes = %v", res.Changed)
 	}
-	if !slices.ContainsFunc(res.Usage, func(u port.Usage) bool { return u.Slot == domain.ModelSlotDedupCheck }) {
+	if !slices.ContainsFunc(res.Usage, func(u domain.Usage) bool { return u.Slot == domain.ModelSlotDedupCheck }) {
 		t.Fatalf("usage %v lacks DEDUP_CHECK", res.Usage)
 	}
 }

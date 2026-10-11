@@ -7,8 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"memd/internal/blob"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // Page sizes of ListDocuments.
@@ -46,7 +47,7 @@ func (a *documentAdmin) ListDocuments(ctx context.Context, req ListDocumentsRequ
 	if match == domain.TagsMatchUnspecified {
 		match = domain.TagsMatchAnyStrict
 	}
-	q := DocumentQuery{
+	q := store.DocumentQuery{
 		Bank: req.Bank, Q: req.Q, Tags: domain.NormalizeTags(req.Tags), TagsMatch: match,
 		Start: req.Start, End: req.End, TimeField: req.TimeField, After: after, Limit: size + 1,
 	}
@@ -62,7 +63,7 @@ func (a *documentAdmin) ListDocuments(ctx context.Context, req ListDocumentsRequ
 	}
 	docs = docs[:size]
 	last := docs[size-1]
-	token, err := encodeCursor(DocumentCursor{CreatedAt: last.CreatedAt, ID: last.ID})
+	token, err := encodeCursor(store.DocumentCursor{CreatedAt: last.CreatedAt, ID: last.ID})
 	if err != nil {
 		return DocumentPage{}, err
 	}
@@ -72,10 +73,10 @@ func (a *documentAdmin) ListDocuments(ctx context.Context, req ListDocumentsRequ
 // GetDocument reads the document in a short read-only transaction (a tombstoned bank reads as
 // domain.ErrNotFound) and, when asked, its original text from the blob store.
 func (a *documentAdmin) GetDocument(
-	ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool,
+	ctx context.Context, b domain.BankRef, id domain.DocumentID, includeText bool,
 ) (DocumentView, error) {
 	var d domain.Document
-	err := a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		d = domain.Document{}
 		if err := liveBank(ctx, tx, b); err != nil {
 			return err
@@ -104,14 +105,14 @@ func (a *documentAdmin) GetDocument(
 
 // ReprocessDocument hands the document to the retain engine and returns the operation it enqueued.
 func (a *documentAdmin) ReprocessDocument(
-	ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig,
+	ctx context.Context, b domain.BankRef, id domain.DocumentID, overrides *domain.BankConfig,
 ) (domain.Operation, error) {
 	opID, err := a.d.Reprocessor.Reprocess(ctx, b, id, overrides)
 	if err != nil {
 		return domain.Operation{}, fmt.Errorf("reprocess document %s: %w", id, err)
 	}
 	var op domain.Operation
-	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = a.d.Store.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		op, err = tx.Queue().Get(ctx, b, opID)
 		return err
@@ -120,7 +121,7 @@ func (a *documentAdmin) ReprocessDocument(
 }
 
 // liveBank fails with domain.ErrNotFound when b is unknown or tombstoned (reads of a deleting bank).
-func liveBank(ctx context.Context, tx port.Tx, b port.BankRef) error {
+func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 	bank, err := tx.Banks().Get(ctx, b)
 	if err != nil {
 		return err
@@ -132,7 +133,7 @@ func liveBank(ctx context.Context, tx port.Tx, b port.BankRef) error {
 }
 
 // readBlob reads the whole object at key.
-func readBlob(ctx context.Context, blob port.Blob, key string) (string, error) {
+func readBlob(ctx context.Context, blob blob.Store, key string) (string, error) {
 	rc, err := blob.Get(ctx, key)
 	if err != nil {
 		return "", err
@@ -160,7 +161,7 @@ func pageSize(n int) (int, error) {
 }
 
 // encodeCursor turns a keyset position into an opaque page token.
-func encodeCursor(c DocumentCursor) (string, error) {
+func encodeCursor(c store.DocumentCursor) (string, error) {
 	raw, err := json.Marshal(c)
 	if err != nil {
 		return "", fmt.Errorf("encode page token: %w", err)
@@ -170,7 +171,7 @@ func encodeCursor(c DocumentCursor) (string, error) {
 
 // decodeCursor parses a page token; "" is the first page and a malformed token is
 // domain.ErrInvalidArgument.
-func decodeCursor(token string) (*DocumentCursor, error) {
+func decodeCursor(token string) (*store.DocumentCursor, error) {
 	if token == "" {
 		return nil, nil
 	}
@@ -178,7 +179,7 @@ func decodeCursor(token string) (*DocumentCursor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: page_token: %w", domain.ErrInvalidArgument, err)
 	}
-	var c DocumentCursor
+	var c store.DocumentCursor
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil, fmt.Errorf("%w: page_token: %w", domain.ErrInvalidArgument, err)
 	}

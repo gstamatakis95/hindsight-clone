@@ -4,7 +4,8 @@ import (
 	"context"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/engine/bank"
+	"memd/internal/engine/mentalmodel"
 	"memd/internal/server"
 	"reflect"
 	"sync"
@@ -46,19 +47,19 @@ func (p *patchStore) wire(d *server.Deps) {
 			p.created++
 			return b, nil
 		},
-		UpdateBankConfigFunc: func(_ context.Context, b port.BankRef, patch server.ConfigPatch) (domain.Bank, error) {
+		UpdateBankConfigFunc: func(_ context.Context, b domain.BankRef, patch bank.ConfigPatch) (domain.Bank, error) {
 			c, err := p.runConfig(patch)
 			return domain.Bank{Ref: b, Config: c}, err
 		},
 	}
 	d.Tenants = &mockserver.TenantAdmin{
-		UpdateTenantConfigFunc: func(_ context.Context, _ string, patch server.ConfigPatch) (domain.BankConfig, error) {
+		UpdateTenantConfigFunc: func(_ context.Context, _ string, patch bank.ConfigPatch) (domain.BankConfig, error) {
 			return p.runConfig(patch)
 		},
 	}
 	d.MentalModels = &mockserver.MentalModelAdmin{
 		UpdateMentalModelFunc: func(
-			_ context.Context, b port.BankRef, _ port.MentalModelID, patch server.SpecPatch,
+			_ context.Context, b domain.BankRef, _ domain.MentalModelID, patch mentalmodel.SpecPatch,
 		) (domain.MentalModel, error) {
 			p.mu.Lock()
 			defer p.mu.Unlock()
@@ -70,7 +71,7 @@ func (p *patchStore) wire(d *server.Deps) {
 }
 
 // runConfig applies patch to the stored config and records the result.
-func (p *patchStore) runConfig(patch server.ConfigPatch) (domain.BankConfig, error) {
+func (p *patchStore) runConfig(patch bank.ConfigPatch) (domain.BankConfig, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	c, err := patch(p.cfg)

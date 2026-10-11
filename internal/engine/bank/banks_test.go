@@ -5,26 +5,26 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 	"testing"
 )
 
 // racingStore makes every bank look unknown and every Create fail as the Postgres adapter does on a unique
 // violation, as when a concurrent CreateBank commits between the check and the insert.
-type racingStore struct{ port.Store }
+type racingStore struct{ store.DB }
 
-func (s racingStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
-	return s.Store.InTx(ctx, func(tx port.Tx) error { return fn(racingTx{tx}) })
+func (s racingStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
+	return s.DB.InTx(ctx, func(tx store.Tx) error { return fn(racingTx{tx}) })
 }
 
-type racingTx struct{ port.Tx }
+type racingTx struct{ store.Tx }
 
-func (t racingTx) Banks() port.BankRepo { return racingBanks{t.Tx.Banks()} }
+func (t racingTx) Banks() store.BankRepo { return racingBanks{t.Tx.Banks()} }
 
-type racingBanks struct{ port.BankRepo }
+type racingBanks struct{ store.BankRepo }
 
-func (racingBanks) Get(context.Context, port.BankRef) (domain.Bank, error) {
+func (racingBanks) Get(context.Context, domain.BankRef) (domain.Bank, error) {
 	return domain.Bank{}, domain.ErrNotFound
 }
 
@@ -38,7 +38,7 @@ func (racingBanks) Create(context.Context, domain.Bank) error {
 func TestCreateBankDeletingAndExisting(t *testing.T) {
 	e := newEnv(t)
 	banks := NewBankAdmin(e.store)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	if _, err := banks.CreateBank(e.ctx, domain.Bank{Ref: b}); err != nil {
 		t.Fatal(err)
 	}

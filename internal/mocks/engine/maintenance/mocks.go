@@ -6,8 +6,8 @@ package mockmaintenance
 
 import (
 	"context"
+	"memd/internal/domain"
 	"memd/internal/engine/maintenance"
-	"memd/internal/port"
 	"sync"
 	"time"
 )
@@ -22,7 +22,7 @@ var _ maintenance.GraphMaintainer = &GraphMaintainer{}
 //
 //		// make and configure a mocked maintenance.GraphMaintainer
 //		mockedGraphMaintainer := &GraphMaintainer{
-//			RunFunc: func(ctx context.Context, b port.BankRef, budget time.Duration) (bool, error) {
+//			RunFunc: func(ctx context.Context, b domain.BankRef, budget time.Duration) (bool, error) {
 //				panic("mock out the Run method")
 //			},
 //		}
@@ -33,7 +33,7 @@ var _ maintenance.GraphMaintainer = &GraphMaintainer{}
 //	}
 type GraphMaintainer struct {
 	// RunFunc mocks the Run method.
-	RunFunc func(ctx context.Context, b port.BankRef, budget time.Duration) (bool, error)
+	RunFunc func(ctx context.Context, b domain.BankRef, budget time.Duration) (bool, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -42,7 +42,7 @@ type GraphMaintainer struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Budget is the budget argument value.
 			Budget time.Duration
 		}
@@ -51,13 +51,13 @@ type GraphMaintainer struct {
 }
 
 // Run calls RunFunc.
-func (mock *GraphMaintainer) Run(ctx context.Context, b port.BankRef, budget time.Duration) (bool, error) {
+func (mock *GraphMaintainer) Run(ctx context.Context, b domain.BankRef, budget time.Duration) (bool, error) {
 	if mock.RunFunc == nil {
 		panic("GraphMaintainer.RunFunc: method is nil but GraphMaintainer.Run was just called")
 	}
 	callInfo := struct {
 		Ctx    context.Context
-		B      port.BankRef
+		B      domain.BankRef
 		Budget time.Duration
 	}{
 		Ctx:    ctx,
@@ -76,12 +76,12 @@ func (mock *GraphMaintainer) Run(ctx context.Context, b port.BankRef, budget tim
 //	len(mockedGraphMaintainer.RunCalls())
 func (mock *GraphMaintainer) RunCalls() []struct {
 	Ctx    context.Context
-	B      port.BankRef
+	B      domain.BankRef
 	Budget time.Duration
 } {
 	var calls []struct {
 		Ctx    context.Context
-		B      port.BankRef
+		B      domain.BankRef
 		Budget time.Duration
 	}
 	mock.lockRun.RLock()

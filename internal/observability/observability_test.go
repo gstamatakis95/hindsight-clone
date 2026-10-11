@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"memd/internal/adapter/s3"
+	"memd/internal/blob/s3"
 	"memd/internal/domain"
 	"net/http"
 	"net/http/httptest"
@@ -164,7 +164,7 @@ func TestS3Spans(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
-	blob, err := s3.NewBlob(context.Background(), s3.Config{
+	blob, err := s3.New(context.Background(), s3.Config{
 		Endpoint: srv.URL, Bucket: "memd", AccessKeyID: "a", SecretAccessKey: "s", UsePathStyle: true,
 		APIOptions: New(nil).S3APIOptions(),
 	})

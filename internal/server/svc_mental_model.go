@@ -6,7 +6,6 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -24,15 +23,15 @@ var _ pb.MentalModelServiceServer = (*mentalModelServer)(nil)
 func newMentalModelServer(d Deps) *mentalModelServer { return &mentalModelServer{d: d} }
 
 // modelRef resolves the bank and the required mental_model_id of a request.
-func modelRef(ctx context.Context, bankID, id string) (port.BankRef, port.MentalModelID, error) {
+func modelRef(ctx context.Context, bankID, id string) (domain.BankRef, domain.MentalModelID, error) {
 	b, err := bankRef(ctx, bankID)
 	if err != nil {
-		return port.BankRef{}, "", err
+		return domain.BankRef{}, "", err
 	}
 	if err := requireID("mental_model_id", id); err != nil {
-		return port.BankRef{}, "", err
+		return domain.BankRef{}, "", err
 	}
-	return b, port.MentalModelID(id), nil
+	return b, domain.MentalModelID(id), nil
 }
 
 // CreateMentalModel stores a model and enqueues its first build.

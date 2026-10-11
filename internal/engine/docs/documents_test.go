@@ -7,7 +7,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
 	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 	"testing"
@@ -17,10 +17,10 @@ import (
 // stubSource serves ListDocuments from a fixed, newest-first list and records the queries.
 type stubSource struct {
 	docs    []domain.Document
-	queries []docs.DocumentQuery
+	queries []store.DocumentQuery
 }
 
-func (s *stubSource) ListDocuments(_ context.Context, q docs.DocumentQuery) ([]domain.Document, error) {
+func (s *stubSource) ListDocuments(_ context.Context, q store.DocumentQuery) ([]domain.Document, error) {
 	s.queries = append(s.queries, q)
 	start := 0
 	if q.After != nil {
@@ -32,20 +32,20 @@ func (s *stubSource) ListDocuments(_ context.Context, q docs.DocumentQuery) ([]d
 
 // stubReprocessor enqueues a retain_document job like the retain engine would.
 type stubReprocessor struct {
-	store port.Store
+	store store.DB
 	err   error
 }
 
 func (s *stubReprocessor) Reprocess(
-	ctx context.Context, b port.BankRef, id port.DocumentID, _ *domain.BankConfig,
-) (port.OperationID, error) {
+	ctx context.Context, b domain.BankRef, id domain.DocumentID, _ *domain.BankConfig,
+) (domain.OperationID, error) {
 	if s.err != nil {
 		return "", s.err
 	}
-	var op port.OperationID
-	err := s.store.InTx(ctx, func(tx port.Tx) error {
+	var op domain.OperationID
+	err := s.store.InTx(ctx, func(tx store.Tx) error {
 		var err error
-		op, _, err = tx.Queue().Enqueue(ctx, port.Job{
+		op, _, err = tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:" + string(id),
 			Payload: []byte(`{}`),
 		})
@@ -59,13 +59,13 @@ func TestDocumentAdminList(t *testing.T) {
 	src := &stubSource{}
 	for i := range 5 {
 		src.docs = append(src.docs, domain.Document{
-			ID: port.DocumentID(fmt.Sprintf("d%d", 5-i)), Bank: testBank,
+			ID: domain.DocumentID(fmt.Sprintf("d%d", 5-i)), Bank: testBank,
 			CreatedAt: time.Date(2026, 1, 5-i, 0, 0, 0, 0, time.UTC),
 		})
 	}
 	a := docs.NewDocumentAdmin(docs.DocumentAdminDeps{Source: src})
 
-	var got []port.DocumentID
+	var got []domain.DocumentID
 	token := ""
 	for page := 0; ; page++ {
 		res, err := a.ListDocuments(ctx, docs.ListDocumentsRequest{
@@ -84,7 +84,7 @@ func TestDocumentAdminList(t *testing.T) {
 			t.Fatal("paging never ends")
 		}
 	}
-	if want := []port.DocumentID{"d5", "d4", "d3", "d2", "d1"}; !slices.Equal(got, want) {
+	if want := []domain.DocumentID{"d5", "d4", "d3", "d2", "d1"}; !slices.Equal(got, want) {
 		t.Fatalf("listed %v, want %v", got, want)
 	}
 	q := src.queries[0]
@@ -131,7 +131,7 @@ func TestDocumentAdminGetAndReprocess(t *testing.T) {
 		t.Fatalf("reprocess error not passed through: %v", err)
 	}
 
-	tomb := func(tx port.Tx) error { return tx.Banks().MarkDeleting(ctx, testBank, f.clock.Now()) }
+	tomb := func(tx store.Tx) error { return tx.Banks().MarkDeleting(ctx, testBank, f.clock.Now()) }
 	if err := f.store.InTx(ctx, tomb); err != nil {
 		t.Fatalf("MarkDeleting: %v", err)
 	}

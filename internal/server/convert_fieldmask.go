@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/engine/bank"
+	"memd/internal/engine/mentalmodel"
 	"reflect"
 	"strings"
 
@@ -83,7 +85,7 @@ func dropImmutable(paths, immutable []string) []string {
 // patched level inside the patch and, with an implicit mask, the request level first: the per-slot merge
 // would otherwise hide a slot the request binds twice.
 func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask, check func(domain.BankConfig) error) (
-	ConfigPatch, error,
+	bank.ConfigPatch, error,
 ) {
 	if patch == nil {
 		patch = &pb.BankConfig{}
@@ -166,7 +168,7 @@ func mergeModelsAt[T any](dst, src *T, path string) error {
 
 // resetPatch builds the ConfigPatch of ResetBankConfig: the paths go back to unset (inherit); no paths =
 // the zero config.
-func resetPatch(paths []string) (ConfigPatch, error) {
+func resetPatch(paths []string) (bank.ConfigPatch, error) {
 	if len(paths) == 0 {
 		return func(domain.BankConfig) (domain.BankConfig, error) { return domain.BankConfig{}, nil }, nil
 	}
@@ -187,7 +189,7 @@ func resetPatch(paths []string) (ConfigPatch, error) {
 // overrides.models merges per slot, and check (nil = none) first validates the request's overrides (the
 // caller validates the patched spec's).
 func specPatch(patch *pb.MentalModelSpec, mask *fieldmaskpb.FieldMask, check func(domain.BankConfig) error) (
-	SpecPatch, error,
+	mentalmodel.SpecPatch, error,
 ) {
 	if patch == nil {
 		patch = &pb.MentalModelSpec{}

@@ -3,9 +3,9 @@ package consolidate
 import (
 	"context"
 	"fmt"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"testing"
 )
@@ -13,13 +13,13 @@ import (
 // seedDocScopes seeds scopes x, y and z, each with one fact and one observation; f3 belongs to document d1.
 func seedDocScopes(t *testing.T, e *env) {
 	t.Helper()
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		return tx.Documents().Upsert(t.Context(), domain.Document{ID: "d1", Bank: bank})
 	})
 	e.fact("f1", "Max surfs", "x")
 	e.fact("f2", "Ned skis", "y")
 	e.texts["f3"] = "Ola dives"
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		seq, err := tx.Seq(t.Context(), bank)
 		if err != nil {
 			return wrapErr(err)
@@ -40,13 +40,13 @@ func TestInvalidatorClearScopes(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	seedDocScopes(t, e)
 	inv := NewInvalidator()
-	var deleted []port.UnitID
-	e.tx(func(tx port.Tx) error {
+	var deleted []domain.UnitID
+	e.tx(func(tx store.Tx) error {
 		var err error
-		deleted, err = inv.ClearScopes(t.Context(), tx, bank, []port.ScopeKey{scopeOf("x")})
+		deleted, err = inv.ClearScopes(t.Context(), tx, bank, []domain.ScopeKey{scopeOf("x")})
 		return wrapErr(err)
 	})
-	if ids := obsIDs(e.observations()); !slices.Equal(ids, []port.UnitID{"obs-y", "obs-z"}) ||
+	if ids := obsIDs(e.observations()); !slices.Equal(ids, []domain.UnitID{"obs-y", "obs-z"}) ||
 		!slices.Equal(names(deleted), []string{"obs-x"}) {
 		t.Fatalf("after ClearScopes(x): left %v, deleted %v", ids, deleted)
 	}
@@ -54,7 +54,7 @@ func TestInvalidatorClearScopes(t *testing.T) {
 		t.Fatal("f1 not reset")
 	}
 	e.wantPending(domain.OperationKindConsolidate, 0) // ClearScopes leaves the enqueue to its caller
-	e.tx(func(tx port.Tx) error {
+	e.tx(func(tx store.Tx) error {
 		var err error
 		deleted, err = inv.ClearScopes(t.Context(), tx, bank, nil)
 		return wrapErr(err)
@@ -69,36 +69,36 @@ type callLog []string
 
 // loggingTx wraps the store's transaction and logs Seq and the evidence calls the Invalidator makes.
 type loggingTx struct {
-	port.Tx
+	store.Tx
 	log *callLog
 }
 
 // Seq logs "Seq".
-func (t loggingTx) Seq(ctx context.Context, b port.BankRef) (int64, error) {
+func (t loggingTx) Seq(ctx context.Context, b domain.BankRef) (int64, error) {
 	*t.log = append(*t.log, "Seq")
 	return t.Tx.Seq(ctx, b)
 }
 
 // Evidence wraps the evidence repository.
-func (t loggingTx) Evidence() port.EvidenceRepo { return loggingEvidence{t.Tx.Evidence(), t.log} }
+func (t loggingTx) Evidence() store.EvidenceRepo { return loggingEvidence{t.Tx.Evidence(), t.log} }
 
 // loggingEvidence logs the evidence calls.
 type loggingEvidence struct {
-	port.EvidenceRepo
+	store.EvidenceRepo
 	log *callLog
 }
 
 // DeleteScopes logs and delegates.
-func (r loggingEvidence) DeleteScopes(ctx context.Context, b port.BankRef, s []port.ScopeKey) (
-	[]port.UnitID, []port.UnitID, error,
+func (r loggingEvidence) DeleteScopes(ctx context.Context, b domain.BankRef, s []domain.ScopeKey) (
+	[]domain.UnitID, []domain.UnitID, error,
 ) {
 	*r.log = append(*r.log, "DeleteScopes")
 	return r.EvidenceRepo.DeleteScopes(ctx, b, s)
 }
 
 // DeleteAllObservations logs and delegates.
-func (r loggingEvidence) DeleteAllObservations(ctx context.Context, b port.BankRef) (
-	[]port.UnitID, []port.UnitID, error,
+func (r loggingEvidence) DeleteAllObservations(ctx context.Context, b domain.BankRef) (
+	[]domain.UnitID, []domain.UnitID, error,
 ) {
 	*r.log = append(*r.log, "DeleteAllObservations")
 	return r.EvidenceRepo.DeleteAllObservations(ctx, b)
@@ -110,14 +110,14 @@ func TestInvalidatorSeqBeforeDelete(t *testing.T) {
 	inv := NewInvalidator()
 	for _, c := range []struct {
 		name string
-		call func(ctx context.Context, tx port.Tx) error
+		call func(ctx context.Context, tx store.Tx) error
 		want callLog
 	}{
-		{"ClearScopes(x)", func(ctx context.Context, tx port.Tx) error {
-			_, err := inv.ClearScopes(ctx, tx, bank, []port.ScopeKey{scopeOf("x")})
+		{"ClearScopes(x)", func(ctx context.Context, tx store.Tx) error {
+			_, err := inv.ClearScopes(ctx, tx, bank, []domain.ScopeKey{scopeOf("x")})
 			return wrapErr(err)
 		}, callLog{"Seq", "DeleteScopes"}},
-		{"ClearScopes(all)", func(ctx context.Context, tx port.Tx) error {
+		{"ClearScopes(all)", func(ctx context.Context, tx store.Tx) error {
 			_, err := inv.ClearScopes(ctx, tx, bank, nil)
 			return wrapErr(err)
 		}, callLog{"Seq", "DeleteAllObservations"}},
@@ -125,7 +125,7 @@ func TestInvalidatorSeqBeforeDelete(t *testing.T) {
 		e := newEnv(t, domain.BankConfig{})
 		seedDocScopes(t, e)
 		var log callLog
-		e.tx(func(tx port.Tx) error { return c.call(t.Context(), loggingTx{tx, &log}) })
+		e.tx(func(tx store.Tx) error { return c.call(t.Context(), loggingTx{tx, &log}) })
 		if !slices.Equal(log, c.want) {
 			t.Errorf("%s: calls %v, want %v", c.name, log, c.want)
 		}
@@ -141,10 +141,10 @@ func wrapErr(err error) error {
 }
 
 // obsIDs returns sorted observation ids.
-func obsIDs(us []domain.Unit) []port.UnitID {
-	var ids []port.UnitID
+func obsIDs(us []domain.Unit) []domain.UnitID {
+	var ids []domain.UnitID
 	for _, u := range us {
-		ids = append(ids, port.UnitID(pgtest.Name(u.ID)))
+		ids = append(ids, domain.UnitID(pgtest.Name(u.ID)))
 	}
 	slices.Sort(ids)
 	return ids

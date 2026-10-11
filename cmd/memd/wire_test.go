@@ -4,13 +4,15 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"memd/internal/adapter/gateway"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/ai"
+	"memd/internal/ai/gateway"
+	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/fake"
 	"memd/internal/observability"
-	"memd/internal/port"
 	"memd/internal/server"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"memd/test/e2e/gatewayemu"
 	"net"
 	"net/http"
@@ -35,15 +37,15 @@ type txGuard struct {
 	violations []string
 }
 
-// guardStore is a port.Store that tells the guard when a transaction is open.
+// guardStore is a store.DB that tells the guard when a transaction is open.
 type guardStore struct {
-	port.Store
+	store.DB
 	g *txGuard
 }
 
 // InTx marks the transaction open while fn runs.
-func (s guardStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
-	return s.Store.InTx(ctx, func(tx port.Tx) error { //nolint:wrapcheck // test passthrough
+func (s guardStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
+	return s.DB.InTx(ctx, func(tx store.Tx) error { //nolint:wrapcheck // test passthrough
 		s.g.open.Add(1)
 		defer s.g.open.Add(-1)
 		return fn(tx)
@@ -63,8 +65,8 @@ func (t guardTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r) //nolint:wrapcheck // test passthrough
 }
 
-// wiredStack is the whole composition (wireEngines) over internal/fake, the real gateway client and the
-// emulated gateway, served over bufconn, with one worker slot so jobs run one at a time.
+// wiredStack is the whole composition (wireEngines) over pgtest, a fake blob store, the real gateway client and
+// the emulated gateway, served over bufconn, with one worker slot so jobs run one at a time.
 type wiredStack struct {
 	guard *txGuard
 	conn  *grpc.ClientConn
@@ -84,7 +86,7 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	_, ts := gatewayemu.Start(gatewayemu.Options{})
 	t.Cleanup(ts.Close)
 	g := &txGuard{}
-	store := pgtest.NewStore(t)
+	db := pgtest.NewStore(t)
 	gw := gateway.NewClient(gateway.Config{
 		BaseURL: ts.URL + gatewayemu.BasePath, EmbedModel: defaultEmbedModel, TraceCall: tel.GatewayHook(),
 	}, tel.HTTPClient(&http.Client{Transport: guardTransport{g: g}}))
@@ -93,13 +95,13 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 		"extract", "time_parse", "consolidate", "dedup_check", "reflect", "structured_output",
 		"mental_model_delta", "synthesize", "rerank",
 	} {
-		env[config.EnvModelPrefix+strings.ToUpper(slot)] = gatewayemu.ModelFor(slot)
+		env[ai.EnvModelPrefix+strings.ToUpper(slot)] = gatewayemu.ModelFor(slot)
 	}
 	serverCfg, err := config.ServerDefaults(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
-	tok, err := newTokenCounter()
+	tok, err := ai.NewTokenizer()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +110,8 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 		StaleAfter: time.Minute, MaintenanceInterval: time.Minute, GatewayURL: ts.URL,
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	p := ports{store: guardStore{Store: store, g: g}, claimer: store, blob: fake.NewBlob(), gw: gw}
-	d := wireEngines(cfg, p, tok, serverCfg, systemClock{}, log)
+	in := infra{db: guardStore{DB: db, g: g}, claimer: db, maint: db, blob: fake.NewBlob(), gw: gw}
+	d := wireEngines(cfg, in, tok, serverCfg, clock.System{}, log)
 	d.server.Probes = nil
 	d.tel = tel
 	lis := bufconn.Listen(1 << 20)

@@ -8,7 +8,7 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/consolidate"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sync"
 )
 
@@ -22,7 +22,7 @@ var _ consolidate.Consolidator = &Consolidator{}
 //
 //		// make and configure a mocked consolidate.Consolidator
 //		mockedConsolidator := &Consolidator{
-//			RunFunc: func(ctx context.Context, j port.Job) (consolidate.ConsolidationResult, error) {
+//			RunFunc: func(ctx context.Context, j store.Job) (consolidate.ConsolidationResult, error) {
 //				panic("mock out the Run method")
 //			},
 //		}
@@ -33,7 +33,7 @@ var _ consolidate.Consolidator = &Consolidator{}
 //	}
 type Consolidator struct {
 	// RunFunc mocks the Run method.
-	RunFunc func(ctx context.Context, j port.Job) (consolidate.ConsolidationResult, error)
+	RunFunc func(ctx context.Context, j store.Job) (consolidate.ConsolidationResult, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -42,20 +42,20 @@ type Consolidator struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// J is the j argument value.
-			J port.Job
+			J store.Job
 		}
 	}
 	lockRun sync.RWMutex
 }
 
 // Run calls RunFunc.
-func (mock *Consolidator) Run(ctx context.Context, j port.Job) (consolidate.ConsolidationResult, error) {
+func (mock *Consolidator) Run(ctx context.Context, j store.Job) (consolidate.ConsolidationResult, error) {
 	if mock.RunFunc == nil {
 		panic("Consolidator.RunFunc: method is nil but Consolidator.Run was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}{
 		Ctx: ctx,
 		J:   j,
@@ -72,11 +72,11 @@ func (mock *Consolidator) Run(ctx context.Context, j port.Job) (consolidate.Cons
 //	len(mockedConsolidator.RunCalls())
 func (mock *Consolidator) RunCalls() []struct {
 	Ctx context.Context
-	J   port.Job
+	J   store.Job
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}
 	mock.lockRun.RLock()
 	calls = mock.calls.Run
@@ -94,10 +94,10 @@ var _ consolidate.StrategyMatcher = &StrategyMatcher{}
 //
 //		// make and configure a mocked consolidate.StrategyMatcher
 //		mockedStrategyMatcher := &StrategyMatcher{
-//			MatchFunc: func(strategies []domain.ConsolidationStrategy, s port.ScopeKey) (*domain.ConsolidationStrategy, bool) {
+//			MatchFunc: func(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
 //				panic("mock out the Match method")
 //			},
-//			PreviewFunc: func(ctx context.Context, b port.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error) {
+//			PreviewFunc: func(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error) {
 //				panic("mock out the Preview method")
 //			},
 //		}
@@ -108,10 +108,10 @@ var _ consolidate.StrategyMatcher = &StrategyMatcher{}
 //	}
 type StrategyMatcher struct {
 	// MatchFunc mocks the Match method.
-	MatchFunc func(strategies []domain.ConsolidationStrategy, s port.ScopeKey) (*domain.ConsolidationStrategy, bool)
+	MatchFunc func(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool)
 
 	// PreviewFunc mocks the Preview method.
-	PreviewFunc func(ctx context.Context, b port.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error)
+	PreviewFunc func(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -120,14 +120,14 @@ type StrategyMatcher struct {
 			// Strategies is the strategies argument value.
 			Strategies []domain.ConsolidationStrategy
 			// S is the s argument value.
-			S port.ScopeKey
+			S domain.ScopeKey
 		}
 		// Preview holds details about calls to the Preview method.
 		Preview []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Draft is the draft argument value.
 			Draft []domain.ConsolidationStrategy
 		}
@@ -137,13 +137,13 @@ type StrategyMatcher struct {
 }
 
 // Match calls MatchFunc.
-func (mock *StrategyMatcher) Match(strategies []domain.ConsolidationStrategy, s port.ScopeKey) (*domain.ConsolidationStrategy, bool) {
+func (mock *StrategyMatcher) Match(strategies []domain.ConsolidationStrategy, s domain.ScopeKey) (*domain.ConsolidationStrategy, bool) {
 	if mock.MatchFunc == nil {
 		panic("StrategyMatcher.MatchFunc: method is nil but StrategyMatcher.Match was just called")
 	}
 	callInfo := struct {
 		Strategies []domain.ConsolidationStrategy
-		S          port.ScopeKey
+		S          domain.ScopeKey
 	}{
 		Strategies: strategies,
 		S:          s,
@@ -160,11 +160,11 @@ func (mock *StrategyMatcher) Match(strategies []domain.ConsolidationStrategy, s 
 //	len(mockedStrategyMatcher.MatchCalls())
 func (mock *StrategyMatcher) MatchCalls() []struct {
 	Strategies []domain.ConsolidationStrategy
-	S          port.ScopeKey
+	S          domain.ScopeKey
 } {
 	var calls []struct {
 		Strategies []domain.ConsolidationStrategy
-		S          port.ScopeKey
+		S          domain.ScopeKey
 	}
 	mock.lockMatch.RLock()
 	calls = mock.calls.Match
@@ -173,13 +173,13 @@ func (mock *StrategyMatcher) MatchCalls() []struct {
 }
 
 // Preview calls PreviewFunc.
-func (mock *StrategyMatcher) Preview(ctx context.Context, b port.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error) {
+func (mock *StrategyMatcher) Preview(ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy) (consolidate.StrategyPreview, error) {
 	if mock.PreviewFunc == nil {
 		panic("StrategyMatcher.PreviewFunc: method is nil but StrategyMatcher.Preview was just called")
 	}
 	callInfo := struct {
 		Ctx   context.Context
-		B     port.BankRef
+		B     domain.BankRef
 		Draft []domain.ConsolidationStrategy
 	}{
 		Ctx:   ctx,
@@ -198,12 +198,12 @@ func (mock *StrategyMatcher) Preview(ctx context.Context, b port.BankRef, draft 
 //	len(mockedStrategyMatcher.PreviewCalls())
 func (mock *StrategyMatcher) PreviewCalls() []struct {
 	Ctx   context.Context
-	B     port.BankRef
+	B     domain.BankRef
 	Draft []domain.ConsolidationStrategy
 } {
 	var calls []struct {
 		Ctx   context.Context
-		B     port.BankRef
+		B     domain.BankRef
 		Draft []domain.ConsolidationStrategy
 	}
 	mock.lockPreview.RLock()

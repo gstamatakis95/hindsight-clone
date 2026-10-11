@@ -4,7 +4,6 @@ import (
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
 	reflecteng "memd/internal/engine/reflect"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -215,7 +214,7 @@ func scoresToProto(s recall.Scores) *pb.Scores {
 // unit converts a Memory to a domain unit (scores and stale are dropped; see memory).
 func (d *decoder) unit(m *pb.Memory) domain.Unit {
 	return domain.Unit{
-		ID:            port.UnitID(m.GetId()),
+		ID:            domain.UnitID(m.GetId()),
 		Type:          fromEnum[domain.FactType](d, m.GetType()),
 		Text:          m.GetText(),
 		Context:       m.GetContext(),
@@ -225,10 +224,10 @@ func (d *decoder) unit(m *pb.Memory) domain.Unit {
 		OccurredStart: d.tsPtr(m.GetOccurredStart()),
 		OccurredEnd:   d.tsPtr(m.GetOccurredEnd()),
 		MentionedAt:   d.tsPtr(m.GetMentionedAt()),
-		DocumentID:    port.DocumentID(m.GetDocumentId()),
-		ChunkID:       port.ChunkID(m.GetChunkId()),
+		DocumentID:    domain.DocumentID(m.GetDocumentId()),
+		ChunkID:       domain.ChunkID(m.GetChunkId()),
 		ProofCount:    int(m.GetProofCount()),
-		SourceIDs:     strs[port.UnitID](m.GetSourceFactIds()),
+		SourceIDs:     strs[domain.UnitID](m.GetSourceFactIds()),
 		State:         fromEnum[domain.MemoryState](d, m.GetState()),
 		EditedAt:      d.tsPtr(m.GetEditedAt()),
 	}
@@ -293,7 +292,7 @@ func memoryToProto(m recall.Memory) *pb.Memory {
 // chunkFromProto converts a Chunk.
 func chunkFromProto(c *pb.Chunk) recall.Chunk {
 	return recall.Chunk{
-		ID: port.ChunkID(c.GetId()), Text: c.GetText(), Index: int(c.GetChunkIndex()), Truncated: c.GetTruncated(),
+		ID: domain.ChunkID(c.GetId()), Text: c.GetText(), Index: int(c.GetChunkIndex()), Truncated: c.GetTruncated(),
 	}
 }
 
@@ -307,7 +306,7 @@ func chunkToProto(c recall.Chunk) *pb.Chunk {
 // directiveFromProto converts a Directive (the bank is set by the caller).
 func directiveFromProto(x *pb.Directive) domain.Directive {
 	return domain.Directive{
-		ID: port.DirectiveID(x.GetId()), Name: x.GetName(), Rules: x.GetRules(), Tags: x.GetTags(),
+		ID: domain.DirectiveID(x.GetId()), Name: x.GetName(), Rules: x.GetRules(), Tags: x.GetTags(),
 		Active: x.GetActive(),
 	}
 }
@@ -410,7 +409,7 @@ func entityHintsToProto(in []domain.EntityHint) []*pb.EntityHint {
 func armTraceFromProto(a *pb.ArmTrace) recall.ArmTrace {
 	return recall.ArmTrace{
 		Arm: a.GetArm(), Candidates: int(a.GetCandidates()), DurationMS: a.GetDurationMs(),
-		TopIDs: strs[port.UnitID](a.GetTopIds()),
+		TopIDs: strs[domain.UnitID](a.GetTopIds()),
 	}
 }
 
@@ -513,7 +512,7 @@ func reflectTraceFromProto(t *pb.ReflectTrace) *reflecteng.ReflectTrace {
 	}
 	return &reflecteng.ReflectTrace{
 		ToolCalls: toolCallsFromProto(t.GetToolCalls()), Iterations: int(t.GetIterations()),
-		StopReason: reflecteng.StopReason(t.GetStopReason()), DirectiveIDs: strs[port.DirectiveID](t.GetDirectiveIds()),
+		StopReason: reflecteng.StopReason(t.GetStopReason()), DirectiveIDs: strs[domain.DirectiveID](t.GetDirectiveIds()),
 		DurationMS: t.GetDurationMs(),
 	}
 }

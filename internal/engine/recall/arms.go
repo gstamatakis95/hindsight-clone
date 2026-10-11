@@ -3,20 +3,20 @@ package recall
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // semantic is the HNSW cosine arm.
-type semantic struct{ r port.Reader }
+type semantic struct{ r store.Reader }
 
 // keyword is the BM25 arm.
-type keyword struct{ r port.Reader }
+type keyword struct{ r store.Reader }
 
 // graph is the link-expansion arm.
-type graph struct{ r port.Reader }
+type graph struct{ r store.Reader }
 
 // temporal is the occurrence-overlap arm.
-type temporal struct{ r port.Reader }
+type temporal struct{ r store.Reader }
 
 var (
 	_ Retriever = (*semantic)(nil)
@@ -31,18 +31,18 @@ var graphLinkKinds = []domain.LinkKind{domain.LinkSemantic, domain.LinkCausal}
 
 // newSemantic returns the semantic arm: SearchVector with the min_scores.semantic floor (default 0.3, as
 // Hindsight; an explicit 0 disables it).
-func newSemantic(r port.Reader) Retriever { return &semantic{r: r} }
+func newSemantic(r store.Reader) Retriever { return &semantic{r: r} }
 
 // newKeyword returns the keyword arm: SearchText (BM25) with the min_scores.keyword floor.
-func newKeyword(r port.Reader) Retriever { return &keyword{r: r} }
+func newKeyword(r store.Reader) Retriever { return &keyword{r: r} }
 
 // newGraph returns the graph arm: its own semantic seeds (the top 20 at cosine >= 0.3, as Hindsight), then
 // ExpandGraph over semantic and causal links up to graph_max_hops (default 1).
-func newGraph(r port.Reader) Retriever { return &graph{r: r} }
+func newGraph(r store.Reader) Retriever { return &graph{r: r} }
 
 // newTemporal returns the temporal arm: SearchTemporal over the query window, spread over temporal_buckets
 // (default 4). It returns nothing when the query has no window.
-func newTemporal(r port.Reader) Retriever { return &temporal{r: r} }
+func newTemporal(r store.Reader) Retriever { return &temporal{r: r} }
 
 // Name implements Retriever.
 func (*semantic) Name() string { return ArmSemantic }
@@ -62,7 +62,7 @@ func (a *semantic) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, e
 	if !ok {
 		floor = semanticMinSimilarity // an explicit 0 disables it
 	}
-	hs, err := a.r.SearchVector(ctx, port.VectorQuery{
+	hs, err := a.r.SearchVector(ctx, store.VectorQuery{
 		Bank: q.Bank, Embedding: q.Embedding, Types: q.Types, Tags: q.Predicate, MinSimilarity: floor,
 		Seq: q.Seq, Limit: q.Limit,
 	})
@@ -72,7 +72,7 @@ func (a *semantic) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, e
 // Retrieve implements Retriever.
 func (a *keyword) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, error) {
 	floor, _ := gate{}.ArmFloor(ArmKeyword, q.MinScores)
-	hs, err := a.r.SearchText(ctx, port.TextQuery{
+	hs, err := a.r.SearchText(ctx, store.TextQuery{
 		Bank: q.Bank, Text: q.Text, Types: q.Types, Tags: q.Predicate, MinScore: floor, Seq: q.Seq, Limit: q.Limit,
 	})
 	return candidates(ArmKeyword, hs, q.Limit), err
@@ -80,18 +80,18 @@ func (a *keyword) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, er
 
 // Retrieve implements Retriever.
 func (a *graph) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, error) {
-	seeds, err := a.r.SearchVector(ctx, port.VectorQuery{
+	seeds, err := a.r.SearchVector(ctx, store.VectorQuery{
 		Bank: q.Bank, Embedding: q.Embedding, Types: q.Types, Tags: q.Predicate,
 		MinSimilarity: graphSeedMinSimilarity, Seq: q.Seq, Limit: graphSeedLimit,
 	})
 	if err != nil || len(seeds) == 0 {
 		return nil, err
 	}
-	ids := make([]port.UnitID, len(seeds))
+	ids := make([]domain.UnitID, len(seeds))
 	for i, h := range seeds {
 		ids[i] = h.ID
 	}
-	hs, err := a.r.ExpandGraph(ctx, port.GraphQuery{
+	hs, err := a.r.ExpandGraph(ctx, store.GraphQuery{
 		Bank: q.Bank, Seeds: ids, MaxHops: settingsOf(q.Config).graphMaxHops, Kinds: graphLinkKinds,
 		Types: q.Types, Tags: q.Predicate, Seq: q.Seq, Limit: q.Limit,
 	})
@@ -103,7 +103,7 @@ func (a *temporal) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, e
 	if q.Window == nil {
 		return nil, nil
 	}
-	hs, err := a.r.SearchTemporal(ctx, port.TemporalQuery{
+	hs, err := a.r.SearchTemporal(ctx, store.TemporalQuery{
 		Bank: q.Bank, Window: *q.Window, Buckets: settingsOf(q.Config).temporalBuckets, Types: q.Types,
 		Tags: q.Predicate, Seq: q.Seq, Limit: q.Limit, Embedding: q.Embedding,
 		MinSimilarity: temporalMinSimilarity,
@@ -113,12 +113,12 @@ func (a *temporal) Retrieve(ctx context.Context, q *parsedQuery) ([]Candidate, e
 
 // candidates turns an arm's hits (best first) into candidates carrying their 1-based rank and raw score,
 // keeping at most limit (<= 0 = all) and dropping repeated ids.
-func candidates(arm string, hs []port.Hit, limit int) []Candidate {
+func candidates(arm string, hs []store.Hit, limit int) []Candidate {
 	if limit > 0 && len(hs) > limit {
 		hs = hs[:limit]
 	}
 	out := make([]Candidate, 0, len(hs))
-	seen := make(map[port.UnitID]bool, len(hs))
+	seen := make(map[domain.UnitID]bool, len(hs))
 	for _, h := range hs {
 		if seen[h.ID] {
 			continue

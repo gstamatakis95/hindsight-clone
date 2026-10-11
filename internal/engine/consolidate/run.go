@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 )
@@ -13,35 +13,35 @@ import (
 // run is the state of one Consolidator.Run.
 type run struct {
 	c       *consolidator
-	job     port.Job
+	job     store.Job
 	cfg     domain.BankConfig // effective run config (server < tenant < bank < request)
 	payload Payload
-	filter  []port.ScopeKey // a manual run's scopes; empty = every unit
+	filter  []domain.ScopeKey // a manual run's scopes; empty = every unit
 	check   Checkpointer
 	models  []domain.MentalModel // refresh_after_consolidation models, listed once per run
 
-	units  map[port.UnitID]domain.Unit     // planned units (their seq and tags are re-checked before stamping)
-	cited  map[port.UnitID][]port.ScopeKey // scopes that cite the unit: skipped at plan, or written this run
+	units  map[domain.UnitID]domain.Unit       // planned units (their seq and tags are re-checked before stamping)
+	cited  map[domain.UnitID][]domain.ScopeKey // scopes that cite the unit: skipped at plan, or written this run
 	scopes []scopeWork
-	last   map[port.UnitID]int // index into scopes of the unit's last pending scope
-	done   []port.UnitID       // planned units with no pending scope: stamped in finish
+	last   map[domain.UnitID]int // index into scopes of the unit's last pending scope
+	done   []domain.UnitID       // planned units with no pending scope: stamped in finish
 
-	parked    map[port.UnitID]bool
-	unsettled map[port.UnitID]bool // decision did not fully land (changed, skipped action): never stamped this run
-	deferred  []port.UnitID        // failed alone in the current top-level batch; settled after it
-	treeOK    bool                 // a call of the current top-level batch succeeded
-	deadTrees int                  // consecutive top-level batches with every call failed, since a success
-	lastErr   error                // the latest batch failure
+	parked    map[domain.UnitID]bool
+	unsettled map[domain.UnitID]bool // decision did not fully land (changed, skipped action): never stamped this run
+	deferred  []domain.UnitID        // failed alone in the current top-level batch; settled after it
+	treeOK    bool                   // a call of the current top-level batch succeeded
+	deadTrees int                    // consecutive top-level batches with every call failed, since a success
+	lastErr   error                  // the latest batch failure
 	processed int
-	changed   map[string]port.ScopeKey
-	usage     []port.Usage
+	changed   map[string]domain.ScopeKey
+	usage     []domain.Usage
 	more      bool
 }
 
 // scopeWork is one scope of the run and the planned units still undecided in it, oldest first.
 type scopeWork struct {
-	key   port.ScopeKey
-	units []port.UnitID
+	key   domain.ScopeKey
+	units []domain.UnitID
 }
 
 // plan reads the run's units in one read-only transaction: up to consolidation_max_units_per_run oldest
@@ -50,8 +50,8 @@ type scopeWork struct {
 func (r *run) plan(ctx context.Context) error {
 	limit := orDefault(r.cfg.ConsolidationMaxUnitsPerRun, defaultMaxUnitsPerRun)
 	var units []domain.Unit
-	var pending, cited map[port.UnitID][]port.ScopeKey
-	err := r.c.d.Store.InTx(ctx, func(tx port.Tx) error {
+	var pending, cited map[domain.UnitID][]domain.ScopeKey
+	err := r.c.d.Store.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		if units, err = tx.Units().Unconsolidated(ctx, r.job.Bank, r.filter, limit); err != nil {
 			return fmt.Errorf("unconsolidated units: %w", err)
@@ -62,8 +62,8 @@ func (r *run) plan(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("consolidate: plan: %w", err)
 	}
-	r.units, r.cited, r.unsettled = map[port.UnitID]domain.Unit{}, cited, map[port.UnitID]bool{}
-	r.last, r.parked, r.changed = map[port.UnitID]int{}, map[port.UnitID]bool{}, map[string]port.ScopeKey{}
+	r.units, r.cited, r.unsettled = map[domain.UnitID]domain.Unit{}, cited, map[domain.UnitID]bool{}
+	r.last, r.parked, r.changed = map[domain.UnitID]int{}, map[domain.UnitID]bool{}, map[string]domain.ScopeKey{}
 	byKey := map[string]*scopeWork{}
 	for _, u := range units {
 		r.units[u.ID] = u
@@ -94,10 +94,10 @@ func (r *run) plan(ctx context.Context) error {
 // pendingScopes expands each unit into its scopes and splits them into those still to decide and those
 // that already cite it.
 func (r *run) pendingScopes(
-	ctx context.Context, tx port.Tx, units []domain.Unit,
-) (pending, cited map[port.UnitID][]port.ScopeKey, err error) {
-	modes := map[port.DocumentID]*domain.ObservationScopes{}
-	pending, cited = map[port.UnitID][]port.ScopeKey{}, map[port.UnitID][]port.ScopeKey{}
+	ctx context.Context, tx store.Tx, units []domain.Unit,
+) (pending, cited map[domain.UnitID][]domain.ScopeKey, err error) {
+	modes := map[domain.DocumentID]*domain.ObservationScopes{}
+	pending, cited = map[domain.UnitID][]domain.ScopeKey{}, map[domain.UnitID][]domain.ScopeKey{}
 	for _, u := range units {
 		mode, err := r.unitMode(ctx, tx, u, modes)
 		if err != nil {
@@ -107,7 +107,7 @@ func (r *run) pendingScopes(
 		if err != nil {
 			// The mode changed since retain (which rejects this synchronously): fall back to the combined
 			// scope rather than strand the unit (decision 1003).
-			keys = []port.ScopeKey{domain.NewScopeKey(r.job.Bank, u.Tags)}
+			keys = []domain.ScopeKey{domain.NewScopeKey(r.job.Bank, u.Tags)}
 		}
 		for _, k := range keys {
 			ok, err := tx.Evidence().Cites(ctx, k, u.ID)
@@ -128,7 +128,7 @@ func (r *run) pendingScopes(
 // observation_scopes, else the document's retain overrides' default_observation_scopes, else the run
 // config's default, else combined. modes caches documents.
 func (r *run) unitMode(
-	ctx context.Context, tx port.Tx, u domain.Unit, modes map[port.DocumentID]*domain.ObservationScopes,
+	ctx context.Context, tx store.Tx, u domain.Unit, modes map[domain.DocumentID]*domain.ObservationScopes,
 ) (domain.ObservationScopes, error) {
 	if u.DocumentID != "" {
 		m, seen := modes[u.DocumentID]
@@ -151,7 +151,7 @@ func (r *run) unitMode(
 
 // docMode reads a document's own scope fan-out: the item's observation_scopes (Document.ObservationScopes),
 // else its overrides' default; nil when neither is set or the document is gone.
-func (r *run) docMode(ctx context.Context, tx port.Tx, doc port.DocumentID) (*domain.ObservationScopes, error) {
+func (r *run) docMode(ctx context.Context, tx store.Tx, doc domain.DocumentID) (*domain.ObservationScopes, error) {
 	d, err := tx.Documents().Get(ctx, r.job.Bank, doc)
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
@@ -199,8 +199,8 @@ func (r *run) scope(ctx context.Context, i int) error {
 }
 
 // open returns ids without the parked, deferred and unsettled ones.
-func (r *run) open(ids []port.UnitID) []port.UnitID {
-	out := make([]port.UnitID, 0, len(ids))
+func (r *run) open(ids []domain.UnitID) []domain.UnitID {
+	out := make([]domain.UnitID, 0, len(ids))
 	for _, id := range ids {
 		if !r.parked[id] && !r.unsettled[id] && !slices.Contains(r.deferred, id) {
 			out = append(out, id)
@@ -229,17 +229,17 @@ func (r *run) result() ConsolidationResult {
 	for _, k := range r.changed {
 		out.Changed = append(out.Changed, k)
 	}
-	slices.SortFunc(out.Changed, func(x, y port.ScopeKey) int { return strings.Compare(x.String(), y.String()) })
+	slices.SortFunc(out.Changed, func(x, y domain.ScopeKey) int { return strings.Compare(x.String(), y.String()) })
 	return out
 }
 
 // addUsage folds usage into the run's per-(slot, model) totals.
-func (r *run) addUsage(us ...port.Usage) {
+func (r *run) addUsage(us ...domain.Usage) {
 	for _, u := range us {
-		if u == (port.Usage{}) {
+		if u == (domain.Usage{}) {
 			continue
 		}
-		i := slices.IndexFunc(r.usage, func(x port.Usage) bool { return x.Slot == u.Slot && x.Model == u.Model })
+		i := slices.IndexFunc(r.usage, func(x domain.Usage) bool { return x.Slot == u.Slot && x.Model == u.Model })
 		if i < 0 {
 			r.usage = append(r.usage, u)
 			continue

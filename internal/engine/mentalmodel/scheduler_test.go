@@ -3,7 +3,7 @@ package mentalmodel
 import (
 	"encoding/json"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 	"time"
 )
@@ -35,7 +35,7 @@ func TestUntaggedWriteNeverStalesTaggedModel(t *testing.T) {
 		m.LastSeqSeen = u.Seq
 	}
 	src := e.addUnit(domain.FactTypeWorld, "cited", "proj")
-	m.LastSeqSeen, m.SourceIDs = src.Seq, []port.UnitID{src.ID}
+	m.LastSeqSeen, m.SourceIDs = src.Seq, []domain.UnitID{src.ID}
 	if stale, _, _ := det.NeedsRefresh(e.ctx, m); stale {
 		t.Fatal("fresh model reported stale")
 	}
@@ -87,16 +87,16 @@ func newTriggers(e *env) (Triggers, Admin) {
 
 // autoTrigger runs the automatic trigger path for model id (scheduler decision, then a parked or immediate
 // enqueue) and returns how many refreshes it inserted.
-func autoTrigger(e *env, tr Triggers, id port.MentalModelID) (int, error) {
+func autoTrigger(e *env, tr Triggers, id domain.MentalModelID) (int, error) {
 	return tr.(*triggers).triggerAll(e.ctx, []domain.MentalModel{e.model(id)})
 }
 
 // claimRefresh claims the due refresh job, if any.
-func claimRefresh(e *env) (port.Job, RefreshPayload, bool) {
+func claimRefresh(e *env) (store.Job, RefreshPayload, bool) {
 	e.t.Helper()
 	jobs := e.claimDue(domain.OperationKindRefreshMentalModel)
 	if len(jobs) == 0 {
-		return port.Job{}, RefreshPayload{}, false
+		return store.Job{}, RefreshPayload{}, false
 	}
 	var p RefreshPayload
 	if err := json.Unmarshal(jobs[0].Payload, &p); err != nil {
@@ -139,7 +139,7 @@ func TestJoiningQueuedRefreshWithForceFullUpgrades(t *testing.T) {
 }
 
 // assertUpgraded claims the refresh and checks it is op, released and upgraded by the manual join.
-func assertUpgraded(t *testing.T, e *env, op port.OperationID) {
+func assertUpgraded(t *testing.T, e *env, op domain.OperationID) {
 	t.Helper()
 	job, p, ok := claimRefresh(e)
 	if !ok || job.ID != op {
@@ -161,7 +161,7 @@ func TestPauseAndManualUnpause(t *testing.T) {
 	e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "Alice leads", "proj")
 	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
-	e.reads.failed = []FailedRefresh{{
+	e.reads.failed = []store.FailedRefresh{{
 		Bank: e.bank, ModelID: "status", OperationID: opID("op1"), FailedAt: e.clock.Now(),
 		Error: "mentalmodel: delta: " + ErrAllOpsRejected.Error(),
 	}}
@@ -210,7 +210,7 @@ func TestCronRefreshes(t *testing.T) {
 	m := e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "new", "proj")
 	created := e.clock.Now()
-	e.reads.cron = []CronModel{{Model: m}}
+	e.reads.cron = []store.CronModel{{Model: m}}
 	next := created.Truncate(time.Hour).Add(time.Hour)
 	if n, err := tr.EnqueueDueCronRefreshes(e.ctx, next.Add(-time.Second)); err != nil || n != 0 {
 		t.Fatalf("before the fire time: %d %v", n, err)
@@ -221,7 +221,7 @@ func TestCronRefreshes(t *testing.T) {
 	if n, _ := tr.EnqueueDueCronRefreshes(e.ctx, next.Add(time.Minute)); n != 0 {
 		t.Fatalf("a second tick inserted %d", n)
 	}
-	e.reads.cron = []CronModel{{Model: m, LastRefreshEnqueuedAt: next}}
+	e.reads.cron = []store.CronModel{{Model: m, LastRefreshEnqueuedAt: next}}
 	if n, _ := tr.EnqueueDueCronRefreshes(e.ctx, next.Add(time.Minute)); n != 0 {
 		t.Fatal("cron fired again before its next fire time")
 	}
@@ -230,11 +230,11 @@ func TestCronRefreshes(t *testing.T) {
 // TestRunJob checks payload decoding and that a deleted model's job is done, not failed.
 func TestRunJob(t *testing.T) {
 	e := newEnv(t)
-	if _, err := RunJob(e.ctx, e.runner, port.Job{Bank: e.bank, Payload: json.RawMessage(`{}`)}); err == nil {
+	if _, err := RunJob(e.ctx, e.runner, store.Job{Bank: e.bank, Payload: json.RawMessage(`{}`)}); err == nil {
 		t.Fatal("empty payload accepted")
 	}
 	payload, _ := json.Marshal(RefreshPayload{MentalModelID: "gone"})
-	if _, err := RunJob(e.ctx, e.runner, port.Job{Bank: e.bank, Payload: payload}); err != nil {
+	if _, err := RunJob(e.ctx, e.runner, store.Job{Bank: e.bank, Payload: payload}); err != nil {
 		t.Fatalf("deleted model: %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"memd/internal/ai"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"strconv"
@@ -35,6 +36,7 @@ const (
 	envEmbedModel          = "MEMD_EMBED_MODEL"
 	envGatewayConcurrency  = "MEMD_GATEWAY_MAX_CONCURRENT"
 	envGatewayTimeout      = "MEMD_GATEWAY_TIMEOUT"
+	envBlobProvider        = "MEMD_BLOB_PROVIDER"
 	envS3Endpoint          = "MEMD_S3_ENDPOINT"
 	envS3Bucket            = "MEMD_S3_BUCKET"
 	envS3AccessKey         = "MEMD_S3_ACCESS_KEY"
@@ -63,6 +65,7 @@ const (
 	defaultGatewayConcurrent = 32
 	defaultGatewayTimeout    = 120 * time.Second
 	defaultS3Region          = "us-east-1"
+	blobProviderS3           = "s3"
 	defaultWorkerSlots       = 10
 	defaultPollInterval      = 500 * time.Millisecond
 	defaultHeartbeat         = 15 * time.Second
@@ -93,6 +96,8 @@ type Config struct {
 	SlotConcurrency map[domain.ModelSlot]int
 	// GatewayTimeout bounds one gateway HTTP attempt when the binding sets none.
 	GatewayTimeout time.Duration
+	// BlobProvider selects the blob.Store adapter; "s3" (S3 or any S3-compatible store) is the only one.
+	BlobProvider string
 	// S3Endpoint is the object store's S3 API URL; empty = AWS for S3Region.
 	S3Endpoint string
 	// S3Bucket holds the original document texts.
@@ -171,6 +176,10 @@ var settings = []setting{
 	{
 		envGatewayTimeout, "gateway HTTP attempt timeout", defaultGatewayTimeout.String(),
 		duration(func(c *Config) *time.Duration { return &c.GatewayTimeout }),
+	},
+	{
+		envBlobProvider, "blob storage for original texts (s3)", blobProviderS3,
+		str(func(c *Config) *string { return &c.BlobProvider }),
 	},
 	{envS3Endpoint, "S3 API URL (empty = AWS)", "", str(func(c *Config) *string { return &c.S3Endpoint })},
 	{envS3Bucket, "bucket for original texts (required)", "", str(func(c *Config) *string { return &c.S3Bucket })},
@@ -376,13 +385,7 @@ func (c Config) Validate() error {
 	if c.GatewayURL == "" {
 		errs = append(errs, fmt.Errorf("%s is required", envGatewayURL))
 	}
-	if c.S3Bucket == "" {
-		errs = append(errs, fmt.Errorf("%s is required", envS3Bucket))
-	}
-	if c.S3AccessKey == "" || c.S3SecretKey == "" {
-		errs = append(errs, fmt.Errorf("%s and %s are both required (static S3 credentials)", envS3AccessKey,
-			envS3SecretKey))
-	}
+	errs = append(errs, c.validateBlob()...)
 	errs = append(errs, c.validateSlots()...)
 	if c.EmbedModel == "" {
 		errs = append(errs, fmt.Errorf("%s must not be empty", envEmbedModel))
@@ -449,8 +452,25 @@ func (c Config) validateSlots() []error {
 	for _, slot := range requiredSlots {
 		if _, ok := server.Binding(slot); !ok {
 			errs = append(errs, fmt.Errorf("no model bound to slot %s: set MEMD_MODEL or %s%s", slot,
-				config.EnvModelPrefix, strings.ToUpper(string(slot))))
+				ai.EnvModelPrefix, strings.ToUpper(string(slot))))
 		}
+	}
+	return errs
+}
+
+// validateBlob checks the blob provider and its settings: s3 needs a bucket and static credentials.
+func (c Config) validateBlob() []error {
+	if c.BlobProvider != blobProviderS3 {
+		return []error{fmt.Errorf("%s: unknown blob provider %q (supported: %s)", envBlobProvider, c.BlobProvider,
+			blobProviderS3)}
+	}
+	var errs []error
+	if c.S3Bucket == "" {
+		errs = append(errs, fmt.Errorf("%s is required", envS3Bucket))
+	}
+	if c.S3AccessKey == "" || c.S3SecretKey == "" {
+		errs = append(errs, fmt.Errorf("%s and %s are both required (static S3 credentials)", envS3AccessKey,
+			envS3SecretKey))
 	}
 	return errs
 }

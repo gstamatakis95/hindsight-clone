@@ -3,7 +3,7 @@ package retain
 import (
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
@@ -35,11 +35,11 @@ func TestRetainOlderRunCannotOverwriteNewerTags(t *testing.T) {
 	if d := e.document("d1"); d.UnitCount != 3 || d.ExtractedAt == nil || !domain.SameTagSet(d.Tags, []string{"new"}) {
 		t.Errorf("document = %+v, want 3 units tagged new, complete", d)
 	}
-	hits, err := e.store.Read().SearchText(e.ctx, port.TextQuery{Bank: testBank, Text: "fact", Limit: 100})
+	hits, err := e.store.Read().SearchText(e.ctx, store.TextQuery{Bank: testBank, Text: "fact", Limit: 100})
 	if err != nil || len(hits) != 3 {
 		t.Fatalf("hits %v, %v", hits, err)
 	}
-	for _, u := range e.units([]port.UnitID{hits[0].ID, hits[1].ID, hits[2].ID}) {
+	for _, u := range e.units([]domain.UnitID{hits[0].ID, hits[1].ID, hits[2].ID}) {
 		if !domain.SameTagSet(u.Tags, []string{"new"}) {
 			t.Errorf("unit %s tags %v, want [new]", u.ID, u.Tags)
 		}

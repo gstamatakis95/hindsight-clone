@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // SerialKey is the consolidate job's serial key: one consolidation at a time per bank.
@@ -20,7 +20,7 @@ type Payload struct {
 
 // NewJob returns a consolidate job for b. A job with scopes or overrides is never deduplicated; the
 // automatic one (no scopes, no overrides) joins a pending consolidate of the bank.
-func NewJob(b port.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) port.Job {
+func NewJob(b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) store.Job {
 	payload := []byte(`{}`)
 	if len(scopes) > 0 {
 		// Marshalling a struct of string slices cannot fail.
@@ -28,11 +28,11 @@ func NewJob(b port.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig
 			payload = b
 		}
 	}
-	dedupe := port.DedupePending
+	dedupe := store.DedupePending
 	if len(scopes) > 0 || overrides != nil {
-		dedupe = port.DedupeNone
+		dedupe = store.DedupeNone
 	}
-	return port.Job{
+	return store.Job{
 		Bank:      b,
 		Kind:      domain.OperationKindConsolidate,
 		SerialKey: SerialKey,
@@ -56,8 +56,8 @@ func decodePayload(raw json.RawMessage) (Payload, error) {
 }
 
 // payloadScopes turns the payload's tag sets into scope keys of b.
-func payloadScopes(b port.BankRef, p Payload) []port.ScopeKey {
-	out := make([]port.ScopeKey, 0, len(p.Scopes))
+func payloadScopes(b domain.BankRef, p Payload) []domain.ScopeKey {
+	out := make([]domain.ScopeKey, 0, len(p.Scopes))
 	for _, s := range p.Scopes {
 		out = append(out, domain.NewScopeKey(b, s.Tags))
 	}

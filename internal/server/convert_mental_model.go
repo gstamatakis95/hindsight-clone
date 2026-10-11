@@ -3,7 +3,6 @@ package server
 import (
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -274,7 +273,7 @@ func historyEntryToProto(e domain.MentalModelHistoryEntry) *pb.MentalModelHistor
 }
 
 // historyPageFromProto converts a GetMentalModelHistoryResponse to a HistoryPage.
-func historyPageFromProto(r *pb.GetMentalModelHistoryResponse) (HistoryPage, error) {
+func historyPageFromProto(r *pb.GetMentalModelHistoryResponse) (mentalmodel.HistoryPage, error) {
 	var d decoder
 	var items []domain.MentalModelHistoryEntry
 	if r.GetEntries() != nil {
@@ -283,11 +282,11 @@ func historyPageFromProto(r *pb.GetMentalModelHistoryResponse) (HistoryPage, err
 			items[i] = d.historyEntry(e)
 		}
 	}
-	return HistoryPage{Items: items, NextPageToken: r.GetNextPageToken()}, d.err
+	return mentalmodel.HistoryPage{Items: items, NextPageToken: r.GetNextPageToken()}, d.err
 }
 
 // historyPageToProto converts a HistoryPage to its response.
-func historyPageToProto(p HistoryPage) *pb.GetMentalModelHistoryResponse {
+func historyPageToProto(p mentalmodel.HistoryPage) *pb.GetMentalModelHistoryResponse {
 	var entries []*pb.MentalModelHistoryEntry
 	if p.Items != nil {
 		entries = make([]*pb.MentalModelHistoryEntry, len(p.Items))
@@ -300,11 +299,11 @@ func historyPageToProto(p HistoryPage) *pb.GetMentalModelHistoryResponse {
 
 // historyRequestFromProto converts a GetMentalModelHistoryRequest; Bank.Bank carries bank_id (the handler
 // sets the full ref).
-func historyRequestFromProto(r *pb.GetMentalModelHistoryRequest) (HistoryRequest, error) {
+func historyRequestFromProto(r *pb.GetMentalModelHistoryRequest) (mentalmodel.HistoryRequest, error) {
 	var d decoder
-	out := HistoryRequest{
-		Bank:      port.BankRef{Bank: r.GetBankId()},
-		ID:        port.MentalModelID(r.GetMentalModelId()),
+	out := mentalmodel.HistoryRequest{
+		Bank:      domain.BankRef{Bank: r.GetBankId()},
+		ID:        domain.MentalModelID(r.GetMentalModelId()),
 		Kind:      fromEnum[domain.HistoryKind](&d, r.GetKind()),
 		PageSize:  int(r.GetPageSize()),
 		PageToken: r.GetPageToken(),
@@ -313,7 +312,7 @@ func historyRequestFromProto(r *pb.GetMentalModelHistoryRequest) (HistoryRequest
 }
 
 // historyRequestToProto converts a HistoryRequest back to its proto (round-trip tests).
-func historyRequestToProto(r HistoryRequest) *pb.GetMentalModelHistoryRequest {
+func historyRequestToProto(r mentalmodel.HistoryRequest) *pb.GetMentalModelHistoryRequest {
 	return &pb.GetMentalModelHistoryRequest{
 		BankId:        r.Bank.Bank,
 		MentalModelId: string(r.ID),
@@ -325,10 +324,10 @@ func historyRequestToProto(r HistoryRequest) *pb.GetMentalModelHistoryRequest {
 
 // listMentalModelsFromProto converts a ListMentalModelsRequest; Detail stays as sent (the handler applies
 // the default) and Bank.Bank carries bank_id.
-func listMentalModelsFromProto(r *pb.ListMentalModelsRequest) (ListMentalModelsRequest, error) {
+func listMentalModelsFromProto(r *pb.ListMentalModelsRequest) (mentalmodel.ListRequest, error) {
 	var d decoder
-	out := ListMentalModelsRequest{
-		Bank:         port.BankRef{Bank: r.GetBankId()},
+	out := mentalmodel.ListRequest{
+		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		FolderPrefix: r.GetFolderPrefix(),
 		Detail:       fromEnum[domain.Detail](&d, r.GetDetail()),
 		Tags:         r.GetTags(),
@@ -340,7 +339,7 @@ func listMentalModelsFromProto(r *pb.ListMentalModelsRequest) (ListMentalModelsR
 }
 
 // listMentalModelsToProto converts a ListMentalModelsRequest back to its proto (round-trip tests).
-func listMentalModelsToProto(r ListMentalModelsRequest) *pb.ListMentalModelsRequest {
+func listMentalModelsToProto(r mentalmodel.ListRequest) *pb.ListMentalModelsRequest {
 	return &pb.ListMentalModelsRequest{
 		BankId:       r.Bank.Bank,
 		FolderPrefix: r.FolderPrefix,
@@ -353,7 +352,7 @@ func listMentalModelsToProto(r ListMentalModelsRequest) *pb.ListMentalModelsRequ
 }
 
 // mentalModelPageToProto converts a MentalModelPage trimmed to detail.
-func mentalModelPageToProto(p MentalModelPage, detail domain.Detail) *pb.ListMentalModelsResponse {
+func mentalModelPageToProto(p mentalmodel.ModelPage, detail domain.Detail) *pb.ListMentalModelsResponse {
 	return &pb.ListMentalModelsResponse{
 		MentalModels:  mentalModelsToProto(p.Items, detail),
 		NextPageToken: p.NextPageToken,
@@ -361,11 +360,11 @@ func mentalModelPageToProto(p MentalModelPage, detail domain.Detail) *pb.ListMen
 }
 
 // refreshRequestFromProto converts a RefreshMentalModelRequest; Bank.Bank carries bank_id.
-func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (RefreshRequest, error) {
+func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (mentalmodel.RefreshRequest, error) {
 	var d decoder
-	out := RefreshRequest{
-		Bank:      port.BankRef{Bank: r.GetBankId()},
-		ID:        port.MentalModelID(r.GetMentalModelId()),
+	out := mentalmodel.RefreshRequest{
+		Bank:      domain.BankRef{Bank: r.GetBankId()},
+		ID:        domain.MentalModelID(r.GetMentalModelId()),
 		ForceFull: r.GetForceFull(),
 		Overrides: d.configPtr(r.GetOverrides()),
 		Strategy:  fromEnum[domain.RefreshStrategy](&d, r.GetStrategy()),
@@ -374,7 +373,7 @@ func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (RefreshRequest, e
 }
 
 // refreshRequestToProto converts a RefreshRequest back to its proto (round-trip tests).
-func refreshRequestToProto(r RefreshRequest) *pb.RefreshMentalModelRequest {
+func refreshRequestToProto(r mentalmodel.RefreshRequest) *pb.RefreshMentalModelRequest {
 	return &pb.RefreshMentalModelRequest{
 		BankId:        r.Bank.Bank,
 		MentalModelId: string(r.ID),
@@ -387,7 +386,7 @@ func refreshRequestToProto(r RefreshRequest) *pb.RefreshMentalModelRequest {
 // searchPagesFromProto converts a SearchPagesRequest; Bank.Bank carries bank_id.
 func searchPagesFromProto(r *pb.SearchPagesRequest) mentalmodel.SearchPagesRequest {
 	return mentalmodel.SearchPagesRequest{
-		Bank:         port.BankRef{Bank: r.GetBankId()},
+		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		Query:        r.GetQuery(),
 		FolderPrefix: r.GetFolderPrefix(),
 		Limit:        int(r.GetLimit()),

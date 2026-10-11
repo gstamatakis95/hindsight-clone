@@ -2,8 +2,9 @@ package bank
 
 import (
 	"context"
+	"memd/internal/blob"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sync/atomic"
 	"testing"
 )
@@ -11,51 +12,51 @@ import (
 // hidingStore hides PROCESSING operations from Queue().List while hide is set, so a test can make the
 // deleter's first busy check pass and only its re-check inside the Banks().Delete transaction see the job.
 type hidingStore struct {
-	port.Store
+	store.DB
 	hide *atomic.Bool
 }
 
 // InTx runs fn over a Tx whose queue hides processing rows while hide is set.
-func (s hidingStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
-	return s.Store.InTx(ctx, func(tx port.Tx) error { return fn(hidingTx{Tx: tx, hide: s.hide}) })
+func (s hidingStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
+	return s.DB.InTx(ctx, func(tx store.Tx) error { return fn(hidingTx{Tx: tx, hide: s.hide}) })
 }
 
 // hidingTx is a Tx whose Queue hides processing rows while hide is set.
 type hidingTx struct {
-	port.Tx
+	store.Tx
 	hide *atomic.Bool
 }
 
 // Queue returns the hiding queue.
-func (t hidingTx) Queue() port.Queue { return hidingQueue{Queue: t.Tx.Queue(), hide: t.hide} }
+func (t hidingTx) Queue() store.Queue { return hidingQueue{Queue: t.Tx.Queue(), hide: t.hide} }
 
 // hidingQueue drops processing rows from List while hide is set.
 type hidingQueue struct {
-	port.Queue
+	store.Queue
 	hide *atomic.Bool
 }
 
 // List lists operations, returning none for a processing-status filter while hide is set.
 func (q hidingQueue) List(
-	ctx context.Context, b port.BankRef, f port.OperationFilter,
+	ctx context.Context, b domain.BankRef, f store.OperationFilter,
 ) ([]domain.Operation, string, error) {
 	if q.hide.Load() && f.Status == domain.OperationStatusProcessing {
 		return nil, "", nil
 	}
-	return q.Queue.List(ctx, b, f) //nolint:wrapcheck // test double passes the port's error through
+	return q.Queue.List(ctx, b, f) //nolint:wrapcheck // test double passes the store's error through
 }
 
 // unhideBlob is the blob store whose DeletePrefix makes the hidden processing job visible afterwards.
 type unhideBlob struct {
-	port.Blob
+	blob.Store
 	hide *atomic.Bool
 }
 
 // DeletePrefix deletes the prefix, then stops hiding processing jobs.
 func (u unhideBlob) DeletePrefix(ctx context.Context, prefix string) (int, error) {
-	n, err := u.Blob.DeletePrefix(ctx, prefix)
+	n, err := u.Store.DeletePrefix(ctx, prefix)
 	u.hide.Store(false)
-	return n, err //nolint:wrapcheck // test double passes the port's error through
+	return n, err //nolint:wrapcheck // test double passes the store's error through
 }
 
 // TestDeleteFinalTxRechecksProcessingJobs: the busy re-check inside the transaction
@@ -63,12 +64,12 @@ func (u unhideBlob) DeletePrefix(ctx context.Context, prefix string) (int, error
 // tombstoned, a delayed continuation is queued and the run reports done=false.
 func TestDeleteFinalTxRechecksProcessingJobs(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	_, claimed := seedBank(t, e, b)
 	hide := &atomic.Bool{}
 	hide.Store(true)
-	store := hidingStore{Store: e.store, hide: hide}
-	d := NewBankDeleter(store, unhideBlob{Blob: e.blob, hide: hide}, e.store, e.clock, DeleterConfig{})
+	hiding := hidingStore{DB: e.store, hide: hide}
+	d := NewBankDeleter(hiding, unhideBlob{Store: e.blob, hide: hide}, e.store, e.clock, DeleterConfig{})
 	if _, err := d.Tombstone(e.ctx, b); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,7 @@ func TestDeleteFinalTxRechecksProcessingJobs(t *testing.T) {
 		t.Fatal("the run never reached the blob delete (the pre-blob check should have been fooled)")
 	}
 	var bank domain.Bank
-	e.tx(t, func(tx port.Tx) error { var err error; bank, err = tx.Banks().Get(e.ctx, b); return err })
+	e.tx(t, func(tx store.Tx) error { var err error; bank, err = tx.Banks().Get(e.ctx, b); return err })
 	if !bank.Deleting() {
 		t.Errorf("bank row after a blocked final tx = %+v, want still tombstoned", bank)
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
+	"memd/internal/engine/mentalmodel"
 	"memd/internal/server"
 	"slices"
 	"testing"
@@ -68,7 +69,7 @@ func TestSpecOverridesValidated(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, _ := h.calls.args("MentalModelAdmin.UpdateMentalModel")
-	_, err = args[2].(server.SpecPatch)(domain.MentalModelSpec{ID: "m"})
+	_, err = args[2].(mentalmodel.SpecPatch)(domain.MentalModelSpec{ID: "m"})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("patched spec with invalid overrides: err = %v, want ErrInvalidArgument", err)
 	}

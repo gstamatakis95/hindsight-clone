@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"testing"
 )
@@ -26,7 +27,7 @@ func (e *env) invalidate(c Curator) domain.Unit {
 }
 
 // assertNotLive fails for every id still live.
-func (e *env) assertNotLive(ids ...port.UnitID) {
+func (e *env) assertNotLive(ids ...domain.UnitID) {
 	e.t.Helper()
 	for _, id := range ids {
 		if _, ok := e.unit(id); ok {
@@ -36,15 +37,15 @@ func (e *env) assertNotLive(ids ...port.UnitID) {
 }
 
 // searchIDs returns the ids the semantic arm (for text's embedding) and the keyword arm (for q) return.
-func (e *env) searchIDs(text, q string) (semantic, keyword []port.UnitID) {
+func (e *env) searchIDs(text, q string) (semantic, keyword []domain.UnitID) {
 	e.t.Helper()
-	vec, err := e.fake.Read().SearchVector(e.ctx, port.VectorQuery{
+	vec, err := e.fake.Read().SearchVector(e.ctx, store.VectorQuery{
 		Bank: testBank, Embedding: e.emb.Vector(text), Limit: 10,
 	})
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	txt, err := e.fake.Read().SearchText(e.ctx, port.TextQuery{Bank: testBank, Text: q, Limit: 10})
+	txt, err := e.fake.Read().SearchText(e.ctx, store.TextQuery{Bank: testBank, Text: q, Limit: 10})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func (e *env) assertInvalidateEffects() {
 
 func TestInvalidateRemovesCitingObservationsAndQueuesRefresh(t *testing.T) {
 	e := newEnv(t)
-	e.citing.by = map[port.UnitID][]port.MentalModelID{
+	e.citing.by = map[domain.UnitID][]domain.MentalModelID{
 		idF1: {"m-fact"}, idO1: {"m-obs", "m-fact"}, idF2: {"m-other"},
 	}
 	u := e.invalidate(e.curator())
@@ -110,7 +111,7 @@ func TestInvalidateRemovesCitingObservationsAndQueuesRefresh(t *testing.T) {
 	// Immediately (no job has run): neither the fact nor the observation citing it is visible to recall.
 	e.assertNotLive(idF1, idO1)
 	semantic, keyword := e.searchIDs("Alice likes green tea", "Alice")
-	for _, id := range []port.UnitID{idF1, idO1} {
+	for _, id := range []domain.UnitID{idF1, idO1} {
 		if slices.Contains(semantic, id) || slices.Contains(keyword, id) {
 			t.Errorf("search still returns %s: semantic %v, keyword %v", id, semantic, keyword)
 		}
@@ -123,7 +124,7 @@ func TestInvalidateRemovesCitingObservationsAndQueuesRefresh(t *testing.T) {
 }
 
 // restoreF1 invalidates f1, drains the consolidation it queued and restores it, returning the rederive job.
-func (e *env) restoreF1(c Curator) port.Job {
+func (e *env) restoreF1(c Curator) store.Job {
 	e.t.Helper()
 	e.invalidate(c)
 	e.drain(domain.OperationKindConsolidate)
@@ -144,8 +145,8 @@ func (e *env) restoreF1(c Curator) port.Job {
 // assertCausalF1F2 checks the causal edge f1 -> f2 exists.
 func (e *env) assertCausalF1F2() {
 	e.t.Helper()
-	hits, err := e.fake.Read().ExpandGraph(e.ctx, port.GraphQuery{
-		Bank: testBank, Seeds: []port.UnitID{idF1}, MaxHops: 1, Kinds: []domain.LinkKind{domain.LinkCausal},
+	hits, err := e.fake.Read().ExpandGraph(e.ctx, store.GraphQuery{
+		Bank: testBank, Seeds: []domain.UnitID{idF1}, MaxHops: 1, Kinds: []domain.LinkKind{domain.LinkCausal},
 		Limit: 10,
 	})
 	if err != nil || !slices.Contains(hitIDs(hits), idF2) {
@@ -179,7 +180,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 	if got, _ = e.unit(idF1); !slices.Equal(got.Entities, []string{"Alice"}) {
 		t.Errorf("entities after rederive = %v, want [Alice]", got.Entities)
 	}
-	if len(e.linker.calls) != 2 || !slices.Equal(e.linker.calls[0], []port.UnitID{idF1}) {
+	if len(e.linker.calls) != 2 || !slices.Equal(e.linker.calls[0], []domain.UnitID{idF1}) {
 		t.Errorf("linker calls = %v", e.linker.calls)
 	}
 	if n := len(e.claim(domain.OperationKindConsolidate)); n != 1 {
@@ -321,7 +322,7 @@ func TestRederiveSkipsWhenUnitGone(t *testing.T) {
 	e := newEnv(t)
 	e.invalidate(e.curator())
 	e.drain(domain.OperationKindConsolidate)
-	job := port.Job{
+	job := store.Job{
 		Bank: testBank, Kind: domain.OperationKindRederiveMemory,
 		Payload: json.RawMessage(`{"unit_id":"` + string(idF1) + `"}`),
 	}
@@ -331,7 +332,7 @@ func TestRederiveSkipsWhenUnitGone(t *testing.T) {
 	if n := len(e.claim(domain.OperationKindConsolidate)); n != 0 {
 		t.Errorf("rederive of a gone unit enqueued %d consolidations", n)
 	}
-	bad := port.Job{Bank: testBank, Kind: domain.OperationKindRederiveMemory, Payload: json.RawMessage(`{}`)}
+	bad := store.Job{Bank: testBank, Kind: domain.OperationKindRederiveMemory, Payload: json.RawMessage(`{}`)}
 	if err := e.rederiver(nil).Rederive(e.ctx, bad); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("bad payload err = %v", err)
 	}
@@ -339,7 +340,7 @@ func TestRederiveSkipsWhenUnitGone(t *testing.T) {
 
 // editingEmbedder edits the unit text while the rederive embeds, like a concurrent UpdateMemory.
 type editingEmbedder struct {
-	port.Embedder
+	ai.Embedder
 	edit func()
 }
 

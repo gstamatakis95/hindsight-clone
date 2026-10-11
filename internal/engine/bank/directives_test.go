@@ -3,13 +3,12 @@ package bank
 import (
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"slices"
 	"testing"
 )
 
 // seedDirectives stores a global, a team-tagged, a sales-tagged and an inactive directive in b.
-func seedDirectives(t *testing.T, e env, b port.BankRef) {
+func seedDirectives(t *testing.T, e env, b domain.BankRef) {
 	t.Helper()
 	admin := NewDirectiveAdmin(e.store)
 	for _, d := range []domain.Directive{
@@ -26,7 +25,7 @@ func seedDirectives(t *testing.T, e env, b port.BankRef) {
 
 func TestDirectiveSelect(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	seedDirectives(t, e, b)
 	sel := NewDirectiveSelector(e.store)
 	cases := []struct {
@@ -52,7 +51,7 @@ func TestDirectiveSelect(t *testing.T) {
 			}
 		})
 	}
-	if _, err := sel.Select(e.ctx, port.BankRef{Tenant: "t", Bank: "nope"}, nil, false); !errors.Is(err,
+	if _, err := sel.Select(e.ctx, domain.BankRef{Tenant: "t", Bank: "nope"}, nil, false); !errors.Is(err,
 		domain.ErrNotFound) {
 		t.Errorf("unknown bank: %v", err)
 	}
@@ -60,7 +59,7 @@ func TestDirectiveSelect(t *testing.T) {
 
 func TestDirectiveAdmin(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "new"}
+	b := domain.BankRef{Tenant: "t", Bank: "new"}
 	admin := NewDirectiveAdmin(e.store)
 	if _, err := admin.ListDirectives(e.ctx, b, nil, false); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("list on unknown bank: %v", err)
@@ -120,7 +119,7 @@ func TestTenantAdmin(t *testing.T) {
 func TestBankAdmin(t *testing.T) {
 	e := newEnv(t)
 	banks := NewBankAdmin(e.store)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	created, err := banks.CreateBank(e.ctx, domain.Bank{Ref: b, Name: "B", Config: domain.BankConfig{ReflectMission: "m"}})
 	if err != nil || created.Name != "B" || created.Config.ReflectMission != "m" {
 		t.Fatalf("created = %+v %v", created, err)
@@ -128,7 +127,7 @@ func TestBankAdmin(t *testing.T) {
 	if _, err := banks.CreateBank(e.ctx, domain.Bank{Ref: b}); !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Errorf("second create: %v", err)
 	}
-	fresh := port.BankRef{Tenant: "t", Bank: "fresh"}
+	fresh := domain.BankRef{Tenant: "t", Bank: "fresh"}
 	updated, err := banks.UpdateBankConfig(e.ctx, fresh, func(cur domain.BankConfig) (domain.BankConfig, error) {
 		cur.ObservationsMission = "obs"
 		return cur, nil

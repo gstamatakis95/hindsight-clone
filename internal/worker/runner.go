@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sort"
 	"sync"
 	"time"
@@ -35,7 +36,7 @@ const (
 )
 
 // Handler runs one job kind. Return ErrPermanent to fail with no retry; any other error retries.
-type Handler func(ctx context.Context, j port.Job) error
+type Handler func(ctx context.Context, j store.Job) error
 
 // Job outcomes passed to a JobTraceFunc's finish func.
 const (
@@ -55,7 +56,7 @@ const (
 // terminal Complete/Fail run under it) and a finish func the runner calls exactly once, after the row is
 // settled, with one of the Outcome* values and the handler's error (nil on success). It is the worker's
 // only tracing hook; internal/observability provides a Datadog one, so this package stays vendor-free.
-type JobTraceFunc func(ctx context.Context, j port.Job) (context.Context, func(outcome string, err error))
+type JobTraceFunc func(ctx context.Context, j store.Job) (context.Context, func(outcome string, err error))
 
 // TickTraceFunc starts a trace span around one maintenance tick and returns ctx carrying it and a finish
 // func called once with the tick's joined error (nil when every step succeeded).
@@ -65,7 +66,7 @@ type TickTraceFunc func(ctx context.Context) (context.Context, func(err error))
 type JobRunner interface {
 	// Handle registers h for kind, replacing any earlier handler. Only registered kinds are claimed.
 	// Register every handler before Run.
-	Handle(kind port.JobKind, h Handler)
+	Handle(kind domain.OperationKind, h Handler)
 	// Run polls, dispatches and heartbeats until ctx is done. It then stops claiming, lets the running
 	// handlers finish within the shutdown grace, cancels the rest, waits for them, settles their rows and
 	// returns nil. Call it once.
@@ -77,7 +78,7 @@ type RunnerConfig struct {
 	// WorkerID names this worker on the rows it claims; empty = "worker-<uuid>".
 	WorkerID string
 	// Clock stamps retry times and heartbeat ages; nil = the system clock.
-	Clock port.Clock
+	Clock clock.Clock
 	// Slots is how many jobs run at once (default DefaultSlots).
 	Slots int
 	// ReservedConsolidate slots only consolidate may use (default DefaultReservedConsolidate; capped at
@@ -104,24 +105,24 @@ type RunnerConfig struct {
 	TraceJob JobTraceFunc
 }
 
-// Runner is the worker-mode job runner: it claims due jobs through port.Claimer, runs each in a slot,
+// Runner is the worker-mode job runner: it claims due jobs through store.Claimer, runs each in a slot,
 // heartbeats them and completes, retries or fails them. Construct it with NewRunner.
 type Runner struct {
-	c          port.Claimer
+	c          store.Claimer
 	cfg        RunnerConfig
 	log        *slog.Logger
-	handlers   map[port.JobKind]Handler
-	otherKinds []port.JobKind // registered kinds except consolidate, sorted
+	handlers   map[domain.OperationKind]Handler
+	otherKinds []domain.OperationKind // registered kinds except consolidate, sorted
 
 	mu      sync.Mutex
-	running map[port.OperationID]*active
+	running map[domain.OperationID]*active
 	wake    chan struct{}
 	wg      sync.WaitGroup
 }
 
 // active is one run of a job. Its pointer is the run's token: a re-claim of the same id is a new run.
 type active struct {
-	kind     port.JobKind
+	kind     domain.OperationKind
 	cancel   context.CancelCauseFunc
 	lastBeat time.Time // claim time, then the last heartbeat that covered this run
 }
@@ -137,12 +138,12 @@ var (
 )
 
 // NewRunner returns a Runner claiming through c. Slots default to 10, 2 of them reserved for consolidate.
-func NewRunner(c port.Claimer, cfg RunnerConfig) *Runner {
+func NewRunner(c store.Claimer, cfg RunnerConfig) *Runner {
 	if cfg.WorkerID == "" {
 		cfg.WorkerID = "worker-" + uuid.NewString()
 	}
 	if cfg.Clock == nil {
-		cfg.Clock = systemClock{}
+		cfg.Clock = clock.System{}
 	}
 	if cfg.Slots <= 0 {
 		cfg.Slots = DefaultSlots
@@ -169,14 +170,14 @@ func NewRunner(c port.Claimer, cfg RunnerConfig) *Runner {
 	}
 	return &Runner{
 		c: c, cfg: cfg, log: log.With("worker", cfg.WorkerID),
-		handlers: map[port.JobKind]Handler{},
-		running:  map[port.OperationID]*active{},
+		handlers: map[domain.OperationKind]Handler{},
+		running:  map[domain.OperationID]*active{},
 		wake:     make(chan struct{}, 1),
 	}
 }
 
 // Handle registers h for kind.
-func (r *Runner) Handle(kind port.JobKind, h Handler) {
+func (r *Runner) Handle(kind domain.OperationKind, h Handler) {
 	r.handlers[kind] = h
 	r.otherKinds = r.otherKinds[:0]
 	for k := range r.handlers {
@@ -248,7 +249,7 @@ func (r *Runner) pollLoop(ctx, base context.Context) {
 func (r *Runner) poll(ctx, base context.Context) {
 	free, otherFree := r.capacity()
 	if free > 0 && r.handlers[domain.OperationKindConsolidate] != nil {
-		free -= r.claim(ctx, base, []port.JobKind{domain.OperationKindConsolidate}, free)
+		free -= r.claim(ctx, base, []domain.OperationKind{domain.OperationKindConsolidate}, free)
 	}
 	if n := min(free, otherFree); n > 0 && len(r.otherKinds) > 0 {
 		r.claim(ctx, base, r.otherKinds, n)
@@ -257,7 +258,7 @@ func (r *Runner) poll(ctx, base context.Context) {
 
 // claim claims up to n jobs of kinds and starts them; it returns how many it started. The Claim call runs
 // under base (with a timeout), not ctx, so a claim that commits as shutdown begins still starts its jobs.
-func (r *Runner) claim(ctx, base context.Context, kinds []port.JobKind, n int) int {
+func (r *Runner) claim(ctx, base context.Context, kinds []domain.OperationKind, n int) int {
 	if ctx.Err() != nil {
 		return 0
 	}
@@ -290,7 +291,7 @@ func (r *Runner) capacity() (free, otherFree int) {
 // start runs j in its own goroutine under a context that only the runner cancels. If this runner still
 // runs an older run of the same id (its job was reclaimed and re-claimed here), that run is cancelled as
 // lost; its settle then finds the row alive under the new run and writes nothing.
-func (r *Runner) start(base context.Context, j port.Job) {
+func (r *Runner) start(base context.Context, j store.Job) {
 	hctx, cancel := context.WithCancelCause(base)
 	a := &active{kind: j.Kind, cancel: cancel, lastBeat: r.cfg.Clock.Now()}
 	r.mu.Lock()
@@ -305,7 +306,7 @@ func (r *Runner) start(base context.Context, j port.Job) {
 }
 
 // release forgets run a of job id (unless a newer run replaced it) and wakes the poll loop.
-func (r *Runner) release(id port.OperationID, a *active) {
+func (r *Runner) release(id domain.OperationID, a *active) {
 	r.mu.Lock()
 	if r.running[id] == a {
 		delete(r.running, id)
@@ -326,9 +327,3 @@ func (r *Runner) cancelAll(cause error) {
 		a.cancel(cause)
 	}
 }
-
-// systemClock is the default Clock.
-type systemClock struct{}
-
-// Now returns the wall-clock time.
-func (systemClock) Now() time.Time { return time.Now() }

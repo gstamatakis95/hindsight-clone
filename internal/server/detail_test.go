@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/engine/mentalmodel"
 	"testing"
 	"time"
 
@@ -22,16 +22,16 @@ type detailModels struct {
 
 // GetMentalModel records detail and returns the model.
 func (s *detailModels) GetMentalModel(
-	_ context.Context, _ port.BankRef, _ port.MentalModelID, detail domain.Detail,
+	_ context.Context, _ domain.BankRef, _ domain.MentalModelID, detail domain.Detail,
 ) (domain.MentalModel, error) {
 	s.got = detail
 	return s.model, nil
 }
 
 // ListMentalModels records the detail and returns a one-model page.
-func (s *detailModels) ListMentalModels(_ context.Context, req ListMentalModelsRequest) (MentalModelPage, error) {
+func (s *detailModels) ListMentalModels(_ context.Context, req mentalmodel.ListRequest) (mentalmodel.ModelPage, error) {
 	s.got = req.Detail
-	return MentalModelPage{Items: []domain.MentalModel{s.model}}, nil
+	return mentalmodel.ModelPage{Items: []domain.MentalModel{s.model}}, nil
 }
 
 // detailModel is a model with every detail-dependent field set.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 )
 
 // ActionKind is what a consolidation decision does to a scope's observations.
@@ -28,7 +27,7 @@ type ConsolidationAction struct {
 	// Kind is Create | Update | None.
 	Kind ActionKind
 	// ObservationID is the observation to rewrite, for Update.
-	ObservationID port.UnitID
+	ObservationID domain.UnitID
 	// Text is the new observation text (Create and Update).
 	Text string
 	// Evidence is each source unit + exact quote the observation rests on.
@@ -69,9 +68,9 @@ func (c *consolidator) embed(ctx context.Context, actions []ConsolidationAction)
 // and no near-duplicate is written; keep leaves the create. A failed check keeps the create (nothing is
 // lost) unless the run is stopping.
 func (c *consolidator) dedup(
-	ctx context.Context, s port.ScopeKey, cfg domain.BankConfig, actions []ConsolidationAction,
-) ([]port.Usage, error) {
-	var usage []port.Usage
+	ctx context.Context, s domain.ScopeKey, cfg domain.BankConfig, actions []ConsolidationAction,
+) ([]domain.Usage, error) {
+	var usage []domain.Usage
 	for i, a := range actions {
 		if a.Kind != ActionCreate {
 			continue
@@ -97,7 +96,7 @@ func (c *consolidator) dedup(
 // one batch writes each observation once and no evidence is attached to a text that doesn't state it.
 // dropped reports a drop: the batch's facts are then left unstamped and re-decided by the next run.
 func firstUpdates(actions []ConsolidationAction) (out []ConsolidationAction, dropped bool) {
-	seen := map[port.UnitID]bool{}
+	seen := map[domain.UnitID]bool{}
 	for _, a := range actions {
 		if a.Kind == ActionUpdate {
 			if seen[a.ObservationID] {

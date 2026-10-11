@@ -1,13 +1,13 @@
 // Package config builds the effective domain.BankConfig: the server defaults, the level merge, the
-// port.ConfigResolver that reads the stored levels, and the per-RPC override validation.
+// Resolver that reads the stored levels, and the per-RPC override validation.
 //
 // # Where it sits
 //
-// config sits beside the engines: it imports domain and port only and never an adapter, server, worker or
-// engine package. It declares the one engine piece it needs, [StrategyMatcher], so
+// config sits beside the engines: it imports domain, store and ai only and never an adapter, server, worker
+// or engine package. It declares the one engine piece it needs, [StrategyMatcher], so
 // consolidate.StrategyMatcher satisfies it without config importing consolidate. cmd/memd/wire.go builds the
 // server level with [ServerDefaults] and the resolver with [NewResolver]; engines consume the resolver as
-// port.ConfigResolver; the server validates request overrides with [ValidateOverrides]; retain's Ingestor
+// [Resolver]; the server validates request overrides with [ValidateOverrides]; retain's Ingestor
 // and the server's FieldMask code use [Merge].
 //
 // # Levels and merge
@@ -53,9 +53,9 @@
 // Knobs whose default the spec leaves open stay unset; the engine that reads a knob owns its default (each
 // engine's package doc lists those).
 //
-// Model bindings come from the environment. [EnvModel] (MEMD_MODEL) binds every LLM slot (EXTRACT,
+// Model bindings come from the environment. [ai.EnvModel] (MEMD_MODEL) binds every LLM slot (EXTRACT,
 // TIME_PARSE, CONSOLIDATE, DEDUP_CHECK, REFLECT, STRUCTURED_OUTPUT, MENTAL_MODEL_DELTA, SYNTHESIZE);
-// [EnvModelPrefix]+SLOT (MEMD_MODEL_REFLECT, ...) binds one slot and wins over MEMD_MODEL. RERANK is bound
+// [ai.EnvModelPrefix]+SLOT (MEMD_MODEL_REFLECT, ...) binds one slot and wins over MEMD_MODEL. RERANK is bound
 // only by MEMD_MODEL_RERANK, and without it recall.rerank defaults to false so recall skips the
 // cross-encoder instead of failing; a tenant or bank that binds RERANK must also set recall.rerank true.
 // EMBED is server-wide and never part of a BankConfig. A slot with no model stays unbound. ServerDefaults
@@ -64,7 +64,7 @@
 //
 // # Resolver
 //
-// [NewResolver](store, matcher, server) returns the port.ConfigResolver:
+// [NewResolver](store, matcher, server) returns the Resolver:
 //
 //   - Effective(ctx, bank, overrides...) merges server < tenant < bank < overrides (in order).
 //   - ForScope(ctx, scope, request) merges server < tenant < bank < strategy < request, where strategy is
@@ -72,7 +72,7 @@
 //     request level included, so a Consolidate call can bring its own strategies. A nil matcher disables
 //     strategies.
 //
-// Both read the tenant config and the bank row in one short read-only Store.InTx (port.Reader has no config
+// Both read the tenant config and the bank row in one short read-only DB.InTx (store.Reader has no config
 // reads), so callers must not call them from inside an open transaction. An unknown or
 // tombstoned bank is domain.ErrNotFound (the read rule); write paths call Banks().Ensure first, which
 // creates the bank or reports domain.ErrBankDeleting. The resolver holds no other state and is safe for
@@ -116,8 +116,8 @@
 // # Tests
 //
 // Table tests per file: defaults_test.go (spec defaults and environment bindings), merge_test.go (set
-// semantics, per-slot models, no aliasing), mask_test.go, resolver_test.go (against the generated mockport
-// Store: precedence, the strategy level, unknown and tombstoned banks, concurrent use) and validate_test.go
+// semantics, per-slot models, no aliasing), paths_test.go, resolver_test.go (on real Postgres through pgtest:
+// precedence, the strategy level, unknown and tombstoned banks, concurrent use) and validate_test.go
 // (the path and slot matrices, bad slots, disposition range, PreviewRPC). SPEC "Model routing", "Per-request
 // overrides" and the BankConfig comments in "gRPC surface" govern this package.
 package config

@@ -3,9 +3,12 @@ package recall
 import (
 	"context"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/timex"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -15,7 +18,7 @@ import (
 type Recaller interface {
 	// Recall resolves the effective config (unknown bank = domain.ErrNotFound), parses, retrieves over the
 	// enabled arms concurrently, fuses, scores, gates, packs and enriches. It is read-only and opens a short
-	// read transaction only to resolve config, so callers must not call it inside Store.InTx. A failing arm,
+	// read transaction only to resolve config, so callers must not call it inside DB.InTx. A failing arm,
 	// embedder or reranker fails the call; a recall that finds nothing is not a failure.
 	Recall(ctx context.Context, req RecallRequest) (RecallResult, error)
 }
@@ -24,20 +27,20 @@ type Recaller interface {
 type RecallerDeps struct {
 	// Reader serves the four arms, hydration, source facts, fuzzy tags (TagCounts), chunks, entity state and
 	// the stale flag (StaleScopes).
-	Reader port.Reader
+	Reader store.Reader
 	// Config merges server < tenant < bank < request.
-	Config port.ConfigResolver
+	Config config.Resolver
 	// Embedder embeds the query.
-	Embedder port.Embedder
+	Embedder ai.Embedder
 	// Reranker is the cross-encoder; nil = recall.rerank off.
-	Reranker port.Reranker
+	Reranker ai.Reranker
 	// Router resolves the RERANK binding.
-	Router port.ModelRouter
+	Router *ai.Router
 	// Times derives a query's time window (TIME_PARSE only for a cue its rules can't resolve); nil = no
 	// derived windows (explicit windows still work).
 	Times timex.TimeNormalizer
 	// Clock is the reference for "now" and durations.
-	Clock port.Clock
+	Clock clock.Clock
 	// Count counts tokens for packing, include budgets and the query limit.
 	Count TokenCounter
 	// Retrievers replaces the four standard arms over Reader; nil = newSemantic, newKeyword, newGraph and
@@ -200,13 +203,13 @@ func (r *recaller) rank(ctx context.Context, q *parsedQuery, fused []Candidate, 
 
 // hydrate attaches each candidate's unit, keeping fused order and dropping ids that no longer resolve or
 // whose unit was rewritten outside seq since the arm saw it (a refresh's snapshot stays at or below S).
-func (r *recaller) hydrate(ctx context.Context, b port.BankRef, seq port.SeqRange, cs []Candidate) (
+func (r *recaller) hydrate(ctx context.Context, b domain.BankRef, seq store.SeqRange, cs []Candidate) (
 	[]Candidate, error,
 ) {
 	if len(cs) == 0 {
 		return nil, nil
 	}
-	ids := make([]port.UnitID, len(cs))
+	ids := make([]domain.UnitID, len(cs))
 	for i, c := range cs {
 		ids[i] = c.ID
 	}
@@ -214,7 +217,7 @@ func (r *recaller) hydrate(ctx context.Context, b port.BankRef, seq port.SeqRang
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[port.UnitID]*domain.Unit, len(units))
+	byID := make(map[domain.UnitID]*domain.Unit, len(units))
 	for i := range units {
 		if seq.Contains(units[i].Seq) {
 			byID[units[i].ID] = &units[i]
@@ -232,8 +235,8 @@ func (r *recaller) hydrate(ctx context.Context, b port.BankRef, seq port.SeqRang
 
 // staleScopes returns the canonical keys of the packed observations' scopes that still hold unconsolidated
 // facts (Reader.StaleScopes, one call over the distinct scopes).
-func (r *recaller) staleScopes(ctx context.Context, b port.BankRef, packed []Candidate) (map[string]bool, error) {
-	var scopes []port.ScopeKey
+func (r *recaller) staleScopes(ctx context.Context, b domain.BankRef, packed []Candidate) (map[string]bool, error) {
+	var scopes []domain.ScopeKey
 	seen := map[string]bool{}
 	for _, c := range packed {
 		if c.Unit == nil || c.Unit.Type != domain.FactTypeObservation {
@@ -297,8 +300,8 @@ func tokensOf(cs []Candidate) int {
 }
 
 // topIDs returns the first traceTopIDs ids of an arm's list.
-func topIDs(cs []Candidate) []port.UnitID {
-	out := make([]port.UnitID, 0, min(len(cs), traceTopIDs))
+func topIDs(cs []Candidate) []domain.UnitID {
+	out := make([]domain.UnitID, 0, min(len(cs), traceTopIDs))
 	for _, c := range cs[:min(len(cs), traceTopIDs)] {
 		out = append(out, c.ID)
 	}

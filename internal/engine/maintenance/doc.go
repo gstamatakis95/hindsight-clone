@@ -3,7 +3,7 @@
 //
 // # Where it sits
 //
-// maintenance is an engine package: it depends on domain and port only and must never import adapters,
+// maintenance is an engine package: it depends on domain and the boundary packages only and must never import adapters,
 // server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It declares the small [Linker] it
 // consumes instead of importing retain; retain.Linker satisfies it (wire.go fails to compile otherwise), and
 // cmd/memd/wire.go passes the retain linker to [NewGraphMaintainer]. The worker's graph handler calls
@@ -26,7 +26,7 @@
 // # Flow of Run
 //
 // [GraphMaintainer.Run](ctx, bank, budget) computes deadline = clock.Now() + budget on the injected
-// port.Clock and then loops, one Store.InTx per batch:
+// clock.Clock and then loops, one DB.InTx per batch:
 //
 //  1. Read the bank row. A tombstoned or missing bank stops the run with domain.ErrCancelled (a job never
 //     writes to a deleting bank; the maintainer never calls Banks().Ensure).
@@ -64,6 +64,6 @@
 // # Tests
 //
 // graph_impl_test.go runs the maintainer against a pgtest database with a stub Linker and a
-// fake.Clock: top-up and prune, resumption after the budget runs out, the tombstone stop, and the final
+// clock.Manual: top-up and prune, resumption after the budget runs out, the tombstone stop, and the final
 // re-check. SPEC "Jobs" (graph_maintenance) and "Behavioural rules" (graph maintenance after removals).
 package maintenance

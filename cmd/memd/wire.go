@@ -5,25 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"memd/internal/adapter/gateway"
-	"memd/internal/adapter/postgres"
-	"memd/internal/adapter/s3"
+	"memd/internal/ai"
+	"memd/internal/ai/gateway"
+	"memd/internal/blob"
+	"memd/internal/blob/s3"
+	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
 	"memd/internal/engine/consolidate"
-	"memd/internal/engine/curate"
-	"memd/internal/engine/docs"
-	"memd/internal/engine/maintenance"
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/recall"
 	"memd/internal/engine/reflect"
 	"memd/internal/engine/retain"
-	"memd/internal/engine/routing"
 	"memd/internal/engine/timex"
 	"memd/internal/observability"
-	"memd/internal/port"
 	"memd/internal/server"
+	"memd/internal/store"
+	"memd/internal/store/postgres"
 	"memd/internal/worker"
 	"net"
 	"net/http"
@@ -37,36 +36,26 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-// wire.go is the only composition root: it builds the adapters (Postgres, S3, gateway), narrows each to the
-// ports the engines consume, builds every engine once, and hands them to the gRPC server (api mode) and the
-// job handlers and maintenance tick (worker mode).
+// The composition root. wire.go opens the infrastructure (Postgres, blob storage, the AI gateway), builds the shared
+// libraries once (core) and runs the two modes; each wire_<area>.go builds one area's engines and fills its part of the
+// gRPC server's dependencies, the job handlers and the maintenance tick.
 
-// modelGateway is the AI gateway as the engines see it: one client serves all three model ports.
+// modelGateway is the AI gateway as the engines see it: one client serves all three model interfaces.
 type modelGateway interface {
-	port.LLM
-	port.Embedder
-	port.Reranker
+	ai.LLM
+	ai.Embedder
+	ai.Reranker
 }
 
-// ports are the adapters narrowed to the interfaces the engines, handlers and probes consume. openAdapters
-// is the only place the concrete adapter types appear; tests build ports from internal/fake.
-type ports struct {
-	store    port.Store
-	claimer  port.Claimer
-	blob     port.Blob
-	gw       modelGateway
-	db       pinger
-	stranded worker.StrandedFactSource
-	batches  worker.BatchSettler
-	maint    maintenanceReads
-}
-
-// maintenanceReads are the maintenance tick's reads the ports don't expose; the Postgres store implements
-// them (decisions 2000-2002).
-type maintenanceReads interface {
-	worker.ConsolidationCandidates
-	worker.StalledDeleteSource
-	worker.GraphWorkSource
+// infra are the adapters, each narrowed to its boundary. openInfra is the only place the concrete adapter types
+// appear; tests build infra over pgtest and internal/fake.
+type infra struct {
+	db      store.DB
+	claimer store.Claimer
+	maint   store.Maintenance
+	blob    blob.Store
+	gw      modelGateway
+	ping    pinger
 }
 
 // deps is everything the two modes run.
@@ -76,9 +65,9 @@ type deps struct {
 	server      server.Deps
 	handlers    worker.Handlers
 	maintenance worker.MaintenanceDeps
-	claimer     port.Claimer
+	claimer     store.Claimer
 	pending     worker.PendingChecker
-	clock       port.Clock
+	clock       clock.Clock
 	// tel is the optional Datadog instrumentation; nil (the default) installs nothing.
 	tel *observability.Telemetry
 }
@@ -88,67 +77,78 @@ type deps struct {
 // server and the worker.
 func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observability.Telemetry,
 ) (*deps, func(), error) {
-	p, closer, err := openAdapters(ctx, cfg, tel)
+	in, closer, err := openInfra(ctx, cfg, tel)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := checkEmbedding(ctx, p.gw); err != nil {
+	if err := checkEmbedding(ctx, in.gw); err != nil {
 		closer()
 		return nil, nil, err
 	}
-	tok, err := newTokenCounter()
+	tok, err := ai.NewTokenizer()
 	if err != nil {
 		closer()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
 	serverCfg, err := config.ServerDefaults(cfg.Env)
 	if err != nil {
 		closer()
 		return nil, nil, fmt.Errorf("memd: %w", err)
 	}
-	d := wireEngines(cfg, p, tok, serverCfg, systemClock{}, log)
+	d := wireEngines(cfg, in, tok, serverCfg, clock.System{}, log)
 	d.tel = tel
 	return d, closer, nil
 }
 
-// openAdapters opens the Postgres pool, the blob store and the gateway client, and narrows them to ports.
-// tel's instrumentation (no-ops when nil) goes into each: the pgx query tracer, the S3 middleware, and the
-// gateway's call hook and HTTP client.
-func openAdapters(ctx context.Context, cfg Config, tel *observability.Telemetry) (ports, func(), error) {
+// openInfra opens the Postgres pool, the blob store and the gateway client. tel's instrumentation (no-ops when nil)
+// goes into each: the pgx query tracer, the S3 middleware, and the gateway's call hook and HTTP client.
+func openInfra(ctx context.Context, cfg Config, tel *observability.Telemetry) (infra, func(), error) {
 	pcfg, err := pgxpool.ParseConfig(cfg.DSN)
 	if err != nil {
-		return ports{}, nil, fmt.Errorf("memd: %s: %w", envDSN, err)
+		return infra{}, nil, fmt.Errorf("memd: %s: %w", envDSN, err)
 	}
 	pcfg.MaxConns = int32(poolSize(cfg)) //nolint:gosec // poolSize is small and positive
 	tel.TracePool(pcfg)
 	pool, err := pgxpool.NewWithConfig(ctx, pcfg)
 	if err != nil {
-		return ports{}, nil, fmt.Errorf("memd: postgres: %w", err)
+		return infra{}, nil, fmt.Errorf("memd: postgres: %w", err)
 	}
 	pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := pool.Ping(pctx); err != nil {
 		pool.Close()
-		return ports{}, nil, fmt.Errorf("memd: postgres: %w", err)
+		return infra{}, nil, fmt.Errorf("memd: postgres: %w", err)
 	}
-	blob, err := s3.NewBlob(ctx, s3.Config{
-		Endpoint: cfg.S3Endpoint, Region: cfg.S3Region, Bucket: cfg.S3Bucket, AccessKeyID: cfg.S3AccessKey,
-		SecretAccessKey: cfg.S3SecretKey, UsePathStyle: cfg.S3PathStyle, APIOptions: tel.S3APIOptions(),
-	})
+	bs, err := openBlob(ctx, cfg, tel)
 	if err != nil {
 		pool.Close()
-		return ports{}, nil, fmt.Errorf("memd: s3: %w", err)
+		return infra{}, nil, err
 	}
 	gw := gateway.NewClient(gateway.Config{
 		BaseURL: cfg.GatewayURL, APIKey: cfg.GatewayAPIKey, EmbedModel: cfg.EmbedModel,
 		MaxConcurrent: cfg.GatewayMaxConcurrent, SlotConcurrency: cfg.SlotConcurrency, Timeout: cfg.GatewayTimeout,
 		TraceCall: tel.GatewayHook(),
 	}, tel.HTTPClient(nil))
-	store := postgres.New(pool)
-	return ports{
-		store: store, claimer: store, blob: blob, gw: gw, db: pool, stranded: store, batches: store,
-		maint: store,
-	}, pool.Close, nil
+	pg := postgres.New(pool)
+	return infra{db: pg, claimer: pg, maint: pg, blob: bs, gw: gw, ping: pool}, pool.Close, nil
+}
+
+// openBlob builds the blob.Store adapter MEMD_BLOB_PROVIDER selects (Config.Validate has already rejected an
+// unknown provider).
+func openBlob(ctx context.Context, cfg Config, tel *observability.Telemetry) (blob.Store, error) {
+	switch cfg.BlobProvider {
+	case blobProviderS3:
+		st, err := s3.New(ctx, s3.Config{
+			Endpoint: cfg.S3Endpoint, Region: cfg.S3Region, Bucket: cfg.S3Bucket, AccessKeyID: cfg.S3AccessKey,
+			SecretAccessKey: cfg.S3SecretKey, UsePathStyle: cfg.S3PathStyle, APIOptions: tel.S3APIOptions(),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("memd: s3: %w", err)
+		}
+		return st, nil
+	default:
+		return nil, fmt.Errorf("memd: %s: unknown blob provider %q", envBlobProvider, cfg.BlobProvider)
+	}
 }
 
 // poolSize is the Postgres pool size: the configured one, else enough for every worker slot (each may hold a
@@ -162,7 +162,7 @@ func poolSize(cfg Config) int {
 
 // checkEmbedding fails startup unless the gateway's embedding model returns domain.EmbeddingDim (768)
 // dimensions: memory_units.embedding is vector(768), so any other model would fail every write later.
-func checkEmbedding(ctx context.Context, emb port.Embedder) error {
+func checkEmbedding(ctx context.Context, emb ai.Embedder) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	vec, err := emb.EmbedQuery(ctx, "memd startup embedding check")
@@ -176,13 +176,14 @@ func checkEmbedding(ctx context.Context, emb port.Embedder) error {
 	return nil
 }
 
-// core are the engines several others depend on.
+// core are the libraries and engines several areas share.
 type core struct {
-	store     port.Store
-	read      port.Reader
-	clock     port.Clock
-	resolver  port.ConfigResolver
-	router    port.ModelRouter
+	db        store.DB
+	read      store.Reader
+	clock     clock.Clock
+	tok       *ai.Tokenizer
+	resolver  config.Resolver
+	router    *ai.Router
 	matcher   consolidate.StrategyMatcher
 	times     timex.TimeNormalizer
 	scopes    consolidate.ScopeExpander
@@ -195,147 +196,63 @@ type core struct {
 	dirs      bank.DirectiveSelector
 }
 
-// wireEngines builds every engine over the adapters, narrowed to ports.
+// wireEngines builds the shared libraries, then every area over them.
 func wireEngines(
-	cfg Config, p ports, tok *tokenCounter, serverCfg domain.BankConfig, clock port.Clock, log *slog.Logger,
+	cfg Config, in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock, log *slog.Logger,
 ) *deps {
-	store, claimer := p.store, p.claimer
-	c := wireCore(p, tok, serverCfg, clock)
-	mm := wireMentalModels(c, p.gw)
-	d := &deps{cfg: cfg, log: log, claimer: claimer, clock: clock, pending: worker.NewPendingChecker(store, clock)}
-	d.server = wireServer(cfg, c, mm, p)
-	d.handlers = worker.Handlers{
-		Retainer: c.retainer,
-		Consolidator: consolidate.NewConsolidator(consolidate.ConsolidatorDeps{
-			Store: store, Config: c.resolver, Router: c.router, LLM: p.gw, Embedder: p.gw, Clock: clock,
-			Scopes: c.scopes, Tokens: tok,
-			Checkpoint: func(j port.Job) consolidate.Checkpointer { return worker.NewCheckpoint(claimer, j.ID) },
-		}),
-		Refresher:  mm.runner,
-		Deleter:    d.server.Deleter,
-		Rederiver:  curate.NewRederiver(curate.RederiverDeps{Store: store, Embedder: p.gw, Linker: c.linker}),
-		Retagger:   d.server.Retagger,
-		Graph:      maintenance.NewGraphMaintainer(store, c.linker, clock),
-		Store:      store,
-		Clock:      clock,
-		Checkpoint: func(j port.Job) worker.Checkpoint { return worker.NewCheckpoint(claimer, j.ID) },
+	c := wireCore(in, tok, serverCfg, clk)
+	d := &deps{
+		cfg: cfg, log: log, claimer: in.claimer, clock: clk, pending: worker.NewPendingChecker(in.db, clk),
+		handlers: worker.Handlers{
+			Store: in.db, Clock: clk,
+			Checkpoint: func(j store.Job) worker.Checkpoint { return worker.NewCheckpoint(in.claimer, j.ID) },
+		},
+		server: server.Deps{
+			DefaultDeadline: cfg.RPCDeadline,
+			Probes: []server.ReadinessProbe{
+				postgresProbe{db: in.ping}, &gatewayProbe{url: cfg.GatewayURL, hc: &http.Client{}},
+			},
+		},
 	}
-	d.maintenance = worker.MaintenanceDeps{
-		Claimer: claimer, Store: store, Clock: clock, CronRefresh: mm.triggers,
-		Consolidation: p.maint, Config: c.resolver, ConsolidationGrace: cfg.ConsolidationGrace,
-		Deletes: p.maint, Graph: p.maint,
-		RefreshFailures: mentalmodel.NewRefreshFailureReconciler(c.read, store, c.resolver, clock),
-		Stranded:        p.stranded, Batches: p.batches, Interval: cfg.MaintenanceInterval, StaleAfter: cfg.StaleAfter,
-		Logger: log,
-	}
+	wireMemory(c, in, d)
+	wireDocuments(c, in, d)
+	wireObservations(c, in, d)
+	wireMentalModels(c, in, d)
+	wireBanks(c, in, d)
+	wireConfig(c, d)
+	wireOperations(c, d)
+	wireMaintenance(cfg, c, in, d)
 	return d
 }
 
-// wireCore builds config resolution, routing, retain, recall and reflect.
-func wireCore(p ports, tok *tokenCounter, serverCfg domain.BankConfig, clock port.Clock) core {
-	store, claimer, blob, gw := p.store, p.claimer, p.blob, p.gw
-	c := core{store: store, read: store.Read(), clock: clock, router: slotRouter{routing.NewRouter()}}
+// wireCore builds config resolution, routing, time normalization, retain's shared pieces, recall and reflect.
+func wireCore(in infra, tok *ai.Tokenizer, serverCfg domain.BankConfig, clk clock.Clock) core {
+	db, claimer, gw := in.db, in.claimer, in.gw
+	c := core{db: db, read: db.Read(), clock: clk, tok: tok, router: ai.NewRouter()}
 	c.matcher = consolidate.NewStrategyMatcher(c.read)
-	c.resolver = config.NewResolver(store, c.matcher, serverCfg)
-	c.times = timex.NewNormalizer(gw, c.router, clock)
+	c.resolver = config.NewResolver(db, c.matcher, serverCfg)
+	c.times = timex.NewNormalizer(gw, c.router, clk)
 	c.scopes = consolidate.NewScopeExpander()
 	c.linker = retain.NewLinker()
 	c.entities = retain.NewEntityResolver(retain.ResolverConfig{})
 	c.retainer = retain.NewRetainer(retain.RetainerDeps{
-		Store: store, Blob: blob, Config: c.resolver, Extractor: retain.NewExtractor(gw, c.router),
+		Store: db, Blob: in.blob, Config: c.resolver, Extractor: retain.NewExtractor(gw, c.router),
 		Dates: c.times, Embedder: gw, Entities: c.entities, Labels: retain.NewLabelResolver(), Linker: c.linker,
-		Scopes: c.scopes, Tokens: tok, Clock: clock,
-		Checkpoint: func(id port.OperationID) retain.Checkpoint { return worker.NewCheckpoint(claimer, id) },
+		Scopes: c.scopes, Tokens: tok, Clock: clk,
+		Checkpoint: func(id domain.OperationID) retain.Checkpoint { return worker.NewCheckpoint(claimer, id) },
 	})
 	c.recaller = recall.NewRecaller(recall.RecallerDeps{
 		Reader: c.read, Config: c.resolver, Embedder: gw, Reranker: gw, Router: c.router, Times: c.times,
-		Clock: clock, Count: tok,
+		Clock: clk, Count: tok,
 	})
-	c.queuer = mentalmodel.NewRefreshQueuer(clock)
-	c.dirs = bank.NewDirectiveSelector(store)
-	pages := &pageReader{search: mentalmodel.NewPageSearcher(c.read, gw), s: store}
+	c.queuer = mentalmodel.NewRefreshQueuer(clk)
+	c.dirs = bank.NewDirectiveSelector(db)
+	pages := &pageReader{search: mentalmodel.NewPageSearcher(c.read, gw), s: db}
 	c.reflector = reflect.NewReflector(reflect.ReflectorDeps{
-		Store: store, Config: c.resolver, Router: c.router, LLM: gw, Clock: clock,
+		Store: db, Config: c.resolver, Router: c.router, LLM: gw, Clock: clk,
 		Tools: reflect.DefaultTools(c.recaller, pages, c.read),
 	})
 	return c
-}
-
-// mentalModels are the mental-model engines.
-type mentalModels struct {
-	runner   mentalmodel.RefreshRunner
-	admin    mentalmodel.Admin
-	pages    mentalmodel.PageSearcher
-	triggers mentalmodel.Triggers
-}
-
-// wireMentalModels builds the refresh runner (both strategies), admin, page search and triggers.
-func wireMentalModels(c core, gw modelGateway) mentalModels {
-	detector := mentalmodel.NewChangeDetector(c.read, c.read)
-	md := mentalmodel.ModelDeps{LLM: gw, Router: c.router, Clock: c.clock, Directives: c.dirs}
-	runner := mentalmodel.NewRefreshRunner(mentalmodel.RefreshRunnerDeps{
-		Store: c.store, Config: c.resolver, Scope: c.read,
-		Synthesizers: []mentalmodel.Synthesizer{
-			mentalmodel.NewAgenticSynthesizer(c.reflector, md), mentalmodel.NewSingleShotSynthesizer(c.recaller, md),
-		},
-		Projector: reflect.NewStructuredProjector(gw, c.router, c.resolver), Embedder: gw, Clock: c.clock,
-	})
-	return mentalModels{
-		runner: runner,
-		admin: mentalmodel.NewAdmin(mentalmodel.AdminDeps{
-			Store: c.store, Models: c.read, Detector: detector, Clock: c.clock, Config: c.resolver,
-		}),
-		pages: mentalmodel.NewPageSearcher(c.read, gw),
-		triggers: mentalmodel.NewTriggers(mentalmodel.TriggerDeps{
-			Store: c.store, Scheduler: mentalmodel.NewRefreshScheduler(detector, c.resolver), Cron: c.read,
-			Clock: c.clock,
-		}),
-	}
-}
-
-// wireServer fills server.Deps.
-func wireServer(cfg Config, c core, mm mentalModels, p ports) server.Deps {
-	blob := p.blob
-	return server.Deps{
-		Ingestor: retain.NewIngestor(retain.IngestorDeps{
-			Store: c.store, Blob: blob, Config: c.resolver, Retainer: c.retainer, Merge: config.Merge,
-			Scopes: c.scopes, Clock: c.clock,
-		}),
-		Recaller:  c.recaller,
-		Reflector: c.reflector,
-		Lister:    curate.NewMemoryLister(c.read),
-		Curator: curate.NewCurator(curate.CuratorDeps{
-			Store: c.store, Clock: c.clock, Citing: c.read, Refresh: c.queuer, Resolver: c.entities,
-			Config: c.resolver, Archived: c.read,
-		}),
-		Stats:     bank.NewStatsReader(c.read),
-		Previewer: bank.NewPromptPreviewer(c.resolver, c.dirs),
-		Deleter: bank.NewBankDeleter(c.store, blob, p.claimer, c.clock,
-			bank.DeleterConfig{Blobs: blob}),
-		Templates:  bank.NewTemplateCodec(c.store, c.queuer),
-		Retagger:   docs.NewRetagger(c.store),
-		Strategies: c.matcher,
-		Refresher:  mm.runner,
-		Pages:      mm.pages,
-		Control:    worker.NewOperationControl(c.store),
-		Config:     c.resolver,
-		Tenants:    bank.NewTenantAdmin(c.store),
-		Banks:      bank.NewBankAdmin(c.store),
-		Directives: bank.NewDirectiveAdmin(c.store),
-		Documents: docs.NewDocumentAdmin(docs.DocumentAdminDeps{
-			Store: c.store, Blob: blob, Source: c.read, Reprocessor: retain.NewReprocessor(c.store),
-		}),
-		Observations: curate.NewObservationAdmin(curate.ObservationAdminDeps{
-			Store: c.store, Scopes: c.read, Clearer: consolidate.NewInvalidator(),
-		}),
-		MentalModels:      mm.admin,
-		Operations:        &operationReader{s: c.store},
-		ValidateOverrides: config.ValidateOverrides,
-		DefaultDeadline:   cfg.RPCDeadline,
-		Probes: []server.ReadinessProbe{
-			postgresProbe{db: p.db}, &gatewayProbe{url: cfg.GatewayURL, hc: &http.Client{}},
-		},
-	}
 }
 
 // apiShutdownGrace is how long in-flight RPCs may finish after a stop signal.

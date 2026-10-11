@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -19,16 +20,16 @@ const (
 
 // graphMaintainer implements GraphMaintainer.
 type graphMaintainer struct {
-	s      port.Store
+	s      store.DB
 	linker Linker
-	clock  port.Clock
+	clock  clock.Clock
 }
 
 var _ GraphMaintainer = (*graphMaintainer)(nil)
 
 // NewGraphMaintainer returns the graph_maintenance job body. linker tops up links (retain.Linker); clock
 // measures the budget, so tests drive it with a fake clock.
-func NewGraphMaintainer(s port.Store, linker Linker, clock port.Clock) GraphMaintainer {
+func NewGraphMaintainer(s store.DB, linker Linker, clock clock.Clock) GraphMaintainer {
 	return &graphMaintainer{s: s, linker: linker, clock: clock}
 }
 
@@ -38,14 +39,14 @@ func NewGraphMaintainer(s port.Store, linker Linker, clock port.Clock) GraphMain
 // queued while a batch ran (even inside it) is drained before the run ends. The
 // budget is checked between batches only, so a batch is never cut in half. Neither step takes the bank's
 // change seq: links and entity rows are not memory content, so models must not go stale over them.
-func (g *graphMaintainer) Run(ctx context.Context, b port.BankRef, budget time.Duration) (bool, error) {
+func (g *graphMaintainer) Run(ctx context.Context, b domain.BankRef, budget time.Duration) (bool, error) {
 	deadline := g.clock.Now().Add(budget)
 	for {
 		if err := ctx.Err(); err != nil {
 			return false, fmt.Errorf("%w: graph maintenance of %s/%s: %w", domain.ErrCancelled, b.Tenant, b.Bank, err)
 		}
 		var linked, pruned int
-		err := g.s.InTx(ctx, func(tx port.Tx) error {
+		err := g.s.InTx(ctx, func(tx store.Tx) error {
 			linked, pruned = 0, 0
 			if err := checkBank(ctx, tx, b); err != nil {
 				return err
@@ -73,7 +74,7 @@ func (g *graphMaintainer) Run(ctx context.Context, b port.BankRef, budget time.D
 }
 
 // checkBank stops the run when the bank is tombstoned or gone (a job never writes to a deleting bank).
-func checkBank(ctx context.Context, tx port.Tx, b port.BankRef) error {
+func checkBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 	bank, err := tx.Banks().Get(ctx, b)
 	if errors.Is(err, domain.ErrNotFound) {
 		return fmt.Errorf("%w: bank %s/%s is gone: %w", domain.ErrCancelled, b.Tenant, b.Bank, err)
@@ -90,7 +91,7 @@ func checkBank(ctx context.Context, tx port.Tx, b port.BankRef) error {
 // topUpLinks takes up to limit units from graph_dirty, lets the linker add the temporal and semantic links
 // they lack (it fills up to the per-unit caps and keeps existing edges), and clears them from the queue
 // whether or not anything was added. It returns how many queue entries it consumed.
-func (g *graphMaintainer) topUpLinks(ctx context.Context, tx port.Tx, b port.BankRef, limit int) (int, error) {
+func (g *graphMaintainer) topUpLinks(ctx context.Context, tx store.Tx, b domain.BankRef, limit int) (int, error) {
 	ids, err := tx.Links().Dirty(ctx, b, limit)
 	if err != nil || len(ids) == 0 {
 		return 0, err
@@ -113,7 +114,7 @@ func (g *graphMaintainer) topUpLinks(ctx context.Context, tx port.Tx, b port.Ban
 // pruneEntities takes up to limit entities from entity_maintenance and deletes those no live unit
 // references (with their co-occurrences); PruneOrphans removes every examined id from the queue. It
 // returns how many queue entries it consumed.
-func (g *graphMaintainer) pruneEntities(ctx context.Context, tx port.Tx, b port.BankRef, limit int) (int, error) {
+func (g *graphMaintainer) pruneEntities(ctx context.Context, tx store.Tx, b domain.BankRef, limit int) (int, error) {
 	ids, err := tx.Entities().PendingMaintenance(ctx, b, limit)
 	if err != nil || len(ids) == 0 {
 		return 0, err

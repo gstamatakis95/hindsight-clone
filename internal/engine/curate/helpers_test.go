@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"memd/internal/adapter/postgres"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/engine/retain"
 	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -18,14 +20,14 @@ import (
 )
 
 // testBank is the bank every curate test works in.
-var testBank = port.BankRef{Tenant: "acme", Bank: "notes"}
+var testBank = domain.BankRef{Tenant: "acme", Bank: "notes"}
 
 // Fixture unit ids: Postgres stores unit ids as uuid. idNope is never written.
 var (
-	idF1   = pgtest.ID[port.UnitID]("f1")
-	idF2   = pgtest.ID[port.UnitID]("f2")
-	idO1   = pgtest.ID[port.UnitID]("o1")
-	idNope = pgtest.ID[port.UnitID]("nope")
+	idF1   = pgtest.ID[domain.UnitID]("f1")
+	idF2   = pgtest.ID[domain.UnitID]("f2")
+	idO1   = pgtest.ID[domain.UnitID]("o1")
+	idNope = pgtest.ID[domain.UnitID]("nope")
 )
 
 // env is a store with a seeded bank: document d1 with facts f1 (Alice, tagged team, causal link to
@@ -33,8 +35,8 @@ var (
 type env struct {
 	t      *testing.T
 	ctx    context.Context
-	clock  *fake.Clock
-	fake   *postgres.Store
+	clock  *clock.Manual
+	fake   *postgres.DB
 	store  *auditStore
 	emb    *fake.Embedder
 	citing *citingStub
@@ -44,13 +46,13 @@ type env struct {
 // newEnv seeds the store and returns the environment.
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	clock := fake.NewClock(time.Time{})
+	clock := clock.NewManual(time.Time{})
 	fs := pgtest.NewStore(t)
 	e := &env{
-		t: t, ctx: context.Background(), clock: clock, fake: fs, store: &auditStore{Store: fs},
+		t: t, ctx: context.Background(), clock: clock, fake: fs, store: &auditStore{DB: fs},
 		emb: fake.NewEmbedder(fake.EmbedSimilar), linker: &linkerStub{},
 	}
-	e.citing = &citingStub{cites: map[port.UnitID][]port.UnitID{idO1: {idF1, idF2}}, store: e.store}
+	e.citing = &citingStub{cites: map[domain.UnitID][]domain.UnitID{idO1: {idF1, idF2}}, store: e.store}
 	e.seed()
 	return e
 }
@@ -58,7 +60,7 @@ func newEnv(t *testing.T) *env {
 // seed writes the bank, document, facts, observation, entity and links.
 func (e *env) seed() {
 	consolidated := e.clock.Now()
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(e.ctx, testBank); err != nil {
 			return err
 		}
@@ -86,7 +88,7 @@ func (e *env) seed() {
 		if err != nil {
 			return err
 		}
-		if err := tx.Entities().Attach(e.ctx, idF1, []port.EntityID{ent}); err != nil {
+		if err := tx.Entities().Attach(e.ctx, idF1, []domain.EntityID{ent}); err != nil {
 			return err
 		}
 		return tx.Links().Insert(e.ctx, []domain.Link{
@@ -97,7 +99,7 @@ func (e *env) seed() {
 }
 
 // fact builds a seeded fact of document d1.
-func (e *env) fact(id port.UnitID, text string, tags []string, seq int64) domain.Unit {
+func (e *env) fact(id domain.UnitID, text string, tags []string, seq int64) domain.Unit {
 	at := e.clock.Now()
 	return domain.Unit{
 		ID: id, Bank: testBank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: text, Tags: tags,
@@ -106,7 +108,7 @@ func (e *env) fact(id port.UnitID, text string, tags []string, seq int64) domain
 }
 
 // inTx runs fn in a transaction and fails the test on error.
-func (e *env) inTx(fn func(tx port.Tx) error) {
+func (e *env) inTx(fn func(tx store.Tx) error) {
 	e.t.Helper()
 	if err := e.fake.InTx(e.ctx, fn); err != nil {
 		e.t.Fatal(err)
@@ -122,7 +124,7 @@ func (e *env) curator() Curator {
 }
 
 // rederiver returns a Rederiver over the env.
-func (e *env) rederiver(emb port.Embedder) Rederiver {
+func (e *env) rederiver(emb ai.Embedder) Rederiver {
 	if emb == nil {
 		emb = e.emb
 	}
@@ -132,9 +134,9 @@ func (e *env) rederiver(emb port.Embedder) Rederiver {
 }
 
 // unit reads a live unit; ok=false when it is not live.
-func (e *env) unit(id port.UnitID) (domain.Unit, bool) {
+func (e *env) unit(id domain.UnitID) (domain.Unit, bool) {
 	e.t.Helper()
-	us, err := e.fake.Read().GetUnits(e.ctx, testBank, []port.UnitID{id})
+	us, err := e.fake.Read().GetUnits(e.ctx, testBank, []domain.UnitID{id})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -148,9 +150,9 @@ func (e *env) unit(id port.UnitID) (domain.Unit, bool) {
 func (e *env) ops(kind domain.OperationKind) []domain.Operation {
 	e.t.Helper()
 	var out []domain.Operation
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		out = nil
-		ops, _, err := tx.Queue().List(e.ctx, testBank, port.OperationFilter{Kind: kind, PageSize: 1000})
+		ops, _, err := tx.Queue().List(e.ctx, testBank, store.OperationFilter{Kind: kind, PageSize: 1000})
 		out = ops
 		return err
 	})
@@ -158,9 +160,9 @@ func (e *env) ops(kind domain.OperationKind) []domain.Operation {
 }
 
 // claim claims every due job of kind.
-func (e *env) claim(kind domain.OperationKind) []port.Job {
+func (e *env) claim(kind domain.OperationKind) []store.Job {
 	e.t.Helper()
-	jobs, err := e.fake.Claim(e.ctx, "w1", []port.JobKind{kind}, 100)
+	jobs, err := e.fake.Claim(e.ctx, "w1", []domain.OperationKind{kind}, 100)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -181,7 +183,7 @@ func (e *env) drain(kind domain.OperationKind) {
 func (e *env) events() []domain.LifecycleEvent {
 	e.t.Helper()
 	var out []domain.LifecycleEvent
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		var err error
 		out, _, err = tx.Events().List(e.ctx, testBank, 0, 0, nil)
 		return err
@@ -190,8 +192,8 @@ func (e *env) events() []domain.LifecycleEvent {
 }
 
 // hitIDs returns the unit ids of hits.
-func hitIDs(hs []port.Hit) []port.UnitID {
-	ids := make([]port.UnitID, len(hs))
+func hitIDs(hs []store.Hit) []domain.UnitID {
+	ids := make([]domain.UnitID, len(hs))
 	for i, h := range hs {
 		ids[i] = h.ID
 	}
@@ -200,7 +202,7 @@ func hitIDs(hs []port.Hit) []port.UnitID {
 
 // auditStore wraps a Store to record the audit rows its transactions append (the ports have no audit read).
 type auditStore struct {
-	port.Store
+	store.DB
 	mu     sync.Mutex
 	audits []domain.AuditEntry
 	// open counts transactions in flight, so stubs can assert they are not called inside one.
@@ -208,10 +210,10 @@ type auditStore struct {
 }
 
 // InTx wraps the transaction so Units().AppendAudit is recorded.
-func (s *auditStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
+func (s *auditStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
 	s.open.Add(1)
 	defer s.open.Add(-1)
-	return s.Store.InTx(ctx, func(tx port.Tx) error { return fn(auditTx{Tx: tx, s: s}) })
+	return s.DB.InTx(ctx, func(tx store.Tx) error { return fn(auditTx{Tx: tx, s: s}) })
 }
 
 // recorded returns the audit rows recorded so far.
@@ -223,16 +225,16 @@ func (s *auditStore) recorded() []domain.AuditEntry {
 
 // auditTx is a Tx whose unit repo records audits.
 type auditTx struct {
-	port.Tx
+	store.Tx
 	s *auditStore
 }
 
 // Units returns the recording unit repo.
-func (t auditTx) Units() port.UnitRepo { return auditUnits{UnitRepo: t.Tx.Units(), s: t.s} }
+func (t auditTx) Units() store.UnitRepo { return auditUnits{UnitRepo: t.Tx.Units(), s: t.s} }
 
 // auditUnits records AppendAudit calls.
 type auditUnits struct {
-	port.UnitRepo
+	store.UnitRepo
 	s *auditStore
 }
 
@@ -248,13 +250,15 @@ func (u auditUnits) AppendAudit(ctx context.Context, a domain.AuditEntry) error 
 // the facts it cites), so it returns the models citing ids or an observation citing one of ids.
 // It fails when called while a transaction of store is open.
 type citingStub struct {
-	by    map[port.UnitID][]port.MentalModelID
-	cites map[port.UnitID][]port.UnitID
+	by    map[domain.UnitID][]domain.MentalModelID
+	cites map[domain.UnitID][]domain.UnitID
 	store *auditStore
 }
 
 // ModelsCiting returns the models citing any of ids or any observation citing one of ids.
-func (c *citingStub) ModelsCiting(_ context.Context, _ port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error) {
+func (c *citingStub) ModelsCiting(
+	_ context.Context, _ domain.BankRef, ids []domain.UnitID,
+) ([]domain.MentalModelID, error) {
 	if c.store != nil && c.store.open.Load() > 0 {
 		return nil, errors.New("ModelsCiting called while a transaction is open")
 	}
@@ -267,7 +271,7 @@ func (c *citingStub) ModelsCiting(_ context.Context, _ port.BankRef, ids []port.
 			}
 		}
 	}
-	var out []port.MentalModelID
+	var out []domain.MentalModelID
 	for _, id := range all {
 		out = append(out, c.by[id]...)
 	}
@@ -279,12 +283,12 @@ type refreshStub struct{}
 
 // QueueRefresh enqueues {"model_id": id} under serial key mm:{id}.
 func (refreshStub) QueueRefresh(
-	ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID,
-) (port.OperationID, error) {
+	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID,
+) (domain.OperationID, error) {
 	raw, _ := json.Marshal(map[string]string{"model_id": string(id)})
-	op, _, err := tx.Queue().Enqueue(ctx, port.Job{
+	op, _, err := tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindRefreshMentalModel, SerialKey: "mm:" + string(id), Payload: raw,
-		Dedupe: port.DedupePending,
+		Dedupe: store.DedupePending,
 	})
 	return op, err
 }
@@ -294,15 +298,15 @@ type resolverStub struct{}
 
 // Resolve upserts one entity per mention.
 func (resolverStub) Resolve(
-	ctx context.Context, tx port.Tx, b port.BankRef, in retain.ResolveInput,
-) ([]port.EntityID, error) {
-	var ids []port.EntityID
+	ctx context.Context, tx store.Tx, b domain.BankRef, in retain.ResolveInput,
+) ([]domain.EntityID, error) {
+	var ids []domain.EntityID
 	for _, m := range in.Mentions {
 		cands, err := tx.Entities().Candidates(ctx, b, m.Name, 5)
 		if err != nil {
 			return nil, err
 		}
-		id := port.EntityID("")
+		id := domain.EntityID("")
 		for _, c := range cands {
 			if c.Entity.CanonicalName == m.Name {
 				id = c.Entity.ID
@@ -321,14 +325,14 @@ func (resolverStub) Resolve(
 // linkerStub records the units it links and adds a temporal link from each to f2 when both are live.
 type linkerStub struct {
 	mu    sync.Mutex
-	calls [][]port.UnitID
+	calls [][]domain.UnitID
 }
 
 // Link records the call and inserts a temporal edge to f2.
 func (l *linkerStub) Link(
-	ctx context.Context, tx port.Tx, b port.BankRef, units []domain.Unit, _ retain.CauseMap,
+	ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, _ retain.CauseMap,
 ) error {
-	ids := make([]port.UnitID, len(units))
+	ids := make([]domain.UnitID, len(units))
 	for i, u := range units {
 		ids[i] = u.ID
 	}
@@ -344,15 +348,15 @@ func (l *linkerStub) Link(
 	return tx.Links().Insert(ctx, ls)
 }
 
-// configStub is a ConfigResolver returning the empty config.
+// configStub is a config.Resolver returning the empty config.
 type configStub struct{}
 
 // Effective returns the zero config.
-func (configStub) Effective(context.Context, port.BankRef, ...domain.BankConfig) (domain.BankConfig, error) {
+func (configStub) Effective(context.Context, domain.BankRef, ...domain.BankConfig) (domain.BankConfig, error) {
 	return domain.BankConfig{}, nil
 }
 
 // ForScope returns the zero config.
-func (configStub) ForScope(context.Context, port.ScopeKey, *domain.BankConfig) (domain.BankConfig, error) {
+func (configStub) ForScope(context.Context, domain.ScopeKey, *domain.BankConfig) (domain.BankConfig, error) {
 	return domain.BankConfig{}, nil
 }

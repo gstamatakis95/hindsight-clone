@@ -3,12 +3,12 @@ package reflect_test
 import (
 	"context"
 	"encoding/json"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
 	rf "memd/internal/engine/reflect"
 	mockreflect "memd/internal/mocks/engine/reflect"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
 	"testing"
@@ -91,7 +91,7 @@ func checkRecallRequest(t *testing.T, r recall.RecallRequest) {
 func TestToolsMentalModels(t *testing.T) {
 	page := func(id, content string, tags ...string) domain.MentalModel {
 		return domain.MentalModel{
-			Spec:      domain.MentalModelSpec{ID: port.MentalModelID(id), Name: id, Tags: tags},
+			Spec:      domain.MentalModelSpec{ID: domain.MentalModelID(id), Name: id, Tags: tags},
 			ContentMD: content,
 		}
 	}
@@ -100,14 +100,14 @@ func TestToolsMentalModels(t *testing.T) {
 		page("other-team", "Hidden.", "team-b"), page("excluded", "Excluded."),
 	}
 	pages := &mockreflect.PageReader{
-		SearchPagesFunc: func(_ context.Context, _ port.BankRef, _ string, limit int) ([]domain.PageHit, error) {
+		SearchPagesFunc: func(_ context.Context, _ domain.BankRef, _ string, limit int) ([]domain.PageHit, error) {
 			var hits []domain.PageHit
 			for i, m := range all {
 				hits = append(hits, domain.PageHit{MentalModelID: m.Spec.ID, Score: 1 - float64(i)/10})
 			}
 			return hits[:min(limit, len(hits))], nil
 		},
-		ReadPagesFunc: func(_ context.Context, _ port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error) {
+		ReadPagesFunc: func(_ context.Context, _ domain.BankRef, ids []domain.MentalModelID) ([]domain.MentalModel, error) {
 			var out []domain.MentalModel
 			for _, m := range all {
 				if slices.Contains(ids, m.Spec.ID) {
@@ -120,7 +120,7 @@ func TestToolsMentalModels(t *testing.T) {
 	tools := rf.DefaultTools(nil, pages, nil)
 	st := newState(rf.ReflectRequest{
 		Tags:                  domain.TagFilter{Tags: []string{"team-a"}, Match: domain.TagsMatchAny},
-		ExcludeMentalModelIDs: []port.MentalModelID{"excluded"},
+		ExcludeMentalModelIDs: []domain.MentalModelID{"excluded"},
 	})
 	res, err := toolByName(t, tools, rf.ToolSearchMentalModels).Call(context.Background(), st,
 		json.RawMessage(`{"query":"q"}`))
@@ -176,18 +176,18 @@ func testReadPages(t *testing.T, tools []rf.Tool) {
 
 func TestToolExpand(t *testing.T) {
 	// Postgres stores unit and chunk ids as uuid; ids maps the names in the JSON below to them.
-	f1, o1, h1 := pgtest.ID[port.UnitID]("f1"), pgtest.ID[port.UnitID]("o1"), pgtest.ID[port.UnitID]("h1")
-	c1 := pgtest.ID[port.ChunkID]("c1")
+	f1, o1, h1 := pgtest.ID[domain.UnitID]("f1"), pgtest.ID[domain.UnitID]("o1"), pgtest.ID[domain.UnitID]("h1")
+	c1 := pgtest.ID[domain.ChunkID]("c1")
 	ids := strings.NewReplacer("f1", string(f1), "o1", string(o1), "h1", string(h1)).Replace
 	fact := unit(string(f1), "Alice ordered green tea")
 	fact.ChunkID = c1
 	obs := unit(string(o1), "Alice likes tea")
-	obs.Type, obs.SourceIDs = domain.FactTypeObservation, []port.UnitID{f1}
+	obs.Type, obs.SourceIDs = domain.FactTypeObservation, []domain.UnitID{f1}
 	hidden := unit(string(h1), "Team B secret")
 	hidden.Tags = []string{"team-b"}
 	h := newHarness(t, domain.BankConfig{})
 	ctx := context.Background()
-	err := h.store.InTx(ctx, func(tx port.Tx) error {
+	err := h.store.InTx(ctx, func(tx store.Tx) error {
 		seq, err := tx.Seq(ctx, bank)
 		if err != nil {
 			return err

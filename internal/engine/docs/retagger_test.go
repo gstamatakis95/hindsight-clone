@@ -3,38 +3,38 @@ package docs_test
 import (
 	"context"
 	"errors"
-	"memd/internal/adapter/postgres"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
-	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"testing"
 	"time"
 )
 
-var testBank = port.BankRef{Tenant: "acme", Bank: "notes"}
+var testBank = domain.BankRef{Tenant: "acme", Bank: "notes"}
 
 // uid is the unit id of a readable fixture name (Postgres stores unit ids as uuid).
-func uid(name string) port.UnitID { return pgtest.ID[port.UnitID](name) }
+func uid(name string) domain.UnitID { return pgtest.ID[domain.UnitID](name) }
 
 // uids maps uid over names.
-func uids(names ...string) []port.UnitID { return pgtest.IDs[port.UnitID](names...) }
+func uids(names ...string) []domain.UnitID { return pgtest.IDs[domain.UnitID](names...) }
 
 // fixture is a bank with document d1 (units f1, f2), document d2 (unit f3) and observation o1 citing f1
 // and f3; f3 is consolidated so a reset is visible.
 type fixture struct {
-	clock *fake.Clock
-	store *postgres.Store
+	clock *clock.Manual
+	store *postgres.DB
 }
 
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	ctx := context.Background()
-	clock := fake.NewClock(time.Time{})
-	store := pgtest.NewStore(t)
-	err := store.InTx(ctx, func(tx port.Tx) error {
+	clock := clock.NewManual(time.Time{})
+	db := pgtest.NewStore(t)
+	err := db.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(ctx, testBank); err != nil {
 			return err
 		}
@@ -71,13 +71,13 @@ func newFixture(t *testing.T) fixture {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	return fixture{clock: clock, store: store}
+	return fixture{clock: clock, store: db}
 }
 
 // units reads live units by fixture name, keyed by name.
-func (f fixture) units(t *testing.T, names ...port.UnitID) map[port.UnitID]domain.Unit {
+func (f fixture) units(t *testing.T, names ...domain.UnitID) map[domain.UnitID]domain.Unit {
 	t.Helper()
-	ids := make([]port.UnitID, len(names))
+	ids := make([]domain.UnitID, len(names))
 	for i, n := range names {
 		ids[i] = uid(string(n))
 	}
@@ -85,20 +85,20 @@ func (f fixture) units(t *testing.T, names ...port.UnitID) map[port.UnitID]domai
 	if err != nil {
 		t.Fatalf("GetUnits: %v", err)
 	}
-	out := map[port.UnitID]domain.Unit{}
+	out := map[domain.UnitID]domain.Unit{}
 	for _, u := range us {
-		out[port.UnitID(pgtest.Name(u.ID))] = u
+		out[domain.UnitID(pgtest.Name(u.ID))] = u
 	}
 	return out
 }
 
 // jobs lists the bank's operations of kind.
-func (f fixture) jobs(t *testing.T, kind port.JobKind) []domain.Operation {
+func (f fixture) jobs(t *testing.T, kind domain.OperationKind) []domain.Operation {
 	t.Helper()
 	var ops []domain.Operation
-	err := f.store.InTx(context.Background(), func(tx port.Tx) error {
+	err := f.store.InTx(context.Background(), func(tx store.Tx) error {
 		var err error
-		ops, _, err = tx.Queue().List(context.Background(), testBank, port.OperationFilter{Kind: kind})
+		ops, _, err = tx.Queue().List(context.Background(), testBank, store.OperationFilter{Kind: kind})
 		return err
 	})
 	if err != nil {
@@ -108,10 +108,10 @@ func (f fixture) jobs(t *testing.T, kind port.JobKind) []domain.Operation {
 }
 
 // docTags reads a document's tags.
-func (f fixture) docTags(t *testing.T, id port.DocumentID) []string {
+func (f fixture) docTags(t *testing.T, id domain.DocumentID) []string {
 	t.Helper()
 	var d domain.Document
-	err := f.store.InTx(context.Background(), func(tx port.Tx) error {
+	err := f.store.InTx(context.Background(), func(tx store.Tx) error {
 		var err error
 		d, err = tx.Documents().Get(context.Background(), testBank, id)
 		return err
@@ -123,9 +123,9 @@ func (f fixture) docTags(t *testing.T, id port.DocumentID) []string {
 }
 
 // claimRetag claims the pending retag_document job.
-func (f fixture) claimRetag(t *testing.T) port.Job {
+func (f fixture) claimRetag(t *testing.T) store.Job {
 	t.Helper()
-	jobs, err := f.store.Claim(context.Background(), "w1", []port.JobKind{domain.OperationKindRetagDocument}, 10)
+	jobs, err := f.store.Claim(context.Background(), "w1", []domain.OperationKind{domain.OperationKindRetagDocument}, 10)
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("Claim retag: %v, %d jobs", err, len(jobs))
 	}
@@ -201,7 +201,7 @@ func (f fixture) assertRetagged(t *testing.T) {
 	if _, ok := us["o1"]; ok {
 		t.Fatal("observation citing a retagged unit survived")
 	}
-	for _, id := range []port.UnitID{"f1", "f2"} {
+	for _, id := range []domain.UnitID{"f1", "f2"} {
 		if !slices.Equal(us[id].Tags, []string{"c"}) || us[id].ConsolidatedAt != nil {
 			t.Fatalf("unit %s = tags %v consolidated %v; want [c] and unconsolidated", id, us[id].Tags,
 				us[id].ConsolidatedAt)
@@ -254,29 +254,29 @@ func TestRetagUnknownDocument(t *testing.T) {
 	if _, err := r.Retag(ctx, testBank, "nope", []string{"a"}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown document: %v, want ErrNotFound", err)
 	}
-	other := port.BankRef{Tenant: "acme", Bank: "other"}
+	other := domain.BankRef{Tenant: "acme", Bank: "other"}
 	if _, err := r.Retag(ctx, other, "d1", []string{"a"}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown bank: %v, want ErrNotFound", err)
 	}
-	if err := r.Apply(ctx, port.Job{Bank: testBank, Payload: []byte(`{"document_id":"nope"}`)}); err != nil {
+	if err := r.Apply(ctx, store.Job{Bank: testBank, Payload: []byte(`{"document_id":"nope"}`)}); err != nil {
 		t.Fatalf("Apply on a gone document: %v, want a no-op", err)
 	}
-	gone := port.Job{Bank: other, Payload: []byte(`{"document_id":"d1"}`)}
+	gone := store.Job{Bank: other, Payload: []byte(`{"document_id":"d1"}`)}
 	if err := r.Apply(ctx, gone); !errors.Is(err, domain.ErrNotFound) || !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("Apply on a gone bank: %v, want ErrCancelled wrapping ErrNotFound (not a silent no-op)", err)
 	}
-	if err := r.Apply(ctx, port.Job{Bank: testBank, Payload: []byte(`{}`)}); !errors.Is(err, domain.ErrInvalidArgument) {
+	if err := r.Apply(ctx, store.Job{Bank: testBank, Payload: []byte(`{}`)}); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("Apply without document_id: %v, want ErrInvalidArgument", err)
 	}
 
-	tomb := func(tx port.Tx) error { return tx.Banks().MarkDeleting(ctx, testBank, f.clock.Now()) }
+	tomb := func(tx store.Tx) error { return tx.Banks().MarkDeleting(ctx, testBank, f.clock.Now()) }
 	if err := f.store.InTx(ctx, tomb); err != nil {
 		t.Fatalf("MarkDeleting: %v", err)
 	}
 	if _, err := r.Retag(ctx, testBank, "d1", []string{"z"}); !errors.Is(err, domain.ErrBankDeleting) {
 		t.Fatalf("retag on a deleting bank: %v, want ErrBankDeleting", err)
 	}
-	err := r.Apply(ctx, port.Job{Bank: testBank, Payload: []byte(`{"document_id":"d1"}`)})
+	err := r.Apply(ctx, store.Job{Bank: testBank, Payload: []byte(`{"document_id":"d1"}`)})
 	if !errors.Is(err, domain.ErrBankDeleting) {
 		t.Fatalf("Apply on a deleting bank: %v, want ErrBankDeleting", err)
 	}

@@ -8,7 +8,7 @@ import (
 	"context"
 	"memd/internal/domain"
 	"memd/internal/engine/curate"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sync"
 )
 
@@ -22,7 +22,7 @@ var _ curate.Curator = &Curator{}
 //
 //		// make and configure a mocked curate.Curator
 //		mockedCurator := &Curator{
-//			UpdateFunc: func(ctx context.Context, req curate.UpdateMemoryRequest) (domain.Unit, port.OperationID, error) {
+//			UpdateFunc: func(ctx context.Context, req curate.UpdateMemoryRequest) (domain.Unit, domain.OperationID, error) {
 //				panic("mock out the Update method")
 //			},
 //		}
@@ -33,7 +33,7 @@ var _ curate.Curator = &Curator{}
 //	}
 type Curator struct {
 	// UpdateFunc mocks the Update method.
-	UpdateFunc func(ctx context.Context, req curate.UpdateMemoryRequest) (domain.Unit, port.OperationID, error)
+	UpdateFunc func(ctx context.Context, req curate.UpdateMemoryRequest) (domain.Unit, domain.OperationID, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -49,7 +49,7 @@ type Curator struct {
 }
 
 // Update calls UpdateFunc.
-func (mock *Curator) Update(ctx context.Context, req curate.UpdateMemoryRequest) (domain.Unit, port.OperationID, error) {
+func (mock *Curator) Update(ctx context.Context, req curate.UpdateMemoryRequest) (domain.Unit, domain.OperationID, error) {
 	if mock.UpdateFunc == nil {
 		panic("Curator.UpdateFunc: method is nil but Curator.Update was just called")
 	}
@@ -94,13 +94,13 @@ var _ curate.MemoryLister = &MemoryLister{}
 //
 //		// make and configure a mocked curate.MemoryLister
 //		mockedMemoryLister := &MemoryLister{
-//			GetFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+//			GetFunc: func(ctx context.Context, b domain.BankRef, id domain.UnitID) (domain.Unit, error) {
 //				panic("mock out the Get method")
 //			},
 //			ListFunc: func(ctx context.Context, req curate.ListMemoriesRequest) (curate.ListMemoriesPage, error) {
 //				panic("mock out the List method")
 //			},
-//			ObservationHistoryFunc: func(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error) {
+//			ObservationHistoryFunc: func(ctx context.Context, b domain.BankRef, id domain.UnitID) ([]domain.ObservationVersion, error) {
 //				panic("mock out the ObservationHistory method")
 //			},
 //		}
@@ -111,13 +111,13 @@ var _ curate.MemoryLister = &MemoryLister{}
 //	}
 type MemoryLister struct {
 	// GetFunc mocks the Get method.
-	GetFunc func(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error)
+	GetFunc func(ctx context.Context, b domain.BankRef, id domain.UnitID) (domain.Unit, error)
 
 	// ListFunc mocks the List method.
 	ListFunc func(ctx context.Context, req curate.ListMemoriesRequest) (curate.ListMemoriesPage, error)
 
 	// ObservationHistoryFunc mocks the ObservationHistory method.
-	ObservationHistoryFunc func(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error)
+	ObservationHistoryFunc func(ctx context.Context, b domain.BankRef, id domain.UnitID) ([]domain.ObservationVersion, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -126,9 +126,9 @@ type MemoryLister struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.UnitID
+			ID domain.UnitID
 		}
 		// List holds details about calls to the List method.
 		List []struct {
@@ -142,9 +142,9 @@ type MemoryLister struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.UnitID
+			ID domain.UnitID
 		}
 	}
 	lockGet                sync.RWMutex
@@ -153,14 +153,14 @@ type MemoryLister struct {
 }
 
 // Get calls GetFunc.
-func (mock *MemoryLister) Get(ctx context.Context, b port.BankRef, id port.UnitID) (domain.Unit, error) {
+func (mock *MemoryLister) Get(ctx context.Context, b domain.BankRef, id domain.UnitID) (domain.Unit, error) {
 	if mock.GetFunc == nil {
 		panic("MemoryLister.GetFunc: method is nil but MemoryLister.Get was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.UnitID
+		B   domain.BankRef
+		ID  domain.UnitID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -178,13 +178,13 @@ func (mock *MemoryLister) Get(ctx context.Context, b port.BankRef, id port.UnitI
 //	len(mockedMemoryLister.GetCalls())
 func (mock *MemoryLister) GetCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.UnitID
+	B   domain.BankRef
+	ID  domain.UnitID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.UnitID
+		B   domain.BankRef
+		ID  domain.UnitID
 	}
 	mock.lockGet.RLock()
 	calls = mock.calls.Get
@@ -229,14 +229,14 @@ func (mock *MemoryLister) ListCalls() []struct {
 }
 
 // ObservationHistory calls ObservationHistoryFunc.
-func (mock *MemoryLister) ObservationHistory(ctx context.Context, b port.BankRef, id port.UnitID) ([]domain.ObservationVersion, error) {
+func (mock *MemoryLister) ObservationHistory(ctx context.Context, b domain.BankRef, id domain.UnitID) ([]domain.ObservationVersion, error) {
 	if mock.ObservationHistoryFunc == nil {
 		panic("MemoryLister.ObservationHistoryFunc: method is nil but MemoryLister.ObservationHistory was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.UnitID
+		B   domain.BankRef
+		ID  domain.UnitID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -254,13 +254,13 @@ func (mock *MemoryLister) ObservationHistory(ctx context.Context, b port.BankRef
 //	len(mockedMemoryLister.ObservationHistoryCalls())
 func (mock *MemoryLister) ObservationHistoryCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.UnitID
+	B   domain.BankRef
+	ID  domain.UnitID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.UnitID
+		B   domain.BankRef
+		ID  domain.UnitID
 	}
 	mock.lockObservationHistory.RLock()
 	calls = mock.calls.ObservationHistory
@@ -278,7 +278,7 @@ var _ curate.Rederiver = &Rederiver{}
 //
 //		// make and configure a mocked curate.Rederiver
 //		mockedRederiver := &Rederiver{
-//			RederiveFunc: func(ctx context.Context, j port.Job) error {
+//			RederiveFunc: func(ctx context.Context, j store.Job) error {
 //				panic("mock out the Rederive method")
 //			},
 //		}
@@ -289,7 +289,7 @@ var _ curate.Rederiver = &Rederiver{}
 //	}
 type Rederiver struct {
 	// RederiveFunc mocks the Rederive method.
-	RederiveFunc func(ctx context.Context, j port.Job) error
+	RederiveFunc func(ctx context.Context, j store.Job) error
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -298,20 +298,20 @@ type Rederiver struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// J is the j argument value.
-			J port.Job
+			J store.Job
 		}
 	}
 	lockRederive sync.RWMutex
 }
 
 // Rederive calls RederiveFunc.
-func (mock *Rederiver) Rederive(ctx context.Context, j port.Job) error {
+func (mock *Rederiver) Rederive(ctx context.Context, j store.Job) error {
 	if mock.RederiveFunc == nil {
 		panic("Rederiver.RederiveFunc: method is nil but Rederiver.Rederive was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}{
 		Ctx: ctx,
 		J:   j,
@@ -328,11 +328,11 @@ func (mock *Rederiver) Rederive(ctx context.Context, j port.Job) error {
 //	len(mockedRederiver.RederiveCalls())
 func (mock *Rederiver) RederiveCalls() []struct {
 	Ctx context.Context
-	J   port.Job
+	J   store.Job
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}
 	mock.lockRederive.RLock()
 	calls = mock.calls.Rederive

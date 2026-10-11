@@ -2,10 +2,10 @@ package gatewayemu_test
 
 import (
 	"encoding/json"
-	"memd/internal/adapter/gateway"
+	"memd/internal/ai"
+	"memd/internal/ai/gateway"
 	"memd/internal/domain"
 	"memd/internal/jsonschema"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"memd/test/e2e/gatewayemu"
 	"testing"
@@ -50,7 +50,7 @@ func mustValidate(t *testing.T, what string, schema, doc json.RawMessage) {
 }
 
 // structured makes a Structured call through the gateway client and returns the raw output.
-func structured(t *testing.T, c *gateway.Client, req port.StructuredRequest) json.RawMessage {
+func structured(t *testing.T, c *gateway.Client, req ai.StructuredRequest) json.RawMessage {
 	t.Helper()
 	var out json.RawMessage
 	if _, err := c.Structured(t.Context(), req, &out); err != nil {
@@ -60,13 +60,13 @@ func structured(t *testing.T, c *gateway.Client, req port.StructuredRequest) jso
 }
 
 // reflectTools returns the reflect tool list from the prompts assets.
-func reflectTools(t *testing.T) []port.ToolSpec {
+func reflectTools(t *testing.T) []ai.ToolSpec {
 	t.Helper()
 	raw, err := prompts.JSON(prompts.ReflectTools)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tools []port.ToolSpec
+	var tools []ai.ToolSpec
 	if err := json.Unmarshal(raw, &tools); err != nil {
 		t.Fatal(err)
 	}

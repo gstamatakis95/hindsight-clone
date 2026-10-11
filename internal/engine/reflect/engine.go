@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/jsonschema"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"slices"
 	"strings"
 )
@@ -21,15 +24,15 @@ const (
 // ReflectorDeps are the reflector's dependencies.
 type ReflectorDeps struct { //nolint:revive // stutter: ReflectorDeps is the spec's name (NewReflector(d ReflectorDeps))
 	// Store reads the bank's name and stored directives (a short read-only transaction).
-	Store port.Store
+	Store store.DB
 	// Config resolves the effective config (server < tenant < bank < request).
-	Config port.ConfigResolver
+	Config config.Resolver
 	// Router picks the REFLECT and STRUCTURED_OUTPUT bindings.
-	Router port.ModelRouter
+	Router *ai.Router
 	// LLM serves the tool-calling turns, the final synthesis and the structured-output pass.
-	LLM port.LLM
+	LLM ai.LLM
 	// Clock gives the current time (default query time, durations).
-	Clock port.Clock
+	Clock clock.Clock
 	// Tools are the retrieval tools (DefaultTools); done is built in.
 	Tools []Tool
 }
@@ -63,7 +66,7 @@ func (r *reflector) Reflect(ctx context.Context, req ReflectRequest) (ReflectRes
 	}
 	cfg, err := r.d.Config.Effective(ctx, req.Bank, overrides...)
 	if err != nil {
-		return ReflectResult{}, err
+		return ReflectResult{}, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
 	}
 	bankName, stored, err := r.readBank(ctx, req.Bank)
 	if err != nil {
@@ -112,10 +115,10 @@ func validate(req ReflectRequest) error {
 }
 
 // readBank reads the bank's display name and its active directives in one short read-only transaction.
-func (r *reflector) readBank(ctx context.Context, b port.BankRef) (string, []domain.Directive, error) {
+func (r *reflector) readBank(ctx context.Context, b domain.BankRef) (string, []domain.Directive, error) {
 	var name string
 	var ds []domain.Directive
-	err := r.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := r.d.Store.InTx(ctx, func(tx store.Tx) error {
 		bank, err := tx.Banks().Get(ctx, b)
 		if err != nil {
 			return err
@@ -189,8 +192,8 @@ func (r *reflector) newRun(
 		llm: r.d.LLM, clock: r.d.Clock, binding: binding, tools: tools, specs: specs, data: data,
 		maxIter: maxIterations(cfg, req.Budget), callIDs: map[string]bool{}, requireEv: true, instructions: instructions,
 		st: &agentState{Request: req, Config: cfg, QueryTime: queryTime},
-		messages: []port.ChatMessage{
-			{Role: port.ChatRoleSystem, Content: system}, {Role: port.ChatRoleUser, Content: req.Query},
+		messages: []ai.ChatMessage{
+			{Role: ai.ChatRoleSystem, Content: system}, {Role: ai.ChatRoleUser, Content: req.Query},
 		},
 	}
 	if cfg.Reflect != nil {
@@ -252,15 +255,15 @@ func toolNames(tools map[string]Tool) map[string]bool {
 
 // toolSpecs declares the offered tools to the model in prompt order, then the done variant that fits:
 // the document form for AsDocument, the directive form when some directive has rules.
-func toolSpecs(tools map[string]Tool, data *prompts.ReflectData) ([]port.ToolSpec, error) {
+func toolSpecs(tools map[string]Tool, data *prompts.ReflectData) ([]ai.ToolSpec, error) {
 	decl, err := toolSchemas()
 	if err != nil {
 		return nil, err
 	}
-	var specs []port.ToolSpec
+	var specs []ai.ToolSpec
 	for _, name := range retrievalTools {
 		if t, ok := tools[name]; ok {
-			specs = append(specs, port.ToolSpec{Name: name, Description: decl[name].Description, Parameters: t.Schema()})
+			specs = append(specs, ai.ToolSpec{Name: name, Description: decl[name].Description, Parameters: t.Schema()})
 		}
 	}
 	done, err := doneSpec(decl[ToolDone], data)
@@ -271,7 +274,7 @@ func toolSpecs(tools map[string]Tool, data *prompts.ReflectData) ([]port.ToolSpe
 }
 
 // doneSpec returns the done tool declaration for data.
-func doneSpec(plain port.ToolSpec, data *prompts.ReflectData) (port.ToolSpec, error) {
+func doneSpec(plain ai.ToolSpec, data *prompts.ReflectData) (ai.ToolSpec, error) {
 	rules := hasRules(data.Directives)
 	var asset string
 	switch {
@@ -286,7 +289,7 @@ func doneSpec(plain port.ToolSpec, data *prompts.ReflectData) (port.ToolSpec, er
 	}
 	raw, err := prompts.DoneTool(asset, data)
 	if err != nil {
-		return port.ToolSpec{}, fmt.Errorf("reflect: %w", err)
+		return ai.ToolSpec{}, fmt.Errorf("reflect: %w", err)
 	}
 	var s struct {
 		Name        string          `json:"name"`
@@ -294,13 +297,13 @@ func doneSpec(plain port.ToolSpec, data *prompts.ReflectData) (port.ToolSpec, er
 		Parameters  json.RawMessage `json:"parameters"`
 	}
 	if err := json.Unmarshal(raw, &s); err != nil {
-		return port.ToolSpec{}, fmt.Errorf("reflect: %s: %w", asset, err)
+		return ai.ToolSpec{}, fmt.Errorf("reflect: %s: %w", asset, err)
 	}
-	return port.ToolSpec{Name: s.Name, Description: s.Description, Parameters: s.Parameters}, nil
+	return ai.ToolSpec{Name: s.Name, Description: s.Description, Parameters: s.Parameters}, nil
 }
 
 // result assembles the answer, its evidence and the trace (without duration and usage).
-func (r *reflector) result(rn *run, ans answer, directives []port.DirectiveID) ReflectResult {
+func (r *reflector) result(rn *run, ans answer, directives []domain.DirectiveID) ReflectResult {
 	req := rn.st.Request
 	res := ReflectResult{Text: ans.text}
 	if req.Include.Facts == nil || *req.Include.Facts {

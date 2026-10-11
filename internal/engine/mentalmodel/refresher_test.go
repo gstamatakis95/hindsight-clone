@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 	"sync"
@@ -15,7 +16,7 @@ import (
 // deltaSpec is a delta-mode model spec tagged "proj".
 func deltaSpec(id string, strategy domain.RefreshStrategy) domain.MentalModelSpec {
 	return domain.MentalModelSpec{
-		ID: port.MentalModelID(id), Name: "Project", SourceQuery: "what is the project status?",
+		ID: domain.MentalModelID(id), Name: "Project", SourceQuery: "what is the project status?",
 		Tags: []string{"proj"}, Trigger: domain.RefreshTrigger{Mode: domain.RefreshModeDelta, Strategy: strategy},
 	}
 }
@@ -62,7 +63,7 @@ func TestBothStrategiesProduceVersionThroughRunner(t *testing.T) {
 			if out.Trace.EffectiveStrategy != strategy || out.Trace.Outcome != domain.RefreshOutcomeContentWritten {
 				t.Fatalf("trace %+v", out.Trace)
 			}
-			if !slices.Equal(m.SourceIDs, []port.UnitID{u.ID}) || m.LastSeqSeen != u.Seq || m.LastRefreshedAt == nil {
+			if !slices.Equal(m.SourceIDs, []domain.UnitID{u.ID}) || m.LastSeqSeen != u.Seq || m.LastRefreshedAt == nil {
 				t.Fatalf("state: sources %v seq %d", m.SourceIDs, m.LastSeqSeen)
 			}
 			if len(m.Embedding) == 0 {
@@ -117,19 +118,19 @@ func TestNothingInScopeMeansNoLLMCall(t *testing.T) {
 // seqStore makes Read().BankSeq return a stale value once, as if a writer that had already taken a
 // higher seq committed while the refresh was reading the snapshot.
 type seqStore struct {
-	port.Store
+	store.DB
 	mu   sync.Mutex
 	next []int64
 }
 
-func (s *seqStore) Read() port.Reader { return seqReader{s.Store.Read(), s} }
+func (s *seqStore) Read() store.Reader { return seqReader{s.DB.Read(), s} }
 
 type seqReader struct {
-	port.Reader
+	store.Reader
 	s *seqStore
 }
 
-func (r seqReader) BankSeq(ctx context.Context, b port.BankRef) (int64, error) {
+func (r seqReader) BankSeq(ctx context.Context, b domain.BankRef) (int64, error) {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	if len(r.s.next) > 0 {
@@ -146,7 +147,7 @@ func TestLateCommittingWriterPickedUpByNextRefresh(t *testing.T) {
 	e := newEnv(t)
 	first := e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	late := e.addUnit(domain.FactTypeWorld, "Bob took over the project", "proj")
-	st := &seqStore{Store: e.store, next: []int64{first.Seq}}
+	st := &seqStore{DB: e.store, next: []int64{first.Seq}}
 	md := ModelDeps{LLM: e.llm, Router: routingRouter(), Clock: e.clock}
 	runner := NewRefreshRunner(RefreshRunnerDeps{
 		Store: st, Config: e.config, Scope: e.reads, Clock: e.clock,
@@ -179,7 +180,7 @@ func TestLateCommittingWriterPickedUpByNextRefresh(t *testing.T) {
 	}
 	m = e.model("status")
 	if !strings.Contains(m.ContentMD, "Bob took over.") || m.LastSeqSeen < late.Seq ||
-		!slices.Equal(m.SourceIDs, []port.UnitID{first.ID, late.ID}) {
+		!slices.Equal(m.SourceIDs, []domain.UnitID{first.ID, late.ID}) {
 		t.Fatalf("after delta: %q seq %d sources %v", m.ContentMD, m.LastSeqSeen, m.SourceIDs)
 	}
 }
@@ -189,8 +190,8 @@ func builtModel(e *env, strategy domain.RefreshStrategy) (domain.MentalModel, do
 	u := e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	m := e.addModel(deltaSpec("status", strategy))
 	m.ContentMD, m.Version, m.LastSeqSeen, m.SourceIDs = "## Status\n\nAlice leads the project.\n", 1, u.Seq,
-		[]port.UnitID{u.ID}
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+		[]domain.UnitID{u.ID}
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	return e.model("status"), u
 }
 
@@ -240,7 +241,7 @@ func TestDeltaRetrySucceedsAndSourcesAccumulate(t *testing.T) {
 	}
 	m := e.model("status")
 	if out.VersionWritten != 2 || !strings.Contains(m.ContentMD, "Bob.") ||
-		!slices.Equal(m.SourceIDs, []port.UnitID{first.ID, second.ID}) {
+		!slices.Equal(m.SourceIDs, []domain.UnitID{first.ID, second.ID}) {
 		t.Fatalf("v%d %q sources %v", out.VersionWritten, m.ContentMD, m.SourceIDs)
 	}
 	if len(out.Trace.DeltaOperations) != 1 || !out.Trace.DeltaOperations[0].Applied {
@@ -254,7 +255,7 @@ func TestDeltaRetrySucceedsAndSourcesAccumulate(t *testing.T) {
 		t.Fatal(err)
 	}
 	m = e.model("status")
-	if out.Trace.ModeFallbackReason != FallbackSourcesRetracted || !slices.Equal(m.SourceIDs, []port.UnitID{second.ID}) {
+	if out.Trace.ModeFallbackReason != FallbackSourcesRetracted || !slices.Equal(m.SourceIDs, []domain.UnitID{second.ID}) {
 		t.Fatalf("fallback %q sources %v", out.Trace.ModeFallbackReason, m.SourceIDs)
 	}
 }
@@ -311,11 +312,11 @@ func TestDryRunWritesNothing(t *testing.T) {
 
 // hookLLM runs hook before every Structured call, to change state while a refresh is in flight.
 type hookLLM struct {
-	port.LLM
+	ai.LLM
 	hook func()
 }
 
-func (h hookLLM) Structured(ctx context.Context, req port.StructuredRequest, out any) (port.Usage, error) {
+func (h hookLLM) Structured(ctx context.Context, req ai.StructuredRequest, out any) (domain.Usage, error) {
 	h.hook()
 	return h.LLM.Structured(ctx, req, out) //nolint:wrapcheck // test pass-through
 }
@@ -328,7 +329,7 @@ func TestRefreshConflictWhenModelChanged(t *testing.T) {
 	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt,
 		opsJSON(map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob."}}))
 	clear := func() {
-		e.tx(func(tx port.Tx) error {
+		e.tx(func(tx store.Tx) error {
 			m, err := tx.MentalModels().Get(e.ctx, e.bank, "status")
 			if err != nil {
 				return err

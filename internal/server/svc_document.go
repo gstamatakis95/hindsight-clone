@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 
 	pb "memd/gen/memory/v1"
 )
@@ -56,7 +55,7 @@ func (s *documentServer) GetDocument(ctx context.Context, req *pb.GetDocumentReq
 	if err := requireID("document_id", req.GetDocumentId()); err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := s.d.Documents.GetDocument(ctx, b, port.DocumentID(req.GetDocumentId()), req.GetIncludeText())
+	out, err := s.d.Documents.GetDocument(ctx, b, domain.DocumentID(req.GetDocumentId()), req.GetIncludeText())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -88,7 +87,7 @@ func (s *documentServer) UpdateDocument(
 	if tags == nil {
 		tags = []string{} // a set but empty TagSet clears the document's tags
 	}
-	id, err := s.d.Retagger.Retag(ctx, b, port.DocumentID(req.GetDocumentId()), tags)
+	id, err := s.d.Retagger.Retag(ctx, b, domain.DocumentID(req.GetDocumentId()), tags)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -123,7 +122,7 @@ func (s *documentServer) ReprocessDocument(
 	if err := s.d.validate("ReprocessDocument", overrides); err != nil {
 		return nil, toStatus(err)
 	}
-	op, err := s.d.Documents.ReprocessDocument(ctx, b, port.DocumentID(req.GetDocumentId()), overrides)
+	op, err := s.d.Documents.ReprocessDocument(ctx, b, domain.DocumentID(req.GetDocumentId()), overrides)
 	if err != nil {
 		return nil, toStatus(err)
 	}

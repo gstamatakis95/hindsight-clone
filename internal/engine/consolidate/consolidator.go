@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
-	"memd/internal/port"
+	"memd/internal/store"
 
 	"github.com/google/uuid"
 )
@@ -26,7 +29,7 @@ type Consolidator interface {
 	// replayed run is safe. A failing LLM batch is halved and retried; a unit that fails alone is parked
 	// with consolidation_failed_at. When units remain, Run enqueues the continuation itself (in its final
 	// transaction) and reports More=true.
-	Run(ctx context.Context, j port.Job) (ConsolidationResult, error)
+	Run(ctx context.Context, j store.Job) (ConsolidationResult, error)
 }
 
 // ConsolidationResult summarizes one consolidation run.
@@ -34,28 +37,28 @@ type ConsolidationResult struct {
 	// Processed counts the units decided (stamped or parked) in this run.
 	Processed int
 	// Changed are the scopes whose observations changed; drives mental-model refresh triggers.
-	Changed []port.ScopeKey
+	Changed []domain.ScopeKey
 	// More reports that unconsolidated units remain; Run has already enqueued the continuation.
 	More bool
 	// Usage is the run's LLM usage per slot and model, for Claimer.Complete.
-	Usage []port.Usage
+	Usage []domain.Usage
 }
 
 // ConsolidatorDeps are the Consolidator's dependencies. Store, Config, Router, LLM, Embedder and Clock
 // are required; the rest are optional as documented.
 type ConsolidatorDeps struct {
 	// Store reads units and applies decisions in short transactions.
-	Store port.Store
+	Store store.DB
 	// Config resolves the effective config per run (Effective) and per scope (ForScope, strategy < request).
-	Config port.ConfigResolver
+	Config config.Resolver
 	// Router resolves the CONSOLIDATE and DEDUP_CHECK bindings.
-	Router port.ModelRouter
+	Router *ai.Router
 	// LLM makes the CONSOLIDATE calls (and DEDUP_CHECK through the default Deduper).
-	LLM port.LLM
+	LLM ai.LLM
 	// Embedder embeds new and rewritten observation text.
-	Embedder port.Embedder
+	Embedder ai.Embedder
 	// Clock stamps consolidated_at, versions and events.
-	Clock port.Clock
+	Clock clock.Clock
 	// Scopes expands units into scopes; nil = NewScopeExpander().
 	Scopes ScopeExpander
 	// Deduper checks new observations for near-duplicates; nil = NewDeduper(LLM, Router, Store.Read()).
@@ -64,9 +67,9 @@ type ConsolidatorDeps struct {
 	Tokens recall.TokenCounter
 	// Checkpoint returns the run's checkpoint (progress + cancel check) between scopes and batches;
 	// nil = none.
-	Checkpoint func(j port.Job) Checkpointer
+	Checkpoint func(j store.Job) Checkpointer
 	// NewID makes observation ids; nil = random UUIDs.
-	NewID func() port.UnitID
+	NewID func() domain.UnitID
 }
 
 // consolidator implements Consolidator.
@@ -88,7 +91,7 @@ func NewConsolidator(d ConsolidatorDeps) Consolidator {
 		d.Tokens = approxTokens{}
 	}
 	if d.NewID == nil {
-		d.NewID = func() port.UnitID { return port.UnitID(uuid.NewString()) }
+		d.NewID = func() domain.UnitID { return domain.UnitID(uuid.NewString()) }
 	}
 	return &consolidator{d: d}
 }
@@ -101,7 +104,7 @@ func (approxTokens) Count(text string) int { return (len([]rune(text)) + 3) / 4 
 
 // Run plans the run in a read transaction, decides and applies scope by scope, then finishes in one
 // transaction (leftover stamps, continuation, refresh triggers, CONSOLIDATION_COMPLETED event).
-func (c *consolidator) Run(ctx context.Context, j port.Job) (ConsolidationResult, error) {
+func (c *consolidator) Run(ctx context.Context, j store.Job) (ConsolidationResult, error) {
 	p, err := decodePayload(j.Payload)
 	if err != nil {
 		return ConsolidationResult{}, err
@@ -142,7 +145,7 @@ func (c *consolidator) Run(ctx context.Context, j port.Job) (ConsolidationResult
 // being a batch failure.
 func errStops(ctx context.Context, err error) bool {
 	return ctx.Err() != nil || errors.Is(err, domain.ErrCancelled) || errors.Is(err, context.Canceled) ||
-		port.LostJobs(err) != nil
+		store.LostJobs(err) != nil
 }
 
 // orDefault returns *p, or def when p is nil or not positive.

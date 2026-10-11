@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
 	"memd/internal/engine/consolidate"
@@ -13,7 +14,7 @@ import (
 	"memd/internal/engine/maintenance"
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/retain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -47,21 +48,21 @@ type Handlers struct {
 	// Graph runs graph_maintenance.
 	Graph maintenance.GraphMaintainer
 	// Store enqueues the continuations of delete_bank and graph_maintenance and re-checks graph work.
-	Store port.Store
+	Store store.DB
 	// Clock dates the continuations; nil = the system clock.
-	Clock port.Clock
+	Clock clock.Clock
 	// GraphBudget bounds one graph_maintenance run; 0 = DefaultGraphBudget.
 	GraphBudget time.Duration
 	// Checkpoint returns a job's checkpoint; refresh, rederive and retag report progress through it before
 	// their engine runs (decision 2003). nil = no progress.
-	Checkpoint func(j port.Job) Checkpoint
+	Checkpoint func(j store.Job) Checkpoint
 }
 
 // Register registers every handler on r. retain_batch is never registered: it is a parent row whose status
 // aggregates its children, not a job a worker runs.
 func Register(r JobRunner, h Handlers) {
 	if h.Clock == nil {
-		h.Clock = systemClock{}
+		h.Clock = clock.System{}
 	}
 	if h.GraphBudget <= 0 {
 		h.GraphBudget = DefaultGraphBudget
@@ -76,12 +77,12 @@ func Register(r JobRunner, h Handlers) {
 }
 
 // notWired is the permanent error of a job whose engine is nil.
-func notWired(j port.Job) error {
+func notWired(j store.Job) error {
 	return fmt.Errorf("%w: no %s handler wired", ErrPermanent, j.Kind)
 }
 
 // reportJSON records v as the job's result summary, with usage.
-func reportJSON(ctx context.Context, v any, usage ...port.Usage) {
+func reportJSON(ctx context.Context, v any, usage ...domain.Usage) {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		raw = nil
@@ -91,7 +92,7 @@ func reportJSON(ctx context.Context, v any, usage ...port.Usage) {
 
 // retain runs retain_document through retain.Retainer.ProcessDocument. The retainer enqueues the bank's
 // consolidation in its completing transaction.
-func (h Handlers) retain(ctx context.Context, j port.Job) error {
+func (h Handlers) retain(ctx context.Context, j store.Job) error {
 	if h.Retainer == nil {
 		return notWired(j)
 	}
@@ -108,7 +109,7 @@ func (h Handlers) retain(ctx context.Context, j port.Job) error {
 
 // consolidate runs consolidate through consolidate.Consolidator.Run. It does NOT re-enqueue on More: Run
 // already enqueued its continuation (decision 1000).
-func (h Handlers) consolidate(ctx context.Context, j port.Job) error {
+func (h Handlers) consolidate(ctx context.Context, j store.Job) error {
 	if h.Consolidator == nil {
 		return notWired(j)
 	}
@@ -123,7 +124,7 @@ func (h Handlers) consolidate(ctx context.Context, j port.Job) error {
 }
 
 // refresh runs refresh_mental_model through mentalmodel.RunJob (payload decode, then RefreshRunner.Run).
-func (h Handlers) refresh(ctx context.Context, j port.Job) error {
+func (h Handlers) refresh(ctx context.Context, j store.Job) error {
 	if h.Refresher == nil {
 		return notWired(j)
 	}
@@ -142,7 +143,7 @@ func (h Handlers) refresh(ctx context.Context, j port.Job) error {
 }
 
 // rederive runs rederive_memory through curate.Rederiver.Rederive.
-func (h Handlers) rederive(ctx context.Context, j port.Job) error {
+func (h Handlers) rederive(ctx context.Context, j store.Job) error {
 	if h.Rederiver == nil {
 		return notWired(j)
 	}
@@ -156,7 +157,7 @@ func (h Handlers) rederive(ctx context.Context, j port.Job) error {
 }
 
 // retag runs retag_document through docs.Retagger.Apply.
-func (h Handlers) retag(ctx context.Context, j port.Job) error {
+func (h Handlers) retag(ctx context.Context, j store.Job) error {
 	if h.Retagger == nil {
 		return notWired(j)
 	}
@@ -174,7 +175,7 @@ func (h Handlers) retag(ctx context.Context, j port.Job) error {
 // check: a cancelled job, or one whose bank is being deleted, stops here (domain.ErrCancelled) before any
 // model call. There is no checkpoint after the engine returns: a late cancel would turn committed work into
 // a failure, and Complete settles a cancel-requested row as CANCELLED anyway.
-func (h Handlers) started(ctx context.Context, j port.Job) error {
+func (h Handlers) started(ctx context.Context, j store.Job) error {
 	if h.Checkpoint == nil {
 		return nil
 	}
@@ -192,7 +193,7 @@ func (h Handlers) started(ctx context.Context, j port.Job) error {
 // run reports work left. delete_bank retries without an attempt cap, like consolidate: a transient failure
 // on the kind's last attempt enqueues a continuation with backoff before the error fails this row, so a
 // half-deleted bank is never abandoned (WP-13 ruling; decision 1451).
-func (h Handlers) deleteBank(ctx context.Context, j port.Job) error {
+func (h Handlers) deleteBank(ctx context.Context, j store.Job) error {
 	if h.Deleter == nil || h.Store == nil {
 		return notWired(j)
 	}
@@ -221,7 +222,7 @@ func (h Handlers) deleteBank(ctx context.Context, j port.Job) error {
 // entity_maintenance as its last step: a removal that committed after the maintainer's final empty batch
 // enqueued graph_maintenance with DedupePendingOrRunning and so joined this running row, and without the
 // re-check its rows would wait for the next removal (decision 1451).
-func (h Handlers) graph(ctx context.Context, j port.Job) error {
+func (h Handlers) graph(ctx context.Context, j store.Job) error {
 	if h.Graph == nil || h.Store == nil {
 		return notWired(j)
 	}
@@ -242,9 +243,9 @@ func (h Handlers) graph(ctx context.Context, j port.Job) error {
 }
 
 // graphWorkLeft reports whether b has graph_dirty or entity_maintenance rows queued.
-func (h Handlers) graphWorkLeft(ctx context.Context, b port.BankRef) (bool, error) {
+func (h Handlers) graphWorkLeft(ctx context.Context, b domain.BankRef) (bool, error) {
 	left := false
-	err := h.Store.InTx(ctx, func(tx port.Tx) error {
+	err := h.Store.InTx(ctx, func(tx store.Tx) error {
 		dirty, err := tx.Links().Dirty(ctx, b, 1)
 		if err != nil {
 			return err
@@ -268,15 +269,15 @@ func (h Handlers) graphWorkLeft(ctx context.Context, b port.BankRef) (bool, erro
 // continueJob enqueues a continuation of j (same kind, serial key and payload, DedupePending), due at at
 // (zero = now). DedupePending joins a continuation the engine already queued (the deleter parks one while
 // another job of the bank is still running). A continuation for a bank that is gone is not needed.
-func (h Handlers) continueJob(ctx context.Context, j port.Job, serialKey string, at time.Time) error {
+func (h Handlers) continueJob(ctx context.Context, j store.Job, serialKey string, at time.Time) error {
 	payload := j.Payload
 	if len(payload) == 0 {
 		payload = json.RawMessage(`{}`)
 	}
-	err := h.Store.InTx(ctx, func(tx port.Tx) error {
-		_, _, err := tx.Queue().Enqueue(ctx, port.Job{
+	err := h.Store.InTx(ctx, func(tx store.Tx) error {
+		_, _, err := tx.Queue().Enqueue(ctx, store.Job{
 			Bank: j.Bank, Kind: j.Kind, SerialKey: serialKey, Payload: payload, RunAt: at,
-			Dedupe: port.DedupePending,
+			Dedupe: store.DedupePending,
 		})
 		return err
 	})

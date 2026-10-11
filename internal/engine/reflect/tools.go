@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"time"
 )
 
@@ -62,9 +61,9 @@ type agentState struct {
 	// Iteration is the current loop iteration, from 1.
 	Iteration int
 	// RetrievedUnits are the units any tool returned, by id; citations outside it are dropped.
-	RetrievedUnits map[port.UnitID]domain.Unit
+	RetrievedUnits map[domain.UnitID]domain.Unit
 	// RetrievedModels are the mental models any tool returned.
-	RetrievedModels map[port.MentalModelID]struct{}
+	RetrievedModels map[domain.MentalModelID]struct{}
 	// Usage is per-slot token usage so far.
 	Usage []domain.Usage
 	// TotalTokens is the input + output tokens so far, checked against max_total_tokens.
@@ -76,11 +75,11 @@ type agentState struct {
 	Searched bool
 }
 
-// PageReader is what the page tools need from mental models. It uses only domain and port types so
+// PageReader is what the page tools need from mental models. It uses only domain and store types so
 // mentalmodel, which imports reflect, can provide it.
 type PageReader interface {
 	// SearchPages ranks the bank's pages for query (fused full-text and semantic), at most limit hits.
-	SearchPages(ctx context.Context, b port.BankRef, query string, limit int) ([]domain.PageHit, error)
+	SearchPages(ctx context.Context, b domain.BankRef, query string, limit int) ([]domain.PageHit, error)
 	// ReadPages returns the pages with the given ids, in order; unknown ids are skipped.
-	ReadPages(ctx context.Context, b port.BankRef, ids []port.MentalModelID) ([]domain.MentalModel, error)
+	ReadPages(ctx context.Context, b domain.BankRef, ids []domain.MentalModelID) ([]domain.MentalModel, error)
 }

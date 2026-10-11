@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // liveBank returns bank b for a read: unknown or tombstoned is domain.ErrNotFound (SPEC: every read of a
 // deleting bank returns NOT_FOUND).
-func liveBank(ctx context.Context, tx port.Tx, b port.BankRef) (domain.Bank, error) {
+func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) (domain.Bank, error) {
 	bank, err := tx.Banks().Get(ctx, b)
 	if err != nil {
 		return domain.Bank{}, err
@@ -23,7 +23,7 @@ func liveBank(ctx context.Context, tx port.Tx, b port.BankRef) (domain.Bank, err
 
 // writableBank returns existing bank b for a write that must not create it: unknown is
 // domain.ErrNotFound, tombstoned is domain.ErrBankDeleting.
-func writableBank(ctx context.Context, tx port.Tx, b port.BankRef) (domain.Bank, error) {
+func writableBank(ctx context.Context, tx store.Tx, b domain.BankRef) (domain.Bank, error) {
 	bank, err := tx.Banks().Get(ctx, b)
 	if err != nil {
 		return domain.Bank{}, err
@@ -34,18 +34,18 @@ func writableBank(ctx context.Context, tx port.Tx, b port.BankRef) (domain.Bank,
 	return bank, nil
 }
 
-// tenantAdmin implements TenantAdmin over port.Store.
-type tenantAdmin struct{ s port.Store }
+// tenantAdmin implements TenantAdmin over store.DB.
+type tenantAdmin struct{ s store.DB }
 
 var _ TenantAdmin = (*tenantAdmin)(nil)
 
 // NewTenantAdmin returns the TenantAdmin over s.
-func NewTenantAdmin(s port.Store) TenantAdmin { return &tenantAdmin{s: s} }
+func NewTenantAdmin(s store.DB) TenantAdmin { return &tenantAdmin{s: s} }
 
 // TenantConfig reads the tenant's config in a short transaction.
 func (a *tenantAdmin) TenantConfig(ctx context.Context, tenant string) (domain.BankConfig, error) {
 	var cfg domain.BankConfig
-	err := a.s.InTx(ctx, func(tx port.Tx) error {
+	err := a.s.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		cfg, err = tx.Banks().TenantConfig(ctx, tenant)
 		return err
@@ -62,7 +62,7 @@ func (a *tenantAdmin) UpdateTenantConfig(
 	ctx context.Context, tenant string, patch ConfigPatch,
 ) (domain.BankConfig, error) {
 	var out domain.BankConfig
-	err := a.s.InTx(ctx, func(tx port.Tx) error {
+	err := a.s.InTx(ctx, func(tx store.Tx) error {
 		out = domain.BankConfig{}
 		if err := tx.Banks().LockTenantConfig(ctx, tenant); err != nil {
 			return err
@@ -87,13 +87,13 @@ func (a *tenantAdmin) UpdateTenantConfig(
 	return out, nil
 }
 
-// bankAdmin implements BankAdmin over port.Store.
-type bankAdmin struct{ s port.Store }
+// bankAdmin implements BankAdmin over store.DB.
+type bankAdmin struct{ s store.DB }
 
 var _ BankAdmin = (*bankAdmin)(nil)
 
 // NewBankAdmin returns the BankAdmin over s.
-func NewBankAdmin(s port.Store) BankAdmin { return &bankAdmin{s: s} }
+func NewBankAdmin(s store.DB) BankAdmin { return &bankAdmin{s: s} }
 
 // CreateBank inserts the bank and returns it as stored. A bank being deleted is domain.ErrBankDeleting
 // (FAILED_PRECONDITION: writes wait for the delete to finish); an existing one is domain.ErrAlreadyExists
@@ -102,7 +102,7 @@ func (a *bankAdmin) CreateBank(ctx context.Context, bank domain.Bank) (domain.Ba
 	var out domain.Bank
 	b := bank.Ref
 	exists := fmt.Errorf("%w: bank %s/%s already exists", domain.ErrAlreadyExists, b.Tenant, b.Bank)
-	err := a.s.InTx(ctx, func(tx port.Tx) error {
+	err := a.s.InTx(ctx, func(tx store.Tx) error {
 		cur, err := tx.Banks().Get(ctx, b)
 		switch {
 		case err == nil && cur.Deleting():
@@ -129,9 +129,9 @@ func (a *bankAdmin) CreateBank(ctx context.Context, bank domain.Bank) (domain.Ba
 }
 
 // GetBank returns the bank, tombstoned or not.
-func (a *bankAdmin) GetBank(ctx context.Context, b port.BankRef) (domain.Bank, error) {
+func (a *bankAdmin) GetBank(ctx context.Context, b domain.BankRef) (domain.Bank, error) {
 	var out domain.Bank
-	err := a.s.InTx(ctx, func(tx port.Tx) error {
+	err := a.s.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		out, err = tx.Banks().Get(ctx, b)
 		return err
@@ -145,9 +145,9 @@ func (a *bankAdmin) GetBank(ctx context.Context, b port.BankRef) (domain.Bank, e
 // UpdateBankConfig ensures the bank, patches its own overrides and returns it, in one transaction. It takes
 // the bank's change seq (which locks the bank row) before reading the overrides, so concurrent patches of
 // different fields serialize instead of one overwriting the other (decision 2500).
-func (a *bankAdmin) UpdateBankConfig(ctx context.Context, b port.BankRef, patch ConfigPatch) (domain.Bank, error) {
+func (a *bankAdmin) UpdateBankConfig(ctx context.Context, b domain.BankRef, patch ConfigPatch) (domain.Bank, error) {
 	var out domain.Bank
-	err := a.s.InTx(ctx, func(tx port.Tx) error {
+	err := a.s.InTx(ctx, func(tx store.Tx) error {
 		out = domain.Bank{}
 		if _, err := tx.Banks().Ensure(ctx, b); err != nil {
 			return err

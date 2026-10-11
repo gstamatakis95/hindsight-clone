@@ -57,7 +57,7 @@ const (
 	EnvS3Region = "MEMD_S3_REGION"
 	// EnvS3PathStyle selects path-style addressing ("true" for MinIO).
 	EnvS3PathStyle = "MEMD_S3_PATH_STYLE"
-	// EnvModelPrefix + upper-case slot binds a slot's model (config.EnvModelPrefix).
+	// EnvModelPrefix + upper-case slot binds a slot's model (ai.EnvModelPrefix).
 	EnvModelPrefix = "MEMD_MODEL_"
 )
 

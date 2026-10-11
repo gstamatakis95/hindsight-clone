@@ -2,8 +2,8 @@ package gatewayemu_test
 
 import (
 	"encoding/json"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"strings"
 	"testing"
@@ -75,7 +75,7 @@ func TestSmokeEveryPromptSchema(t *testing.T) {
 			if !ok {
 				t.Fatalf("no smoke case for structured prompt %s: add one and teach the emulator its semantics", name)
 			}
-			out := structured(t, client, port.StructuredRequest{
+			out := structured(t, client, ai.StructuredRequest{
 				Slot: c.slot, Binding: binding(c.slot), Name: name, System: "system",
 				User: c.user, Schema: schema,
 			})
@@ -102,7 +102,7 @@ func TestSmokeExtractOptionalDimensions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			out := structured(t, client, port.StructuredRequest{
+			out := structured(t, client, ai.StructuredRequest{
 				Slot: domain.ModelSlotExtract, Binding: binding(domain.ModelSlotExtract), Name: name, User: user, Schema: schema,
 			})
 			mustValidate(t, name, schema, out)
@@ -152,7 +152,7 @@ func TestSmokeStructuredOutputCallerSchemas(t *testing.T) {
 		user := render(t, prompts.StructuredOutputUser, prompts.StructuredOutputData{
 			Document: "Alice lives in Paris.", Schema: raw,
 		})
-		out := structured(t, client, port.StructuredRequest{
+		out := structured(t, client, ai.StructuredRequest{
 			Slot: domain.ModelSlotStructuredOutput, Binding: binding(domain.ModelSlotStructuredOutput),
 			Name: prompts.StructuredOutputSystem, User: user, Schema: schema,
 		})
@@ -179,7 +179,7 @@ func TestConsolidateOnePerFact(t *testing.T) {
 		} `json:"creates"`
 		Updates []any `json:"updates"`
 	}
-	if _, err := client.Structured(t.Context(), port.StructuredRequest{
+	if _, err := client.Structured(t.Context(), ai.StructuredRequest{
 		Slot: domain.ModelSlotConsolidate, Binding: binding(domain.ModelSlotConsolidate), Name: prompts.ConsolidateSystem,
 		User: render(t, prompts.ConsolidateUser, prompts.ConsolidateData{Facts: facts}), Schema: schema,
 	}, &got); err != nil {
@@ -215,8 +215,8 @@ func TestSmokeReflectLoop(t *testing.T) {
 		t.Run(name, func(t *testing.T) { reflectVariant(t, client, withDone(t, tools, done)) })
 	}
 	t.Run("forced_done", func(t *testing.T) {
-		resp := chat(t, client, port.ChatRequest{
-			Messages: []port.ChatMessage{{Role: port.ChatRoleUser, Content: "Where does Alice live?"}},
+		resp := chat(t, client, ai.ChatRequest{
+			Messages: []ai.ChatMessage{{Role: ai.ChatRoleUser, Content: "Where does Alice live?"}},
 			Tools:    tools, ToolChoice: "done",
 		})
 		args := doneArgs(t, resp, tools)
@@ -227,12 +227,12 @@ func TestSmokeReflectLoop(t *testing.T) {
 }
 
 // reflectVariant runs the two turns of the loop with tools.
-func reflectVariant(t *testing.T, client port.LLM, tools []port.ToolSpec) {
+func reflectVariant(t *testing.T, client ai.LLM, tools []ai.ToolSpec) {
 	t.Helper()
-	msgs := []port.ChatMessage{
-		{Role: port.ChatRoleSystem, Content: "system"}, {Role: port.ChatRoleUser, Content: "Where does Alice live?"},
+	msgs := []ai.ChatMessage{
+		{Role: ai.ChatRoleSystem, Content: "system"}, {Role: ai.ChatRoleUser, Content: "Where does Alice live?"},
 	}
-	first := chat(t, client, port.ChatRequest{Messages: msgs, Tools: tools, ToolChoice: "required"})
+	first := chat(t, client, ai.ChatRequest{Messages: msgs, Tools: tools, ToolChoice: "required"})
 	if len(first.Message.ToolCalls) != 1 || first.Message.ToolCalls[0].Name != "recall" {
 		t.Fatalf("first turn: %+v, want one recall call", first.Message)
 	}
@@ -245,8 +245,8 @@ func reflectVariant(t *testing.T, client port.LLM, tools []port.ToolSpec) {
 	}
 	output := `{"query":"Where does Alice live?",` +
 		`"memories":[{"id":"u-1","text":"Alice lives in Paris.","fact_type":"world"}]}`
-	msgs = append(msgs, first.Message, port.ChatMessage{Role: port.ChatRoleTool, ToolCallID: call.ID, Content: output})
-	second := chat(t, client, port.ChatRequest{Messages: msgs, Tools: tools, ToolChoice: "auto"})
+	msgs = append(msgs, first.Message, ai.ChatMessage{Role: ai.ChatRoleTool, ToolCallID: call.ID, Content: output})
+	second := chat(t, client, ai.ChatRequest{Messages: msgs, Tools: tools, ToolChoice: "auto"})
 	args := doneArgs(t, second, tools)
 	text, _ := json.Marshal(args)
 	if !strings.Contains(string(text), "Alice lives in Paris.") {
@@ -258,16 +258,16 @@ func reflectVariant(t *testing.T, client port.LLM, tools []port.ToolSpec) {
 }
 
 // withDone returns tools with done replaced by the given declaration (nil keeps the plain done).
-func withDone(t *testing.T, tools []port.ToolSpec, done json.RawMessage) []port.ToolSpec {
+func withDone(t *testing.T, tools []ai.ToolSpec, done json.RawMessage) []ai.ToolSpec {
 	t.Helper()
 	if done == nil {
 		return tools
 	}
-	var spec port.ToolSpec
+	var spec ai.ToolSpec
 	if err := json.Unmarshal(done, &spec); err != nil {
 		t.Fatal(err)
 	}
-	out := make([]port.ToolSpec, 0, len(tools))
+	out := make([]ai.ToolSpec, 0, len(tools))
 	for _, tool := range tools {
 		if tool.Name == "done" {
 			tool = spec
@@ -278,7 +278,7 @@ func withDone(t *testing.T, tools []port.ToolSpec, done json.RawMessage) []port.
 }
 
 // chat makes a REFLECT-slot chat call.
-func chat(t *testing.T, client port.LLM, req port.ChatRequest) port.ChatResponse {
+func chat(t *testing.T, client ai.LLM, req ai.ChatRequest) ai.ChatResponse {
 	t.Helper()
 	if req.Slot == "" {
 		req.Slot, req.Binding = domain.ModelSlotReflect, binding(domain.ModelSlotReflect)
@@ -291,7 +291,7 @@ func chat(t *testing.T, client port.LLM, req port.ChatRequest) port.ChatResponse
 }
 
 // doneArgs checks resp is one done call whose arguments match done's declared parameters, and decodes them.
-func doneArgs(t *testing.T, resp port.ChatResponse, tools []port.ToolSpec) map[string]any {
+func doneArgs(t *testing.T, resp ai.ChatResponse, tools []ai.ToolSpec) map[string]any {
 	t.Helper()
 	if len(resp.Message.ToolCalls) != 1 || resp.Message.ToolCalls[0].Name != "done" {
 		t.Fatalf("got %+v, want one done call", resp.Message)
@@ -329,9 +329,9 @@ func TestSmokePlainChat(t *testing.T) {
 		}), []string{"Alice lives in Paris."}},
 	}
 	for _, c := range cases {
-		resp := chat(t, client, port.ChatRequest{
+		resp := chat(t, client, ai.ChatRequest{
 			Slot: c.slot, Binding: binding(c.slot),
-			Messages: []port.ChatMessage{{Role: port.ChatRoleSystem, Content: "s"}, {Role: port.ChatRoleUser, Content: c.user}},
+			Messages: []ai.ChatMessage{{Role: ai.ChatRoleSystem, Content: "s"}, {Role: ai.ChatRoleUser, Content: c.user}},
 		})
 		for _, w := range c.want {
 			if !strings.Contains(resp.Message.Content, w) {
@@ -339,8 +339,8 @@ func TestSmokePlainChat(t *testing.T) {
 			}
 		}
 	}
-	empty := chat(t, client, port.ChatRequest{
-		Messages: []port.ChatMessage{{Role: port.ChatRoleUser, Content: "nothing retrieved"}},
+	empty := chat(t, client, ai.ChatRequest{
+		Messages: []ai.ChatMessage{{Role: ai.ChatRoleUser, Content: "nothing retrieved"}},
 	})
 	if empty.Message.Content == "" {
 		t.Error("reflect final with nothing retrieved returned an empty answer")

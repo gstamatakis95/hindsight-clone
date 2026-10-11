@@ -3,9 +3,10 @@ package bank
 import (
 	"encoding/json"
 	"errors"
-	"memd/internal/adapter/postgres/pgtest"
+	"memd/internal/blob"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
 	"testing"
@@ -13,9 +14,9 @@ import (
 
 // seedBank fills b with a document, two units, a blob under its prefix, a pending consolidate job and a
 // claimed retain job; it returns the pending and the claimed operation ids.
-func seedBank(t *testing.T, e env, b port.BankRef) (pending, claimed port.OperationID) {
+func seedBank(t *testing.T, e env, b domain.BankRef) (pending, claimed domain.OperationID) {
 	t.Helper()
-	e.tx(t, func(tx port.Tx) error {
+	e.tx(t, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(e.ctx, b); err != nil {
 			return err
 		}
@@ -23,17 +24,17 @@ func seedBank(t *testing.T, e env, b port.BankRef) (pending, claimed port.Operat
 		if err != nil {
 			return err
 		}
-		doc := domain.Document{ID: "d1", Bank: b, BlobKey: domain.DocumentBlobKey(b, "d1", "h1")}
+		doc := domain.Document{ID: "d1", Bank: b, BlobKey: blob.Key(b, "d1", "h1")}
 		if err := tx.Documents().Upsert(e.ctx, doc); err != nil {
 			return err
 		}
 		units := []domain.Unit{
 			{
-				ID: pgtest.ID[port.UnitID]("u1"), Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld,
+				ID: pgtest.ID[domain.UnitID]("u1"), Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld,
 				Text: "Alice likes tea", Seq: seq,
 			},
 			{
-				ID: pgtest.ID[port.UnitID]("u2"), Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld,
+				ID: pgtest.ID[domain.UnitID]("u2"), Bank: b, DocumentID: "d1", Type: domain.FactTypeWorld,
 				Text: "Bob likes coffee", Seq: seq,
 			},
 		}
@@ -43,23 +44,23 @@ func seedBank(t *testing.T, e env, b port.BankRef) (pending, claimed port.Operat
 		if _, err := tx.Directives().Upsert(e.ctx, domain.Directive{Bank: b, Name: "d", Active: true}); err != nil {
 			return err
 		}
-		pending, _, err = tx.Queue().Enqueue(e.ctx, port.Job{
+		pending, _, err = tx.Queue().Enqueue(e.ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate",
-			Payload: json.RawMessage(`{}`), Dedupe: port.DedupePending,
+			Payload: json.RawMessage(`{}`), Dedupe: store.DedupePending,
 		})
 		if err != nil {
 			return err
 		}
-		_, _, err = tx.Queue().Enqueue(e.ctx, port.Job{
+		_, _, err = tx.Queue().Enqueue(e.ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:d1", Payload: json.RawMessage(`{}`),
 		})
 		return err
 	})
-	if err := e.blob.Put(e.ctx, domain.DocumentBlobKey(b, "d1", "h1"), strings.NewReader("hello"), 5,
+	if err := e.blob.Put(e.ctx, blob.Key(b, "d1", "h1"), strings.NewReader("hello"), 5,
 		"text/plain"); err != nil {
 		t.Fatal(err)
 	}
-	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{domain.OperationKindRetainDocument}, 1)
+	jobs, err := e.store.Claim(e.ctx, "w1", []domain.OperationKind{domain.OperationKindRetainDocument}, 1)
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("claim retain: %v %v", jobs, err)
 	}
@@ -78,9 +79,9 @@ func blobKeys(e env, prefix string) []string {
 }
 
 // claimDelete claims the bank's delete_bank job.
-func claimDelete(t *testing.T, e env) port.Job {
+func claimDelete(t *testing.T, e env) store.Job {
 	t.Helper()
-	jobs, err := e.store.Claim(e.ctx, "w2", []port.JobKind{domain.OperationKindDeleteBank}, 1)
+	jobs, err := e.store.Claim(e.ctx, "w2", []domain.OperationKind{domain.OperationKindDeleteBank}, 1)
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("claim delete_bank: %v %v", jobs, err)
 	}
@@ -88,17 +89,17 @@ func claimDelete(t *testing.T, e env) port.Job {
 }
 
 // assertWritesRefused checks every kind of write on a tombstoned bank fails with ErrBankDeleting.
-func assertWritesRefused(t *testing.T, e env, b port.BankRef) {
+func assertWritesRefused(t *testing.T, e env, b domain.BankRef) {
 	t.Helper()
-	writes := map[string]func(tx port.Tx) error{
-		"seq": func(tx port.Tx) error { _, err := tx.Seq(e.ctx, b); return err },
-		"ensure": func(tx port.Tx) error {
+	writes := map[string]func(tx store.Tx) error{
+		"seq": func(tx store.Tx) error { _, err := tx.Seq(e.ctx, b); return err },
+		"ensure": func(tx store.Tx) error {
 			_, err := tx.Banks().Ensure(e.ctx, b)
 			return err
 		},
-		"enqueue": func(tx port.Tx) error {
-			_, _, err := tx.Queue().Enqueue(e.ctx, port.Job{
-				Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate", Dedupe: port.DedupePending,
+		"enqueue": func(tx store.Tx) error {
+			_, _, err := tx.Queue().Enqueue(e.ctx, store.Job{
+				Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate", Dedupe: store.DedupePending,
 			})
 			return err
 		},
@@ -115,7 +116,7 @@ func assertWritesRefused(t *testing.T, e env, b port.BankRef) {
 }
 
 // assertReadsNotFound checks the bank's reads answer NOT_FOUND while it is being deleted.
-func assertReadsNotFound(t *testing.T, e env, b port.BankRef) {
+func assertReadsNotFound(t *testing.T, e env, b domain.BankRef) {
 	t.Helper()
 	if _, err := NewDirectiveAdmin(e.store).ListDirectives(e.ctx, b, nil, false); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("ListDirectives during delete: %v", err)
@@ -130,7 +131,7 @@ func assertReadsNotFound(t *testing.T, e env, b port.BankRef) {
 }
 
 // runUntilDone runs the delete job until it reports done, counting the runs.
-func runUntilDone(t *testing.T, e env, d BankDeleter, j port.Job) int {
+func runUntilDone(t *testing.T, e env, d BankDeleter, j store.Job) int {
 	t.Helper()
 	for runs := 1; runs <= 50; runs++ {
 		done, err := d.Run(e.ctx, j)
@@ -149,10 +150,10 @@ func runUntilDone(t *testing.T, e env, d BankDeleter, j port.Job) int {
 // afterwards creates a fresh bank.
 func TestBankDeleteLifecycle(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "doomed"}
-	other := port.BankRef{Tenant: "t", Bank: "keep"}
+	b := domain.BankRef{Tenant: "t", Bank: "doomed"}
+	other := domain.BankRef{Tenant: "t", Bank: "keep"}
 	e.ensure(t, other)
-	if err := e.blob.Put(e.ctx, domain.DocumentBlobKey(other, "d", "h"), strings.NewReader("x"), 1, ""); err != nil {
+	if err := e.blob.Put(e.ctx, blob.Key(other, "d", "h"), strings.NewReader("x"), 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	pending, claimed := seedBank(t, e, b)
@@ -190,10 +191,10 @@ func TestBankDeleteLifecycle(t *testing.T) {
 		t.Errorf("finished in %d more runs", runs)
 	}
 
-	if keys := blobKeys(e, domain.BankBlobPrefix(b)); len(keys) != 0 {
+	if keys := blobKeys(e, blob.BankPrefix(b)); len(keys) != 0 {
 		t.Errorf("blobs left under the bank prefix: %v", keys)
 	}
-	if keys := blobKeys(e, domain.BankBlobPrefix(other)); len(keys) != 1 {
+	if keys := blobKeys(e, blob.BankPrefix(other)); len(keys) != 1 {
 		t.Errorf("other bank's blobs touched: %v", keys)
 	}
 	assertFreshBank(t, e, b, pending, claimed)
@@ -206,7 +207,7 @@ func TestBankDeleteLifecycle(t *testing.T) {
 // assertBlockedByProcessing runs the delete while the claimed job of the bank is still processing: every
 // run reports done=false, the bank stays tombstoned with its blobs, the job's writes are refused and a
 // delayed delete_bank continuation is queued.
-func assertBlockedByProcessing(t *testing.T, e env, d BankDeleter, j port.Job, claimed port.OperationID) {
+func assertBlockedByProcessing(t *testing.T, e env, d BankDeleter, j store.Job, claimed domain.OperationID) {
 	t.Helper()
 	var cont *domain.Operation
 	for runs := 0; runs < 50 && cont == nil; runs++ {
@@ -226,23 +227,23 @@ func assertBlockedByProcessing(t *testing.T, e env, d BankDeleter, j port.Job, c
 		t.Errorf("run still blocked: done=%v err=%v", done, err)
 	}
 	var bank domain.Bank
-	e.tx(t, func(tx port.Tx) error { var err error; bank, err = tx.Banks().Get(e.ctx, j.Bank); return err })
-	if !bank.Deleting() || len(blobKeys(e, domain.BankBlobPrefix(j.Bank))) == 0 {
-		t.Errorf("blocked delete went ahead: bank %+v, blobs %v", bank, blobKeys(e, domain.BankBlobPrefix(j.Bank)))
+	e.tx(t, func(tx store.Tx) error { var err error; bank, err = tx.Banks().Get(e.ctx, j.Bank); return err })
+	if !bank.Deleting() || len(blobKeys(e, blob.BankPrefix(j.Bank))) == 0 {
+		t.Errorf("blocked delete went ahead: bank %+v, blobs %v", bank, blobKeys(e, blob.BankPrefix(j.Bank)))
 	}
-	err := e.store.InTx(e.ctx, func(tx port.Tx) error { _, err := tx.Seq(e.ctx, j.Bank); return err })
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error { _, err := tx.Seq(e.ctx, j.Bank); return err })
 	if !errors.Is(err, domain.ErrBankDeleting) {
 		t.Errorf("claimed job %s write while blocked: %v, want ErrBankDeleting", claimed, err)
 	}
 }
 
 // delayedContinuation returns the pending delete_bank operation other than j, if any.
-func delayedContinuation(t *testing.T, e env, j port.Job) *domain.Operation {
+func delayedContinuation(t *testing.T, e env, j store.Job) *domain.Operation {
 	t.Helper()
 	var out *domain.Operation
-	e.tx(t, func(tx port.Tx) error {
+	e.tx(t, func(tx store.Tx) error {
 		out = nil
-		ops, _, err := tx.Queue().List(e.ctx, j.Bank, port.OperationFilter{
+		ops, _, err := tx.Queue().List(e.ctx, j.Bank, store.OperationFilter{
 			Status: domain.OperationStatusPending, Kind: domain.OperationKindDeleteBank, PageSize: 100,
 		})
 		for i := range ops {
@@ -256,9 +257,9 @@ func delayedContinuation(t *testing.T, e env, j port.Job) *domain.Operation {
 }
 
 // assertFreshBank checks bank b is gone with its jobs, and a write afterwards creates a clean bank.
-func assertFreshBank(t *testing.T, e env, b port.BankRef, oldOps ...port.OperationID) {
+func assertFreshBank(t *testing.T, e env, b domain.BankRef, oldOps ...domain.OperationID) {
 	t.Helper()
-	err := e.store.InTx(e.ctx, func(tx port.Tx) error { _, err := tx.Banks().Get(e.ctx, b); return err })
+	err := e.store.InTx(e.ctx, func(tx store.Tx) error { _, err := tx.Banks().Get(e.ctx, b); return err })
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("bank after delete: %v, want NotFound", err)
 	}
@@ -266,13 +267,13 @@ func assertFreshBank(t *testing.T, e env, b port.BankRef, oldOps ...port.Operati
 		if alive, _ := e.store.Alive(e.ctx, id); alive {
 			t.Errorf("old job %s alive after delete", id)
 		}
-		err := e.store.InTx(e.ctx, func(tx port.Tx) error { _, err := tx.Queue().Retry(e.ctx, b, id); return err })
+		err := e.store.InTx(e.ctx, func(tx store.Tx) error { _, err := tx.Queue().Retry(e.ctx, b, id); return err })
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("retry of old job %s: %v, want NotFound (the row went with the bank)", id, err)
 		}
 	}
 	var seq int64
-	e.tx(t, func(tx port.Tx) error {
+	e.tx(t, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(e.ctx, b); err != nil {
 			return err
 		}
@@ -283,11 +284,11 @@ func assertFreshBank(t *testing.T, e env, b port.BankRef, oldOps ...port.Operati
 	if seq != 1 {
 		t.Errorf("fresh bank's first seq = %d, want 1", seq)
 	}
-	units, err := e.store.Read().GetUnits(e.ctx, b, pgtest.IDs[port.UnitID]("u1", "u2"))
+	units, err := e.store.Read().GetUnits(e.ctx, b, pgtest.IDs[domain.UnitID]("u1", "u2"))
 	if err != nil || len(units) != 0 {
 		t.Errorf("fresh bank units = %v (%v), want none", units, err)
 	}
-	err = e.store.InTx(e.ctx, func(tx port.Tx) error { _, err := tx.Documents().Get(e.ctx, b, "d1"); return err })
+	err = e.store.InTx(e.ctx, func(tx store.Tx) error { _, err := tx.Documents().Get(e.ctx, b, "d1"); return err })
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("fresh bank document: %v, want NotFound", err)
 	}
@@ -299,7 +300,7 @@ func assertFreshBank(t *testing.T, e env, b port.BankRef, oldOps ...port.Operati
 
 func TestTombstoneIdempotent(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	d := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{})
 	if _, err := d.Tombstone(e.ctx, b); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown bank: %v, want NotFound", err)
@@ -325,7 +326,7 @@ func TestTombstoneIdempotent(t *testing.T) {
 
 func TestDeleteRunSkipsPrefixWhenBankGone(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	seedBank(t, e, b)
 	d := NewBankDeleter(e.store, e.blob, e.store, e.clock, DeleterConfig{})
 	if _, err := d.Tombstone(e.ctx, b); err != nil {
@@ -333,12 +334,12 @@ func TestDeleteRunSkipsPrefixWhenBankGone(t *testing.T) {
 	}
 	j := claimDelete(t, e)
 	// An earlier run finished (bank row gone), then a write created a fresh bank with a new blob.
-	e.tx(t, func(tx port.Tx) error { return tx.Banks().Delete(e.ctx, b) })
+	e.tx(t, func(tx store.Tx) error { return tx.Banks().Delete(e.ctx, b) })
 	if done, err := d.Run(e.ctx, j); err != nil || !done {
 		t.Fatalf("run on a gone bank: done=%v err=%v", done, err)
 	}
 	e.ensure(t, b)
-	fresh := domain.DocumentBlobKey(b, "new", "h")
+	fresh := blob.Key(b, "new", "h")
 	if err := e.blob.Put(e.ctx, fresh, strings.NewReader("x"), 1, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -346,16 +347,16 @@ func TestDeleteRunSkipsPrefixWhenBankGone(t *testing.T) {
 		t.Fatalf("run on a fresh bank: done=%v err=%v", done, err)
 	}
 	// The bank row was removed by hand above, so the old blob is still there too: Run deleted nothing.
-	if keys := blobKeys(e, domain.BankBlobPrefix(b)); len(keys) != 2 || !slices.Contains(keys, fresh) {
+	if keys := blobKeys(e, blob.BankPrefix(b)); len(keys) != 2 || !slices.Contains(keys, fresh) {
 		t.Errorf("blobs under the prefix = %v, want both kept (incl. %s)", keys, fresh)
 	}
 }
 
 func TestDeleteRunStopsWhenCancelled(t *testing.T) {
 	e := newEnv(t)
-	b := port.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.BankRef{Tenant: "t", Bank: "b"}
 	e.ensure(t, b)
-	key := domain.DocumentBlobKey(b, "d", "h")
+	key := blob.Key(b, "d", "h")
 	if err := e.blob.Put(e.ctx, key, strings.NewReader("x"), 1, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -365,11 +366,11 @@ func TestDeleteRunStopsWhenCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	j := claimDelete(t, e)
-	e.tx(t, func(tx port.Tx) error { _, err := tx.Queue().Cancel(e.ctx, b, op.ID); return err })
+	e.tx(t, func(tx store.Tx) error { _, err := tx.Queue().Cancel(e.ctx, b, op.ID); return err })
 	if _, err := d.Run(e.ctx, j); !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("run after cancel: %v, want ErrCancelled", err)
 	}
-	if keys := blobKeys(e, domain.BankBlobPrefix(b)); len(keys) != 1 {
+	if keys := blobKeys(e, blob.BankPrefix(b)); len(keys) != 1 {
 		t.Errorf("a cancelled delete removed blobs: %v", keys)
 	}
 }

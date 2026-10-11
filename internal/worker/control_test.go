@@ -4,16 +4,16 @@ import (
 	"context"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 	"time"
 )
 
 // claimOne enqueues and claims one retain job and returns its id.
-func claimOne(t *testing.T, ops *opsDB) port.OperationID {
+func claimOne(t *testing.T, ops *opsDB) domain.OperationID {
 	t.Helper()
 	id := ops.add(retainJob("1"))
-	if js, _ := ops.Claim(t.Context(), "w1", []port.JobKind{domain.OperationKindRetainDocument}, 1); len(js) != 1 {
+	if js, _ := ops.Claim(t.Context(), "w1", []domain.OperationKind{domain.OperationKindRetainDocument}, 1); len(js) != 1 {
 		t.Fatal("claim")
 	}
 	return id
@@ -32,19 +32,19 @@ func TestCheckpointReport(t *testing.T) {
 	})
 	tests := []struct {
 		name  string
-		setup func(ops *opsDB, id port.OperationID, cancel context.CancelFunc)
+		setup func(ops *opsDB, id domain.OperationID, cancel context.CancelFunc)
 	}{
-		{"cancel requested", func(ops *opsDB, id port.OperationID, _ context.CancelFunc) {
+		{"cancel requested", func(ops *opsDB, id domain.OperationID, _ context.CancelFunc) {
 			_, _ = ops.cancel(bankA, id)
 		}},
-		{"bank tombstoned", func(ops *opsDB, _ port.OperationID, _ context.CancelFunc) { ops.markDeleting(bankA) }},
-		{"row no longer processing", func(ops *opsDB, id port.OperationID, _ context.CancelFunc) {
+		{"bank tombstoned", func(ops *opsDB, _ domain.OperationID, _ context.CancelFunc) { ops.markDeleting(bankA) }},
+		{"row no longer processing", func(ops *opsDB, id domain.OperationID, _ context.CancelFunc) {
 			_ = ops.Complete(ops.t.Context(), id, nil, nil)
 		}},
-		{"row gone", func(ops *opsDB, id port.OperationID, _ context.CancelFunc) {
+		{"row gone", func(ops *opsDB, id domain.OperationID, _ context.CancelFunc) {
 			ops.exec(`DELETE FROM operations WHERE id = $1`, string(id))
 		}},
-		{"context done", func(_ *opsDB, _ port.OperationID, cancel context.CancelFunc) { cancel() }},
+		{"context done", func(_ *opsDB, _ domain.OperationID, cancel context.CancelFunc) { cancel() }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,8 +66,8 @@ func TestControlDeleteBankAndDeletingBank(t *testing.T) {
 	bg := context.Background()
 	ops := newOps(t)
 	oc := NewOperationControl(ops)
-	del := ops.add(port.Job{Bank: bankC, Kind: domain.OperationKindDeleteBank, SerialKey: "bank"})
-	retain := ops.add(port.Job{Bank: bankC, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:1"})
+	del := ops.add(store.Job{Bank: bankC, Kind: domain.OperationKindDeleteBank, SerialKey: "bank"})
+	retain := ops.add(store.Job{Bank: bankC, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:1"})
 	if _, err := oc.Cancel(bg, bankC, del); !errors.Is(err, domain.ErrFailedPrecondition) {
 		t.Fatalf("Cancel delete_bank = %v, want ErrFailedPrecondition", err)
 	}
@@ -78,7 +78,7 @@ func TestControlDeleteBankAndDeletingBank(t *testing.T) {
 		t.Fatalf("Cancel retain: %v", err)
 	}
 	ops.markDeleting(bankC)
-	if js, _ := ops.Claim(bg, "w", []port.JobKind{domain.OperationKindDeleteBank}, 1); len(js) != 1 {
+	if js, _ := ops.Claim(bg, "w", []domain.OperationKind{domain.OperationKindDeleteBank}, 1); len(js) != 1 {
 		t.Fatal("claim delete_bank")
 	}
 	if err := ops.Fail(bg, del, errors.New("crash"), nil); err != nil {
@@ -108,27 +108,27 @@ func TestPendingChecker(t *testing.T) {
 	parked.RunAt = clock.Now().Add(time.Hour)
 	ops.add(due)
 	ops.add(parked)
-	ops.add(port.Job{
+	ops.add(store.Job{
 		Bank: bankC, Kind: domain.OperationKindConsolidate, SerialKey: consolidateSerialKey,
 		Overrides: &domain.BankConfig{},
 	}) // manual, with overrides: not joinable
-	ops.markDeleting(port.BankRef{Tenant: "t9", Bank: "gone"})
+	ops.markDeleting(domain.BankRef{Tenant: "t9", Bank: "gone"})
 	rows := ops.count("true")
 	tests := []struct {
-		bank port.BankRef
+		bank domain.BankRef
 		want bool
 	}{
 		{bankA, true},  // due automatic consolidate
 		{bankB, false}, // parked
 		{bankC, false}, // not joinable
-		{port.BankRef{Tenant: "t9", Bank: "gone"}, false}, // tombstoned
+		{domain.BankRef{Tenant: "t9", Bank: "gone"}, false}, // tombstoned
 	}
 	for _, tt := range tests {
 		if ok, err := pc.HasPending(bg, tt.bank, domain.OperationKindConsolidate); err != nil || ok != tt.want {
 			t.Errorf("bank %v = %v, %v; want %v", tt.bank, ok, err, tt.want)
 		}
 	}
-	if _, err := pc.HasPending(bg, port.BankRef{Tenant: "t9", Bank: "x"}, domain.OperationKindConsolidate); !errors.Is(
+	if _, err := pc.HasPending(bg, domain.BankRef{Tenant: "t9", Bank: "x"}, domain.OperationKindConsolidate); !errors.Is(
 		err, domain.ErrNotFound) {
 		t.Errorf("unknown bank = %v, want ErrNotFound", err)
 	}
@@ -139,7 +139,7 @@ func TestPendingChecker(t *testing.T) {
 	if ok, _ := pc.HasPending(bg, bankB, domain.OperationKindConsolidate); !ok {
 		t.Error("a parked consolidate that became due must count")
 	}
-	broken := NewPendingChecker(&pruneStore{Store: ops, txErr: domain.ErrUnavailable}, clock)
+	broken := NewPendingChecker(&pruneStore{DB: ops, txErr: domain.ErrUnavailable}, clock)
 	if _, err := broken.HasPending(bg, bankA, domain.OperationKindConsolidate); !errors.Is(err, domain.ErrUnavailable) {
 		t.Errorf("broken store = %v, want ErrUnavailable", err)
 	}

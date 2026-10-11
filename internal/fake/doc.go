@@ -1,25 +1,21 @@
-// Package fake provides scripted, deterministic stand-ins for the model ports (LLM, Embedder, Reranker), the Blob
-// port and the Clock, for engine, worker and cmd/memd tests. There is no fake Store: code that touches the store is
-// tested against real Postgres (internal/adapter/postgres/pgtest).
+// Package fake provides scripted, deterministic stand-ins for the AI boundary (ai.LLM, ai.Embedder, ai.Reranker) and
+// for blob.Store, for engine, worker and cmd/memd tests. There is no fake store.DB: code that touches the store is
+// tested against real Postgres (internal/store/postgres/pgtest). The test clock is clock.Manual.
 //
-// # Architecture
+// # Where it sits
 //
-// fake implements internal/port (domain -> port -> engine/adapter -> server/worker -> cmd/memd/wire.go); of memd's
-// packages it imports only internal/domain, internal/port and internal/jsonschema, and it never imports an adapter,
-// pgx, the S3 SDK or net/http. It is a regular (non-test) package so any package's tests can import it; production code
-// must not. Fakes return concrete types (*Blob, *LLM, ...) that tests pass wherever a port is expected.
+// Of memd's packages fake imports only internal/domain, internal/ai, internal/blob and internal/jsonschema, and it
+// never imports an adapter, pgx, the S3 SDK or net/http. It is a regular (non-test) package so any package's tests can
+// import it; production code must not. Fakes return concrete types (*Blob, *LLM, ...) that tests pass wherever the
+// interface is expected.
 //
 // # Quick start
 //
-//	clock := fake.NewClock(time.Time{})          // frozen at DefaultClockStart; Advance / Set it
-//	llm := fake.NewLLM()                         // port.LLM: script replies per (slot, prompt name)
+//	llm := fake.NewLLM()                         // ai.LLM: script replies per (slot, prompt name)
 //	llm.RespondJSON(domain.ModelSlotExtract, "extract_facts", `{"facts":[]}`)
-//	emb := fake.NewEmbedder(fake.EmbedSimilar)   // port.Embedder: 768-dim, deterministic
-//	rr := fake.NewReranker()                     // port.Reranker: token overlap unless scripted
-//	blob := fake.NewBlob()                       // port.Blob
-//
-// A Clock only drives the code it is passed to: Postgres judges due-ness and heartbeat staleness by its own clock, so
-// a test that needs a parked job to become due moves the job's run_at (or the clock relative to it) with SQL.
+//	emb := fake.NewEmbedder(fake.EmbedSimilar)   // ai.Embedder: 768-dim, deterministic
+//	rr := fake.NewReranker()                     // ai.Reranker: token overlap unless scripted
+//	bs := fake.NewBlob()                         // blob.Store
 //
 // # Model fakes
 //

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 )
 
@@ -12,15 +12,15 @@ import (
 type TemplateCodec interface {
 	// Export returns bank b's own config, directives and mental-model specs (no memories); an unknown or
 	// tombstoned bank is domain.ErrNotFound.
-	Export(ctx context.Context, b port.BankRef) (domain.BankTemplate, error)
+	Export(ctx context.Context, b domain.BankRef) (domain.BankTemplate, error)
 	// Create makes bank b from t in one transaction, reassigning directive ids and enqueueing a first
 	// build of every mental model; an existing bank is domain.ErrAlreadyExists. It is CreateNamed with
 	// an empty name, kept for callers that need only the bank.
-	Create(ctx context.Context, b port.BankRef, t domain.BankTemplate) (domain.Bank, error)
+	Create(ctx context.Context, b domain.BankRef, t domain.BankTemplate) (domain.Bank, error)
 	// CreateNamed is Create with the bank's display name; it also returns the first-build operation of
 	// every mental model, in template order (CreateBankFromTemplateResponse.mental_model_builds).
 	CreateNamed(
-		ctx context.Context, b port.BankRef, name string, t domain.BankTemplate,
+		ctx context.Context, b domain.BankRef, name string, t domain.BankTemplate,
 	) (domain.Bank, []domain.Operation, error)
 }
 
@@ -29,12 +29,12 @@ type TemplateCodec interface {
 type RefreshQueuer interface {
 	// QueueRefresh enqueues (or joins) a refresh of model id of bank b inside tx and returns its operation
 	// id. The caller has already called tx.Seq(b).
-	QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
+	QueueRefresh(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID) (domain.OperationID, error)
 }
 
-// templateCodec implements TemplateCodec over port.Store.
+// templateCodec implements TemplateCodec over store.DB.
 type templateCodec struct {
-	s       port.Store
+	s       store.DB
 	refresh RefreshQueuer
 }
 
@@ -42,15 +42,15 @@ var _ TemplateCodec = (*templateCodec)(nil)
 
 // NewTemplateCodec returns the TemplateCodec over s (Export lists the model specs with
 // Reader.ListMentalModels); refresh enqueues the first build of each created model.
-func NewTemplateCodec(s port.Store, refresh RefreshQueuer) TemplateCodec {
+func NewTemplateCodec(s store.DB, refresh RefreshQueuer) TemplateCodec {
 	return &templateCodec{s: s, refresh: refresh}
 }
 
 // Export reads the bank's own config and directives in one short transaction, then its model specs.
 // Directive ids, bank refs and timestamps are dropped: Create reassigns them.
-func (c *templateCodec) Export(ctx context.Context, b port.BankRef) (domain.BankTemplate, error) {
+func (c *templateCodec) Export(ctx context.Context, b domain.BankRef) (domain.BankTemplate, error) {
 	var t domain.BankTemplate
-	err := c.s.InTx(ctx, func(tx port.Tx) error {
+	err := c.s.InTx(ctx, func(tx store.Tx) error {
 		t = domain.BankTemplate{}
 		bank, err := liveBank(ctx, tx, b)
 		if err != nil {
@@ -69,7 +69,7 @@ func (c *templateCodec) Export(ctx context.Context, b port.BankRef) (domain.Bank
 	if err != nil {
 		return domain.BankTemplate{}, err
 	}
-	models, _, err := c.s.Read().ListMentalModels(ctx, port.ModelQuery{Bank: b})
+	models, _, err := c.s.Read().ListMentalModels(ctx, store.ModelQuery{Bank: b})
 	if err != nil {
 		return domain.BankTemplate{}, fmt.Errorf("export mental-model specs: %w", err)
 	}
@@ -87,7 +87,7 @@ func portableDirective(d domain.Directive) domain.Directive {
 }
 
 // Create is CreateNamed without a name, dropping the build operations.
-func (c *templateCodec) Create(ctx context.Context, b port.BankRef, t domain.BankTemplate) (domain.Bank, error) {
+func (c *templateCodec) Create(ctx context.Context, b domain.BankRef, t domain.BankTemplate) (domain.Bank, error) {
 	bank, _, err := c.CreateNamed(ctx, b, "", t)
 	return bank, err
 }
@@ -95,7 +95,7 @@ func (c *templateCodec) Create(ctx context.Context, b port.BankRef, t domain.Ban
 // CreateNamed creates the bank, its directives (new ids) and its mental models, and enqueues each model's
 // first build, all in one transaction.
 func (c *templateCodec) CreateNamed(
-	ctx context.Context, b port.BankRef, name string, t domain.BankTemplate,
+	ctx context.Context, b domain.BankRef, name string, t domain.BankTemplate,
 ) (domain.Bank, []domain.Operation, error) {
 	specs, err := templateSpecs(t.MentalModels)
 	if err != nil {
@@ -109,7 +109,7 @@ func (c *templateCodec) CreateNamed(
 		bank domain.Bank
 		ops  []domain.Operation
 	)
-	err = c.s.InTx(ctx, func(tx port.Tx) error {
+	err = c.s.InTx(ctx, func(tx store.Tx) error {
 		bank, ops = domain.Bank{}, nil
 		if err := tx.Banks().Create(ctx, domain.Bank{Ref: b, Name: name, Config: t.Config}); err != nil {
 			return err
@@ -139,7 +139,7 @@ func (c *templateCodec) CreateNamed(
 
 // createModels creates each model in tx and enqueues its first build, returning the build operations.
 func (c *templateCodec) createModels(
-	ctx context.Context, tx port.Tx, b port.BankRef, specs []domain.MentalModelSpec,
+	ctx context.Context, tx store.Tx, b domain.BankRef, specs []domain.MentalModelSpec,
 ) ([]domain.Operation, error) {
 	ops := make([]domain.Operation, 0, len(specs))
 	for _, spec := range specs {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"strings"
 )
@@ -14,7 +14,7 @@ import (
 type PromptPreviewer interface {
 	// Preview renders op's prompt for bank b with overrides o merged on top of the effective config.
 	Preview(
-		ctx context.Context, b port.BankRef, op domain.PromptOperation, o domain.BankConfig,
+		ctx context.Context, b domain.BankRef, op domain.PromptOperation, o domain.BankConfig,
 	) (domain.PromptPreview, error)
 }
 
@@ -38,7 +38,7 @@ const (
 
 // previewer implements PromptPreviewer with internal/prompts.
 type previewer struct {
-	cfg  port.ConfigResolver
+	cfg  config.Resolver
 	dirs DirectiveSelector
 }
 
@@ -46,18 +46,18 @@ var _ PromptPreviewer = (*previewer)(nil)
 
 // NewPromptPreviewer returns the PromptPreviewer; cfg resolves the effective config and dirs picks the
 // directives reflect and synthesize would see (global ones: a preview has no request tags).
-func NewPromptPreviewer(cfg port.ConfigResolver, dirs DirectiveSelector) PromptPreviewer {
+func NewPromptPreviewer(cfg config.Resolver, dirs DirectiveSelector) PromptPreviewer {
 	return &previewer{cfg: cfg, dirs: dirs}
 }
 
 // Preview resolves the effective config with o on top and renders op's messages from the built-in
 // templates, with placeholders for request-time content.
 func (p *previewer) Preview(
-	ctx context.Context, b port.BankRef, op domain.PromptOperation, o domain.BankConfig,
+	ctx context.Context, b domain.BankRef, op domain.PromptOperation, o domain.BankConfig,
 ) (domain.PromptPreview, error) {
 	cfg, err := p.cfg.Effective(ctx, b, o)
 	if err != nil {
-		return domain.PromptPreview{}, err
+		return domain.PromptPreview{}, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
 	}
 	switch op {
 	case domain.PromptOperationRetain:

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 )
 
 // Includer attaches chunks, source facts and entity state within their own token budgets.
@@ -18,26 +18,26 @@ type Includer interface {
 	//     SourceFactsTruncated is set.
 	//   - entities: the entity state of every entity attached to a result.
 	Enrich(
-		ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, inc domain.RecallInclude,
+		ctx context.Context, b domain.BankRef, seq store.SeqRange, results []Candidate, inc domain.RecallInclude,
 	) (enrichment, error)
 }
 
 // enrichment is what an Includer attached to a result set.
 type enrichment struct {
 	// SourceFacts are the facts behind returned observations, by id.
-	SourceFacts map[port.UnitID]domain.Unit
+	SourceFacts map[domain.UnitID]domain.Unit
 	// SourceFactsTruncated reports that the source-fact budget cut some off.
 	SourceFactsTruncated bool
 	// Chunks are the source chunks of returned memories, by id.
-	Chunks map[port.ChunkID]Chunk
+	Chunks map[domain.ChunkID]Chunk
 	// Entities is the entity state of returned memories, by id.
-	Entities map[port.EntityID]domain.EntityState
+	Entities map[domain.EntityID]domain.EntityState
 }
 
 // Chunk mirrors memory.v1.Chunk: a source chunk attached to recall results.
 type Chunk struct {
 	// ID is the chunk id.
-	ID port.ChunkID
+	ID domain.ChunkID
 	// Text is the chunk text, possibly cut to fit the chunk budget.
 	Text string
 	// Index is the chunk's position in its document, from 0.
@@ -48,20 +48,20 @@ type Chunk struct {
 
 // includer is the Includer.
 type includer struct {
-	r     port.Reader
+	r     store.Reader
 	count TokenCounter
 }
 
 var _ Includer = (*includer)(nil)
 
 // newIncluder returns the Includer over r (GetChunks, GetUnits and EntityStates).
-func newIncluder(r port.Reader, count TokenCounter) Includer {
+func newIncluder(r store.Reader, count TokenCounter) Includer {
 	return &includer{r: r, count: count}
 }
 
 // Enrich implements Includer.
 func (in *includer) Enrich(
-	ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, inc domain.RecallInclude,
+	ctx context.Context, b domain.BankRef, seq store.SeqRange, results []Candidate, inc domain.RecallInclude,
 ) (enrichment, error) {
 	var e enrichment
 	var err error
@@ -86,17 +86,17 @@ func (in *includer) Enrich(
 
 // chunks reads the results' chunks and fits them into budget tokens.
 func (in *includer) chunks(
-	ctx context.Context, b port.BankRef, results []Candidate, budget int,
-) (map[port.ChunkID]Chunk, error) {
-	var ids []port.ChunkID
-	seen := map[port.ChunkID]bool{}
+	ctx context.Context, b domain.BankRef, results []Candidate, budget int,
+) (map[domain.ChunkID]Chunk, error) {
+	var ids []domain.ChunkID
+	seen := map[domain.ChunkID]bool{}
 	for _, c := range results {
 		if c.Unit != nil && c.Unit.ChunkID != "" && !seen[c.Unit.ChunkID] {
 			seen[c.Unit.ChunkID] = true
 			ids = append(ids, c.Unit.ChunkID)
 		}
 	}
-	out := map[port.ChunkID]Chunk{}
+	out := map[domain.ChunkID]Chunk{}
 	if len(ids) == 0 {
 		return out, nil
 	}
@@ -122,10 +122,10 @@ func (in *includer) chunks(
 
 // sourceFacts reads the facts cited by the returned observations and fits them into budget tokens.
 func (in *includer) sourceFacts(
-	ctx context.Context, b port.BankRef, seq port.SeqRange, results []Candidate, budget int,
-) (map[port.UnitID]domain.Unit, bool, error) {
-	var ids []port.UnitID
-	seen := map[port.UnitID]bool{}
+	ctx context.Context, b domain.BankRef, seq store.SeqRange, results []Candidate, budget int,
+) (map[domain.UnitID]domain.Unit, bool, error) {
+	var ids []domain.UnitID
+	seen := map[domain.UnitID]bool{}
 	for _, c := range results {
 		if c.Unit == nil || c.Unit.Type != domain.FactTypeObservation {
 			continue
@@ -137,7 +137,7 @@ func (in *includer) sourceFacts(
 			}
 		}
 	}
-	out := map[port.UnitID]domain.Unit{}
+	out := map[domain.UnitID]domain.Unit{}
 	if len(ids) == 0 {
 		return out, false, nil
 	}
@@ -145,7 +145,7 @@ func (in *includer) sourceFacts(
 	if err != nil {
 		return nil, false, err
 	}
-	byID := make(map[port.UnitID]domain.Unit, len(units))
+	byID := make(map[domain.UnitID]domain.Unit, len(units))
 	for _, u := range units {
 		if seq.Contains(u.Seq) {
 			byID[u.ID] = u
@@ -170,13 +170,13 @@ func (in *includer) sourceFacts(
 
 // entities reads the entity state of every entity attached to a result.
 func (in *includer) entities(
-	ctx context.Context, b port.BankRef, results []Candidate,
-) (map[port.EntityID]domain.EntityState, error) {
-	ids := make([]port.UnitID, 0, len(results))
+	ctx context.Context, b domain.BankRef, results []Candidate,
+) (map[domain.EntityID]domain.EntityState, error) {
+	ids := make([]domain.UnitID, 0, len(results))
 	for _, c := range results {
 		ids = append(ids, c.ID)
 	}
-	out := map[port.EntityID]domain.EntityState{}
+	out := map[domain.EntityID]domain.EntityState{}
 	if len(ids) == 0 {
 		return out, nil
 	}

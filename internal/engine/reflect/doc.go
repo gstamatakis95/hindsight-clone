@@ -3,13 +3,13 @@
 //
 // # Where it sits
 //
-// reflect is an engine package: it imports domain, port, prompts, jsonschema and recall (for its request and
-// result types) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
-// (depguard). It never imports mentalmodel, which imports reflect; it declares the small [Recaller]
-// (recall.Recaller satisfies it) and [PageReader] (search and read of mental-model pages, provided by
-// cmd/memd from mentalmodel's PageSearcher) it consumes. cmd/memd/wire.go builds the [Reflector] with
-// [NewReflector] and [DefaultTools]; the server's Reflect RPC and the agentic mental-model synthesizer call
-// [Reflector.Reflect], and the refresh runner uses [NewStructuredProjector].
+// reflect is an engine package: it imports domain, the boundary packages, prompts, jsonschema and recall (for its
+// request and result types) and must never import adapters, server, worker, gen, pgx, net/http, the S3 SDK or Datadog
+// (depguard). It never imports mentalmodel, which imports reflect; it declares the small [Recaller] (recall.Recaller
+// satisfies it) and [PageReader] (search and read of mental-model pages, provided by cmd/memd from mentalmodel's
+// PageSearcher) it consumes. cmd/memd/wire.go builds the [Reflector] with [NewReflector] and [DefaultTools]; the
+// server's Reflect RPC and the agentic mental-model synthesizer call [Reflector.Reflect], and the refresh runner uses
+// [NewStructuredProjector].
 //
 // # Flow of Reflect
 //
@@ -72,7 +72,7 @@
 // Every model call's usage is charged to the run; past reflect.max_total_tokens (unset = unlimited) the
 // call fails with domain.ErrResourceExhausted (RESOURCE_EXHAUSTED). A blank final answer is
 // domain.ErrUnavailable. The answer's soft length target is the request's max_tokens, else
-// reflect.max_answer_tokens (default 4096). The query time defaults to port.Clock's now.
+// reflect.max_answer_tokens (default 4096). The query time defaults to clock.Clock's now.
 //
 // # Internal callers
 //
@@ -88,7 +88,7 @@
 // # Invariants
 //
 // Reflect is read-only: it never writes and never opens a write transaction, so it must not be called inside
-// Store.InTx. Tools only read through recall, the page reader and port.Reader.
+// DB.InTx. Tools only read through recall, the page reader and store.Reader.
 //
 // # Tests
 //

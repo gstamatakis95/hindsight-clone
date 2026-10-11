@@ -4,11 +4,10 @@
 //
 // # Where it sits
 //
-// timex is an engine package: it imports domain, port and prompts and must never import adapters, server,
-// worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It works on domain.ExtractedFact rather than
-// a retain type so that retain can import timex without a cycle. cmd/memd/wire.go builds one
-// [TimeNormalizer] with [NewNormalizer](gateway, router, clock) and hands it to retain (its DateNormalizer)
-// and recall (its query parser).
+// timex is an engine package: it imports domain, the boundary packages and prompts and must never import adapters,
+// server, worker, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It works on domain.ExtractedFact rather than a
+// retain type so that retain can import timex without a cycle. cmd/memd/wire.go builds one [TimeNormalizer] with
+// [NewNormalizer](gateway, router, clock) and hands it to retain (its DateNormalizer) and recall (its query parser).
 //
 // # Usage
 //
@@ -21,7 +20,7 @@
 //	// recall: nil window = no time constraint
 //	w, err := times.QueryWindow(ctx, cfg, "what did I do last spring?", time.Time{})
 //
-// A zero reference time means "now" from the injected port.Clock; timex never calls time.Now.
+// A zero reference time means "now" from the injected clock.Clock; timex never calls time.Now.
 //
 // # Flow
 //
@@ -40,10 +39,10 @@
 //  2. The rules parse the query; a resolved window is returned.
 //  3. Otherwise the TIME_PARSE fallback runs.
 //
-// The fallback resolves the TIME_PARSE binding through port.ModelRouter only at this point (so an unbound
+// The fallback resolves the TIME_PARSE binding through ai.Router only at this point (so an unbound
 // slot never fails a call the rules can answer), renders the time_parse_system / time_parse_user prompts
 // with the reference instant, weekday, time zone, kind ("query" or "expression") and text, and makes one
-// port.LLM.Structured call returning {start, end} as RFC 3339 or YYYY-MM-DD strings (null = unbounded).
+// ai.LLM.Structured call returning {start, end} as RFC 3339 or YYYY-MM-DD strings (null = unbounded).
 // Both bounds null, an unparseable bound, start >= end, or a bound outside years 1..9999 yields no window
 // (not an error).
 //
@@ -93,7 +92,7 @@
 // The normalizer holds only its injected dependencies and compiled regexps, so it is safe for concurrent
 // use. corpus_test.go and timex_test.go run a query corpus at a fixed reference (including non-UTC zones),
 // check that no cue means no LLM call, that the fallback runs only with a cue and no rule, and that every
-// fallback failure degrades; rules_test.go and cue_test.go pin individual rules and cues. The LLM, router
-// and clock are the generated mockport mocks. SPEC "Model routing" (the TIME_PARSE slot) and "Recall
-// pipeline" (the temporal arm).
+// fallback failure degrades; rules_test.go and cue_test.go pin individual rules and cues. The LLM is the
+// generated mockai mock, with the real ai.Router and a clock.Manual. SPEC "Model routing" (the TIME_PARSE slot)
+// and "Recall pipeline" (the temporal arm).
 package timex

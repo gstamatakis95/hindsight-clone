@@ -3,7 +3,6 @@ package consolidate
 import (
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"slices"
 	"strings"
 )
@@ -13,7 +12,7 @@ type ScopeExpander interface {
 	// Expand returns the scopes for tags under s. ALL_COMBINATIONS beyond max_combinations returns
 	// ErrTooManyScopes; the Ingestor calls Expand before storing anything, so Retain fails with
 	// INVALID_ARGUMENT instead of a job failing later.
-	Expand(b port.BankRef, tags []string, s domain.ObservationScopes) ([]port.ScopeKey, error)
+	Expand(b domain.BankRef, tags []string, s domain.ObservationScopes) ([]domain.ScopeKey, error)
 }
 
 // scopeExpander implements ScopeExpander.
@@ -32,7 +31,7 @@ func NewScopeExpander() ScopeExpander { return scopeExpander{} }
 //   - per_tag: one scope per tag.
 //   - all_combinations: every non-empty subset, at most max_combinations (default 15) of them.
 //   - custom: the explicit tag sets as given (normalized); none = combined.
-func (scopeExpander) Expand(b port.BankRef, tags []string, s domain.ObservationScopes) ([]port.ScopeKey, error) {
+func (scopeExpander) Expand(b domain.BankRef, tags []string, s domain.ObservationScopes) ([]domain.ScopeKey, error) {
 	tags = domain.NormalizeTags(tags)
 	var sets [][]string
 	switch s.Mode {
@@ -69,9 +68,9 @@ func (scopeExpander) Expand(b port.BankRef, tags []string, s domain.ObservationS
 }
 
 // scopeKeys builds normalized, deduplicated scope keys sorted by their encoding.
-func scopeKeys(b port.BankRef, sets [][]string) []port.ScopeKey {
+func scopeKeys(b domain.BankRef, sets [][]string) []domain.ScopeKey {
 	seen := map[string]bool{}
-	var out []port.ScopeKey
+	var out []domain.ScopeKey
 	for _, set := range sets {
 		k := domain.NewScopeKey(b, set)
 		if !seen[k.String()] {
@@ -79,7 +78,7 @@ func scopeKeys(b port.BankRef, sets [][]string) []port.ScopeKey {
 			out = append(out, k)
 		}
 	}
-	slices.SortFunc(out, func(x, y port.ScopeKey) int { return strings.Compare(x.String(), y.String()) })
+	slices.SortFunc(out, func(x, y domain.ScopeKey) int { return strings.Compare(x.String(), y.String()) })
 	return out
 }
 

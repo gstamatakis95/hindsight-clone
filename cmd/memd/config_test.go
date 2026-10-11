@@ -5,14 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"memd/internal/config"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/engine/routing"
 	"memd/internal/server"
-	"memd/internal/worker"
 	"net"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,7 +25,7 @@ func baseEnv() map[string]string {
 	return map[string]string{
 		envDSN: "postgres://x", envGatewayURL: "http://gw/v1", envS3Bucket: "memd", envS3PathStyle: "true",
 		envS3AccessKey: "ak", envS3SecretKey: "sk", envStaleAfter: "8s", envHeartbeatInterval: "1s",
-		config.EnvModel: "m",
+		ai.EnvModel: "m",
 	}
 }
 
@@ -87,40 +84,20 @@ func TestValidateS3Keys(t *testing.T) {
 // TestRequiredSlots: startup fails when EXTRACT or REFLECT has no model.
 func TestRequiredSlots(t *testing.T) {
 	env := baseEnv()
-	delete(env, config.EnvModel)
+	delete(env, ai.EnvModel)
 	_, err := loadValidate([]string{"all"}, env)
 	for _, slot := range []string{"EXTRACT", "REFLECT"} {
-		if err == nil || !strings.Contains(err.Error(), config.EnvModelPrefix+slot) {
+		if err == nil || !strings.Contains(err.Error(), ai.EnvModelPrefix+slot) {
 			t.Errorf("no models: %v, want a %s error", err, slot)
 		}
 	}
-	env[config.EnvModelPrefix+"EXTRACT"] = "x"
+	env[ai.EnvModelPrefix+"EXTRACT"] = "x"
 	if _, err := loadValidate([]string{"all"}, env); err == nil || !strings.Contains(err.Error(), "REFLECT") {
 		t.Errorf("only EXTRACT bound: %v, want a REFLECT error", err)
 	}
-	env[config.EnvModelPrefix+"REFLECT"] = "r"
+	env[ai.EnvModelPrefix+"REFLECT"] = "r"
 	if _, err := loadValidate([]string{"all"}, env); err != nil {
 		t.Errorf("EXTRACT and REFLECT bound: %v", err)
-	}
-}
-
-// TestUnboundSlotRouter: a call on an unbound slot is FAILED_PRECONDITION (and a permanent job
-// failure), not INVALID_ARGUMENT; bound slots and EMBED keep the engine router's behaviour.
-func TestUnboundSlotRouter(t *testing.T) {
-	r := slotRouter{routing.NewRouter()}
-	cfg := domain.BankConfig{Models: []domain.SlotBinding{
-		{Slot: domain.ModelSlotExtract, Binding: domain.ModelBinding{Model: "x"}},
-	}}
-	if b, err := r.Resolve(cfg, domain.ModelSlotExtract); err != nil || b.Model != "x" {
-		t.Fatalf("bound slot: %+v %v", b, err)
-	}
-	_, err := r.Resolve(cfg, domain.ModelSlotConsolidate)
-	if !errors.Is(err, domain.ErrFailedPrecondition) || errors.Is(err, domain.ErrInvalidArgument) ||
-		!errors.Is(err, worker.ErrPermanent) {
-		t.Fatalf("unbound slot: %v, want FailedPrecondition + ErrPermanent, not InvalidArgument", err)
-	}
-	if _, err := r.Resolve(cfg, domain.ModelSlotEmbed); !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("embed: %v, want the engine router's InvalidArgument", err)
 	}
 }
 
@@ -250,6 +227,10 @@ func TestValidateRejects(t *testing.T) {
 		"no dsn":       func(env map[string]string) []string { delete(env, envDSN); return []string{"api"} },
 		"no gateway":   func(env map[string]string) []string { delete(env, envGatewayURL); return []string{"api"} },
 		"no bucket":    func(env map[string]string) []string { delete(env, envS3Bucket); return []string{"worker"} },
+		"unknown blob provider": func(env map[string]string) []string {
+			env[envBlobProvider] = "gcs"
+			return []string{"api"}
+		},
 		"heartbeat too slow": func(env map[string]string) []string {
 			env[envHeartbeatInterval] = "6s"
 			return []string{"worker"}
@@ -271,7 +252,7 @@ func TestValidateRejects(t *testing.T) {
 	}
 }
 
-// embedder is a port.Embedder returning vectors of a fixed size.
+// embedder is a ai.Embedder returning vectors of a fixed size.
 type embedder struct {
 	dim int
 	err error
@@ -299,41 +280,5 @@ func TestCheckEmbedding(t *testing.T) {
 	}
 	if err := checkEmbedding(t.Context(), embedder{err: errors.New("down")}); err == nil {
 		t.Fatal("gateway down accepted")
-	}
-}
-
-// TestTokenCounterConcurrent shares one counter across goroutines, as every RPC and worker slot does; run
-// with -race.
-func TestTokenCounterConcurrent(t *testing.T) {
-	tok, err := newTokenCounter()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := tok.Count("Alice moved to Lisbon in 2021.")
-	var wg sync.WaitGroup
-	for i := range 16 {
-		wg.Go(func() {
-			for j := range 50 {
-				if got := tok.Count("Alice moved to Lisbon in 2021."); got != want {
-					t.Errorf("goroutine %d: %d tokens, want %d", i, got, want)
-				}
-				tok.Count(strings.Repeat("token ", i+j))
-			}
-		})
-	}
-	wg.Wait()
-}
-
-// TestTokenCounter checks the embedded tiktoken encoding counts tokens without a download.
-func TestTokenCounter(t *testing.T) {
-	tok, err := newTokenCounter()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := tok.Count("hello world"); n != 2 {
-		t.Fatalf("hello world = %d tokens, want 2", n)
-	}
-	if n := tok.Count(""); n != 0 {
-		t.Fatalf("empty = %d", n)
 	}
 }

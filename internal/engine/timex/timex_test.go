@@ -5,58 +5,57 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/jsonschema"
-	"memd/internal/port"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	mockport "memd/internal/mocks/port"
+	mockai "memd/internal/mocks/ai"
 )
 
 // errUnexpected is what the mocks return when a test expects no model call.
 var errUnexpected = errors.New("unexpected model call")
 
-// harness is a normalizer over mocks; the clock has no NowFunc, so any use with a non-zero ref panics.
+// harness is a normalizer over a mocked LLM and the real router; TIME_PARSE is unbound until a test binds it.
 type harness struct {
-	tn     TimeNormalizer
-	llm    *mockport.LLM
-	router *mockport.ModelRouter
+	tn    TimeNormalizer
+	llm   *mockai.LLM
+	bound *domain.ModelBinding
 }
 
 // newHarness wires a normalizer whose model calls fail; tests that expect a call replace the funcs.
-func newHarness() harness {
-	llm := &mockport.LLM{
-		StructuredFunc: func(_ context.Context, _ port.StructuredRequest, _ any) (port.Usage, error) {
-			return port.Usage{}, errUnexpected
+func newHarness() *harness {
+	llm := &mockai.LLM{
+		StructuredFunc: func(_ context.Context, _ ai.StructuredRequest, _ any) (domain.Usage, error) {
+			return domain.Usage{}, errUnexpected
 		},
 	}
-	router := &mockport.ModelRouter{
-		ResolveFunc: func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
-			return port.ModelBinding{}, errUnexpected
-		},
-	}
-	return harness{tn: NewNormalizer(llm, router, &mockport.Clock{}), llm: llm, router: router}
+	return &harness{tn: NewNormalizer(llm, ai.NewRouter(), clock.NewManual(testRef)), llm: llm}
 }
 
-// scripted makes the LLM answer with raw JSON and the router return binding.
-func (h harness) scripted(binding domain.ModelBinding, raw string) {
-	h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
-		return binding, nil
+// cfg returns base with the harness's TIME_PARSE binding, if a test set one.
+func (h *harness) cfg(base domain.BankConfig) domain.BankConfig {
+	if h.bound != nil {
+		base.Models = append(base.Models, domain.SlotBinding{Slot: domain.ModelSlotTimeParse, Binding: *h.bound})
 	}
-	h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, out any) (port.Usage, error) {
-		return port.Usage{}, json.Unmarshal([]byte(raw), out)
+	return base
+}
+
+// scripted binds TIME_PARSE to binding and makes the LLM answer with raw JSON.
+func (h *harness) scripted(binding domain.ModelBinding, raw string) {
+	h.bound = &binding
+	h.llm.StructuredFunc = func(_ context.Context, _ ai.StructuredRequest, out any) (domain.Usage, error) {
+		return domain.Usage{}, json.Unmarshal([]byte(raw), out)
 	}
 }
 
-// assertNoModelCalls fails when the router or the LLM was used.
-func (h harness) assertNoModelCalls(t *testing.T) {
+// assertNoModelCalls fails when the LLM was used.
+func (h *harness) assertNoModelCalls(t *testing.T) {
 	t.Helper()
-	if n := len(h.router.ResolveCalls()); n != 0 {
-		t.Errorf("router.Resolve called %d times, want 0", n)
-	}
 	if n := len(h.llm.StructuredCalls()); n != 0 {
 		t.Errorf("llm.Structured called %d times, want 0", n)
 	}
@@ -81,7 +80,7 @@ func TestQueryWindowCorpus(t *testing.T) {
 			if ref.IsZero() {
 				ref = testRef
 			}
-			got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, row.query, ref)
+			got, err := h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), row.query, ref)
 			if err != nil {
 				t.Fatalf("QueryWindow(%q): %v", row.query, err)
 			}
@@ -119,7 +118,7 @@ func TestNoCueMakesNoLLMCall(t *testing.T) {
 	h := newHarness()
 	h.scripted(domain.ModelBinding{Model: "tp"}, `{"start":"2026-01-01T00:00:00Z","end":null}`)
 	for _, q := range []string{"what is my name", "may I ask about my cats", "spring water brands", ""} {
-		got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, q, testRef)
+		got, err := h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), q, testRef)
 		if err != nil || got != nil {
 			t.Errorf("QueryWindow(%q) = %v, %v; want nil, nil", q, got, err)
 		}
@@ -128,23 +127,19 @@ func TestNoCueMakesNoLLMCall(t *testing.T) {
 }
 
 // TestFallbackOnlyWhenCueAndNoRule checks a cue the rules cannot resolve makes exactly one TIME_PARSE call
-// with the binding the router returned for the caller's cfg, and that the window is decoded from it.
+// with the binding the caller's cfg holds for the slot, and that the window is decoded from it.
 func TestFallbackOnlyWhenCueAndNoRule(t *testing.T) {
 	h := newHarness()
 	binding := domain.ModelBinding{Model: "tp-override", ReasoningEffort: "low"}
 	h.scripted(binding, `{"start":"2025-12-20T00:00:00Z","end":"2026-01-03T00:00:00Z"}`)
 	cfg := domain.BankConfig{RetainMission: "request-level override"}
 
-	got, err := h.tn.QueryWindow(context.Background(), cfg, "what did we do around the holidays?", testRef)
+	got, err := h.tn.QueryWindow(context.Background(), h.cfg(cfg), "what did we do around the holidays?", testRef)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := w(d(2025, 12, 20), d(2026, 1, 3)); !sameWindow(got, want) {
 		t.Fatalf("window = %v, want %v", got, want)
-	}
-	rc := h.router.ResolveCalls()
-	if len(rc) != 1 || rc[0].Slot != domain.ModelSlotTimeParse || !reflect.DeepEqual(rc[0].Cfg, cfg) {
-		t.Fatalf("Resolve calls = %+v", rc)
 	}
 	sc := h.llm.StructuredCalls()
 	if len(sc) != 1 {
@@ -172,7 +167,7 @@ func TestFallbackNullWindow(t *testing.T) {
 	} {
 		h := newHarness()
 		h.scripted(domain.ModelBinding{Model: "tp"}, raw)
-		got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "when I was in college", testRef)
+		got, err := h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), "when I was in college", testRef)
 		if err != nil || got != nil {
 			t.Errorf("%s: got %v, %v; want nil, nil", raw, got, err)
 		}
@@ -186,7 +181,7 @@ func TestFallbackNullWindow(t *testing.T) {
 func TestFallbackOpenAndDateOnlyBounds(t *testing.T) {
 	h := newHarness()
 	h.scripted(domain.ModelBinding{Model: "tp"}, `{"start":"2026-09-30","end":null}`)
-	got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", estRef)
+	got, err := h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), "the other day", estRef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,41 +190,39 @@ func TestFallbackOpenAndDateOnlyBounds(t *testing.T) {
 	}
 }
 
-// TestQueryWindowFallbackErrorsDegrade checks router and LLM failures mean no window and no error, while
+// TestQueryWindowFallbackErrorsDegrade checks an unbound slot and LLM failures mean no window and no error, while
 // the caller's cancellation still surfaces wrapped.
 func TestQueryWindowFallbackErrorsDegrade(t *testing.T) {
 	h := newHarness()
-	got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
-	if got != nil || err != nil || len(h.router.ResolveCalls()) != 1 {
-		t.Fatalf("router error: got %v, %v; want nil, nil", got, err)
+	got, err := h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), "the other day", testRef)
+	if got != nil || err != nil || len(h.llm.StructuredCalls()) != 0 {
+		t.Fatalf("unbound slot: got %v, %v; want nil, nil and no call", got, err)
 	}
-	h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
-		return port.ModelBinding{Model: "tp"}, nil
-	}
-	got, err = h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
+	h.bound = &domain.ModelBinding{Model: "tp"}
+	got, err = h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), "the other day", testRef)
 	if got != nil || err != nil || len(h.llm.StructuredCalls()) != 1 {
 		t.Fatalf("llm error: got %v, %v; want nil, nil", got, err)
 	}
 	// A gateway's own per-call timeout wraps DeadlineExceeded under a live ctx: it degrades too.
-	h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, _ any) (port.Usage, error) {
-		return port.Usage{}, fmt.Errorf("%w: gateway timeout: %w", domain.ErrUnavailable, context.DeadlineExceeded)
+	h.llm.StructuredFunc = func(_ context.Context, _ ai.StructuredRequest, _ any) (domain.Usage, error) {
+		return domain.Usage{}, fmt.Errorf("%w: gateway timeout: %w", domain.ErrUnavailable, context.DeadlineExceeded)
 	}
-	got, err = h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
+	got, err = h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), "the other day", testRef)
 	if got != nil || err != nil {
 		t.Fatalf("gateway timeout: got %v, %v; want nil, nil", got, err)
 	}
-	h.llm.StructuredFunc = func(ctx context.Context, _ port.StructuredRequest, _ any) (port.Usage, error) {
-		return port.Usage{}, ctx.Err()
+	h.llm.StructuredFunc = func(ctx context.Context, _ ai.StructuredRequest, _ any) (domain.Usage, error) {
+		return domain.Usage{}, ctx.Err()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = h.tn.QueryWindow(ctx, domain.BankConfig{}, "the other day", testRef)
+	_, err = h.tn.QueryWindow(ctx, h.cfg(domain.BankConfig{}), "the other day", testRef)
 	if !errors.Is(err, context.Canceled) || !strings.HasPrefix(err.Error(), "timex: ") {
 		t.Fatalf("cancelled: err = %v, want wrapped context.Canceled", err)
 	}
 }
 
-// gatewayErrors builds the error shapes the real gateway adapter returns (internal/adapter/gateway):
+// gatewayErrors builds the error shapes the real gateway adapter returns (internal/ai/gateway):
 // persistently schema-invalid output after its retries, a non-retryable 4xx, and a per-call timeout.
 func gatewayErrors(t *testing.T) map[string]error {
 	t.Helper()
@@ -253,12 +246,12 @@ func gatewayErrors(t *testing.T) map[string]error {
 
 // normalizeErrCase is one fallback failure fed to Normalize.
 type normalizeErrCase struct {
-	name      string
-	ctx       context.Context
-	routerErr error
-	llmErr    error
-	raw       string
-	wantErr   error
+	name    string
+	ctx     context.Context
+	unbound bool
+	llmErr  error
+	raw     string
+	wantErr error
 }
 
 // TestNormalizeFallbackErrors checks a retain never fails on dates: every fallback failure (unbound
@@ -266,7 +259,7 @@ type normalizeErrCase struct {
 // only the caller's cancellation is returned.
 func TestNormalizeFallbackErrors(t *testing.T) {
 	tests := []normalizeErrCase{
-		{name: "unbound slot", routerErr: fmt.Errorf("%w: no model bound", domain.ErrInvalidArgument)},
+		{name: "unbound slot", unbound: true},
 		{name: "undecodable answer", raw: `not json`},
 	}
 	for name, gerr := range gatewayErrors(t) {
@@ -290,17 +283,17 @@ func runNormalizeErrCase(t *testing.T, tt normalizeErrCase) {
 		tt.ctx = context.Background()
 	}
 	h := newHarness()
-	h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
-		return port.ModelBinding{Model: "tp"}, tt.routerErr
+	if !tt.unbound {
+		h.bound = &domain.ModelBinding{Model: "tp"}
 	}
-	h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, out any) (port.Usage, error) {
+	h.llm.StructuredFunc = func(_ context.Context, _ ai.StructuredRequest, out any) (domain.Usage, error) {
 		if tt.llmErr != nil {
-			return port.Usage{}, tt.llmErr
+			return domain.Usage{}, tt.llmErr
 		}
-		return port.Usage{}, json.Unmarshal([]byte(tt.raw), out)
+		return domain.Usage{}, json.Unmarshal([]byte(tt.raw), out)
 	}
 	f := &domain.ExtractedFact{TimeExpression: "the long weekend in the mountains"}
-	err := h.tn.Normalize(tt.ctx, domain.BankConfig{}, f, testRef)
+	err := h.tn.Normalize(tt.ctx, h.cfg(domain.BankConfig{}), f, testRef)
 	if tt.wantErr == nil && err != nil || tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 		t.Errorf("%s: err = %v, want %v", tt.name, err, tt.wantErr)
 	}
@@ -313,13 +306,11 @@ func runNormalizeErrCase(t *testing.T, tt normalizeErrCase) {
 func TestQueryWindowGatewayErrorsDegrade(t *testing.T) {
 	for name, gerr := range gatewayErrors(t) {
 		h := newHarness()
-		h.router.ResolveFunc = func(_ domain.BankConfig, _ port.ModelSlot) (port.ModelBinding, error) {
-			return port.ModelBinding{Model: "tp"}, nil
+		h.bound = &domain.ModelBinding{Model: "tp"}
+		h.llm.StructuredFunc = func(_ context.Context, _ ai.StructuredRequest, _ any) (domain.Usage, error) {
+			return domain.Usage{}, gerr
 		}
-		h.llm.StructuredFunc = func(_ context.Context, _ port.StructuredRequest, _ any) (port.Usage, error) {
-			return port.Usage{}, gerr
-		}
-		got, err := h.tn.QueryWindow(context.Background(), domain.BankConfig{}, "the other day", testRef)
+		got, err := h.tn.QueryWindow(context.Background(), h.cfg(domain.BankConfig{}), "the other day", testRef)
 		if got != nil || err != nil {
 			t.Errorf("%s: got %v, %v; want nil, nil", name, got, err)
 		}
@@ -328,14 +319,10 @@ func TestQueryWindowGatewayErrorsDegrade(t *testing.T) {
 
 // TestZeroRefUsesClock checks a zero ref resolves against the injected clock.
 func TestZeroRefUsesClock(t *testing.T) {
-	clock := &mockport.Clock{NowFunc: func() time.Time { return testRef }}
-	tn := NewNormalizer(&mockport.LLM{}, &mockport.ModelRouter{}, clock)
+	tn := NewNormalizer(&mockai.LLM{}, ai.NewRouter(), clock.NewManual(testRef))
 	got, err := tn.QueryWindow(context.Background(), domain.BankConfig{}, "yesterday", time.Time{})
 	if err != nil || !sameWindow(got, w(d(2026, 10, 9), d(2026, 10, 10))) {
 		t.Fatalf("got %v, %v", got, err)
-	}
-	if len(clock.NowCalls()) != 1 {
-		t.Fatalf("clock calls = %d", len(clock.NowCalls()))
 	}
 }
 
@@ -343,7 +330,7 @@ func TestZeroRefUsesClock(t *testing.T) {
 func TestNormalizeByRules(t *testing.T) {
 	h := newHarness()
 	f := &domain.ExtractedFact{Text: "Went hiking", TimeExpression: "last spring"}
-	if err := h.tn.Normalize(context.Background(), domain.BankConfig{}, f, testRef); err != nil {
+	if err := h.tn.Normalize(context.Background(), h.cfg(domain.BankConfig{}), f, testRef); err != nil {
 		t.Fatal(err)
 	}
 	if f.OccurredStart == nil || f.OccurredEnd == nil ||
@@ -357,7 +344,7 @@ func TestNormalizeByRules(t *testing.T) {
 func TestNormalizeOpenRange(t *testing.T) {
 	h := newHarness()
 	f := &domain.ExtractedFact{TimeExpression: "before 2020"}
-	if err := h.tn.Normalize(context.Background(), domain.BankConfig{}, f, testRef); err != nil {
+	if err := h.tn.Normalize(context.Background(), h.cfg(domain.BankConfig{}), f, testRef); err != nil {
 		t.Fatal(err)
 	}
 	if f.OccurredStart != nil || f.OccurredEnd == nil || !f.OccurredEnd.Equal(d(2020, 1, 1)) {
@@ -371,7 +358,7 @@ func TestNormalizeAlreadyAbsoluteUnchanged(t *testing.T) {
 	h := newHarness()
 	start := d(2020, 5, 1)
 	f := &domain.ExtractedFact{TimeExpression: "yesterday", OccurredStart: &start}
-	if err := h.tn.Normalize(context.Background(), domain.BankConfig{}, f, testRef); err != nil {
+	if err := h.tn.Normalize(context.Background(), h.cfg(domain.BankConfig{}), f, testRef); err != nil {
 		t.Fatal(err)
 	}
 	if f.OccurredStart != &start || !f.OccurredStart.Equal(d(2020, 5, 1)) || f.OccurredEnd != nil {
@@ -384,7 +371,7 @@ func TestNormalizeAlreadyAbsoluteUnchanged(t *testing.T) {
 func TestNormalizeEmptyExpressionUnchanged(t *testing.T) {
 	h := newHarness()
 	for _, f := range []*domain.ExtractedFact{{Text: "x"}, {TimeExpression: "   "}, nil} {
-		if err := h.tn.Normalize(context.Background(), domain.BankConfig{}, f, testRef); err != nil {
+		if err := h.tn.Normalize(context.Background(), h.cfg(domain.BankConfig{}), f, testRef); err != nil {
 			t.Fatal(err)
 		}
 		if f != nil && (f.OccurredStart != nil || f.OccurredEnd != nil) {
@@ -401,7 +388,7 @@ func TestNormalizeFallback(t *testing.T) {
 	h.scripted(binding, `{"start":"2026-07-03T00:00:00Z","end":"2026-07-06T00:00:00Z"}`)
 	cfg := domain.BankConfig{RetainMission: "m"}
 	f := &domain.ExtractedFact{TimeExpression: "the long weekend in the mountains"}
-	if err := h.tn.Normalize(context.Background(), cfg, f, testRef); err != nil {
+	if err := h.tn.Normalize(context.Background(), h.cfg(cfg), f, testRef); err != nil {
 		t.Fatal(err)
 	}
 	if f.OccurredStart == nil || !f.OccurredStart.Equal(d(2026, 7, 3)) || !f.OccurredEnd.Equal(d(2026, 7, 6)) {
@@ -414,9 +401,6 @@ func TestNormalizeFallback(t *testing.T) {
 	if !strings.Contains(sc[0].Req.User, "Time expression from a stored fact") {
 		t.Errorf("user prompt:\n%s", sc[0].Req.User)
 	}
-	if rc := h.router.ResolveCalls(); len(rc) != 1 || !reflect.DeepEqual(rc[0].Cfg, cfg) {
-		t.Fatalf("Resolve calls = %+v", rc)
-	}
 }
 
 // TestNormalizeFallbackNullLeavesFact keeps the fact unchanged when the fallback finds no window.
@@ -424,7 +408,7 @@ func TestNormalizeFallbackNullLeavesFact(t *testing.T) {
 	h := newHarness()
 	h.scripted(domain.ModelBinding{Model: "tp"}, `{"start":null,"end":null}`)
 	f := &domain.ExtractedFact{TimeExpression: "once upon a time"}
-	if err := h.tn.Normalize(context.Background(), domain.BankConfig{}, f, testRef); err != nil {
+	if err := h.tn.Normalize(context.Background(), h.cfg(domain.BankConfig{}), f, testRef); err != nil {
 		t.Fatal(err)
 	}
 	if f.OccurredStart != nil || f.OccurredEnd != nil || len(h.llm.StructuredCalls()) != 1 {

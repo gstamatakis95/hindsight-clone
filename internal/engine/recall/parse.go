@@ -3,9 +3,11 @@ package recall
 import (
 	"context"
 	"fmt"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/engine/timex"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 	"time"
 )
@@ -13,7 +15,7 @@ import (
 // parsedQuery is a recall request after parsing: what every Retriever and the Scorer read.
 type parsedQuery struct {
 	// Bank is the bank searched.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Text is the query text, cut to MaxQueryTokens.
 	Text string
 	// Embedding is the query vector from EmbedQuery, 768 dims.
@@ -25,7 +27,7 @@ type parsedQuery struct {
 	// Tags is the request's tag filter.
 	Tags domain.TagFilter
 	// Predicate is Tags compiled once (fuzzy leaves resolved) and shared by all four arms.
-	Predicate *port.SQLPredicate
+	Predicate *store.SQLPredicate
 	// Limit is the per-arm candidate limit from the budget: 100 / 300 / 1000.
 	Limit int
 	// At is the reference time for recency and temporal boosts.
@@ -33,17 +35,17 @@ type parsedQuery struct {
 	// MinScores are the request's arm and result floors.
 	MinScores domain.MinScores
 	// Seq bounds the units' seq; zero = unbounded.
-	Seq port.SeqRange
+	Seq store.SeqRange
 	// Config is the effective (merged) config of the call: recall knobs and the RERANK binding.
 	Config domain.BankConfig
 }
 
 // parseDeps are what parse calls.
 type parseDeps struct {
-	embedder port.Embedder
+	embedder ai.Embedder
 	times    timex.TimeNormalizer
 	tags     TagFilterCompiler
-	clock    port.Clock
+	clock    clock.Clock
 	count    TokenCounter
 }
 

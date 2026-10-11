@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"memd/internal/port"
+	"memd/internal/domain"
 
 	pb "memd/gen/memory/v1"
 )
@@ -116,13 +116,13 @@ func (s *operationServer) ListEvents(ctx context.Context, req *pb.ListEventsRequ
 }
 
 // operationRef builds the bank ref of a request and checks its required operation id.
-func operationRef(ctx context.Context, bankID, opID string) (port.BankRef, port.OperationID, error) {
+func operationRef(ctx context.Context, bankID, opID string) (domain.BankRef, domain.OperationID, error) {
 	b, err := bankRef(ctx, bankID)
 	if err != nil {
-		return port.BankRef{}, "", err
+		return domain.BankRef{}, "", err
 	}
 	if err := requireID("operation_id", opID); err != nil {
-		return port.BankRef{}, "", err
+		return domain.BankRef{}, "", err
 	}
-	return b, port.OperationID(opID), nil
+	return b, domain.OperationID(opID), nil
 }

@@ -7,7 +7,7 @@ package mockretain
 import (
 	"context"
 	"memd/internal/engine/retain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sync"
 )
 
@@ -93,7 +93,7 @@ var _ retain.Retainer = &Retainer{}
 //
 //		// make and configure a mocked retain.Retainer
 //		mockedRetainer := &Retainer{
-//			ProcessDocumentFunc: func(ctx context.Context, j port.Job) (retain.RetainResult, error) {
+//			ProcessDocumentFunc: func(ctx context.Context, j store.Job) (retain.RetainResult, error) {
 //				panic("mock out the ProcessDocument method")
 //			},
 //		}
@@ -104,7 +104,7 @@ var _ retain.Retainer = &Retainer{}
 //	}
 type Retainer struct {
 	// ProcessDocumentFunc mocks the ProcessDocument method.
-	ProcessDocumentFunc func(ctx context.Context, j port.Job) (retain.RetainResult, error)
+	ProcessDocumentFunc func(ctx context.Context, j store.Job) (retain.RetainResult, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -113,20 +113,20 @@ type Retainer struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// J is the j argument value.
-			J port.Job
+			J store.Job
 		}
 	}
 	lockProcessDocument sync.RWMutex
 }
 
 // ProcessDocument calls ProcessDocumentFunc.
-func (mock *Retainer) ProcessDocument(ctx context.Context, j port.Job) (retain.RetainResult, error) {
+func (mock *Retainer) ProcessDocument(ctx context.Context, j store.Job) (retain.RetainResult, error) {
 	if mock.ProcessDocumentFunc == nil {
 		panic("Retainer.ProcessDocumentFunc: method is nil but Retainer.ProcessDocument was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}{
 		Ctx: ctx,
 		J:   j,
@@ -143,11 +143,11 @@ func (mock *Retainer) ProcessDocument(ctx context.Context, j port.Job) (retain.R
 //	len(mockedRetainer.ProcessDocumentCalls())
 func (mock *Retainer) ProcessDocumentCalls() []struct {
 	Ctx context.Context
-	J   port.Job
+	J   store.Job
 } {
 	var calls []struct {
 		Ctx context.Context
-		J   port.Job
+		J   store.Job
 	}
 	mock.lockProcessDocument.RLock()
 	calls = mock.calls.ProcessDocument

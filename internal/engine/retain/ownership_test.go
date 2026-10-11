@@ -3,11 +3,11 @@ package retain
 import (
 	"context"
 	"errors"
+	"memd/internal/ai"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/routing"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"slices"
 	"testing"
 )
@@ -54,7 +54,7 @@ func TestRetainRetryOperationAfterNewerRetain(t *testing.T) {
 	if err := e.store.Complete(e.ctx, j2.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		_, err := tx.Queue().Retry(e.ctx, testBank, j1.ID)
 		return wrap(err)
 	})
@@ -86,7 +86,7 @@ type hookExtractor struct {
 }
 
 // Extract implements Extractor.
-func (h *hookExtractor) Extract(ctx context.Context, in extractInput) ([]ExtractedFact, []domain.Usage, error) {
+func (h *hookExtractor) Extract(ctx context.Context, in extractInput) ([]domain.ExtractedFact, []domain.Usage, error) {
 	h.calls++
 	if h.calls == h.at {
 		h.hook()
@@ -103,7 +103,7 @@ func (e *env) hookedRetainer(at int, hook func()) Retainer {
 // hookedRetainerBatch is e's retainer committing batch chunks per transaction, with an extractor that runs
 // hook before its at-th call.
 func (e *env) hookedRetainerBatch(batch, at int, hook func()) Retainer {
-	router := routing.NewRouter()
+	router := ai.NewRouter()
 	return NewRetainer(RetainerDeps{
 		Store: e.store, Blob: e.blob, Config: e.cfg,
 		Extractor: &hookExtractor{inner: NewExtractor(e.llm, router), at: at, hook: hook}, Embedder: e.emb,

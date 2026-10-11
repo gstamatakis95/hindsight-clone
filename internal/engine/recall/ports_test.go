@@ -2,9 +2,9 @@ package recall
 
 import (
 	"context"
-	"memd/internal/adapter/postgres/pgtest"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"sync"
 	"testing"
@@ -12,9 +12,9 @@ import (
 )
 
 // addChunks stores document doc with the given chunks (ids, indexes and texts) in the store.
-func (e *env) addChunks(t *testing.T, doc port.DocumentID, cs ...domain.Chunk) {
+func (e *env) addChunks(t *testing.T, doc domain.DocumentID, cs ...domain.Chunk) {
 	t.Helper()
-	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
+	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
 		if err := tx.Documents().Upsert(ctx, domain.Document{ID: doc, Bank: testBank}); err != nil {
 			return err
 		}
@@ -66,7 +66,7 @@ func TestRecallMemoryStale(t *testing.T) {
 	if got := stale(); !got["oa"] || got["ob"] || got["fa"] || len(got) != 3 {
 		t.Fatalf("stale = %v, want only oa", got)
 	}
-	e.tx(t, func(ctx context.Context, tx port.Tx, _ int64) error {
+	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
 		return tx.Units().MarkConsolidated(ctx, uids("fa"), testNow)
 	})
 	if got := stale(); got["oa"] {
@@ -76,13 +76,13 @@ func TestRecallMemoryStale(t *testing.T) {
 
 // temporalSpy wraps the store's reader and records the temporal queries it serves.
 type temporalSpy struct {
-	port.Reader
+	store.Reader
 	mu sync.Mutex
-	qs []port.TemporalQuery
+	qs []store.TemporalQuery
 }
 
 // SearchTemporal records q and delegates.
-func (s *temporalSpy) SearchTemporal(ctx context.Context, q port.TemporalQuery) ([]port.Hit, error) {
+func (s *temporalSpy) SearchTemporal(ctx context.Context, q store.TemporalQuery) ([]store.Hit, error) {
 	s.mu.Lock()
 	s.qs = append(s.qs, q)
 	s.mu.Unlock()
@@ -97,7 +97,7 @@ func TestTemporalArmRelevanceFilter(t *testing.T) {
 	rel, noEmb := fact("rel", "rocket launch"), fact("noemb", "rocket launch")
 	rel.OccurredStart, noEmb.OccurredStart = &at, &at
 	e.add(t, rel)
-	e.tx(t, func(ctx context.Context, tx port.Tx, seq int64) error {
+	e.tx(t, func(ctx context.Context, tx store.Tx, seq int64) error {
 		noEmb.Seq, noEmb.Tags = seq, []string{}
 		return tx.Units().Insert(ctx, []domain.Unit{noEmb})
 	})

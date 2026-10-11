@@ -3,8 +3,9 @@ package mentalmodel
 import (
 	"context"
 	"errors"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"sync"
 	"testing"
@@ -13,18 +14,18 @@ import (
 
 // fwChatHookLLM runs hook once, before the first Chat call, to change state while a full build is in flight.
 type fwChatHookLLM struct {
-	port.LLM
+	ai.LLM
 	once *sync.Once
 	hook func()
 }
 
-func (h fwChatHookLLM) Chat(ctx context.Context, req port.ChatRequest) (port.ChatResponse, error) {
+func (h fwChatHookLLM) Chat(ctx context.Context, req ai.ChatRequest) (ai.ChatResponse, error) {
 	h.once.Do(h.hook)
 	return h.LLM.Chat(ctx, req) //nolint:wrapcheck // test pass-through
 }
 
 // fwSingleShotRunner is a runner whose single-shot synthesizer calls llm.
-func fwSingleShotRunner(e *env, llm port.LLM) RefreshRunner {
+func fwSingleShotRunner(e *env, llm ai.LLM) RefreshRunner {
 	md := ModelDeps{LLM: llm, Router: routingRouter(), Clock: e.clock}
 	return NewRefreshRunner(RefreshRunnerDeps{
 		Store: e.store, Config: e.config, Scope: e.reads, Clock: e.clock,
@@ -74,7 +75,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 		opsJSON(map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob."}}))
 	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
 	e.clock.Advance(time.Minute)
-	e.reads.failed = []FailedRefresh{{
+	e.reads.failed = []store.FailedRefresh{{
 		Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: e.clock.Now(), Error: "boom",
 	}}
 	var once sync.Once
@@ -100,7 +101,7 @@ func TestReconcileInterleavedWithWrite(t *testing.T) {
 	}
 
 	e.clock.Advance(time.Minute)
-	e.reads.failed = []FailedRefresh{{
+	e.reads.failed = []store.FailedRefresh{{
 		Bank: e.bank, ModelID: "status", OperationID: opID("op2"), FailedAt: e.clock.Now(), Error: "boom",
 	}}
 	var wg sync.WaitGroup
@@ -121,7 +122,7 @@ func TestReconcileSkipsFailureOfEarlierModel(t *testing.T) {
 	e := newEnv(t)
 	m := e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
 	failedAt := m.CreatedAt.Add(-time.Minute) // created_at is the database's time
-	e.reads.failed = []FailedRefresh{{Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: failedAt}}
+	e.reads.failed = []store.FailedRefresh{{Bank: e.bank, ModelID: "status", OperationID: opID("op0"), FailedAt: failedAt}}
 	rec := NewRefreshFailureReconciler(e.reads, e.store, e.config, e.clock)
 	if n, err := rec.ReconcileFailedRefreshes(e.ctx); err != nil || n != 0 {
 		t.Fatalf("paused %d: %v", n, err)

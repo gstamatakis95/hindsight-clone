@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"memd/internal/ai"
 	"memd/internal/domain"
 	"memd/internal/engine/recall"
-	"memd/internal/port"
 	"memd/internal/prompts"
+	"memd/internal/store"
 	"slices"
 	"strings"
 	"time"
@@ -29,7 +30,7 @@ const (
 // DefaultTools returns the retrieval tools: recall and search_observations over rc, the page tools over pages
 // and expand over r (units, source facts and chunks). A nil dependency leaves its tools out. The done tool is
 // part of the loop, not this list.
-func DefaultTools(rc Recaller, pages PageReader, r port.Reader) []Tool {
+func DefaultTools(rc Recaller, pages PageReader, r store.Reader) []Tool {
 	var tools []Tool
 	if pages != nil {
 		tools = append(tools, &searchPagesTool{pages: pages}, &readPagesTool{pages: pages})
@@ -44,7 +45,7 @@ func DefaultTools(rc Recaller, pages PageReader, r port.Reader) []Tool {
 }
 
 // toolSchemas maps each tool name to its declaration in the reflect_tools asset.
-func toolSchemas() (map[string]port.ToolSpec, error) {
+func toolSchemas() (map[string]ai.ToolSpec, error) {
 	raw, err := prompts.JSON(prompts.ReflectTools)
 	if err != nil {
 		return nil, fmt.Errorf("reflect: %w", err)
@@ -57,9 +58,9 @@ func toolSchemas() (map[string]port.ToolSpec, error) {
 	if err := json.Unmarshal(raw, &specs); err != nil {
 		return nil, fmt.Errorf("reflect: reflect_tools: %w", err)
 	}
-	out := make(map[string]port.ToolSpec, len(specs))
+	out := make(map[string]ai.ToolSpec, len(specs))
 	for _, s := range specs {
-		out[s.Name] = port.ToolSpec{Name: s.Name, Description: s.Description, Parameters: s.Parameters}
+		out[s.Name] = ai.ToolSpec{Name: s.Name, Description: s.Description, Parameters: s.Parameters}
 	}
 	return out, nil
 }
@@ -145,7 +146,7 @@ func estimateTokens(s string) int { return (len(s) + 3) / 4 }
 
 // memoryOut is one memory or observation as the tools show it to the model.
 type memoryOut struct {
-	ID            port.UnitID       `json:"id"`
+	ID            domain.UnitID     `json:"id"`
 	Text          string            `json:"text"`
 	FactType      domain.FactType   `json:"fact_type"`
 	Context       string            `json:"context,omitempty"`
@@ -155,7 +156,7 @@ type memoryOut struct {
 	OccurredStart *time.Time        `json:"occurred_start,omitempty"`
 	OccurredEnd   *time.Time        `json:"occurred_end,omitempty"`
 	MentionedAt   *time.Time        `json:"mentioned_at,omitempty"`
-	SourceFactIDs []port.UnitID     `json:"source_fact_ids,omitempty"`
+	SourceFactIDs []domain.UnitID   `json:"source_fact_ids,omitempty"`
 	IsStale       *bool             `json:"is_stale,omitempty"`
 }
 
@@ -171,7 +172,7 @@ func toMemoryOut(u domain.Unit) memoryOut {
 // remember records retrieved units in the agent state.
 func remember(st *agentState, units ...domain.Unit) {
 	if st.RetrievedUnits == nil {
-		st.RetrievedUnits = map[port.UnitID]domain.Unit{}
+		st.RetrievedUnits = map[domain.UnitID]domain.Unit{}
 	}
 	for _, u := range units {
 		st.RetrievedUnits[u.ID] = u
@@ -235,7 +236,7 @@ func (t *recallTool) Call(ctx context.Context, st *agentState, args json.RawMess
 	}
 	out := map[string]any{"query": a.Query, "memories": memories}
 	if len(res.Chunks) > 0 {
-		chunks := map[port.ChunkID]any{}
+		chunks := map[domain.ChunkID]any{}
 		for id, c := range res.Chunks {
 			chunks[id] = map[string]any{"chunk_text": c.Text, "chunk_index": c.Index, "truncated": c.Truncated}
 		}

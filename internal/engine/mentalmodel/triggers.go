@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 	"time"
 
@@ -29,13 +30,13 @@ type Triggers interface {
 // TriggerDeps are the Triggers' dependencies.
 type TriggerDeps struct {
 	// Store enqueues in short transactions.
-	Store port.Store
+	Store store.DB
 	// Scheduler decides run now, park or skip.
 	Scheduler RefreshScheduler
 	// Cron finds models with a cron schedule; nil disables cron refreshes.
 	Cron CronSource
 	// Clock is the trigger time.
-	Clock port.Clock
+	Clock clock.Clock
 }
 
 // triggers is the Triggers implementation.
@@ -106,7 +107,7 @@ func (t *triggers) EnqueueDueCronRefreshes(ctx context.Context, now time.Time) (
 // cronDue reports whether cm's schedule has a fire time F in (now - cronGrace, now] that is not yet served
 // (no refresh operation created at or after F) and not before the model's creation. An unparsable schedule
 // never fires.
-func (t *triggers) cronDue(cm CronModel, now time.Time) bool {
+func (t *triggers) cronDue(cm store.CronModel, now time.Time) bool {
 	expr := strings.TrimSpace(cm.Model.Spec.Trigger.RefreshCron)
 	if expr == "" {
 		return false
@@ -154,7 +155,7 @@ func (t *triggers) trigger(ctx context.Context, m domain.MentalModel) (bool, err
 		return false, nil
 	}
 	var joined bool
-	err = t.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = t.d.Store.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Seq(ctx, m.Bank); err != nil {
 			return err
 		}
@@ -166,7 +167,7 @@ func (t *triggers) trigger(ctx context.Context, m domain.MentalModel) (bool, err
 }
 
 // listAll reads every page of q from l.
-func listAll(ctx context.Context, l ModelLister, q ModelQuery) ([]domain.MentalModel, error) {
+func listAll(ctx context.Context, l ModelLister, q store.ModelQuery) ([]domain.MentalModel, error) {
 	var out []domain.MentalModel
 	q.PageToken = ""
 	for {

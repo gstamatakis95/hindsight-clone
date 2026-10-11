@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"memd/internal/domain"
 	"memd/internal/engine/reflect"
-	"memd/internal/port"
+	"memd/internal/store"
 	"testing"
 )
 
@@ -52,7 +52,7 @@ func TestMaxDeltaRatioFallsBackToFull(t *testing.T) {
 	ratio := 0.5
 	m := e.model("status")
 	m.Spec.Overrides = &domain.BankConfig{MentalModels: &domain.MentalModelConfig{MaxDeltaRatio: &ratio}}
-	e.tx(func(tx port.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
+	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	doc := splitMarkdown(m.ContentMD)
 	e.llm.RespondJSON(domain.ModelSlotMentalModelDelta, deltaPrompt, opsJSON(map[string]any{

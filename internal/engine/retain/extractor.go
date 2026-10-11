@@ -3,34 +3,26 @@ package retain
 import (
 	"context"
 	"fmt"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"strings"
 	"time"
 )
-
-// ExtractedFact is one fact produced by extraction, before normalization, embedding and storage. It is
-// an alias of domain.ExtractedFact, which lives in domain so timex can normalize it without importing
-// retain.
-type ExtractedFact = domain.ExtractedFact
-
-// Mention is one entity mention (name + kind) of an extracted fact; an alias of domain.Mention.
-type Mention = domain.Mention
 
 // Extractor turns one chunk into facts.
 type Extractor interface {
 	// Extract makes one LLM call per chunk (EXTRACT slot); mission + speaker context injected. The
 	// strategy for in.Config's extraction mode builds the prompt; chunks mode returns the chunk as a
 	// single fact with no call. It also returns the call's token usage (empty with no call).
-	Extract(ctx context.Context, in extractInput) ([]ExtractedFact, []domain.Usage, error)
+	Extract(ctx context.Context, in extractInput) ([]domain.ExtractedFact, []domain.Usage, error)
 }
 
 // extractInput is one chunk to extract facts from, with the item context the prompt needs.
 type extractInput struct {
 	// Bank owns the document.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// DocumentID is the source document.
-	DocumentID port.DocumentID
+	DocumentID domain.DocumentID
 	// ChunkIndex is the chunk's position in the document, from 0.
 	ChunkIndex int
 	// Text is the chunk text.
@@ -50,15 +42,15 @@ type extractInput struct {
 
 // extractor is the Extractor over the gateway.
 type extractor struct {
-	llm    port.LLM
-	router port.ModelRouter
+	llm    ai.LLM
+	router *ai.Router
 	modes  map[domain.ExtractionMode]ExtractionStrategy
 }
 
 var _ Extractor = (*extractor)(nil)
 
 // NewExtractor returns the Extractor. modes are the strategies it can run; none = all five built-in ones.
-func NewExtractor(llm port.LLM, router port.ModelRouter, modes ...ExtractionStrategy) Extractor {
+func NewExtractor(llm ai.LLM, router *ai.Router, modes ...ExtractionStrategy) Extractor {
 	if len(modes) == 0 {
 		modes = []ExtractionStrategy{conciseMode(), verboseMode(), verbatimMode(), chunksMode(), customMode()}
 	}
@@ -70,7 +62,7 @@ func NewExtractor(llm port.LLM, router port.ModelRouter, modes ...ExtractionStra
 }
 
 // Extract implements Extractor. An unset mode is concise; an unknown one is domain.ErrInvalidArgument.
-func (e *extractor) Extract(ctx context.Context, in extractInput) ([]ExtractedFact, []domain.Usage, error) {
+func (e *extractor) Extract(ctx context.Context, in extractInput) ([]domain.ExtractedFact, []domain.Usage, error) {
 	mode := in.Config.ExtractionMode
 	if mode == domain.ExtractionModeUnspecified {
 		mode = domain.ExtractionModeConcise
@@ -80,7 +72,7 @@ func (e *extractor) Extract(ctx context.Context, in extractInput) ([]ExtractedFa
 		return nil, nil, fmt.Errorf("%w: unknown extraction mode %q", domain.ErrInvalidArgument, mode)
 	}
 	if !s.NeedsLLM() {
-		return []ExtractedFact{{Text: in.Text, Type: domain.FactTypeWorld}}, nil, nil
+		return []domain.ExtractedFact{{Text: in.Text, Type: domain.FactTypeWorld}}, nil, nil
 	}
 	p, err := s.Prompt(in.Config, in)
 	if err != nil {
@@ -91,7 +83,7 @@ func (e *extractor) Extract(ctx context.Context, in extractInput) ([]ExtractedFa
 		return nil, nil, err
 	}
 	var resp extractResponse
-	usage, err := e.llm.Structured(ctx, port.StructuredRequest{
+	usage, err := e.llm.Structured(ctx, ai.StructuredRequest{
 		Slot: domain.ModelSlotExtract, Binding: binding, Name: p.Name, System: p.System, User: p.User, Schema: p.Schema,
 	}, &resp)
 	if err != nil {
@@ -147,11 +139,11 @@ const maxCauses = 2
 // text (metadata from the first entry, mentions and labels from all). Otherwise each fact's text is
 // Hindsight's "what | When: when | Involving: who | why"; a fact with no what is dropped, and caused_by
 // indexes are remapped past dropped facts (only earlier facts, at most two; none when causal links are off).
-func parseFacts(raw []rawFact, pc parseConfig) []ExtractedFact {
+func parseFacts(raw []rawFact, pc parseConfig) []domain.ExtractedFact {
 	if pc.verbatim {
 		return verbatimFact(raw, pc)
 	}
-	out := make([]ExtractedFact, 0, len(raw))
+	out := make([]domain.ExtractedFact, 0, len(raw))
 	index := make(map[int]int, len(raw)) // raw index -> output index
 	for i, r := range raw {
 		text := composeText(r)
@@ -170,8 +162,8 @@ func parseFacts(raw []rawFact, pc parseConfig) []ExtractedFact {
 }
 
 // verbatimFact is the one fact of a verbatim chunk.
-func verbatimFact(raw []rawFact, pc parseConfig) []ExtractedFact {
-	f := ExtractedFact{Text: pc.chunk, Type: domain.FactTypeWorld}
+func verbatimFact(raw []rawFact, pc parseConfig) []domain.ExtractedFact {
+	f := domain.ExtractedFact{Text: pc.chunk, Type: domain.FactTypeWorld}
 	if len(raw) > 0 {
 		f = baseFact(raw[0], pc)
 		f.Text = pc.chunk
@@ -181,12 +173,12 @@ func verbatimFact(raw []rawFact, pc parseConfig) []ExtractedFact {
 			f.Labels = append(f.Labels, more.Labels...)
 		}
 	}
-	return []ExtractedFact{f}
+	return []domain.ExtractedFact{f}
 }
 
 // baseFact maps the type, dates, mentions and labels of one raw fact.
-func baseFact(r rawFact, pc parseConfig) ExtractedFact {
-	f := ExtractedFact{Type: factType(r), Labels: r.Labels}
+func baseFact(r rawFact, pc parseConfig) domain.ExtractedFact {
+	f := domain.ExtractedFact{Type: factType(r), Labels: r.Labels}
 	if r.FactKind == "event" {
 		f.OccurredStart = parseTime(dimension(r.OccurredStart))
 		f.OccurredEnd = parseTime(dimension(r.OccurredEnd))
@@ -199,7 +191,7 @@ func baseFact(r rawFact, pc parseConfig) ExtractedFact {
 	if pc.freeForm {
 		for _, e := range r.Entities {
 			if name := strings.TrimSpace(e.Name); name != "" {
-				f.Entities = append(f.Entities, Mention{Name: name, Kind: strings.ToLower(dimension(e.Kind))})
+				f.Entities = append(f.Entities, domain.Mention{Name: name, Kind: strings.ToLower(dimension(e.Kind))})
 			}
 		}
 	}

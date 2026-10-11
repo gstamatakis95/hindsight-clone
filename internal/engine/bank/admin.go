@@ -3,7 +3,6 @@ package bank
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
 )
 
 // ConfigPatch computes a new config from the current one. It must be pure: it runs inside the write
@@ -26,9 +25,9 @@ type BankAdmin interface { //nolint:revive // stutter: mirrors server.BankAdmin,
 	// domain.ErrAlreadyExists.
 	CreateBank(ctx context.Context, bank domain.Bank) (domain.Bank, error)
 	// GetBank returns the bank, a tombstoned one included (DeletingAt set); unknown = domain.ErrNotFound.
-	GetBank(ctx context.Context, b port.BankRef) (domain.Bank, error)
+	GetBank(ctx context.Context, b domain.BankRef) (domain.Bank, error)
 	// UpdateBankConfig applies patch to the bank's own overrides in one transaction and returns the bank.
 	// It is a write: an unknown bank is created with tenant defaults (BankRepo.Ensure), a tombstoned one is
 	// domain.ErrBankDeleting.
-	UpdateBankConfig(ctx context.Context, b port.BankRef, patch ConfigPatch) (domain.Bank, error)
+	UpdateBankConfig(ctx context.Context, b domain.BankRef, patch ConfigPatch) (domain.Bank, error)
 }

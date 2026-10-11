@@ -1,6 +1,6 @@
 // Package gatewayemu is a deterministic, in-process emulation of the OpenAI-compatible AI gateway memd talks to: POST
 // /v1/chat/completions (plain, tools and response_format json_schema), /v1/embeddings and /v1/rerank, the routes and
-// defaults internal/adapter/gateway uses. It answers every prompt memd sends with schema-valid output, so memd runs end
+// defaults internal/ai/gateway uses. It answers every prompt memd sends with schema-valid output, so memd runs end
 // to end with no model in the loop: the e2e tests (test/e2e), the golden fixtures and local development through
 // cmd/gatewayemu use it. Its answers exercise memd's plumbing; they are not real answers.
 //

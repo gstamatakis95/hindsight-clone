@@ -5,7 +5,6 @@ import (
 	"memd/internal/engine/curate"
 	"memd/internal/engine/recall"
 	"memd/internal/engine/retain"
-	"memd/internal/port"
 	"reflect"
 	"testing"
 	"time"
@@ -60,7 +59,7 @@ func TestGoldenRetainRequest(t *testing.T) {
 		RunAsync:          false,
 	}
 	want := retain.IngestRequest{
-		Bank: port.BankRef{Bank: "bank-1"},
+		Bank: domain.BankRef{Bank: "bank-1"},
 		Items: []retain.IngestItem{{
 			Content:    "content-1",
 			Context:    "context-1",
@@ -114,7 +113,7 @@ func TestGoldenRecallRequest(t *testing.T) {
 		Overrides: &pb.BankConfig{ReflectMission: "recall-overrides"},
 	}
 	want := recall.RecallRequest{
-		Bank:  port.BankRef{Bank: "bank-2"},
+		Bank:  domain.BankRef{Bank: "bank-2"},
 		Query: "what happened",
 		Types: []domain.FactType{domain.FactTypeExperience, domain.FactTypeObservation},
 		Tags: domain.TagFilter{
@@ -164,7 +163,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		Overrides: &pb.BankConfig{ReflectMission: "reflect-overrides"},
 	}
 	want := reflecteng.ReflectRequest{
-		Bank:  port.BankRef{Bank: "bank-3"},
+		Bank:  domain.BankRef{Bank: "bank-3"},
 		Query: "why",
 		Tags: domain.TagFilter{
 			Tags: []string{"reflect-tag"}, Match: domain.TagsMatchAnyStrict,

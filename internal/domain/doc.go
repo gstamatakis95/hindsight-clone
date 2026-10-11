@@ -27,9 +27,9 @@
 // # Identity and scopes
 //
 // [BankRef] (tenant, bank) names a bank; every id ([UnitID], [DocumentID], [ChunkID], [EntityID], [OperationID],
-// [MentalModelID], [DirectiveID]) is unique only within its bank, and internal/port re-exports them as aliases. Tags
-// are canonicalized by [NormalizeTags]: NFC, trimmed, lowercased, empty tags dropped, deduplicated and sorted; storage
-// compares tags as plain arrays, so writers normalize first. A [ScopeKey] is one observation scope, a canonical tag set
+// [MentalModelID], [DirectiveID]) is unique only within its bank. Tags are canonicalized by [NormalizeTags]: NFC,
+// trimmed, lowercased, empty tags dropped, deduplicated and sorted; storage compares tags as plain arrays, so writers
+// normalize first. A [ScopeKey] is one observation scope, a canonical tag set
 // within a bank (no tags = the shared scope). Its String is a length-prefixed encoding ("3:foo,5:bar,b"), so no tag
 // content can make two scopes collide, and [ParseScopeKey] accepts only the canonical form, so a scope has exactly one
 // key.
@@ -42,7 +42,7 @@
 // [MatchTags] is the flat filter with Hindsight's five modes (any, all, any_strict, all_strict, exact; unset behaves as
 // any): any and all let untagged units pass, the strict modes do not, and exact with no tags selects only untagged
 // units. [MatchGroup] and [MatchFilter] evaluate the boolean group tree; their semantics are the reference that
-// port.SQLPredicate.Eval and the Postgres rendering agree with.
+// store.SQLPredicate.Eval and the Postgres rendering agree with.
 //
 // # Operations
 //
@@ -56,18 +56,10 @@
 // The error values are classes: wrap them with fmt.Errorf("%w: ...", ErrX) and test with errors.Is. The server maps
 // each class to one gRPC code ([ErrNotFound] NOT_FOUND, [ErrAlreadyExists] ALREADY_EXISTS, [ErrInvalidArgument]
 // INVALID_ARGUMENT, [ErrFailedPrecondition] FAILED_PRECONDITION, [ErrUnavailable] UNAVAILABLE, [ErrResourceExhausted]
-// RESOURCE_EXHAUSTED, ...). Some wrap a broader class: [ErrBankDeleting] wraps ErrFailedPrecondition,
-// [ErrContextOverflow] wraps ErrUnavailable and [ErrTooManyScopes] wraps ErrInvalidArgument. [ErrConflict] means a
-// concurrent writer won a race and the caller may retry; [ErrCancelled] means the operation was cancelled or its bank
-// deleted.
-//
-// # Blob keys
-//
-// [DocumentBlobKey] is where a document's original text is stored:
-//
-//	{tenant}/{bank}/docs/{document_id}/{content_hash}
-//
-// [BankBlobPrefix], "{tenant}/{bank}/", is what deleting a bank removes from blob storage.
+// RESOURCE_EXHAUSTED, ...). Some wrap a broader class: [ErrBankDeleting] and [ErrModelUnbound] wrap
+// ErrFailedPrecondition, [ErrContextOverflow] wraps ErrUnavailable and [ErrTooManyScopes] wraps ErrInvalidArgument.
+// [ErrConflict] means a concurrent writer won a race and the caller may retry; [ErrCancelled] means the operation was
+// cancelled or its bank deleted.
 //
 // # Testing
 //

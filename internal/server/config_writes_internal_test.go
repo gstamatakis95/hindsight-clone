@@ -1,6 +1,7 @@
 package server
 
 import (
+	"memd/internal/ai"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"reflect"
@@ -11,7 +12,7 @@ import (
 // RERANK) pass config.RPCBankConfig, and written whole as a bank or tenant level through the validating
 // patch they are accepted and stored unchanged.
 func TestServerDefaultsStillValidate(t *testing.T) {
-	env := map[string]string{config.EnvModel: "m", config.EnvModelPrefix + "RERANK": "r"}
+	env := map[string]string{ai.EnvModel: "m", ai.EnvModelPrefix + "RERANK": "r"}
 	defaults, err := config.ServerDefaults(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)

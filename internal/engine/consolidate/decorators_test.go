@@ -2,8 +2,9 @@ package consolidate
 
 import (
 	"context"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"sync"
 )
 
@@ -26,7 +27,7 @@ func (h *hookAt) Report(context.Context, domain.Progress) error {
 // hookEmbedder decorates an Embedder: fn runs once, on the first EmbedDocuments call, which happens
 // inside decide (after the CONSOLIDATE call, before the apply transaction).
 type hookEmbedder struct {
-	port.Embedder
+	ai.Embedder
 	once sync.Once
 	fn   func()
 }
@@ -40,43 +41,43 @@ func (h *hookEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]
 // recorder collects what the transactions of a recStore wrote.
 type recorder struct {
 	versions []domain.ObservationVersion
-	evidence map[port.UnitID][]domain.Evidence
+	evidence map[domain.UnitID][]domain.Evidence
 }
 
 // recStore decorates a Store so its transactions record observation versions and evidence.
 type recStore struct {
-	port.Store
+	store.DB
 	rec *recorder
 }
 
 // InTx runs fn with a recording transaction.
-func (s recStore) InTx(ctx context.Context, fn func(port.Tx) error) error {
-	return s.Store.InTx(ctx, func(tx port.Tx) error { return fn(recTx{Tx: tx, rec: s.rec}) })
+func (s recStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
+	return s.DB.InTx(ctx, func(tx store.Tx) error { return fn(recTx{Tx: tx, rec: s.rec}) })
 }
 
 // recTx records through its unit and evidence repositories.
 type recTx struct {
-	port.Tx
+	store.Tx
 	rec *recorder
 }
 
 // Units returns the recording unit repository.
-func (t recTx) Units() port.UnitRepo { return recUnits{UnitRepo: t.Tx.Units(), rec: t.rec} }
+func (t recTx) Units() store.UnitRepo { return recUnits{UnitRepo: t.Tx.Units(), rec: t.rec} }
 
 // Evidence returns the recording evidence repository.
-func (t recTx) Evidence() port.EvidenceRepo {
+func (t recTx) Evidence() store.EvidenceRepo {
 	return recEvidence{EvidenceRepo: t.Tx.Evidence(), rec: t.rec}
 }
 
 // recUnits records RecordObservationVersion.
 type recUnits struct {
-	port.UnitRepo
+	store.UnitRepo
 	rec *recorder
 }
 
 // RecordObservationVersion records v, then writes it.
 func (u recUnits) RecordObservationVersion(
-	ctx context.Context, b port.BankRef, obs port.UnitID, v domain.ObservationVersion,
+	ctx context.Context, b domain.BankRef, obs domain.UnitID, v domain.ObservationVersion,
 ) error {
 	u.rec.versions = append(u.rec.versions, v)
 	return u.UnitRepo.RecordObservationVersion(ctx, b, obs, v)
@@ -84,14 +85,14 @@ func (u recUnits) RecordObservationVersion(
 
 // recEvidence records Add.
 type recEvidence struct {
-	port.EvidenceRepo
+	store.EvidenceRepo
 	rec *recorder
 }
 
 // Add records ev, then writes it.
-func (r recEvidence) Add(ctx context.Context, obs port.UnitID, ev []domain.Evidence) error {
+func (r recEvidence) Add(ctx context.Context, obs domain.UnitID, ev []domain.Evidence) error {
 	if r.rec.evidence == nil {
-		r.rec.evidence = map[port.UnitID][]domain.Evidence{}
+		r.rec.evidence = map[domain.UnitID][]domain.Evidence{}
 	}
 	r.rec.evidence[obs] = append(r.rec.evidence[obs], ev...)
 	return r.EvidenceRepo.Add(ctx, obs, ev)

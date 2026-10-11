@@ -2,7 +2,7 @@ package server
 
 import (
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/engine/docs"
 
 	pb "memd/gen/memory/v1"
 )
@@ -23,7 +23,7 @@ func documentToProto(x domain.Document) *pb.Document {
 }
 
 // documentViewToProto converts a DocumentView: the document plus its original text.
-func documentViewToProto(v DocumentView) *pb.Document {
+func documentViewToProto(v docs.DocumentView) *pb.Document {
 	out := documentToProto(v.Document)
 	out.OriginalText = v.OriginalText
 	return out
@@ -32,7 +32,7 @@ func documentViewToProto(v DocumentView) *pb.Document {
 // document converts a Document to a stored document, dropping original_text (see documentView).
 func (d *decoder) document(m *pb.Document) domain.Document {
 	return domain.Document{
-		ID:              port.DocumentID(m.GetId()),
+		ID:              domain.DocumentID(m.GetId()),
 		ContentHash:     m.GetContentHash(),
 		Tags:            m.GetTags(),
 		UnitCount:       m.GetMemoryUnitCount(),
@@ -45,15 +45,15 @@ func (d *decoder) document(m *pb.Document) domain.Document {
 }
 
 // documentView converts a Document to a DocumentView.
-func (d *decoder) documentView(m *pb.Document) DocumentView {
-	return DocumentView{Document: d.document(m), OriginalText: m.GetOriginalText()}
+func (d *decoder) documentView(m *pb.Document) docs.DocumentView {
+	return docs.DocumentView{Document: d.document(m), OriginalText: m.GetOriginalText()}
 }
 
 // listDocumentsFromProto converts a ListDocumentsRequest; the tenant is set by the caller.
-func listDocumentsFromProto(r *pb.ListDocumentsRequest) (ListDocumentsRequest, error) {
+func listDocumentsFromProto(r *pb.ListDocumentsRequest) (docs.ListDocumentsRequest, error) {
 	var d decoder
-	out := ListDocumentsRequest{
-		Bank:      port.BankRef{Bank: r.GetBankId()},
+	out := docs.ListDocumentsRequest{
+		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		Q:         r.GetQ(),
 		Tags:      r.GetTags(),
 		TagsMatch: fromEnum[domain.TagsMatch](&d, r.GetTagsMatch()),
@@ -67,7 +67,7 @@ func listDocumentsFromProto(r *pb.ListDocumentsRequest) (ListDocumentsRequest, e
 }
 
 // listDocumentsRequestToProto converts a ListDocumentsRequest back to proto.
-func listDocumentsRequestToProto(r ListDocumentsRequest) *pb.ListDocumentsRequest {
+func listDocumentsRequestToProto(r docs.ListDocumentsRequest) *pb.ListDocumentsRequest {
 	return &pb.ListDocumentsRequest{
 		BankId:    r.Bank.Bank,
 		Q:         r.Q,
@@ -82,25 +82,25 @@ func listDocumentsRequestToProto(r ListDocumentsRequest) *pb.ListDocumentsReques
 }
 
 // documentPageToProto converts a DocumentPage to a ListDocumentsResponse (listed documents carry no text).
-func documentPageToProto(p DocumentPage) *pb.ListDocumentsResponse {
-	var docs []*pb.Document
+func documentPageToProto(p docs.DocumentPage) *pb.ListDocumentsResponse {
+	var items []*pb.Document
 	if p.Items != nil {
-		docs = make([]*pb.Document, len(p.Items))
+		items = make([]*pb.Document, len(p.Items))
 		for i := range p.Items {
-			docs[i] = documentToProto(p.Items[i])
+			items[i] = documentToProto(p.Items[i])
 		}
 	}
-	return &pb.ListDocumentsResponse{Documents: docs, NextPageToken: p.NextPageToken}
+	return &pb.ListDocumentsResponse{Documents: items, NextPageToken: p.NextPageToken}
 }
 
 // documentPage converts a ListDocumentsResponse to a DocumentPage.
-func (d *decoder) documentPage(m *pb.ListDocumentsResponse) DocumentPage {
-	var docs []domain.Document
+func (d *decoder) documentPage(m *pb.ListDocumentsResponse) docs.DocumentPage {
+	var items []domain.Document
 	if m.GetDocuments() != nil {
-		docs = make([]domain.Document, len(m.GetDocuments()))
+		items = make([]domain.Document, len(m.GetDocuments()))
 		for i, x := range m.GetDocuments() {
-			docs[i] = d.document(x)
+			items[i] = d.document(x)
 		}
 	}
-	return DocumentPage{Items: docs, NextPageToken: m.GetNextPageToken()}
+	return docs.DocumentPage{Items: items, NextPageToken: m.GetNextPageToken()}
 }

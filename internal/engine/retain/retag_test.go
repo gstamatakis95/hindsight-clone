@@ -3,18 +3,18 @@ package retain
 import (
 	"memd/internal/domain"
 	"memd/internal/engine/docs"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"testing"
 )
 
 // docUnits lists the live units of a document.
-func (e *env) docUnits(doc port.DocumentID) []domain.Unit {
+func (e *env) docUnits(doc domain.DocumentID) []domain.Unit {
 	e.t.Helper()
 	var us []domain.Unit
-	e.inTx(func(tx port.Tx) error {
+	e.inTx(func(tx store.Tx) error {
 		var err error
-		us, err = tx.ListUnits(e.ctx, port.UnitQuery{
+		us, err = tx.ListUnits(e.ctx, store.UnitQuery{
 			Bank: testBank, DocumentID: doc, State: domain.MemoryStateValid, Limit: 1000,
 		})
 		return wrap(err)
@@ -34,12 +34,12 @@ func (e *env) retag(tags ...string) {
 
 // applyRetag completes retain job j, then claims and runs the retag_document job queued behind it on the
 // same "doc:" serial key.
-func (e *env) applyRetag(j port.Job) {
+func (e *env) applyRetag(j store.Job) {
 	e.t.Helper()
 	if err := e.store.Complete(e.ctx, j.ID, nil, nil); err != nil {
 		e.t.Fatal(err)
 	}
-	jobs, err := e.store.Claim(e.ctx, "w1", []port.JobKind{domain.OperationKindRetagDocument}, 1)
+	jobs, err := e.store.Claim(e.ctx, "w1", []domain.OperationKind{domain.OperationKindRetagDocument}, 1)
 	if err != nil || len(jobs) != 1 {
 		e.t.Fatalf("Claim retag_document: %v, %d jobs", err, len(jobs))
 	}
@@ -73,7 +73,7 @@ func (e *env) checkRetagged(stage string, tags ...string) {
 // runRetaggedBetweenBatches runs retain job j one chunk per batch, retagging d1 to [new] after the first
 // batch committed, and checks that the run completes with every chunk's facts and that retag_document then
 // leaves every unit tagged [new].
-func (e *env) runRetaggedBetweenBatches(j port.Job) {
+func (e *env) runRetaggedBetweenBatches(j store.Job) {
 	e.t.Helper()
 	e.scriptChunks(3, false)
 	res, err := e.hookedRetainerBatch(1, 2, func() { e.retag("new") }).ProcessDocument(e.ctx, j)

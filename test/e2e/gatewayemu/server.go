@@ -10,7 +10,7 @@ import (
 	"sync"
 )
 
-// Routes served under the base path, matching internal/adapter/gateway's defaults.
+// Routes served under the base path, matching internal/ai/gateway's defaults.
 const (
 	// BasePath is the OpenAI-style version prefix; the gateway client's BaseURL is URL()+BasePath.
 	BasePath = "/v1"

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
-	"memd/internal/port"
+	"memd/internal/store"
 	"time"
 )
 
@@ -29,32 +31,8 @@ const (
 	consolidateSerialKey = "consolidate"
 )
 
-// ConsolidationCandidates finds banks the consolidation reconcile must look at. It is a read the ports
-// don't expose; the Postgres adapter implements it (decision 2000).
-type ConsolidationCandidates interface {
-	// UnconsolidatedBanks returns every bank that is not tombstoned and has at least one live fact with an
-	// embedding, consolidated_at and consolidation_failed_at unset, created before before.
-	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]port.BankRef, error)
-}
-
-// StalledDeleteSource finds tombstoned banks whose delete stopped: no delete_bank operation is pending or
-// processing (ReclaimStale or a shutdown release failed it at the attempt cap, or it failed for good). The
-// Postgres adapter implements it (decision 2001).
-type StalledDeleteSource interface {
-	// StalledBankDeletes returns every tombstoned bank with no pending or processing delete_bank operation.
-	StalledBankDeletes(ctx context.Context) ([]port.BankRef, error)
-}
-
-// GraphWorkSource finds banks with graph maintenance queued; the Postgres adapter implements it (decision
-// 2002).
-type GraphWorkSource interface {
-	// BanksWithGraphWork returns every bank that is not tombstoned and has graph_dirty or entity_maintenance
-	// rows.
-	BanksWithGraphWork(ctx context.Context) ([]port.BankRef, error)
-}
-
 // CronRefresher enqueues the refreshes of mental models whose refresh_cron schedule has fired; the mental
-// model engine (WP-12) implements it.
+// model engine implements it.
 type CronRefresher interface {
 	// EnqueueDueCronRefreshes enqueues one refresh_mental_model job per model with a refresh_cron whose
 	// latest fire time at or before now has not been served yet, skipping models with auto_refresh_paused
@@ -67,7 +45,7 @@ type CronRefresher interface {
 }
 
 // RefreshFailureReconciler turns failed refreshes into paused models (SPEC "Paused by failure"; decision
-// 012, R10'); the mental model engine (WP-12) implements it.
+// 012, R10'); the mental model engine implements it.
 type RefreshFailureReconciler interface {
 	// ReconcileFailedRefreshes looks, per model, at the latest terminal refresh_mental_model operation.
 	// When it is FAILED and newer than the model's last successful refresh, and not yet recorded, it sets
@@ -81,31 +59,31 @@ type RefreshFailureReconciler interface {
 // MaintenanceDeps are RunMaintenance's dependencies; zero durations take the defaults.
 type MaintenanceDeps struct {
 	// Claimer reclaims stale jobs.
-	Claimer port.Claimer
+	Claimer store.Claimer
 	// Store enqueues consolidation and prunes operations and events.
-	Store port.Store
+	Store store.DB
 	// Clock dates the prune cut-offs and cron checks; nil = the system clock.
-	Clock port.Clock
-	// Consolidation lists banks for the consolidation reconcile; nil skips the step.
-	Consolidation ConsolidationCandidates
+	Clock clock.Clock
+	// Consolidation lists banks for the consolidation reconcile (UnconsolidatedBanks); nil skips the step.
+	Consolidation store.Maintenance
 	// Config resolves each candidate bank's effective config: banks with auto_consolidation or
 	// enable_observations false are skipped. nil = no filtering.
-	Config port.ConfigResolver
+	Config config.Resolver
 	// ConsolidationGrace is how old an unconsolidated unit must be before the reconcile consolidates its bank
 	// (default DefaultConsolidationGrace).
 	ConsolidationGrace time.Duration
-	// Deletes lists tombstoned banks whose delete_bank stopped; nil skips the step.
-	Deletes StalledDeleteSource
-	// Graph lists banks with graph maintenance queued; nil skips the step.
-	Graph GraphWorkSource
+	// Deletes lists tombstoned banks whose delete_bank stopped (StalledBankDeletes); nil skips the step.
+	Deletes store.Maintenance
+	// Graph lists banks with graph maintenance queued (BanksWithGraphWork); nil skips the step.
+	Graph store.Maintenance
 	// CronRefresh enqueues cron refreshes; nil skips the step.
 	CronRefresh CronRefresher
 	// RefreshFailures pauses models whose refresh failed; nil skips the step.
 	RefreshFailures RefreshFailureReconciler
-	// Batches settles retain_batch parents whose children finished; nil skips the step.
-	Batches BatchSettler
-	// Stranded finds facts with a NULL embedding left by a failed rederive; nil skips the step.
-	Stranded StrandedFactSource
+	// Batches settles retain_batch parents whose children finished (SettleRetainBatches); nil skips the step.
+	Batches store.Maintenance
+	// Stranded finds facts with a NULL embedding left by a failed rederive (StrandedFacts); nil skips the step.
+	Stranded store.Maintenance
 	// StrandedRetryAfter is how long after a unit's last rederive ended the step may queue another one
 	// (default DefaultStrandedRetryAfter).
 	StrandedRetryAfter time.Duration
@@ -128,7 +106,7 @@ type MaintenanceDeps struct {
 // withDefaults fills zero fields.
 func (d MaintenanceDeps) withDefaults() MaintenanceDeps {
 	if d.Clock == nil {
-		d.Clock = systemClock{}
+		d.Clock = clock.System{}
 	}
 	if d.Interval <= 0 {
 		d.Interval = DefaultMaintenanceInterval
@@ -273,7 +251,7 @@ func reconcileConsolidation(ctx context.Context, d MaintenanceDeps) (int, error)
 	if err != nil {
 		return 0, fmt.Errorf("list banks to consolidate: %w", err)
 	}
-	var keep []port.BankRef
+	var keep []domain.BankRef
 	var errs []error
 	for _, b := range banks {
 		ok, err := autoConsolidates(ctx, d.Config, b)
@@ -291,13 +269,13 @@ func reconcileConsolidation(ctx context.Context, d MaintenanceDeps) (int, error)
 
 // autoConsolidates reports whether b's effective config lets the tick consolidate it: auto_consolidation and
 // enable_observations both unset or true. A nil resolver lets every bank through.
-func autoConsolidates(ctx context.Context, r port.ConfigResolver, b port.BankRef) (bool, error) {
+func autoConsolidates(ctx context.Context, r config.Resolver, b domain.BankRef) (bool, error) {
 	if r == nil {
 		return true, nil
 	}
 	cfg, err := r.Effective(ctx, b)
 	if err != nil {
-		return false, err
+		return false, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
 	}
 	on := func(p *bool) bool { return p == nil || *p }
 	return on(cfg.AutoConsolidation) && on(cfg.EnableObservations), nil
@@ -340,7 +318,7 @@ func gone(err error) bool {
 // enqueueEach enqueues (or joins) an automatic job of kind for every bank, one short transaction each, and
 // returns how many it inserted. A bank being deleted (or gone) is skipped; other errors don't stop the rest.
 func enqueueEach(
-	ctx context.Context, s port.Store, banks []port.BankRef, kind port.JobKind, serialKey string,
+	ctx context.Context, s store.DB, banks []domain.BankRef, kind domain.OperationKind, serialKey string,
 ) (int, error) {
 	inserted := 0
 	var errs []error
@@ -361,12 +339,12 @@ func enqueueEach(
 // (decision 502), DedupePendingOrRunning. It takes no change seq: nothing here is memory content, and Seq
 // refuses a tombstoned bank, which the delete_bank resume must still reach.
 func enqueueAutomatic(
-	ctx context.Context, s port.Store, b port.BankRef, kind port.JobKind, serialKey string,
+	ctx context.Context, s store.DB, b domain.BankRef, kind domain.OperationKind, serialKey string,
 ) (joined bool, err error) {
-	err = s.InTx(ctx, func(tx port.Tx) error {
-		_, j, err := tx.Queue().Enqueue(ctx, port.Job{
+	err = s.InTx(ctx, func(tx store.Tx) error {
+		_, j, err := tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: kind, SerialKey: serialKey, Payload: json.RawMessage(`{}`),
-			Dedupe: port.DedupePendingOrRunning,
+			Dedupe: store.DedupePendingOrRunning,
 		})
 		joined = j
 		return err
@@ -379,7 +357,7 @@ func enqueueAutomatic(
 func pruneOperations(ctx context.Context, d MaintenanceDeps) (int, error) {
 	before := d.Clock.Now().Add(-d.OperationRetention)
 	n := 0
-	err := d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := d.Store.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		n, err = tx.Queue().Prune(ctx, before)
 		return err
@@ -391,7 +369,7 @@ func pruneOperations(ctx context.Context, d MaintenanceDeps) (int, error) {
 func pruneEvents(ctx context.Context, d MaintenanceDeps) (int, error) {
 	before := d.Clock.Now().Add(-d.EventRetention)
 	n := 0
-	err := d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := d.Store.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		n, err = tx.Events().Prune(ctx, before)
 		return err

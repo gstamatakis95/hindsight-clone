@@ -2,6 +2,7 @@ package server
 
 import (
 	"memd/internal/domain"
+	"memd/internal/engine/mentalmodel"
 
 	pb "memd/gen/memory/v1"
 )
@@ -62,7 +63,7 @@ func init() {
 	}, nil)
 	addRT(func(m *pb.ListMentalModelsResponse) (*pb.ListMentalModelsResponse, error) {
 		var d decoder
-		p := MentalModelPage{Items: d.mentalModels(m.GetMentalModels()), NextPageToken: m.GetNextPageToken()}
+		p := mentalmodel.ModelPage{Items: d.mentalModels(m.GetMentalModels()), NextPageToken: m.GetNextPageToken()}
 		return mentalModelPageToProto(p, domain.DetailFull), d.err
 	}, func(m *pb.ListMentalModelsResponse) {
 		for _, x := range m.MentalModels {

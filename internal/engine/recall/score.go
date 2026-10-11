@@ -5,8 +5,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"memd/internal/ai"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"slices"
 	"time"
 )
@@ -34,15 +35,15 @@ type boosts struct {
 
 // scorer is the Scorer.
 type scorer struct {
-	rr     port.Reranker
-	router port.ModelRouter
-	clock  port.Clock
+	rr     ai.Reranker
+	router *ai.Router
+	clock  clock.Clock
 }
 
 var _ Scorer = (*scorer)(nil)
 
 // newScorer returns the Scorer. rr may be nil, which behaves as recall.rerank = false.
-func newScorer(rr port.Reranker, router port.ModelRouter, clock port.Clock) Scorer {
+func newScorer(rr ai.Reranker, router *ai.Router, clock clock.Clock) Scorer {
 	return &scorer{rr: rr, router: router, clock: clock}
 }
 

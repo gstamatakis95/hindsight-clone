@@ -4,7 +4,7 @@ package e2e
 
 import (
 	"context"
-	"memd/internal/adapter/s3"
+	"memd/internal/blob/s3"
 	"memd/test/e2e/gatewayemu"
 	"memd/test/e2e/harness"
 	"slices"
@@ -159,7 +159,7 @@ const e2eTenant = "e2e"
 // blobKeys lists the MinIO keys under prefix (up to 1000), straight from the bucket memd writes to.
 func (e *env) blobKeys(t *testing.T, prefix string) []string {
 	t.Helper()
-	blob, err := s3.NewBlob(e.ctx(t), s3.Config{
+	blob, err := s3.New(e.ctx(t), s3.Config{
 		Endpoint: e.stack.S3Endpoint, Region: harness.S3Region, Bucket: harness.S3Bucket,
 		AccessKeyID: harness.S3AccessKey, SecretAccessKey: harness.S3SecretKey, UsePathStyle: true,
 	})

@@ -3,9 +3,9 @@ package worker
 import (
 	"context"
 	"errors"
+	"memd/internal/clock"
 	"memd/internal/domain"
-	"memd/internal/fake"
-	"memd/internal/port"
+	"memd/internal/store"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,12 +13,19 @@ import (
 	"time"
 )
 
-// fixedBanks is a ConsolidationCandidates returning the same banks every time.
-type fixedBanks []port.BankRef
-
-func (f fixedBanks) UnconsolidatedBanks(context.Context, time.Time) ([]port.BankRef, error) {
-	return f, nil
+// fixedBanks is a store.Maintenance whose UnconsolidatedBanks returns the same banks every time (the step it is
+// wired into calls nothing else).
+type fixedBanks struct {
+	store.Maintenance
+	banks []domain.BankRef
 }
+
+func (f fixedBanks) UnconsolidatedBanks(context.Context, time.Time) ([]domain.BankRef, error) {
+	return f.banks, nil
+}
+
+// banksOf returns a fixedBanks over bs.
+func banksOf(bs ...domain.BankRef) fixedBanks { return fixedBanks{banks: bs} }
 
 // stepLog records the order maintenance steps ran in.
 type stepLog struct {
@@ -63,7 +70,7 @@ func (c *countingFailures) ReconcileFailedRefreshes(context.Context) (int, error
 
 // loggingClaimer records ReclaimStale in the step log.
 type loggingClaimer struct {
-	port.Claimer
+	store.Claimer
 	log *stepLog
 }
 
@@ -78,7 +85,7 @@ type loggingBanks struct {
 	log *stepLog
 }
 
-func (l loggingBanks) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]port.BankRef, error) {
+func (l loggingBanks) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]domain.BankRef, error) {
 	l.log.add("consolidation")
 	return l.fixedBanks.UnconsolidatedBanks(ctx, before)
 }
@@ -89,14 +96,14 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 	ops := newOps(t)
 	// A job whose worker died long ago: it must be reclaimed exactly once.
 	stale := ops.add(retainJob("1"))
-	kinds := []port.JobKind{domain.OperationKindRetainDocument}
+	kinds := []domain.OperationKind{domain.OperationKindRetainDocument}
 	if js, _ := ops.Claim(context.Background(), "dead", kinds, 1); len(js) != 1 {
 		t.Fatal("setup claim")
 	}
 	ops.ageHeartbeats(DefaultStaleAfter + time.Second)
 	cron, failures := &countingCron{}, &countingFailures{}
 	deps := MaintenanceDeps{
-		Claimer: ops, Store: ops, Clock: clock, Consolidation: fixedBanks{bankA, bankB, bankC},
+		Claimer: ops, Store: ops, Clock: clock, Consolidation: banksOf(bankA, bankB, bankC),
 		CronRefresh: cron, RefreshFailures: failures, Interval: time.Millisecond, Logger: quiet,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,7 +119,7 @@ func TestConcurrentMaintenanceNoDuplicateEnqueues(t *testing.T) {
 	cancel()
 	wg.Wait()
 
-	for _, b := range []port.BankRef{bankA, bankB, bankC} {
+	for _, b := range []domain.BankRef{bankA, bankB, bankC} {
 		if n := ops.countBank(b, domain.OperationKindConsolidate, ""); n != 1 {
 			t.Errorf("bank %v: %d consolidate jobs, want exactly 1", b, n)
 		}
@@ -131,12 +138,12 @@ func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 	clock := newClock()
 	ops := newOps(t)
 	ops.markDeleting(bankC)
-	store := &pruneStore{Store: ops}
+	store := &pruneStore{DB: ops}
 	log := &stepLog{}
 	cron := &countingCron{log: log, err: errors.New("cron parse failed")}
 	deps := MaintenanceDeps{
 		Claimer: &loggingClaimer{Claimer: ops, log: log}, Store: store, Clock: clock,
-		Consolidation: loggingBanks{fixedBanks{bankA, bankC}, log}, CronRefresh: cron,
+		Consolidation: loggingBanks{banksOf(bankA, bankC), log}, CronRefresh: cron,
 		RefreshFailures: &countingFailures{log: log}, Logger: quiet,
 	}.withDefaults()
 	err := maintenanceTick(context.Background(), deps)
@@ -170,12 +177,12 @@ func TestConsolidationReconcileJoinsRunning(t *testing.T) {
 	clock := newClock()
 	ops := newOps(t)
 	ops.add(consolidateJob(bankA))
-	kinds := []port.JobKind{domain.OperationKindConsolidate}
+	kinds := []domain.OperationKind{domain.OperationKindConsolidate}
 	if js, _ := ops.Claim(context.Background(), "w1", kinds, 1); len(js) != 1 {
 		t.Fatal("setup claim")
 	}
 	deps := MaintenanceDeps{
-		Claimer: ops, Store: ops, Clock: clock, Consolidation: fixedBanks{bankA}, Logger: quiet,
+		Claimer: ops, Store: ops, Clock: clock, Consolidation: banksOf(bankA), Logger: quiet,
 	}.withDefaults()
 	n, err := reconcileConsolidation(context.Background(), deps)
 	if err != nil || n != 0 {
@@ -187,12 +194,12 @@ func TestConsolidationReconcileJoinsRunning(t *testing.T) {
 }
 
 func TestPruneOperations(t *testing.T) {
-	clock := fake.NewClock(time.Now())
+	clock := clock.NewManual(time.Now())
 	ops := newOps(t)
 	done := ops.add(retainJob("old"))
 	pending := ops.add(retainJob("pending"))
 	recent := ops.add(retainJob("recent"))
-	for _, id := range []port.OperationID{done, recent} {
+	for _, id := range []domain.OperationID{done, recent} {
 		if _, err := ops.cancel(bankA, id); err != nil {
 			t.Fatal(err)
 		}

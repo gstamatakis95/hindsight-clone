@@ -7,8 +7,12 @@ package mockserver
 import (
 	"context"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/engine/bank"
+	"memd/internal/engine/curate"
+	"memd/internal/engine/docs"
+	"memd/internal/engine/mentalmodel"
 	"memd/internal/server"
+	"memd/internal/store"
 	"sync"
 )
 
@@ -91,7 +95,7 @@ var _ server.TenantAdmin = &TenantAdmin{}
 //			TenantConfigFunc: func(ctx context.Context, tenant string) (domain.BankConfig, error) {
 //				panic("mock out the TenantConfig method")
 //			},
-//			UpdateTenantConfigFunc: func(ctx context.Context, tenant string, patch server.ConfigPatch) (domain.BankConfig, error) {
+//			UpdateTenantConfigFunc: func(ctx context.Context, tenant string, patch bank.ConfigPatch) (domain.BankConfig, error) {
 //				panic("mock out the UpdateTenantConfig method")
 //			},
 //		}
@@ -105,7 +109,7 @@ type TenantAdmin struct {
 	TenantConfigFunc func(ctx context.Context, tenant string) (domain.BankConfig, error)
 
 	// UpdateTenantConfigFunc mocks the UpdateTenantConfig method.
-	UpdateTenantConfigFunc func(ctx context.Context, tenant string, patch server.ConfigPatch) (domain.BankConfig, error)
+	UpdateTenantConfigFunc func(ctx context.Context, tenant string, patch bank.ConfigPatch) (domain.BankConfig, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -123,7 +127,7 @@ type TenantAdmin struct {
 			// Tenant is the tenant argument value.
 			Tenant string
 			// Patch is the patch argument value.
-			Patch server.ConfigPatch
+			Patch bank.ConfigPatch
 		}
 	}
 	lockTenantConfig       sync.RWMutex
@@ -167,14 +171,14 @@ func (mock *TenantAdmin) TenantConfigCalls() []struct {
 }
 
 // UpdateTenantConfig calls UpdateTenantConfigFunc.
-func (mock *TenantAdmin) UpdateTenantConfig(ctx context.Context, tenant string, patch server.ConfigPatch) (domain.BankConfig, error) {
+func (mock *TenantAdmin) UpdateTenantConfig(ctx context.Context, tenant string, patch bank.ConfigPatch) (domain.BankConfig, error) {
 	if mock.UpdateTenantConfigFunc == nil {
 		panic("TenantAdmin.UpdateTenantConfigFunc: method is nil but TenantAdmin.UpdateTenantConfig was just called")
 	}
 	callInfo := struct {
 		Ctx    context.Context
 		Tenant string
-		Patch  server.ConfigPatch
+		Patch  bank.ConfigPatch
 	}{
 		Ctx:    ctx,
 		Tenant: tenant,
@@ -193,12 +197,12 @@ func (mock *TenantAdmin) UpdateTenantConfig(ctx context.Context, tenant string, 
 func (mock *TenantAdmin) UpdateTenantConfigCalls() []struct {
 	Ctx    context.Context
 	Tenant string
-	Patch  server.ConfigPatch
+	Patch  bank.ConfigPatch
 } {
 	var calls []struct {
 		Ctx    context.Context
 		Tenant string
-		Patch  server.ConfigPatch
+		Patch  bank.ConfigPatch
 	}
 	mock.lockUpdateTenantConfig.RLock()
 	calls = mock.calls.UpdateTenantConfig
@@ -216,13 +220,13 @@ var _ server.BankAdmin = &BankAdmin{}
 //
 //		// make and configure a mocked server.BankAdmin
 //		mockedBankAdmin := &BankAdmin{
-//			CreateBankFunc: func(ctx context.Context, bank domain.Bank) (domain.Bank, error) {
+//			CreateBankFunc: func(ctx context.Context, bank1 domain.Bank) (domain.Bank, error) {
 //				panic("mock out the CreateBank method")
 //			},
-//			GetBankFunc: func(ctx context.Context, b port.BankRef) (domain.Bank, error) {
+//			GetBankFunc: func(ctx context.Context, b domain.BankRef) (domain.Bank, error) {
 //				panic("mock out the GetBank method")
 //			},
-//			UpdateBankConfigFunc: func(ctx context.Context, b port.BankRef, patch server.ConfigPatch) (domain.Bank, error) {
+//			UpdateBankConfigFunc: func(ctx context.Context, b domain.BankRef, patch bank.ConfigPatch) (domain.Bank, error) {
 //				panic("mock out the UpdateBankConfig method")
 //			},
 //		}
@@ -233,13 +237,13 @@ var _ server.BankAdmin = &BankAdmin{}
 //	}
 type BankAdmin struct {
 	// CreateBankFunc mocks the CreateBank method.
-	CreateBankFunc func(ctx context.Context, bank domain.Bank) (domain.Bank, error)
+	CreateBankFunc func(ctx context.Context, bank1 domain.Bank) (domain.Bank, error)
 
 	// GetBankFunc mocks the GetBank method.
-	GetBankFunc func(ctx context.Context, b port.BankRef) (domain.Bank, error)
+	GetBankFunc func(ctx context.Context, b domain.BankRef) (domain.Bank, error)
 
 	// UpdateBankConfigFunc mocks the UpdateBankConfig method.
-	UpdateBankConfigFunc func(ctx context.Context, b port.BankRef, patch server.ConfigPatch) (domain.Bank, error)
+	UpdateBankConfigFunc func(ctx context.Context, b domain.BankRef, patch bank.ConfigPatch) (domain.Bank, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -247,24 +251,24 @@ type BankAdmin struct {
 		CreateBank []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
-			// Bank is the bank argument value.
-			Bank domain.Bank
+			// Bank1 is the bank1 argument value.
+			Bank1 domain.Bank
 		}
 		// GetBank holds details about calls to the GetBank method.
 		GetBank []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 		}
 		// UpdateBankConfig holds details about calls to the UpdateBankConfig method.
 		UpdateBankConfig []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Patch is the patch argument value.
-			Patch server.ConfigPatch
+			Patch bank.ConfigPatch
 		}
 	}
 	lockCreateBank       sync.RWMutex
@@ -273,21 +277,21 @@ type BankAdmin struct {
 }
 
 // CreateBank calls CreateBankFunc.
-func (mock *BankAdmin) CreateBank(ctx context.Context, bank domain.Bank) (domain.Bank, error) {
+func (mock *BankAdmin) CreateBank(ctx context.Context, bank1 domain.Bank) (domain.Bank, error) {
 	if mock.CreateBankFunc == nil {
 		panic("BankAdmin.CreateBankFunc: method is nil but BankAdmin.CreateBank was just called")
 	}
 	callInfo := struct {
-		Ctx  context.Context
-		Bank domain.Bank
+		Ctx   context.Context
+		Bank1 domain.Bank
 	}{
-		Ctx:  ctx,
-		Bank: bank,
+		Ctx:   ctx,
+		Bank1: bank1,
 	}
 	mock.lockCreateBank.Lock()
 	mock.calls.CreateBank = append(mock.calls.CreateBank, callInfo)
 	mock.lockCreateBank.Unlock()
-	return mock.CreateBankFunc(ctx, bank)
+	return mock.CreateBankFunc(ctx, bank1)
 }
 
 // CreateBankCalls gets all the calls that were made to CreateBank.
@@ -295,12 +299,12 @@ func (mock *BankAdmin) CreateBank(ctx context.Context, bank domain.Bank) (domain
 //
 //	len(mockedBankAdmin.CreateBankCalls())
 func (mock *BankAdmin) CreateBankCalls() []struct {
-	Ctx  context.Context
-	Bank domain.Bank
+	Ctx   context.Context
+	Bank1 domain.Bank
 } {
 	var calls []struct {
-		Ctx  context.Context
-		Bank domain.Bank
+		Ctx   context.Context
+		Bank1 domain.Bank
 	}
 	mock.lockCreateBank.RLock()
 	calls = mock.calls.CreateBank
@@ -309,13 +313,13 @@ func (mock *BankAdmin) CreateBankCalls() []struct {
 }
 
 // GetBank calls GetBankFunc.
-func (mock *BankAdmin) GetBank(ctx context.Context, b port.BankRef) (domain.Bank, error) {
+func (mock *BankAdmin) GetBank(ctx context.Context, b domain.BankRef) (domain.Bank, error) {
 	if mock.GetBankFunc == nil {
 		panic("BankAdmin.GetBankFunc: method is nil but BankAdmin.GetBank was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -332,11 +336,11 @@ func (mock *BankAdmin) GetBank(ctx context.Context, b port.BankRef) (domain.Bank
 //	len(mockedBankAdmin.GetBankCalls())
 func (mock *BankAdmin) GetBankCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
+	B   domain.BankRef
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
+		B   domain.BankRef
 	}
 	mock.lockGetBank.RLock()
 	calls = mock.calls.GetBank
@@ -345,14 +349,14 @@ func (mock *BankAdmin) GetBankCalls() []struct {
 }
 
 // UpdateBankConfig calls UpdateBankConfigFunc.
-func (mock *BankAdmin) UpdateBankConfig(ctx context.Context, b port.BankRef, patch server.ConfigPatch) (domain.Bank, error) {
+func (mock *BankAdmin) UpdateBankConfig(ctx context.Context, b domain.BankRef, patch bank.ConfigPatch) (domain.Bank, error) {
 	if mock.UpdateBankConfigFunc == nil {
 		panic("BankAdmin.UpdateBankConfigFunc: method is nil but BankAdmin.UpdateBankConfig was just called")
 	}
 	callInfo := struct {
 		Ctx   context.Context
-		B     port.BankRef
-		Patch server.ConfigPatch
+		B     domain.BankRef
+		Patch bank.ConfigPatch
 	}{
 		Ctx:   ctx,
 		B:     b,
@@ -370,13 +374,13 @@ func (mock *BankAdmin) UpdateBankConfig(ctx context.Context, b port.BankRef, pat
 //	len(mockedBankAdmin.UpdateBankConfigCalls())
 func (mock *BankAdmin) UpdateBankConfigCalls() []struct {
 	Ctx   context.Context
-	B     port.BankRef
-	Patch server.ConfigPatch
+	B     domain.BankRef
+	Patch bank.ConfigPatch
 } {
 	var calls []struct {
 		Ctx   context.Context
-		B     port.BankRef
-		Patch server.ConfigPatch
+		B     domain.BankRef
+		Patch bank.ConfigPatch
 	}
 	mock.lockUpdateBankConfig.RLock()
 	calls = mock.calls.UpdateBankConfig
@@ -394,10 +398,10 @@ var _ server.DirectiveAdmin = &DirectiveAdmin{}
 //
 //		// make and configure a mocked server.DirectiveAdmin
 //		mockedDirectiveAdmin := &DirectiveAdmin{
-//			DeleteDirectiveFunc: func(ctx context.Context, b port.BankRef, id port.DirectiveID) error {
+//			DeleteDirectiveFunc: func(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error {
 //				panic("mock out the DeleteDirective method")
 //			},
-//			ListDirectivesFunc: func(ctx context.Context, b port.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error) {
+//			ListDirectivesFunc: func(ctx context.Context, b domain.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error) {
 //				panic("mock out the ListDirectives method")
 //			},
 //			UpsertDirectiveFunc: func(ctx context.Context, d domain.Directive) (domain.Directive, error) {
@@ -411,10 +415,10 @@ var _ server.DirectiveAdmin = &DirectiveAdmin{}
 //	}
 type DirectiveAdmin struct {
 	// DeleteDirectiveFunc mocks the DeleteDirective method.
-	DeleteDirectiveFunc func(ctx context.Context, b port.BankRef, id port.DirectiveID) error
+	DeleteDirectiveFunc func(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error
 
 	// ListDirectivesFunc mocks the ListDirectives method.
-	ListDirectivesFunc func(ctx context.Context, b port.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error)
+	ListDirectivesFunc func(ctx context.Context, b domain.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error)
 
 	// UpsertDirectiveFunc mocks the UpsertDirective method.
 	UpsertDirectiveFunc func(ctx context.Context, d domain.Directive) (domain.Directive, error)
@@ -426,16 +430,16 @@ type DirectiveAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.DirectiveID
+			ID domain.DirectiveID
 		}
 		// ListDirectives holds details about calls to the ListDirectives method.
 		ListDirectives []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Tags is the tags argument value.
 			Tags []string
 			// ActiveOnly is the activeOnly argument value.
@@ -455,14 +459,14 @@ type DirectiveAdmin struct {
 }
 
 // DeleteDirective calls DeleteDirectiveFunc.
-func (mock *DirectiveAdmin) DeleteDirective(ctx context.Context, b port.BankRef, id port.DirectiveID) error {
+func (mock *DirectiveAdmin) DeleteDirective(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error {
 	if mock.DeleteDirectiveFunc == nil {
 		panic("DirectiveAdmin.DeleteDirectiveFunc: method is nil but DirectiveAdmin.DeleteDirective was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.DirectiveID
+		B   domain.BankRef
+		ID  domain.DirectiveID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -480,13 +484,13 @@ func (mock *DirectiveAdmin) DeleteDirective(ctx context.Context, b port.BankRef,
 //	len(mockedDirectiveAdmin.DeleteDirectiveCalls())
 func (mock *DirectiveAdmin) DeleteDirectiveCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.DirectiveID
+	B   domain.BankRef
+	ID  domain.DirectiveID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.DirectiveID
+		B   domain.BankRef
+		ID  domain.DirectiveID
 	}
 	mock.lockDeleteDirective.RLock()
 	calls = mock.calls.DeleteDirective
@@ -495,13 +499,13 @@ func (mock *DirectiveAdmin) DeleteDirectiveCalls() []struct {
 }
 
 // ListDirectives calls ListDirectivesFunc.
-func (mock *DirectiveAdmin) ListDirectives(ctx context.Context, b port.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error) {
+func (mock *DirectiveAdmin) ListDirectives(ctx context.Context, b domain.BankRef, tags []string, activeOnly bool) ([]domain.Directive, error) {
 	if mock.ListDirectivesFunc == nil {
 		panic("DirectiveAdmin.ListDirectivesFunc: method is nil but DirectiveAdmin.ListDirectives was just called")
 	}
 	callInfo := struct {
 		Ctx        context.Context
-		B          port.BankRef
+		B          domain.BankRef
 		Tags       []string
 		ActiveOnly bool
 	}{
@@ -522,13 +526,13 @@ func (mock *DirectiveAdmin) ListDirectives(ctx context.Context, b port.BankRef, 
 //	len(mockedDirectiveAdmin.ListDirectivesCalls())
 func (mock *DirectiveAdmin) ListDirectivesCalls() []struct {
 	Ctx        context.Context
-	B          port.BankRef
+	B          domain.BankRef
 	Tags       []string
 	ActiveOnly bool
 } {
 	var calls []struct {
 		Ctx        context.Context
-		B          port.BankRef
+		B          domain.BankRef
 		Tags       []string
 		ActiveOnly bool
 	}
@@ -584,13 +588,13 @@ var _ server.DocumentAdmin = &DocumentAdmin{}
 //
 //		// make and configure a mocked server.DocumentAdmin
 //		mockedDocumentAdmin := &DocumentAdmin{
-//			GetDocumentFunc: func(ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool) (server.DocumentView, error) {
+//			GetDocumentFunc: func(ctx context.Context, b domain.BankRef, id domain.DocumentID, includeText bool) (docs.DocumentView, error) {
 //				panic("mock out the GetDocument method")
 //			},
-//			ListDocumentsFunc: func(ctx context.Context, req server.ListDocumentsRequest) (server.DocumentPage, error) {
+//			ListDocumentsFunc: func(ctx context.Context, req docs.ListDocumentsRequest) (docs.DocumentPage, error) {
 //				panic("mock out the ListDocuments method")
 //			},
-//			ReprocessDocumentFunc: func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (domain.Operation, error) {
+//			ReprocessDocumentFunc: func(ctx context.Context, b domain.BankRef, id domain.DocumentID, overrides *domain.BankConfig) (domain.Operation, error) {
 //				panic("mock out the ReprocessDocument method")
 //			},
 //		}
@@ -601,13 +605,13 @@ var _ server.DocumentAdmin = &DocumentAdmin{}
 //	}
 type DocumentAdmin struct {
 	// GetDocumentFunc mocks the GetDocument method.
-	GetDocumentFunc func(ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool) (server.DocumentView, error)
+	GetDocumentFunc func(ctx context.Context, b domain.BankRef, id domain.DocumentID, includeText bool) (docs.DocumentView, error)
 
 	// ListDocumentsFunc mocks the ListDocuments method.
-	ListDocumentsFunc func(ctx context.Context, req server.ListDocumentsRequest) (server.DocumentPage, error)
+	ListDocumentsFunc func(ctx context.Context, req docs.ListDocumentsRequest) (docs.DocumentPage, error)
 
 	// ReprocessDocumentFunc mocks the ReprocessDocument method.
-	ReprocessDocumentFunc func(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (domain.Operation, error)
+	ReprocessDocumentFunc func(ctx context.Context, b domain.BankRef, id domain.DocumentID, overrides *domain.BankConfig) (domain.Operation, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -616,9 +620,9 @@ type DocumentAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.DocumentID
+			ID domain.DocumentID
 			// IncludeText is the includeText argument value.
 			IncludeText bool
 		}
@@ -627,16 +631,16 @@ type DocumentAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Req is the req argument value.
-			Req server.ListDocumentsRequest
+			Req docs.ListDocumentsRequest
 		}
 		// ReprocessDocument holds details about calls to the ReprocessDocument method.
 		ReprocessDocument []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.DocumentID
+			ID domain.DocumentID
 			// Overrides is the overrides argument value.
 			Overrides *domain.BankConfig
 		}
@@ -647,14 +651,14 @@ type DocumentAdmin struct {
 }
 
 // GetDocument calls GetDocumentFunc.
-func (mock *DocumentAdmin) GetDocument(ctx context.Context, b port.BankRef, id port.DocumentID, includeText bool) (server.DocumentView, error) {
+func (mock *DocumentAdmin) GetDocument(ctx context.Context, b domain.BankRef, id domain.DocumentID, includeText bool) (docs.DocumentView, error) {
 	if mock.GetDocumentFunc == nil {
 		panic("DocumentAdmin.GetDocumentFunc: method is nil but DocumentAdmin.GetDocument was just called")
 	}
 	callInfo := struct {
 		Ctx         context.Context
-		B           port.BankRef
-		ID          port.DocumentID
+		B           domain.BankRef
+		ID          domain.DocumentID
 		IncludeText bool
 	}{
 		Ctx:         ctx,
@@ -674,14 +678,14 @@ func (mock *DocumentAdmin) GetDocument(ctx context.Context, b port.BankRef, id p
 //	len(mockedDocumentAdmin.GetDocumentCalls())
 func (mock *DocumentAdmin) GetDocumentCalls() []struct {
 	Ctx         context.Context
-	B           port.BankRef
-	ID          port.DocumentID
+	B           domain.BankRef
+	ID          domain.DocumentID
 	IncludeText bool
 } {
 	var calls []struct {
 		Ctx         context.Context
-		B           port.BankRef
-		ID          port.DocumentID
+		B           domain.BankRef
+		ID          domain.DocumentID
 		IncludeText bool
 	}
 	mock.lockGetDocument.RLock()
@@ -691,13 +695,13 @@ func (mock *DocumentAdmin) GetDocumentCalls() []struct {
 }
 
 // ListDocuments calls ListDocumentsFunc.
-func (mock *DocumentAdmin) ListDocuments(ctx context.Context, req server.ListDocumentsRequest) (server.DocumentPage, error) {
+func (mock *DocumentAdmin) ListDocuments(ctx context.Context, req docs.ListDocumentsRequest) (docs.DocumentPage, error) {
 	if mock.ListDocumentsFunc == nil {
 		panic("DocumentAdmin.ListDocumentsFunc: method is nil but DocumentAdmin.ListDocuments was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		Req server.ListDocumentsRequest
+		Req docs.ListDocumentsRequest
 	}{
 		Ctx: ctx,
 		Req: req,
@@ -714,11 +718,11 @@ func (mock *DocumentAdmin) ListDocuments(ctx context.Context, req server.ListDoc
 //	len(mockedDocumentAdmin.ListDocumentsCalls())
 func (mock *DocumentAdmin) ListDocumentsCalls() []struct {
 	Ctx context.Context
-	Req server.ListDocumentsRequest
+	Req docs.ListDocumentsRequest
 } {
 	var calls []struct {
 		Ctx context.Context
-		Req server.ListDocumentsRequest
+		Req docs.ListDocumentsRequest
 	}
 	mock.lockListDocuments.RLock()
 	calls = mock.calls.ListDocuments
@@ -727,14 +731,14 @@ func (mock *DocumentAdmin) ListDocumentsCalls() []struct {
 }
 
 // ReprocessDocument calls ReprocessDocumentFunc.
-func (mock *DocumentAdmin) ReprocessDocument(ctx context.Context, b port.BankRef, id port.DocumentID, overrides *domain.BankConfig) (domain.Operation, error) {
+func (mock *DocumentAdmin) ReprocessDocument(ctx context.Context, b domain.BankRef, id domain.DocumentID, overrides *domain.BankConfig) (domain.Operation, error) {
 	if mock.ReprocessDocumentFunc == nil {
 		panic("DocumentAdmin.ReprocessDocumentFunc: method is nil but DocumentAdmin.ReprocessDocument was just called")
 	}
 	callInfo := struct {
 		Ctx       context.Context
-		B         port.BankRef
-		ID        port.DocumentID
+		B         domain.BankRef
+		ID        domain.DocumentID
 		Overrides *domain.BankConfig
 	}{
 		Ctx:       ctx,
@@ -754,14 +758,14 @@ func (mock *DocumentAdmin) ReprocessDocument(ctx context.Context, b port.BankRef
 //	len(mockedDocumentAdmin.ReprocessDocumentCalls())
 func (mock *DocumentAdmin) ReprocessDocumentCalls() []struct {
 	Ctx       context.Context
-	B         port.BankRef
-	ID        port.DocumentID
+	B         domain.BankRef
+	ID        domain.DocumentID
 	Overrides *domain.BankConfig
 } {
 	var calls []struct {
 		Ctx       context.Context
-		B         port.BankRef
-		ID        port.DocumentID
+		B         domain.BankRef
+		ID        domain.DocumentID
 		Overrides *domain.BankConfig
 	}
 	mock.lockReprocessDocument.RLock()
@@ -780,16 +784,16 @@ var _ server.ObservationAdmin = &ObservationAdmin{}
 //
 //		// make and configure a mocked server.ObservationAdmin
 //		mockedObservationAdmin := &ObservationAdmin{
-//			ClearMemoryObservationsFunc: func(ctx context.Context, b port.BankRef, id port.UnitID, reconsolidate bool) (server.ClearResult, error) {
+//			ClearMemoryObservationsFunc: func(ctx context.Context, b domain.BankRef, id domain.UnitID, reconsolidate bool) (curate.ClearResult, error) {
 //				panic("mock out the ClearMemoryObservations method")
 //			},
-//			ClearObservationsFunc: func(ctx context.Context, b port.BankRef, scopes []domain.TagSet, reconsolidate bool) (server.ClearResult, error) {
+//			ClearObservationsFunc: func(ctx context.Context, b domain.BankRef, scopes []domain.TagSet, reconsolidate bool) (curate.ClearResult, error) {
 //				panic("mock out the ClearObservations method")
 //			},
-//			ConsolidateFunc: func(ctx context.Context, b port.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (domain.Operation, error) {
+//			ConsolidateFunc: func(ctx context.Context, b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (domain.Operation, error) {
 //				panic("mock out the Consolidate method")
 //			},
-//			ListScopesFunc: func(ctx context.Context, b port.BankRef, pageSize int, pageToken string) (server.ScopePage, error) {
+//			ListScopesFunc: func(ctx context.Context, b domain.BankRef, pageSize int, pageToken string) (curate.ScopePage, error) {
 //				panic("mock out the ListScopes method")
 //			},
 //		}
@@ -800,16 +804,16 @@ var _ server.ObservationAdmin = &ObservationAdmin{}
 //	}
 type ObservationAdmin struct {
 	// ClearMemoryObservationsFunc mocks the ClearMemoryObservations method.
-	ClearMemoryObservationsFunc func(ctx context.Context, b port.BankRef, id port.UnitID, reconsolidate bool) (server.ClearResult, error)
+	ClearMemoryObservationsFunc func(ctx context.Context, b domain.BankRef, id domain.UnitID, reconsolidate bool) (curate.ClearResult, error)
 
 	// ClearObservationsFunc mocks the ClearObservations method.
-	ClearObservationsFunc func(ctx context.Context, b port.BankRef, scopes []domain.TagSet, reconsolidate bool) (server.ClearResult, error)
+	ClearObservationsFunc func(ctx context.Context, b domain.BankRef, scopes []domain.TagSet, reconsolidate bool) (curate.ClearResult, error)
 
 	// ConsolidateFunc mocks the Consolidate method.
-	ConsolidateFunc func(ctx context.Context, b port.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (domain.Operation, error)
+	ConsolidateFunc func(ctx context.Context, b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (domain.Operation, error)
 
 	// ListScopesFunc mocks the ListScopes method.
-	ListScopesFunc func(ctx context.Context, b port.BankRef, pageSize int, pageToken string) (server.ScopePage, error)
+	ListScopesFunc func(ctx context.Context, b domain.BankRef, pageSize int, pageToken string) (curate.ScopePage, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -818,9 +822,9 @@ type ObservationAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.UnitID
+			ID domain.UnitID
 			// Reconsolidate is the reconsolidate argument value.
 			Reconsolidate bool
 		}
@@ -829,7 +833,7 @@ type ObservationAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Scopes is the scopes argument value.
 			Scopes []domain.TagSet
 			// Reconsolidate is the reconsolidate argument value.
@@ -840,7 +844,7 @@ type ObservationAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Scopes is the scopes argument value.
 			Scopes []domain.TagSet
 			// Overrides is the overrides argument value.
@@ -851,7 +855,7 @@ type ObservationAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// PageSize is the pageSize argument value.
 			PageSize int
 			// PageToken is the pageToken argument value.
@@ -865,14 +869,14 @@ type ObservationAdmin struct {
 }
 
 // ClearMemoryObservations calls ClearMemoryObservationsFunc.
-func (mock *ObservationAdmin) ClearMemoryObservations(ctx context.Context, b port.BankRef, id port.UnitID, reconsolidate bool) (server.ClearResult, error) {
+func (mock *ObservationAdmin) ClearMemoryObservations(ctx context.Context, b domain.BankRef, id domain.UnitID, reconsolidate bool) (curate.ClearResult, error) {
 	if mock.ClearMemoryObservationsFunc == nil {
 		panic("ObservationAdmin.ClearMemoryObservationsFunc: method is nil but ObservationAdmin.ClearMemoryObservations was just called")
 	}
 	callInfo := struct {
 		Ctx           context.Context
-		B             port.BankRef
-		ID            port.UnitID
+		B             domain.BankRef
+		ID            domain.UnitID
 		Reconsolidate bool
 	}{
 		Ctx:           ctx,
@@ -892,14 +896,14 @@ func (mock *ObservationAdmin) ClearMemoryObservations(ctx context.Context, b por
 //	len(mockedObservationAdmin.ClearMemoryObservationsCalls())
 func (mock *ObservationAdmin) ClearMemoryObservationsCalls() []struct {
 	Ctx           context.Context
-	B             port.BankRef
-	ID            port.UnitID
+	B             domain.BankRef
+	ID            domain.UnitID
 	Reconsolidate bool
 } {
 	var calls []struct {
 		Ctx           context.Context
-		B             port.BankRef
-		ID            port.UnitID
+		B             domain.BankRef
+		ID            domain.UnitID
 		Reconsolidate bool
 	}
 	mock.lockClearMemoryObservations.RLock()
@@ -909,13 +913,13 @@ func (mock *ObservationAdmin) ClearMemoryObservationsCalls() []struct {
 }
 
 // ClearObservations calls ClearObservationsFunc.
-func (mock *ObservationAdmin) ClearObservations(ctx context.Context, b port.BankRef, scopes []domain.TagSet, reconsolidate bool) (server.ClearResult, error) {
+func (mock *ObservationAdmin) ClearObservations(ctx context.Context, b domain.BankRef, scopes []domain.TagSet, reconsolidate bool) (curate.ClearResult, error) {
 	if mock.ClearObservationsFunc == nil {
 		panic("ObservationAdmin.ClearObservationsFunc: method is nil but ObservationAdmin.ClearObservations was just called")
 	}
 	callInfo := struct {
 		Ctx           context.Context
-		B             port.BankRef
+		B             domain.BankRef
 		Scopes        []domain.TagSet
 		Reconsolidate bool
 	}{
@@ -936,13 +940,13 @@ func (mock *ObservationAdmin) ClearObservations(ctx context.Context, b port.Bank
 //	len(mockedObservationAdmin.ClearObservationsCalls())
 func (mock *ObservationAdmin) ClearObservationsCalls() []struct {
 	Ctx           context.Context
-	B             port.BankRef
+	B             domain.BankRef
 	Scopes        []domain.TagSet
 	Reconsolidate bool
 } {
 	var calls []struct {
 		Ctx           context.Context
-		B             port.BankRef
+		B             domain.BankRef
 		Scopes        []domain.TagSet
 		Reconsolidate bool
 	}
@@ -953,13 +957,13 @@ func (mock *ObservationAdmin) ClearObservationsCalls() []struct {
 }
 
 // Consolidate calls ConsolidateFunc.
-func (mock *ObservationAdmin) Consolidate(ctx context.Context, b port.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (domain.Operation, error) {
+func (mock *ObservationAdmin) Consolidate(ctx context.Context, b domain.BankRef, scopes []domain.TagSet, overrides *domain.BankConfig) (domain.Operation, error) {
 	if mock.ConsolidateFunc == nil {
 		panic("ObservationAdmin.ConsolidateFunc: method is nil but ObservationAdmin.Consolidate was just called")
 	}
 	callInfo := struct {
 		Ctx       context.Context
-		B         port.BankRef
+		B         domain.BankRef
 		Scopes    []domain.TagSet
 		Overrides *domain.BankConfig
 	}{
@@ -980,13 +984,13 @@ func (mock *ObservationAdmin) Consolidate(ctx context.Context, b port.BankRef, s
 //	len(mockedObservationAdmin.ConsolidateCalls())
 func (mock *ObservationAdmin) ConsolidateCalls() []struct {
 	Ctx       context.Context
-	B         port.BankRef
+	B         domain.BankRef
 	Scopes    []domain.TagSet
 	Overrides *domain.BankConfig
 } {
 	var calls []struct {
 		Ctx       context.Context
-		B         port.BankRef
+		B         domain.BankRef
 		Scopes    []domain.TagSet
 		Overrides *domain.BankConfig
 	}
@@ -997,13 +1001,13 @@ func (mock *ObservationAdmin) ConsolidateCalls() []struct {
 }
 
 // ListScopes calls ListScopesFunc.
-func (mock *ObservationAdmin) ListScopes(ctx context.Context, b port.BankRef, pageSize int, pageToken string) (server.ScopePage, error) {
+func (mock *ObservationAdmin) ListScopes(ctx context.Context, b domain.BankRef, pageSize int, pageToken string) (curate.ScopePage, error) {
 	if mock.ListScopesFunc == nil {
 		panic("ObservationAdmin.ListScopesFunc: method is nil but ObservationAdmin.ListScopes was just called")
 	}
 	callInfo := struct {
 		Ctx       context.Context
-		B         port.BankRef
+		B         domain.BankRef
 		PageSize  int
 		PageToken string
 	}{
@@ -1024,13 +1028,13 @@ func (mock *ObservationAdmin) ListScopes(ctx context.Context, b port.BankRef, pa
 //	len(mockedObservationAdmin.ListScopesCalls())
 func (mock *ObservationAdmin) ListScopesCalls() []struct {
 	Ctx       context.Context
-	B         port.BankRef
+	B         domain.BankRef
 	PageSize  int
 	PageToken string
 } {
 	var calls []struct {
 		Ctx       context.Context
-		B         port.BankRef
+		B         domain.BankRef
 		PageSize  int
 		PageToken string
 	}
@@ -1050,31 +1054,31 @@ var _ server.MentalModelAdmin = &MentalModelAdmin{}
 //
 //		// make and configure a mocked server.MentalModelAdmin
 //		mockedMentalModelAdmin := &MentalModelAdmin{
-//			ClearMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error) {
+//			ClearMentalModelFunc: func(ctx context.Context, b domain.BankRef, id domain.MentalModelID) (domain.MentalModel, error) {
 //				panic("mock out the ClearMentalModel method")
 //			},
-//			CreateMentalModelFunc: func(ctx context.Context, b port.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error) {
+//			CreateMentalModelFunc: func(ctx context.Context, b domain.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error) {
 //				panic("mock out the CreateMentalModel method")
 //			},
-//			DeleteFolderFunc: func(ctx context.Context, b port.BankRef, path string) (int, error) {
+//			DeleteFolderFunc: func(ctx context.Context, b domain.BankRef, path string) (int, error) {
 //				panic("mock out the DeleteFolder method")
 //			},
-//			DeleteMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID) error {
+//			DeleteMentalModelFunc: func(ctx context.Context, b domain.BankRef, id domain.MentalModelID) error {
 //				panic("mock out the DeleteMentalModel method")
 //			},
-//			GetMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail) (domain.MentalModel, error) {
+//			GetMentalModelFunc: func(ctx context.Context, b domain.BankRef, id domain.MentalModelID, detail domain.Detail) (domain.MentalModel, error) {
 //				panic("mock out the GetMentalModel method")
 //			},
-//			ListMentalModelsFunc: func(ctx context.Context, req server.ListMentalModelsRequest) (server.MentalModelPage, error) {
+//			ListMentalModelsFunc: func(ctx context.Context, req mentalmodel.ListRequest) (mentalmodel.ModelPage, error) {
 //				panic("mock out the ListMentalModels method")
 //			},
-//			MentalModelHistoryFunc: func(ctx context.Context, req server.HistoryRequest) (server.HistoryPage, error) {
+//			MentalModelHistoryFunc: func(ctx context.Context, req mentalmodel.HistoryRequest) (mentalmodel.HistoryPage, error) {
 //				panic("mock out the MentalModelHistory method")
 //			},
-//			RefreshMentalModelFunc: func(ctx context.Context, req server.RefreshRequest) (domain.Operation, bool, error) {
+//			RefreshMentalModelFunc: func(ctx context.Context, req mentalmodel.RefreshRequest) (domain.Operation, bool, error) {
 //				panic("mock out the RefreshMentalModel method")
 //			},
-//			UpdateMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID, patch server.SpecPatch) (domain.MentalModel, error) {
+//			UpdateMentalModelFunc: func(ctx context.Context, b domain.BankRef, id domain.MentalModelID, patch mentalmodel.SpecPatch) (domain.MentalModel, error) {
 //				panic("mock out the UpdateMentalModel method")
 //			},
 //		}
@@ -1085,31 +1089,31 @@ var _ server.MentalModelAdmin = &MentalModelAdmin{}
 //	}
 type MentalModelAdmin struct {
 	// ClearMentalModelFunc mocks the ClearMentalModel method.
-	ClearMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error)
+	ClearMentalModelFunc func(ctx context.Context, b domain.BankRef, id domain.MentalModelID) (domain.MentalModel, error)
 
 	// CreateMentalModelFunc mocks the CreateMentalModel method.
-	CreateMentalModelFunc func(ctx context.Context, b port.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error)
+	CreateMentalModelFunc func(ctx context.Context, b domain.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error)
 
 	// DeleteFolderFunc mocks the DeleteFolder method.
-	DeleteFolderFunc func(ctx context.Context, b port.BankRef, path string) (int, error)
+	DeleteFolderFunc func(ctx context.Context, b domain.BankRef, path string) (int, error)
 
 	// DeleteMentalModelFunc mocks the DeleteMentalModel method.
-	DeleteMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID) error
+	DeleteMentalModelFunc func(ctx context.Context, b domain.BankRef, id domain.MentalModelID) error
 
 	// GetMentalModelFunc mocks the GetMentalModel method.
-	GetMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail) (domain.MentalModel, error)
+	GetMentalModelFunc func(ctx context.Context, b domain.BankRef, id domain.MentalModelID, detail domain.Detail) (domain.MentalModel, error)
 
 	// ListMentalModelsFunc mocks the ListMentalModels method.
-	ListMentalModelsFunc func(ctx context.Context, req server.ListMentalModelsRequest) (server.MentalModelPage, error)
+	ListMentalModelsFunc func(ctx context.Context, req mentalmodel.ListRequest) (mentalmodel.ModelPage, error)
 
 	// MentalModelHistoryFunc mocks the MentalModelHistory method.
-	MentalModelHistoryFunc func(ctx context.Context, req server.HistoryRequest) (server.HistoryPage, error)
+	MentalModelHistoryFunc func(ctx context.Context, req mentalmodel.HistoryRequest) (mentalmodel.HistoryPage, error)
 
 	// RefreshMentalModelFunc mocks the RefreshMentalModel method.
-	RefreshMentalModelFunc func(ctx context.Context, req server.RefreshRequest) (domain.Operation, bool, error)
+	RefreshMentalModelFunc func(ctx context.Context, req mentalmodel.RefreshRequest) (domain.Operation, bool, error)
 
 	// UpdateMentalModelFunc mocks the UpdateMentalModel method.
-	UpdateMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID, patch server.SpecPatch) (domain.MentalModel, error)
+	UpdateMentalModelFunc func(ctx context.Context, b domain.BankRef, id domain.MentalModelID, patch mentalmodel.SpecPatch) (domain.MentalModel, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -1118,16 +1122,16 @@ type MentalModelAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.MentalModelID
+			ID domain.MentalModelID
 		}
 		// CreateMentalModel holds details about calls to the CreateMentalModel method.
 		CreateMentalModel []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Spec is the spec argument value.
 			Spec domain.MentalModelSpec
 		}
@@ -1136,7 +1140,7 @@ type MentalModelAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// Path is the path argument value.
 			Path string
 		}
@@ -1145,18 +1149,18 @@ type MentalModelAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.MentalModelID
+			ID domain.MentalModelID
 		}
 		// GetMentalModel holds details about calls to the GetMentalModel method.
 		GetMentalModel []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.MentalModelID
+			ID domain.MentalModelID
 			// Detail is the detail argument value.
 			Detail domain.Detail
 		}
@@ -1165,32 +1169,32 @@ type MentalModelAdmin struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Req is the req argument value.
-			Req server.ListMentalModelsRequest
+			Req mentalmodel.ListRequest
 		}
 		// MentalModelHistory holds details about calls to the MentalModelHistory method.
 		MentalModelHistory []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Req is the req argument value.
-			Req server.HistoryRequest
+			Req mentalmodel.HistoryRequest
 		}
 		// RefreshMentalModel holds details about calls to the RefreshMentalModel method.
 		RefreshMentalModel []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// Req is the req argument value.
-			Req server.RefreshRequest
+			Req mentalmodel.RefreshRequest
 		}
 		// UpdateMentalModel holds details about calls to the UpdateMentalModel method.
 		UpdateMentalModel []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.MentalModelID
+			ID domain.MentalModelID
 			// Patch is the patch argument value.
-			Patch server.SpecPatch
+			Patch mentalmodel.SpecPatch
 		}
 	}
 	lockClearMentalModel   sync.RWMutex
@@ -1205,14 +1209,14 @@ type MentalModelAdmin struct {
 }
 
 // ClearMentalModel calls ClearMentalModelFunc.
-func (mock *MentalModelAdmin) ClearMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error) {
+func (mock *MentalModelAdmin) ClearMentalModel(ctx context.Context, b domain.BankRef, id domain.MentalModelID) (domain.MentalModel, error) {
 	if mock.ClearMentalModelFunc == nil {
 		panic("MentalModelAdmin.ClearMentalModelFunc: method is nil but MentalModelAdmin.ClearMentalModel was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.MentalModelID
+		B   domain.BankRef
+		ID  domain.MentalModelID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -1230,13 +1234,13 @@ func (mock *MentalModelAdmin) ClearMentalModel(ctx context.Context, b port.BankR
 //	len(mockedMentalModelAdmin.ClearMentalModelCalls())
 func (mock *MentalModelAdmin) ClearMentalModelCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.MentalModelID
+	B   domain.BankRef
+	ID  domain.MentalModelID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.MentalModelID
+		B   domain.BankRef
+		ID  domain.MentalModelID
 	}
 	mock.lockClearMentalModel.RLock()
 	calls = mock.calls.ClearMentalModel
@@ -1245,13 +1249,13 @@ func (mock *MentalModelAdmin) ClearMentalModelCalls() []struct {
 }
 
 // CreateMentalModel calls CreateMentalModelFunc.
-func (mock *MentalModelAdmin) CreateMentalModel(ctx context.Context, b port.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error) {
+func (mock *MentalModelAdmin) CreateMentalModel(ctx context.Context, b domain.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error) {
 	if mock.CreateMentalModelFunc == nil {
 		panic("MentalModelAdmin.CreateMentalModelFunc: method is nil but MentalModelAdmin.CreateMentalModel was just called")
 	}
 	callInfo := struct {
 		Ctx  context.Context
-		B    port.BankRef
+		B    domain.BankRef
 		Spec domain.MentalModelSpec
 	}{
 		Ctx:  ctx,
@@ -1270,12 +1274,12 @@ func (mock *MentalModelAdmin) CreateMentalModel(ctx context.Context, b port.Bank
 //	len(mockedMentalModelAdmin.CreateMentalModelCalls())
 func (mock *MentalModelAdmin) CreateMentalModelCalls() []struct {
 	Ctx  context.Context
-	B    port.BankRef
+	B    domain.BankRef
 	Spec domain.MentalModelSpec
 } {
 	var calls []struct {
 		Ctx  context.Context
-		B    port.BankRef
+		B    domain.BankRef
 		Spec domain.MentalModelSpec
 	}
 	mock.lockCreateMentalModel.RLock()
@@ -1285,13 +1289,13 @@ func (mock *MentalModelAdmin) CreateMentalModelCalls() []struct {
 }
 
 // DeleteFolder calls DeleteFolderFunc.
-func (mock *MentalModelAdmin) DeleteFolder(ctx context.Context, b port.BankRef, path string) (int, error) {
+func (mock *MentalModelAdmin) DeleteFolder(ctx context.Context, b domain.BankRef, path string) (int, error) {
 	if mock.DeleteFolderFunc == nil {
 		panic("MentalModelAdmin.DeleteFolderFunc: method is nil but MentalModelAdmin.DeleteFolder was just called")
 	}
 	callInfo := struct {
 		Ctx  context.Context
-		B    port.BankRef
+		B    domain.BankRef
 		Path string
 	}{
 		Ctx:  ctx,
@@ -1310,12 +1314,12 @@ func (mock *MentalModelAdmin) DeleteFolder(ctx context.Context, b port.BankRef, 
 //	len(mockedMentalModelAdmin.DeleteFolderCalls())
 func (mock *MentalModelAdmin) DeleteFolderCalls() []struct {
 	Ctx  context.Context
-	B    port.BankRef
+	B    domain.BankRef
 	Path string
 } {
 	var calls []struct {
 		Ctx  context.Context
-		B    port.BankRef
+		B    domain.BankRef
 		Path string
 	}
 	mock.lockDeleteFolder.RLock()
@@ -1325,14 +1329,14 @@ func (mock *MentalModelAdmin) DeleteFolderCalls() []struct {
 }
 
 // DeleteMentalModel calls DeleteMentalModelFunc.
-func (mock *MentalModelAdmin) DeleteMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID) error {
+func (mock *MentalModelAdmin) DeleteMentalModel(ctx context.Context, b domain.BankRef, id domain.MentalModelID) error {
 	if mock.DeleteMentalModelFunc == nil {
 		panic("MentalModelAdmin.DeleteMentalModelFunc: method is nil but MentalModelAdmin.DeleteMentalModel was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.MentalModelID
+		B   domain.BankRef
+		ID  domain.MentalModelID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -1350,13 +1354,13 @@ func (mock *MentalModelAdmin) DeleteMentalModel(ctx context.Context, b port.Bank
 //	len(mockedMentalModelAdmin.DeleteMentalModelCalls())
 func (mock *MentalModelAdmin) DeleteMentalModelCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.MentalModelID
+	B   domain.BankRef
+	ID  domain.MentalModelID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.MentalModelID
+		B   domain.BankRef
+		ID  domain.MentalModelID
 	}
 	mock.lockDeleteMentalModel.RLock()
 	calls = mock.calls.DeleteMentalModel
@@ -1365,14 +1369,14 @@ func (mock *MentalModelAdmin) DeleteMentalModelCalls() []struct {
 }
 
 // GetMentalModel calls GetMentalModelFunc.
-func (mock *MentalModelAdmin) GetMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail) (domain.MentalModel, error) {
+func (mock *MentalModelAdmin) GetMentalModel(ctx context.Context, b domain.BankRef, id domain.MentalModelID, detail domain.Detail) (domain.MentalModel, error) {
 	if mock.GetMentalModelFunc == nil {
 		panic("MentalModelAdmin.GetMentalModelFunc: method is nil but MentalModelAdmin.GetMentalModel was just called")
 	}
 	callInfo := struct {
 		Ctx    context.Context
-		B      port.BankRef
-		ID     port.MentalModelID
+		B      domain.BankRef
+		ID     domain.MentalModelID
 		Detail domain.Detail
 	}{
 		Ctx:    ctx,
@@ -1392,14 +1396,14 @@ func (mock *MentalModelAdmin) GetMentalModel(ctx context.Context, b port.BankRef
 //	len(mockedMentalModelAdmin.GetMentalModelCalls())
 func (mock *MentalModelAdmin) GetMentalModelCalls() []struct {
 	Ctx    context.Context
-	B      port.BankRef
-	ID     port.MentalModelID
+	B      domain.BankRef
+	ID     domain.MentalModelID
 	Detail domain.Detail
 } {
 	var calls []struct {
 		Ctx    context.Context
-		B      port.BankRef
-		ID     port.MentalModelID
+		B      domain.BankRef
+		ID     domain.MentalModelID
 		Detail domain.Detail
 	}
 	mock.lockGetMentalModel.RLock()
@@ -1409,13 +1413,13 @@ func (mock *MentalModelAdmin) GetMentalModelCalls() []struct {
 }
 
 // ListMentalModels calls ListMentalModelsFunc.
-func (mock *MentalModelAdmin) ListMentalModels(ctx context.Context, req server.ListMentalModelsRequest) (server.MentalModelPage, error) {
+func (mock *MentalModelAdmin) ListMentalModels(ctx context.Context, req mentalmodel.ListRequest) (mentalmodel.ModelPage, error) {
 	if mock.ListMentalModelsFunc == nil {
 		panic("MentalModelAdmin.ListMentalModelsFunc: method is nil but MentalModelAdmin.ListMentalModels was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		Req server.ListMentalModelsRequest
+		Req mentalmodel.ListRequest
 	}{
 		Ctx: ctx,
 		Req: req,
@@ -1432,11 +1436,11 @@ func (mock *MentalModelAdmin) ListMentalModels(ctx context.Context, req server.L
 //	len(mockedMentalModelAdmin.ListMentalModelsCalls())
 func (mock *MentalModelAdmin) ListMentalModelsCalls() []struct {
 	Ctx context.Context
-	Req server.ListMentalModelsRequest
+	Req mentalmodel.ListRequest
 } {
 	var calls []struct {
 		Ctx context.Context
-		Req server.ListMentalModelsRequest
+		Req mentalmodel.ListRequest
 	}
 	mock.lockListMentalModels.RLock()
 	calls = mock.calls.ListMentalModels
@@ -1445,13 +1449,13 @@ func (mock *MentalModelAdmin) ListMentalModelsCalls() []struct {
 }
 
 // MentalModelHistory calls MentalModelHistoryFunc.
-func (mock *MentalModelAdmin) MentalModelHistory(ctx context.Context, req server.HistoryRequest) (server.HistoryPage, error) {
+func (mock *MentalModelAdmin) MentalModelHistory(ctx context.Context, req mentalmodel.HistoryRequest) (mentalmodel.HistoryPage, error) {
 	if mock.MentalModelHistoryFunc == nil {
 		panic("MentalModelAdmin.MentalModelHistoryFunc: method is nil but MentalModelAdmin.MentalModelHistory was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		Req server.HistoryRequest
+		Req mentalmodel.HistoryRequest
 	}{
 		Ctx: ctx,
 		Req: req,
@@ -1468,11 +1472,11 @@ func (mock *MentalModelAdmin) MentalModelHistory(ctx context.Context, req server
 //	len(mockedMentalModelAdmin.MentalModelHistoryCalls())
 func (mock *MentalModelAdmin) MentalModelHistoryCalls() []struct {
 	Ctx context.Context
-	Req server.HistoryRequest
+	Req mentalmodel.HistoryRequest
 } {
 	var calls []struct {
 		Ctx context.Context
-		Req server.HistoryRequest
+		Req mentalmodel.HistoryRequest
 	}
 	mock.lockMentalModelHistory.RLock()
 	calls = mock.calls.MentalModelHistory
@@ -1481,13 +1485,13 @@ func (mock *MentalModelAdmin) MentalModelHistoryCalls() []struct {
 }
 
 // RefreshMentalModel calls RefreshMentalModelFunc.
-func (mock *MentalModelAdmin) RefreshMentalModel(ctx context.Context, req server.RefreshRequest) (domain.Operation, bool, error) {
+func (mock *MentalModelAdmin) RefreshMentalModel(ctx context.Context, req mentalmodel.RefreshRequest) (domain.Operation, bool, error) {
 	if mock.RefreshMentalModelFunc == nil {
 		panic("MentalModelAdmin.RefreshMentalModelFunc: method is nil but MentalModelAdmin.RefreshMentalModel was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		Req server.RefreshRequest
+		Req mentalmodel.RefreshRequest
 	}{
 		Ctx: ctx,
 		Req: req,
@@ -1504,11 +1508,11 @@ func (mock *MentalModelAdmin) RefreshMentalModel(ctx context.Context, req server
 //	len(mockedMentalModelAdmin.RefreshMentalModelCalls())
 func (mock *MentalModelAdmin) RefreshMentalModelCalls() []struct {
 	Ctx context.Context
-	Req server.RefreshRequest
+	Req mentalmodel.RefreshRequest
 } {
 	var calls []struct {
 		Ctx context.Context
-		Req server.RefreshRequest
+		Req mentalmodel.RefreshRequest
 	}
 	mock.lockRefreshMentalModel.RLock()
 	calls = mock.calls.RefreshMentalModel
@@ -1517,15 +1521,15 @@ func (mock *MentalModelAdmin) RefreshMentalModelCalls() []struct {
 }
 
 // UpdateMentalModel calls UpdateMentalModelFunc.
-func (mock *MentalModelAdmin) UpdateMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID, patch server.SpecPatch) (domain.MentalModel, error) {
+func (mock *MentalModelAdmin) UpdateMentalModel(ctx context.Context, b domain.BankRef, id domain.MentalModelID, patch mentalmodel.SpecPatch) (domain.MentalModel, error) {
 	if mock.UpdateMentalModelFunc == nil {
 		panic("MentalModelAdmin.UpdateMentalModelFunc: method is nil but MentalModelAdmin.UpdateMentalModel was just called")
 	}
 	callInfo := struct {
 		Ctx   context.Context
-		B     port.BankRef
-		ID    port.MentalModelID
-		Patch server.SpecPatch
+		B     domain.BankRef
+		ID    domain.MentalModelID
+		Patch mentalmodel.SpecPatch
 	}{
 		Ctx:   ctx,
 		B:     b,
@@ -1544,15 +1548,15 @@ func (mock *MentalModelAdmin) UpdateMentalModel(ctx context.Context, b port.Bank
 //	len(mockedMentalModelAdmin.UpdateMentalModelCalls())
 func (mock *MentalModelAdmin) UpdateMentalModelCalls() []struct {
 	Ctx   context.Context
-	B     port.BankRef
-	ID    port.MentalModelID
-	Patch server.SpecPatch
+	B     domain.BankRef
+	ID    domain.MentalModelID
+	Patch mentalmodel.SpecPatch
 } {
 	var calls []struct {
 		Ctx   context.Context
-		B     port.BankRef
-		ID    port.MentalModelID
-		Patch server.SpecPatch
+		B     domain.BankRef
+		ID    domain.MentalModelID
+		Patch mentalmodel.SpecPatch
 	}
 	mock.lockUpdateMentalModel.RLock()
 	calls = mock.calls.UpdateMentalModel
@@ -1570,13 +1574,13 @@ var _ server.OperationReader = &OperationReader{}
 //
 //		// make and configure a mocked server.OperationReader
 //		mockedOperationReader := &OperationReader{
-//			GetOperationFunc: func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+//			GetOperationFunc: func(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 //				panic("mock out the GetOperation method")
 //			},
-//			ListEventsFunc: func(ctx context.Context, b port.BankRef, afterSeq int64, limit int, types []domain.EventType) ([]domain.LifecycleEvent, int64, error) {
+//			ListEventsFunc: func(ctx context.Context, b domain.BankRef, afterSeq int64, limit int, types []domain.EventType) ([]domain.LifecycleEvent, int64, error) {
 //				panic("mock out the ListEvents method")
 //			},
-//			ListOperationsFunc: func(ctx context.Context, b port.BankRef, f port.OperationFilter) ([]domain.Operation, string, error) {
+//			ListOperationsFunc: func(ctx context.Context, b domain.BankRef, f store.OperationFilter) ([]domain.Operation, string, error) {
 //				panic("mock out the ListOperations method")
 //			},
 //		}
@@ -1587,13 +1591,13 @@ var _ server.OperationReader = &OperationReader{}
 //	}
 type OperationReader struct {
 	// GetOperationFunc mocks the GetOperation method.
-	GetOperationFunc func(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error)
+	GetOperationFunc func(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
 
 	// ListEventsFunc mocks the ListEvents method.
-	ListEventsFunc func(ctx context.Context, b port.BankRef, afterSeq int64, limit int, types []domain.EventType) ([]domain.LifecycleEvent, int64, error)
+	ListEventsFunc func(ctx context.Context, b domain.BankRef, afterSeq int64, limit int, types []domain.EventType) ([]domain.LifecycleEvent, int64, error)
 
 	// ListOperationsFunc mocks the ListOperations method.
-	ListOperationsFunc func(ctx context.Context, b port.BankRef, f port.OperationFilter) ([]domain.Operation, string, error)
+	ListOperationsFunc func(ctx context.Context, b domain.BankRef, f store.OperationFilter) ([]domain.Operation, string, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -1602,16 +1606,16 @@ type OperationReader struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// ID is the id argument value.
-			ID port.OperationID
+			ID domain.OperationID
 		}
 		// ListEvents holds details about calls to the ListEvents method.
 		ListEvents []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// AfterSeq is the afterSeq argument value.
 			AfterSeq int64
 			// Limit is the limit argument value.
@@ -1624,9 +1628,9 @@ type OperationReader struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// B is the b argument value.
-			B port.BankRef
+			B domain.BankRef
 			// F is the f argument value.
-			F port.OperationFilter
+			F store.OperationFilter
 		}
 	}
 	lockGetOperation   sync.RWMutex
@@ -1635,14 +1639,14 @@ type OperationReader struct {
 }
 
 // GetOperation calls GetOperationFunc.
-func (mock *OperationReader) GetOperation(ctx context.Context, b port.BankRef, id port.OperationID) (domain.Operation, error) {
+func (mock *OperationReader) GetOperation(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	if mock.GetOperationFunc == nil {
 		panic("OperationReader.GetOperationFunc: method is nil but OperationReader.GetOperation was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.OperationID
+		B   domain.BankRef
+		ID  domain.OperationID
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -1660,13 +1664,13 @@ func (mock *OperationReader) GetOperation(ctx context.Context, b port.BankRef, i
 //	len(mockedOperationReader.GetOperationCalls())
 func (mock *OperationReader) GetOperationCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	ID  port.OperationID
+	B   domain.BankRef
+	ID  domain.OperationID
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		ID  port.OperationID
+		B   domain.BankRef
+		ID  domain.OperationID
 	}
 	mock.lockGetOperation.RLock()
 	calls = mock.calls.GetOperation
@@ -1675,13 +1679,13 @@ func (mock *OperationReader) GetOperationCalls() []struct {
 }
 
 // ListEvents calls ListEventsFunc.
-func (mock *OperationReader) ListEvents(ctx context.Context, b port.BankRef, afterSeq int64, limit int, types []domain.EventType) ([]domain.LifecycleEvent, int64, error) {
+func (mock *OperationReader) ListEvents(ctx context.Context, b domain.BankRef, afterSeq int64, limit int, types []domain.EventType) ([]domain.LifecycleEvent, int64, error) {
 	if mock.ListEventsFunc == nil {
 		panic("OperationReader.ListEventsFunc: method is nil but OperationReader.ListEvents was just called")
 	}
 	callInfo := struct {
 		Ctx      context.Context
-		B        port.BankRef
+		B        domain.BankRef
 		AfterSeq int64
 		Limit    int
 		Types    []domain.EventType
@@ -1704,14 +1708,14 @@ func (mock *OperationReader) ListEvents(ctx context.Context, b port.BankRef, aft
 //	len(mockedOperationReader.ListEventsCalls())
 func (mock *OperationReader) ListEventsCalls() []struct {
 	Ctx      context.Context
-	B        port.BankRef
+	B        domain.BankRef
 	AfterSeq int64
 	Limit    int
 	Types    []domain.EventType
 } {
 	var calls []struct {
 		Ctx      context.Context
-		B        port.BankRef
+		B        domain.BankRef
 		AfterSeq int64
 		Limit    int
 		Types    []domain.EventType
@@ -1723,14 +1727,14 @@ func (mock *OperationReader) ListEventsCalls() []struct {
 }
 
 // ListOperations calls ListOperationsFunc.
-func (mock *OperationReader) ListOperations(ctx context.Context, b port.BankRef, f port.OperationFilter) ([]domain.Operation, string, error) {
+func (mock *OperationReader) ListOperations(ctx context.Context, b domain.BankRef, f store.OperationFilter) ([]domain.Operation, string, error) {
 	if mock.ListOperationsFunc == nil {
 		panic("OperationReader.ListOperationsFunc: method is nil but OperationReader.ListOperations was just called")
 	}
 	callInfo := struct {
 		Ctx context.Context
-		B   port.BankRef
-		F   port.OperationFilter
+		B   domain.BankRef
+		F   store.OperationFilter
 	}{
 		Ctx: ctx,
 		B:   b,
@@ -1748,13 +1752,13 @@ func (mock *OperationReader) ListOperations(ctx context.Context, b port.BankRef,
 //	len(mockedOperationReader.ListOperationsCalls())
 func (mock *OperationReader) ListOperationsCalls() []struct {
 	Ctx context.Context
-	B   port.BankRef
-	F   port.OperationFilter
+	B   domain.BankRef
+	F   store.OperationFilter
 } {
 	var calls []struct {
 		Ctx context.Context
-		B   port.BankRef
-		F   port.OperationFilter
+		B   domain.BankRef
+		F   store.OperationFilter
 	}
 	mock.lockListOperations.RLock()
 	calls = mock.calls.ListOperations

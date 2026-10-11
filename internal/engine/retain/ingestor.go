@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"memd/internal/blob"
+	"memd/internal/clock"
+	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"strings"
 	"time"
@@ -25,7 +28,7 @@ type Ingestor interface {
 // IngestRequest mirrors memory.v1.RetainRequest with domain types.
 type IngestRequest struct {
 	// Bank receives the items; an unknown bank is created with tenant defaults.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Items are the documents to retain.
 	Items []IngestItem
 	// DocumentTags are added to every item's tags.
@@ -44,12 +47,12 @@ type IngestItem struct {
 	Content string
 	// Context is free-form context stored on every unit (speaker, conversation, source).
 	Context string
-	// Timestamp is when the content was said; nil = now (from port.Clock).
+	// Timestamp is when the content was said; nil = now (from clock.Clock).
 	Timestamp *time.Time
 	// Timeless marks content with no time anchor; it wins over Timestamp.
 	Timeless bool
 	// DocumentID is the upsert key (replace); empty = generated.
-	DocumentID port.DocumentID
+	DocumentID domain.DocumentID
 	// Tags are the item's tags (merged with IngestRequest.DocumentTags).
 	Tags []string
 	// ObservationScopes picks the item's scope fan-out; nil = the bank's default.
@@ -71,7 +74,7 @@ type IngestResult struct {
 	// Documents has one entry per item, in item order: sync = filled; async = operation ids only.
 	Documents []RetainedDocument
 	// ParentOperationID is the retain_batch parent, set when an async retain enqueues more than one document.
-	ParentOperationID port.OperationID
+	ParentOperationID domain.OperationID
 	// Usage is the per-slot token usage of a sync retain's model calls (RetainResponse.usage); empty for
 	// async (each job records its own).
 	Usage []domain.Usage
@@ -80,23 +83,23 @@ type IngestResult struct {
 // RetainedDocument mirrors memory.v1.RetainedDocument: the outcome for one item.
 type RetainedDocument struct {
 	// DocumentID is the item's document (generated when the item left it empty).
-	DocumentID port.DocumentID
+	DocumentID domain.DocumentID
 	// UnitsCreated counts the units inserted (sync only).
 	UnitsCreated int
 	// Unchanged reports the same content + overrides hash; nothing re-extracted.
 	Unchanged bool
 	// OperationID is the retain_document operation (async), or empty for an inline run.
-	OperationID port.OperationID
+	OperationID domain.OperationID
 }
 
 // IngestorDeps are the Ingestor's dependencies.
 type IngestorDeps struct {
 	// Store opens the transactions.
-	Store port.Store
+	Store store.DB
 	// Blob stores the original text.
-	Blob port.Blob
+	Blob blob.Store
 	// Config resolves the bank's effective config.
-	Config port.ConfigResolver
+	Config config.Resolver
 	// Retainer runs a sync retain inline.
 	Retainer Retainer
 	// Merge merges config levels (config.Merge): the request and item overrides stored on the document and
@@ -105,7 +108,7 @@ type IngestorDeps struct {
 	// Scopes expands scope fan-out (consolidate.ScopeExpander); nil = only the ALL_COMBINATIONS cap is checked.
 	Scopes ScopeExpander
 	// Clock is "now" for items without a timestamp.
-	Clock port.Clock
+	Clock clock.Clock
 	// NewID generates document ids; nil = uuid.NewString.
 	NewID func() string
 }
@@ -127,7 +130,7 @@ func NewIngestor(d IngestorDeps) Ingestor {
 
 // itemPlan is one validated item: its document, payload and hashes.
 type itemPlan struct {
-	doc       port.DocumentID
+	doc       domain.DocumentID
 	content   string
 	overrides *domain.BankConfig
 	oh        string
@@ -148,7 +151,7 @@ func (i *ingestor) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 		return IngestResult{}, err
 	}
 	plans := make([]*itemPlan, len(req.Items))
-	seen := map[port.DocumentID]bool{}
+	seen := map[domain.DocumentID]bool{}
 	for k, it := range req.Items {
 		if plans[k], err = i.plan(ctx, req, it, base, known); err != nil {
 			return IngestResult{}, fmt.Errorf("item %d: %w", k, err)
@@ -175,13 +178,13 @@ func (i *ingestor) Ingest(ctx context.Context, req IngestRequest) (IngestResult,
 // bankConfig returns the bank's effective config, and whether the bank exists. An unknown bank is not created
 // here (validation must store nothing); its config for validation is the tenant level, and the write
 // transaction creates it. The server level only adds defaults that cannot fail validation.
-func (i *ingestor) bankConfig(ctx context.Context, b port.BankRef) (domain.BankConfig, bool, error) {
+func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.BankConfig, bool, error) {
 	cfg, err := i.d.Config.Effective(ctx, b)
 	if !errors.Is(err, domain.ErrNotFound) {
-		return cfg, err == nil, err
+		return cfg, err == nil, err //nolint:wrapcheck // config.Resolver errors are already domain error classes
 	}
 	var tenant domain.BankConfig
-	err = i.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err = i.d.Store.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		tenant, err = tx.Banks().TenantConfig(ctx, b.Tenant)
 		return err
@@ -214,7 +217,7 @@ func (i *ingestor) plan(
 	}
 	doc := it.DocumentID
 	if doc == "" {
-		doc = port.DocumentID(i.d.NewID())
+		doc = domain.DocumentID(i.d.NewID())
 	}
 	p := DocumentPayload{
 		DocumentID: doc, ContentHash: ContentHash(it.Content), Tags: tags, Context: it.Context,
@@ -222,7 +225,7 @@ func (i *ingestor) plan(
 		ResolveEntities: it.ResolveEntities, ObservationScopes: it.ObservationScopes,
 		ForceReextract: it.ForceReextract, SkipConsolidation: req.SkipConsolidation,
 	}
-	p.BlobKey = domain.DocumentBlobKey(req.Bank, doc, p.ContentHash)
+	p.BlobKey = blob.Key(req.Bank, doc, p.ContentHash)
 	t := tuningOf(cfg)
 	p.ChunkMaxTokens, p.ChunkOverlapTokens, p.StructuredChunkMaxTokens = t.chunkMax, t.chunkOverlap, t.structuredMax
 	if !it.Timeless {
@@ -238,13 +241,13 @@ func (i *ingestor) plan(
 // itemConfig is an item's effective config: the resolver's for a known bank, else the tenant level merged with
 // the item's overrides.
 func (i *ingestor) itemConfig(
-	ctx context.Context, b port.BankRef, base domain.BankConfig, known bool, overrides *domain.BankConfig,
+	ctx context.Context, b domain.BankRef, base domain.BankConfig, known bool, overrides *domain.BankConfig,
 ) (domain.BankConfig, error) {
 	switch {
 	case overrides == nil:
 		return base, nil
 	case known:
-		return i.d.Config.Effective(ctx, b, *overrides)
+		return i.d.Config.Effective(ctx, b, *overrides) //nolint:wrapcheck // already a domain error class
 	case i.d.Merge == nil:
 		return domain.BankConfig{}, fmt.Errorf("%w: retain: no config merger wired", domain.ErrUnavailable)
 	}
@@ -271,7 +274,7 @@ func (i *ingestor) mergeOverrides(req, item *domain.BankConfig) (*domain.BankCon
 
 // checkFanout rejects a scope fan-out over its cap: through the wired ScopeExpander, else by counting the
 // ALL_COMBINATIONS subsets (2^n - 1) against max_combinations.
-func (i *ingestor) checkFanout(b port.BankRef, tags []string, s domain.ObservationScopes) error {
+func (i *ingestor) checkFanout(b domain.BankRef, tags []string, s domain.ObservationScopes) error {
 	if i.d.Scopes != nil {
 		if _, err := i.d.Scopes.Expand(b, tags, s); err != nil {
 			return fmt.Errorf("retain: observation scopes: %w", err)
@@ -292,8 +295,8 @@ func (i *ingestor) checkFanout(b port.BankRef, tags []string, s domain.Observati
 // hash (and no force_reextract). It reads before anything is written: Upsert would clear extracted_at. It
 // also rejects a bank being deleted (domain.ErrBankDeleting) before storeBlobs, so a retain racing
 // DeleteBank leaves no blob under the bank's prefix; an unknown bank is fine (the write creates it).
-func (i *ingestor) markUnchanged(ctx context.Context, b port.BankRef, plans []*itemPlan) error {
-	return i.d.Store.InTx(ctx, func(tx port.Tx) error {
+func (i *ingestor) markUnchanged(ctx context.Context, b domain.BankRef, plans []*itemPlan) error {
+	return i.d.Store.InTx(ctx, func(tx store.Tx) error {
 		bank, err := tx.Banks().Get(ctx, b)
 		switch {
 		case err == nil && bank.Deleting():
@@ -339,9 +342,9 @@ func (i *ingestor) storeBlobs(ctx context.Context, plans []*itemPlan) error {
 // retain_batch parent when there are several), in one transaction.
 func (i *ingestor) write(ctx context.Context, req IngestRequest, plans []*itemPlan) (IngestResult, error) {
 	var res IngestResult
-	var opIDs []port.OperationID
-	err := i.d.Store.InTx(ctx, func(tx port.Tx) error {
-		res, opIDs = IngestResult{}, make([]port.OperationID, len(plans))
+	var opIDs []domain.OperationID
+	err := i.d.Store.InTx(ctx, func(tx store.Tx) error {
+		res, opIDs = IngestResult{}, make([]domain.OperationID, len(plans))
 		changed := 0
 		for _, p := range plans {
 			if !p.unchanged {
@@ -389,11 +392,11 @@ func (i *ingestor) write(ctx context.Context, req IngestRequest, plans []*itemPl
 // enqueue inserts the retain_document jobs of the changed plans, under a retain_batch parent when there are
 // several, and records their ids in opIDs.
 func (i *ingestor) enqueue(
-	ctx context.Context, tx port.Tx, b port.BankRef, plans []*itemPlan, changed int, opIDs []port.OperationID,
-) (port.OperationID, error) {
-	var parent port.OperationID
+	ctx context.Context, tx store.Tx, b domain.BankRef, plans []*itemPlan, changed int, opIDs []domain.OperationID,
+) (domain.OperationID, error) {
+	var parent domain.OperationID
 	if changed > 1 {
-		id, _, err := tx.Queue().Enqueue(ctx, port.Job{
+		id, _, err := tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindRetainBatch, Payload: []byte(fmt.Sprintf(`{"documents":%d}`, changed)),
 		})
 		if err != nil {
@@ -409,9 +412,9 @@ func (i *ingestor) enqueue(
 		if err != nil {
 			return "", err
 		}
-		opIDs[k], _, err = tx.Queue().Enqueue(ctx, port.Job{
+		opIDs[k], _, err = tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: DocumentSerialKey(p.doc),
-			Payload: payload, Overrides: p.overrides, ParentID: parent, Dedupe: port.DedupeNone,
+			Payload: payload, Overrides: p.overrides, ParentID: parent, Dedupe: store.DedupeNone,
 		})
 		if err != nil {
 			return "", err
@@ -422,7 +425,7 @@ func (i *ingestor) enqueue(
 
 // runInline runs the Retainer for each changed document of a sync retain, in item order.
 func (i *ingestor) runInline(
-	ctx context.Context, b port.BankRef, plans []*itemPlan, res IngestResult,
+	ctx context.Context, b domain.BankRef, plans []*itemPlan, res IngestResult,
 ) (IngestResult, error) {
 	var usage []domain.Usage
 	for k, p := range plans {
@@ -433,7 +436,7 @@ func (i *ingestor) runInline(
 		if err != nil {
 			return IngestResult{}, err
 		}
-		out, err := i.d.Retainer.ProcessDocument(ctx, port.Job{
+		out, err := i.d.Retainer.ProcessDocument(ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: DocumentSerialKey(p.doc),
 			Payload: payload, Overrides: p.overrides,
 		})

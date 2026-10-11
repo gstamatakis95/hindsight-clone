@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"time"
 )
 
 // preparedFact is one extracted, normalized and embedded fact, ready to store.
 type preparedFact struct {
-	fact    ExtractedFact
-	unitID  port.UnitID
-	chunkID port.ChunkID
+	fact    domain.ExtractedFact
+	unitID  domain.UnitID
+	chunkID domain.ChunkID
 	vec     []float32
 	causes  []int // indexes into the batch's facts
 }
@@ -28,7 +28,7 @@ type preparedBatch struct {
 // processBatch prepares pending chunks (model calls) and then commits them in one short transaction.
 func (r *retainer) processBatch(
 	ctx context.Context, rn *run, pending []domain.Chunk,
-) ([]port.UnitID, []domain.Usage, error) {
+) ([]domain.UnitID, []domain.Usage, error) {
 	pb, usage, err := r.prepare(ctx, rn, pending)
 	if err != nil {
 		return nil, usage, err
@@ -40,7 +40,7 @@ func (r *retainer) processBatch(
 	for _, c := range pb.chunks {
 		rn.owned = append(rn.owned, c.Index)
 	}
-	ids := make([]port.UnitID, len(pb.facts))
+	ids := make([]domain.UnitID, len(pb.facts))
 	for i, f := range pb.facts {
 		ids[i] = f.unitID
 	}
@@ -54,7 +54,7 @@ func (r *retainer) prepare(
 	pb := &preparedBatch{}
 	var usage []domain.Usage
 	for _, c := range pending {
-		c.ID = port.ChunkID(r.d.NewID())
+		c.ID = domain.ChunkID(r.d.NewID())
 		pb.chunks = append(pb.chunks, c)
 		facts, u, err := r.d.Extractor.Extract(ctx, extractInput{
 			Bank: rn.j.Bank, DocumentID: rn.p.DocumentID, ChunkIndex: c.Index, Text: c.Text, Context: rn.p.Context,
@@ -76,7 +76,7 @@ func (r *retainer) prepare(
 				}
 			}
 			pb.facts = append(pb.facts, preparedFact{
-				fact: f, unitID: port.UnitID(r.d.NewID()), chunkID: c.ID, causes: causes,
+				fact: f, unitID: domain.UnitID(r.d.NewID()), chunkID: c.ID, causes: causes,
 			})
 		}
 	}
@@ -85,7 +85,7 @@ func (r *retainer) prepare(
 
 // normalize applies the item's time handling: a timeless item's facts carry no dates; otherwise a relative
 // expression is resolved against the mention time.
-func (r *retainer) normalize(ctx context.Context, rn *run, f *ExtractedFact) error {
+func (r *retainer) normalize(ctx context.Context, rn *run, f *domain.ExtractedFact) error {
 	if rn.p.Timeless {
 		f.OccurredStart, f.OccurredEnd, f.TimeExpression = nil, nil, ""
 		return nil
@@ -125,7 +125,7 @@ func (r *retainer) embed(ctx context.Context, pb *preparedBatch) error {
 // their entities and labels, and their links, all under one change seq.
 func (r *retainer) commitBatch(ctx context.Context, rn *run, pb *preparedBatch) error {
 	replace := !rn.replaced
-	return r.d.Store.InTx(ctx, func(tx port.Tx) error {
+	return r.d.Store.InTx(ctx, func(tx store.Tx) error {
 		seq, err := tx.Seq(ctx, rn.j.Bank)
 		if err != nil {
 			return err
@@ -146,13 +146,13 @@ func (r *retainer) commitBatch(ctx context.Context, rn *run, pb *preparedBatch) 
 }
 
 // writeUnits resolves labels and entities, inserts the units, attaches their entities and links them.
-func (r *retainer) writeUnits(ctx context.Context, tx port.Tx, rn *run, pb *preparedBatch, seq int64) error {
+func (r *retainer) writeUnits(ctx context.Context, tx store.Tx, rn *run, pb *preparedBatch, seq int64) error {
 	if len(pb.facts) == 0 {
 		return nil
 	}
 	b := rn.j.Bank
 	units := make([]domain.Unit, len(pb.facts))
-	ents := make([][]port.EntityID, len(pb.facts))
+	ents := make([][]domain.EntityID, len(pb.facts))
 	for i, pf := range pb.facts {
 		labelIDs, labelTags, err := r.d.Labels.Resolve(ctx, tx, b, rn.cfg.EntityLabels, pf.fact.Labels)
 		if err != nil {
@@ -206,7 +206,7 @@ func (r *retainer) unit(rn *run, pf preparedFact, seq int64, labelTags []string)
 }
 
 // factTime is a fact's time for entity recency: when it occurred, else when it was said.
-func factTime(f ExtractedFact, mentioned *time.Time) time.Time {
+func factTime(f domain.ExtractedFact, mentioned *time.Time) time.Time {
 	switch {
 	case f.OccurredStart != nil:
 		return *f.OccurredStart
@@ -223,7 +223,7 @@ func factTime(f ExtractedFact, mentioned *time.Time) time.Time {
 // listed with UnitRepo.IDsByDocument, which writes nothing (decision 802, superseded by the CCR batch).
 // It first reopens the document (decision 2200), so a run that fails after replacing never leaves it stamped
 // complete.
-func (r *retainer) replace(ctx context.Context, tx port.Tx, rn *run) error {
+func (r *retainer) replace(ctx context.Context, tx store.Tx, rn *run) error {
 	b, doc := rn.j.Bank, rn.p.DocumentID
 	if err := reopen(ctx, tx, b, doc); err != nil {
 		return err
@@ -238,9 +238,9 @@ func (r *retainer) replace(ctx context.Context, tx port.Tx, rn *run) error {
 	if _, err := tx.Units().DeleteByDocument(ctx, b, doc); err != nil {
 		return err
 	}
-	_, _, err = tx.Queue().Enqueue(ctx, port.Job{
+	_, _, err = tx.Queue().Enqueue(ctx, store.Job{
 		Bank: b, Kind: domain.OperationKindGraphMaintenance, SerialKey: graphSerialKey,
-		Payload: json.RawMessage(`{}`), Dedupe: port.DedupePendingOrRunning,
+		Payload: json.RawMessage(`{}`), Dedupe: store.DedupePendingOrRunning,
 	})
 	return err
 }
@@ -251,7 +251,7 @@ func (r *retainer) replace(ctx context.Context, tx port.Tx, rn *run) error {
 // transaction (the bank is Seq-locked), so only extracted_at changes. Without it, a run failing after its
 // first batch would leave a document stamped complete with only that batch's units, and every later retain
 // of the same content would report Unchanged (decision 2200).
-func reopen(ctx context.Context, tx port.Tx, b port.BankRef, id port.DocumentID) error {
+func reopen(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.DocumentID) error {
 	d, err := tx.Documents().Get(ctx, b, id)
 	if err != nil || d.ExtractedAt == nil {
 		return err
@@ -267,7 +267,7 @@ func reopen(ctx context.Context, tx port.Tx, b port.BankRef, id port.DocumentID)
 func (r *retainer) complete(ctx context.Context, rn *run) error {
 	replace := !rn.replaced
 	b, doc := rn.j.Bank, rn.p.DocumentID
-	err := r.d.Store.InTx(ctx, func(tx port.Tx) error {
+	err := r.d.Store.InTx(ctx, func(tx store.Tx) error {
 		seq, err := tx.Seq(ctx, b)
 		if err != nil {
 			return err
@@ -292,9 +292,9 @@ func (r *retainer) complete(ctx context.Context, rn *run) error {
 		if !consolidates(rn) {
 			return nil
 		}
-		_, _, err = tx.Queue().Enqueue(ctx, port.Job{
+		_, _, err = tx.Queue().Enqueue(ctx, store.Job{
 			Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: consolidateSerialKey,
-			Payload: json.RawMessage(`{}`), Dedupe: port.DedupePending,
+			Payload: json.RawMessage(`{}`), Dedupe: store.DedupePending,
 		})
 		return err
 	})

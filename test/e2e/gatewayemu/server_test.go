@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"math"
+	"memd/internal/ai"
 	"memd/internal/domain"
-	"memd/internal/port"
 	"memd/internal/prompts"
 	"memd/test/e2e/gatewayemu"
 	"reflect"
@@ -82,7 +82,7 @@ func TestFaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := port.StructuredRequest{
+	req := ai.StructuredRequest{
 		Slot: domain.ModelSlotDedupCheck, Binding: binding(domain.ModelSlotDedupCheck), Name: prompts.DedupSystem,
 		User: "[NEW] a\n[EXISTING] b", Schema: schema,
 	}

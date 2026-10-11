@@ -13,14 +13,19 @@ linters:
         - name: package-comments
         - name: unused-parameter
     wrapcheck:
-      ignore-package-globs: ["memd/internal/port"]   # errors crossing a port are already typed
+      # errors crossing a boundary are already domain error classes
+      ignore-package-globs: ["memd/internal/store", "memd/internal/ai", "memd/internal/blob"]
     depguard:
       rules:
         engines:
           files: ["**/internal/engine/**", "!$test"]   # tests may use pgtest and pgx: store code runs on real Postgres
           deny:
-            - pkg: "memd/internal/adapter"
-              desc: engines depend on ports only
+            - pkg: "memd/internal/store/postgres"
+              desc: engines depend on the store interfaces only
+            - pkg: "memd/internal/ai/gateway"
+              desc: engines depend on the ai interfaces only
+            - pkg: "memd/internal/blob/s3"
+              desc: engines depend on blob.Store only
             - pkg: "memd/internal/server"
               desc: engines don't know about gRPC
             - pkg: "memd/internal/worker"
@@ -28,29 +33,68 @@ linters:
             - pkg: "memd/gen"
               desc: no proto types in engines; use domain
             - pkg: "github.com/jackc/pgx"
-              desc: use port.Store
+              desc: use store.DB
             - pkg: "net/http"
-              desc: use port.LLM / port.Embedder / port.Reranker
+              desc: use ai.LLM / ai.Embedder / ai.Reranker
             - pkg: "github.com/aws"
-              desc: use port.Blob
+              desc: use blob.Store
             - pkg: "github.com/DataDog"
               desc: observability is wired in cmd/memd via internal/observability; engines stay vendor-free
         server:
           files: ["**/internal/server/**"]
           deny:
-            - pkg: "memd/internal/adapter"
+            - pkg: "memd/internal/store/postgres"
+              desc: handlers call engines
+            - pkg: "memd/internal/ai/gateway"
+              desc: handlers call engines
+            - pkg: "memd/internal/blob/s3"
               desc: handlers call engines
         domain:
           files: ["**/internal/domain/**"]
           deny:
             - pkg: "memd/internal"
               desc: domain imports nothing internal
+            - pkg: "memd/gen"
+              desc: no proto types in domain
             - pkg: "github.com/DataDog"
               desc: domain stays vendor-free
-        port:
-          files: ["**/internal/port/**"]
+        contracts:
+          files: ["**/internal/store/*.go", "**/internal/ai/*.go", "**/internal/blob/*.go", "**/internal/clock/*.go"]
           deny:
+            - pkg: "memd/internal/store/postgres"
+              desc: contracts never see adapters
+            - pkg: "memd/internal/ai/gateway"
+              desc: contracts never see adapters
+            - pkg: "memd/internal/blob/s3"
+              desc: contracts never see adapters
+            - pkg: "memd/internal/config"
+              desc: contracts sit below config
+            - pkg: "memd/internal/engine"
+              desc: contracts sit below the engines
+            - pkg: "memd/internal/server"
+              desc: contracts sit below the server
+            - pkg: "memd/internal/worker"
+              desc: contracts sit below the worker
+            - pkg: "memd/gen"
+              desc: no proto types in contracts
+            - pkg: "github.com/jackc/pgx"
+              desc: only store/postgres uses pgx
+            - pkg: "github.com/aws"
+              desc: only blob/s3 uses the AWS SDK
             - pkg: "github.com/DataDog"
-              desc: ports stay vendor-free
+              desc: contracts stay vendor-free
+        adapters:
+          files: ["**/internal/store/postgres/**", "**/internal/ai/gateway/**", "**/internal/blob/s3/**", "!$test"]
+          deny:
+            - pkg: "memd/internal/config"
+              desc: adapters translate; they never decide
+            - pkg: "memd/internal/engine"
+              desc: adapters never import engines
+            - pkg: "memd/internal/server"
+              desc: adapters never import the server
+            - pkg: "memd/internal/worker"
+              desc: adapters never import the worker
+            - pkg: "memd/gen"
+              desc: no proto types in adapters
 formatters:
   enable: [gofumpt, goimports]

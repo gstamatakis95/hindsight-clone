@@ -2,15 +2,15 @@ package recall
 
 import (
 	"memd/internal/domain"
-	"memd/internal/port"
 	"slices"
 	"strings"
 	"testing"
 )
 
 // words returns a candidate whose unit text has n words.
-func words(id string, n int, typ domain.FactType, sources ...port.UnitID) Candidate {
-	u := domain.Unit{ID: port.UnitID(id), Type: typ, Text: strings.TrimSpace(strings.Repeat("w ", n)), SourceIDs: sources}
+func words(id string, n int, typ domain.FactType, sources ...domain.UnitID) Candidate {
+	text := strings.TrimSpace(strings.Repeat("w ", n))
+	u := domain.Unit{ID: domain.UnitID(id), Type: typ, Text: text, SourceIDs: sources}
 	return Candidate{ID: u.ID, Unit: &u}
 }
 

@@ -4,35 +4,34 @@ import (
 	"context"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
 )
 
 // StatsReader answers bank stats and tag listings with indexed COUNT queries (no counter tables in v1).
 type StatsReader interface {
 	// Stats returns bank b's counts; an unknown bank is domain.ErrNotFound.
-	Stats(ctx context.Context, b port.BankRef) (domain.BankStats, error)
+	Stats(ctx context.Context, b domain.BankRef) (domain.BankStats, error)
 	// Tags lists tags with counts from the requested source, one page at a time.
 	Tags(ctx context.Context, req ListTagsRequest) (TagPage, error)
 }
 
-// StatsSource is the counting side of StatsReader. Its methods are port.Reader methods; port.Reader
+// StatsSource is the counting side of StatsReader. Its methods are store.Reader methods; store.Reader
 // satisfies it.
 type StatsSource interface {
 	// BankStats returns bank b's counts from indexed COUNT queries; an unknown or tombstoned bank is
 	// domain.ErrNotFound.
-	BankStats(ctx context.Context, b port.BankRef) (domain.BankStats, error)
+	BankStats(ctx context.Context, b domain.BankRef) (domain.BankStats, error)
 	// TagCounts returns up to limit tags of b's source with their counts, ordered by tag, keeping only tags
 	// that start with prefix and sort after after ("" = from the start). Source unspecified = memories
 	// (live units). An unknown or tombstoned bank is domain.ErrNotFound.
 	TagCounts(
-		ctx context.Context, b port.BankRef, source domain.TagSource, prefix, after string, limit int,
+		ctx context.Context, b domain.BankRef, source domain.TagSource, prefix, after string, limit int,
 	) ([]domain.TagCount, error)
 }
 
 // ListTagsRequest mirrors memory.v1.ListTagsRequest.
 type ListTagsRequest struct {
 	// Bank is the bank listed.
-	Bank port.BankRef
+	Bank domain.BankRef
 	// Source is where tags are counted; unspecified = memories.
 	Source domain.TagSource
 	// Prefix limits tags to those starting with it; empty = all.
@@ -56,11 +55,11 @@ type statsReader struct{ src StatsSource }
 
 var _ StatsReader = (*statsReader)(nil)
 
-// NewStatsReader returns the StatsReader over src (port.Reader).
+// NewStatsReader returns the StatsReader over src (store.Reader).
 func NewStatsReader(src StatsSource) StatsReader { return &statsReader{src: src} }
 
 // Stats returns the source's counts.
-func (r *statsReader) Stats(ctx context.Context, b port.BankRef) (domain.BankStats, error) {
+func (r *statsReader) Stats(ctx context.Context, b domain.BankRef) (domain.BankStats, error) {
 	st, err := r.src.BankStats(ctx, b)
 	if err != nil {
 		return domain.BankStats{}, fmt.Errorf("bank stats: %w", err)

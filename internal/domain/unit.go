@@ -236,14 +236,13 @@ const (
 	CurationRestore CurationAction = "restore"
 )
 
-// AuditEntry is one memory_audit row: what a curation action changed and why. Rows of units replaced by
-// a reprocess are kept and tagged with the reprocess operation id.
+// AuditEntry is one memory_audit row: what a curation action changed and why.
 type AuditEntry struct {
 	// Bank owns the unit.
 	Bank BankRef
 	// UnitID is the curated unit.
 	UnitID UnitID
-	// Action is edit, invalidate, restore or reprocess.
+	// Action is edit, invalidate or restore.
 	Action CurationAction
 	// Reason is the caller's reason.
 	Reason string
@@ -251,7 +250,7 @@ type AuditEntry struct {
 	Before json.RawMessage
 	// After is a JSON snapshot of the changed fields after the action; nil = none.
 	After json.RawMessage
-	// OperationID is the rederive or reprocess operation, if any.
+	// OperationID is the rederive operation, if any.
 	OperationID OperationID
 	// At is when the action committed.
 	At time.Time

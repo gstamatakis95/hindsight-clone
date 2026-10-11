@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"memd/internal/domain"
-	"memd/internal/port"
+	"memd/internal/store"
 	"slices"
 	"testing"
 	"time"
@@ -14,11 +14,11 @@ import (
 // unitSourceStub serves a fixed unit list (newest first) with keyset paging, recording the last query.
 type unitSourceStub struct {
 	units []domain.Unit
-	last  UnitQuery
+	last  store.UnitQuery
 }
 
 // GetUnit returns the unit with id.
-func (s *unitSourceStub) GetUnit(_ context.Context, _ port.BankRef, id port.UnitID) (domain.Unit, error) {
+func (s *unitSourceStub) GetUnit(_ context.Context, _ domain.BankRef, id domain.UnitID) (domain.Unit, error) {
 	for _, u := range s.units {
 		if u.ID == id {
 			return u, nil
@@ -28,7 +28,7 @@ func (s *unitSourceStub) GetUnit(_ context.Context, _ port.BankRef, id port.Unit
 }
 
 // ListUnits pages s.units, which are already in listing order.
-func (s *unitSourceStub) ListUnits(_ context.Context, q UnitQuery) ([]domain.Unit, error) {
+func (s *unitSourceStub) ListUnits(_ context.Context, q store.UnitQuery) ([]domain.Unit, error) {
 	s.last = q
 	start := 0
 	if q.After != nil {
@@ -40,7 +40,7 @@ func (s *unitSourceStub) ListUnits(_ context.Context, q UnitQuery) ([]domain.Uni
 
 // ObservationHistory returns one version for o1 and not-found otherwise.
 func (s *unitSourceStub) ObservationHistory(
-	_ context.Context, _ port.BankRef, id port.UnitID,
+	_ context.Context, _ domain.BankRef, id domain.UnitID,
 ) ([]domain.ObservationVersion, error) {
 	if id != "o1" {
 		return nil, fmt.Errorf("%w: observation %s", domain.ErrNotFound, id)
@@ -49,9 +49,9 @@ func (s *unitSourceStub) ObservationHistory(
 }
 
 // listAll pages through l two units at a time, checking each query the source saw.
-func listAll(t *testing.T, l MemoryLister, src *unitSourceStub) ([]port.UnitID, int) {
+func listAll(t *testing.T, l MemoryLister, src *unitSourceStub) ([]domain.UnitID, int) {
 	t.Helper()
-	var got []port.UnitID
+	var got []domain.UnitID
 	tok, pages := "", 0
 	for {
 		page, err := l.List(context.Background(), ListMemoriesRequest{
@@ -78,12 +78,12 @@ func TestListerPaging(t *testing.T) {
 	src := &unitSourceStub{}
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 5; i >= 1; i-- {
-		src.units = append(src.units, domain.Unit{ID: port.UnitID(fmt.Sprintf("u%d", i)), CreatedAt: base.Add(
+		src.units = append(src.units, domain.Unit{ID: domain.UnitID(fmt.Sprintf("u%d", i)), CreatedAt: base.Add(
 			time.Duration(i) * time.Hour)})
 	}
 	l := NewMemoryLister(src)
 	got, pages := listAll(t, l, src)
-	if pages != 3 || !slices.Equal(got, []port.UnitID{"u5", "u4", "u3", "u2", "u1"}) {
+	if pages != 3 || !slices.Equal(got, []domain.UnitID{"u5", "u4", "u3", "u2", "u1"}) {
 		t.Errorf("listed %v over %d pages", got, pages)
 	}
 
