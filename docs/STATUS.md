@@ -23,6 +23,12 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-13 | Bank, curation, documents, maintenance | merged (fffcf5b) | wp/WP-13-bank-curate-docs-maint | — | — | — | — |
 | WP-15 | Port extension (CCR batch) | merged (b5d9e2d) | wp/WP-15-port-extension | 9f9451e | — | batch applied | coverage gap: CitingScopes/IDsByDocument on unknown/tombstoned bank |
 | WP-14 | Integration | merged (14a a28bc05, 14b 6bb3dde) | — | — | — | — | — |
+| WP-16 | Engine follow-ups (batch ports) | merged (988a886) | wp/WP-16-engine-followups | 575f2c2 | — | — | see log |
+| WP-17 | Fix-up: retag adopted mid-retain | merged (9a33e88) | wp/WP-17-retag-fixup | d301c0d | — | — | — |
+| WP-18 | Fix-up: refresh payload, stamp re-check | merged (7a19d47) | wp/WP-18-consolidation-refresh | fac68a4 | — | — | — |
+| WP-19 | Fix-up: retag keeps label tags | merged (7f516a1) | wp/WP-19-retag-label-tags | 35e6b55 | — | WP-19-1 approved | see decision 1900 |
+| WP-20 | Fix-up: worker/cmd hardening | merged (916f85a) | wp/WP-20-worker-hardening | f14624a | — | — | see log |
+| WP-21 | Fix-up: config writes | merged (36cbff2) | wp/WP-21-config-writes | 51bdd4e | — | — | see decision 2100 |
 
 ## Environment notes
 
@@ -336,3 +342,10 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   concurrency env; worker health; "."/".." ids; e2e blob-prefix assertion). Rulings: the grace is a process
   setting (BankConfig is frozen; the tick has no request to override from), accepted; the cancel deviation is
   accepted. All gates incl. make e2e pass. rules.md rows added. Focused check spawned.
+- 2026-10-11 WP-20 focused check: CLEAN. Accepted gaps: a permanently failing delete_bank is re-enqueued once per
+  tick (bounded, pruned after 7 days); a retain racing DeleteBank can leave one orphan blob; banks named "."/".."
+  created before WP-20 are unreachable (none expected).
+- 2026-10-11 BUILD COMPLETE. Every WP is merged (00-13, 14a/14b, 15-21). On main: make gen (no diff), make lint
+  (incl. buf breaking vs contracts-v1), go test -race -count=1 ./... (incl. Postgres) and make e2e all pass;
+  docs/rules.md maps every Jobs/Curation/Behavioural-rules bullet to a passing test (accepted gap: reprocess op id
+  on audit/archive rows); the final review and closing verification leave no CRITICAL/HIGH.
