@@ -2,6 +2,7 @@ package consolidate
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -55,7 +56,7 @@ func seedDocScopes(t *testing.T, e *env) {
 	e.tx(func(tx port.Tx) error {
 		seq, err := tx.Seq(t.Context(), bank)
 		if err != nil {
-			return err
+			return wrapErr(err)
 		}
 		return tx.Units().Insert(t.Context(), []domain.Unit{{
 			ID: "f3", Bank: bank, DocumentID: "d1", Type: domain.FactTypeWorld, Text: "Ola dives",
@@ -78,7 +79,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 	e.tx(func(tx port.Tx) error {
 		var err error
 		deleted, err = inv.ClearScopes(t.Context(), tx, bank, []port.ScopeKey{scopeOf("x")})
-		return err
+		return wrapErr(err)
 	})
 	if ids := obsIDs(e.observations()); !slices.Equal(ids, []port.UnitID{"obs-y", "obs-z"}) ||
 		!slices.Equal(deleted, []port.UnitID{"obs-x"}) {
@@ -101,7 +102,7 @@ func TestInvalidatorClearScopesAndDocument(t *testing.T) {
 	e.tx(func(tx port.Tx) error {
 		var err error
 		deleted, err = inv.ClearScopes(t.Context(), tx, bank, nil)
-		return err
+		return wrapErr(err)
 	})
 	if left := e.observations(); len(left) != 0 || !slices.Equal(deleted, []port.UnitID{"obs-y"}) {
 		t.Fatalf("after ClearScopes(all): left %+v, deleted %v", left, deleted)
@@ -188,19 +189,19 @@ func TestInvalidatorSeqBeforeDelete(t *testing.T) {
 	}{
 		{"ClearScopes(x)", func(ctx context.Context, tx port.Tx) error {
 			_, err := inv.ClearScopes(ctx, tx, bank, []port.ScopeKey{scopeOf("x")})
-			return err
+			return wrapErr(err)
 		}, callLog{"Seq", "DeleteScopes"}},
 		{"ClearScopes(all)", func(ctx context.Context, tx port.Tx) error {
 			_, err := inv.ClearScopes(ctx, tx, bank, nil)
-			return err
+			return wrapErr(err)
 		}, callLog{"Seq", "DeleteAllObservations"}},
 		{"ClearForMemory", func(ctx context.Context, tx port.Tx) error {
 			_, err := inv.ClearForMemory(ctx, tx, bank, "f1")
-			return err
+			return wrapErr(err)
 		}, callLog{"Seq", "CitingScopes", "DeleteCiting"}},
 		{"ClearDocumentUnits", func(ctx context.Context, tx port.Tx) error {
 			_, err := inv.ClearDocumentUnits(ctx, tx, bank, "d1")
-			return err
+			return wrapErr(err)
 		}, callLog{"Seq", "IDsByDocument", "CitingScopes", "DeleteCiting"}},
 	} {
 		e := newEnv(t, domain.BankConfig{})
@@ -227,13 +228,13 @@ func TestInvalidatorDataDerivedEmptyNeverClearsAll(t *testing.T) {
 	e.tx(func(tx port.Tx) error {
 		ltx := loggingTx{tx, &log}
 		if _, err := inv.ClearForMemory(t.Context(), ltx, bank, "uncited"); err != nil {
-			return err
+			return wrapErr(err)
 		}
 		if _, err := inv.ClearDocumentUnits(t.Context(), ltx, bank, "d-empty"); err != nil {
-			return err
+			return wrapErr(err)
 		}
 		_, err := inv.ClearDocumentUnits(t.Context(), ltx, bank, "d-unknown")
-		return err
+		return wrapErr(err)
 	})
 	if slices.Contains(log, "DeleteAllObservations") || slices.Contains(log, "DeleteScopes") {
 		t.Fatalf("data-derived clears called %v", log)
@@ -242,6 +243,14 @@ func TestInvalidatorDataDerivedEmptyNeverClearsAll(t *testing.T) {
 		t.Fatalf("observations after data-derived empty clears: %v, want all three", ids)
 	}
 	e.wantPending(domain.OperationKindConsolidate, 0)
+}
+
+// wrapErr wraps a non-nil error from the Invalidator or the fake store for the test's transaction.
+func wrapErr(err error) error {
+	if err != nil {
+		return fmt.Errorf("in test tx: %w", err)
+	}
+	return nil
 }
 
 // obsIDs returns sorted observation ids.

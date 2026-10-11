@@ -76,18 +76,37 @@ func (e *env) reprocessJob() (port.Job, DocumentPayload) {
 	return j, p
 }
 
+// reprocessAt is the mention time of the item TestReprocessCarriesScopesAndOverrides retains.
+var reprocessAt = time.Date(2025, 3, 4, 5, 6, 7, 0, time.UTC)
+
+// checkReprocessPayload fails the test unless the reprocess job carries the item's scopes, context,
+// metadata, mention time and content hash, is forced, and replays the stored overrides.
+func checkReprocessPayload(t *testing.T, j port.Job, p DocumentPayload) {
+	t.Helper()
+	if p.ObservationScopes == nil || p.ObservationScopes.Mode != domain.ScopeModePerTag || !p.ForceReextract {
+		t.Errorf("payload scopes %+v, force %v; want per_tag and forced", p.ObservationScopes, p.ForceReextract)
+	}
+	if p.Context != "chat" || p.Metadata["k"] != "v" || p.Timestamp == nil || !p.Timestamp.Equal(reprocessAt) {
+		t.Errorf("payload context %q, metadata %v, timestamp %v; want the item's", p.Context, p.Metadata, p.Timestamp)
+	}
+	if p.ContentHash != ContentHash("some text") {
+		t.Errorf("payload content hash %q, want the stored text's", p.ContentHash)
+	}
+	if j.Overrides == nil || j.Overrides.RetainMission != "stored" {
+		t.Errorf("job overrides = %+v, want the stored ones replayed", j.Overrides)
+	}
+}
+
 // TestReprocessCarriesScopesAndOverrides: Reprocess keeps the document's item scopes (on the row and in the
 // payload), replays the stored overrides unless new ones are given, takes the item's context, metadata and
 // mention time from a live unit, and the forced job re-extracts the stored text.
 func TestReprocessCarriesScopesAndOverrides(t *testing.T) {
 	e := newEnv(t, 0)
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
-	at := time.Date(2025, 3, 4, 5, 6, 7, 0, time.UTC)
-	scopes := &domain.ObservationScopes{Mode: domain.ScopeModePerTag}
-	stored := &domain.BankConfig{RetainMission: "stored"}
 	e.ingest(IngestRequest{Items: []IngestItem{{
-		DocumentID: "d1", Content: "some text", Tags: []string{"a"}, ObservationScopes: scopes, Context: "chat",
-		Timestamp: &at, Metadata: map[string]string{"k": "v"}, Overrides: stored,
+		DocumentID: "d1", Content: "some text", Tags: []string{"a"}, Context: "chat", Timestamp: &reprocessAt,
+		ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag},
+		Metadata:          map[string]string{"k": "v"}, Overrides: &domain.BankConfig{RetainMission: "stored"},
 	}}})
 	rp := NewReprocessor(e.store)
 
@@ -99,31 +118,33 @@ func TestReprocessCarriesScopesAndOverrides(t *testing.T) {
 		t.Fatalf("document scopes after reprocess = %+v, want per_tag (Upsert must carry them)", s)
 	}
 	j, p := e.reprocessJob()
-	if j.ID != opID || p.ObservationScopes == nil || p.ObservationScopes.Mode != domain.ScopeModePerTag ||
-		!p.ForceReextract || p.Context != "chat" || p.Metadata["k"] != "v" || p.Timestamp == nil ||
-		!p.Timestamp.Equal(at) || p.ContentHash != ContentHash("some text") {
-		t.Fatalf("job %s payload %+v", j.ID, p)
+	if j.ID != opID {
+		t.Fatalf("claimed %s, want the reprocess operation %s", j.ID, opID)
 	}
-	if j.Overrides == nil || j.Overrides.RetainMission != "stored" {
-		t.Errorf("job overrides = %+v, want the stored ones replayed", j.Overrides)
-	}
+	checkReprocessPayload(t, j, p)
 	before := e.extractCalls()
 	res, err := e.retainer.ProcessDocument(e.ctx, j)
 	if err != nil || res.Unchanged || e.extractCalls() != before+1 {
 		t.Fatalf("reprocess run = %+v, %v; %d extract calls, want 1 more", res, err, e.extractCalls()-before)
 	}
 	u := e.units([]port.UnitID{e.onlyUnit("d1")})[0]
-	if u.Context != "chat" || u.MentionedAt == nil || !u.MentionedAt.Equal(at) {
+	if u.Context != "chat" || u.MentionedAt == nil || !u.MentionedAt.Equal(reprocessAt) {
 		t.Errorf("re-extracted unit %+v lost the item's context or mention time", u)
 	}
 	if err := e.store.Complete(e.ctx, j.ID, nil, nil); err != nil {
 		t.Fatal(err)
 	}
+	checkReprocessNewOverrides(t, e, rp)
+}
 
+// checkReprocessNewOverrides reprocesses d1 with new overrides: they replace the stored ones on the document
+// and the job, and the item scopes stay.
+func checkReprocessNewOverrides(t *testing.T, e *env, rp Reprocessor) {
+	t.Helper()
 	if _, err := rp.Reprocess(e.ctx, testBank, "d1", &domain.BankConfig{RetainMission: "new"}); err != nil {
 		t.Fatal(err)
 	}
-	j, _ = e.reprocessJob()
+	j, _ := e.reprocessJob()
 	d := e.document("d1")
 	if d.Overrides == nil || d.Overrides.RetainMission != "new" || j.Overrides.RetainMission != "new" ||
 		d.ObservationScopes == nil {

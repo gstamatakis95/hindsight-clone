@@ -3,6 +3,7 @@ package recall
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"memd/internal/domain"
 	"memd/internal/port"
 	"slices"
@@ -24,7 +25,7 @@ type TagVocabulary interface {
 func bankTags(ctx context.Context, v TagVocabulary, b port.BankRef) ([]string, error) {
 	counts, err := v.TagCounts(ctx, b, domain.TagSourceMemories, "", "", 0)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("tag counts: %w", err)
 	}
 	slices.SortFunc(counts, func(x, y domain.TagCount) int {
 		if c := cmp.Compare(y.Count, x.Count); c != 0 {

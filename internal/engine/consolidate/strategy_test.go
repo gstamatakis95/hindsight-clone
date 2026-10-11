@@ -54,7 +54,7 @@ func TestStrategyMatch(t *testing.T) {
 type manyScopes struct{}
 
 // ListScopes returns limit scopes when asked for previewScopeLimit+1 of them.
-func (manyScopes) ListScopes(_ context.Context, b port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
+func (manyScopes) ListScopes(_ context.Context, _ port.BankRef, after string, limit int) ([]domain.ScopeInfo, error) {
 	if after != "" || limit != previewScopeLimit+1 {
 		return nil, errors.New("unexpected paging")
 	}
