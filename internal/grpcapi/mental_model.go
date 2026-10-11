@@ -53,12 +53,12 @@ func (h *MentalModelHandler) CreateMentalModel(
 		return nil, toStatus(err)
 	}
 	return &pb.CreateMentalModelResponse{
-		MentalModel: mentalModelToProto(m, domain.DetailFull),
+		MentalModel: mentalModelToProto(m, domain.MentalModelViewFull),
 		Operation:   operationToProto(op),
 	}, nil
 }
 
-// GetMentalModel returns one model at the requested detail, default FULL.
+// GetMentalModel returns one model in the requested view, default FULL.
 func (h *MentalModelHandler) GetMentalModel(
 	ctx context.Context, req *pb.GetMentalModelRequest,
 ) (*pb.GetMentalModelResponse, error) {
@@ -67,18 +67,18 @@ func (h *MentalModelHandler) GetMentalModel(
 		return nil, toStatus(err)
 	}
 	var d decoder
-	detail := detailOr(fromEnum[domain.Detail](&d, req.GetDetail()), getDetailDefault)
+	view := viewOr(fromEnum[domain.MentalModelView](&d, req.GetView()), getViewDefault)
 	if d.err != nil {
 		return nil, toStatus(d.err)
 	}
-	m, err := h.MentalModels.GetMentalModel(ctx, b, id, detail)
+	m, err := h.MentalModels.GetMentalModel(ctx, b, id, view)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.GetMentalModelResponse{MentalModel: mentalModelToProto(m, detail)}, nil
+	return &pb.GetMentalModelResponse{MentalModel: mentalModelToProto(m, view)}, nil
 }
 
-// ListMentalModels pages through models, default METADATA.
+// ListMentalModels pages through models, default BASIC.
 func (h *MentalModelHandler) ListMentalModels(
 	ctx context.Context, req *pb.ListMentalModelsRequest,
 ) (*pb.ListMentalModelsResponse, error) {
@@ -91,12 +91,12 @@ func (h *MentalModelHandler) ListMentalModels(
 		return nil, toStatus(err)
 	}
 	in.Bank = b
-	in.Detail = detailOr(in.Detail, listDetailDefault)
+	in.View = viewOr(in.View, listViewDefault)
 	page, err := h.MentalModels.ListMentalModels(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return mentalModelPageToProto(page, in.Detail), nil
+	return mentalModelPageToProto(page, in.View), nil
 }
 
 // UpdateMentalModel patches a model's spec with a FieldMask.
@@ -115,7 +115,7 @@ func (h *MentalModelHandler) UpdateMentalModel(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.UpdateMentalModelResponse{MentalModel: mentalModelToProto(m, domain.DetailFull)}, nil
+	return &pb.UpdateMentalModelResponse{MentalModel: mentalModelToProto(m, domain.MentalModelViewFull)}, nil
 }
 
 // RefreshMentalModel enqueues a manual refresh, or joins the queued one.
@@ -141,10 +141,10 @@ func (h *MentalModelHandler) RefreshMentalModel(
 	return &pb.RefreshMentalModelResponse{Operation: operationToProto(op), JoinedQueued: joined}, nil
 }
 
-// DryRunRefresh runs the refresh pipeline synchronously and writes nothing.
-func (h *MentalModelHandler) DryRunRefresh(
-	ctx context.Context, req *pb.DryRunRefreshRequest,
-) (*pb.DryRunRefreshResponse, error) {
+// PreviewMentalModelRefresh runs the refresh pipeline synchronously and writes nothing.
+func (h *MentalModelHandler) PreviewMentalModelRefresh(
+	ctx context.Context, req *pb.PreviewMentalModelRefreshRequest,
+) (*pb.PreviewMentalModelRefreshResponse, error) {
 	b, id, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
@@ -158,28 +158,13 @@ func (h *MentalModelHandler) DryRunRefresh(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return dryRunToProto(out), nil
+	return previewToProto(out), nil
 }
 
-// ClearMentalModel empties a model's content so its next refresh is full.
-func (h *MentalModelHandler) ClearMentalModel(
-	ctx context.Context, req *pb.ClearMentalModelRequest,
-) (*pb.ClearMentalModelResponse, error) {
-	b, id, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	m, err := h.MentalModels.ClearMentalModel(ctx, b, id)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &pb.ClearMentalModelResponse{MentalModel: mentalModelToProto(m, domain.DetailFull)}, nil
-}
-
-// GetMentalModelHistory pages through a model's versions and refresh failures.
-func (h *MentalModelHandler) GetMentalModelHistory(
-	ctx context.Context, req *pb.GetMentalModelHistoryRequest,
-) (*pb.GetMentalModelHistoryResponse, error) {
+// ListMentalModelHistory pages through a model's versions and refresh failures, newest first.
+func (h *MentalModelHandler) ListMentalModelHistory(
+	ctx context.Context, req *pb.ListMentalModelHistoryRequest,
+) (*pb.ListMentalModelHistoryResponse, error) {
 	b, _, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
@@ -210,10 +195,10 @@ func (h *MentalModelHandler) DeleteMentalModel(
 	return &pb.DeleteMentalModelResponse{}, nil
 }
 
-// DeleteFolder deletes every model under a folder path.
-func (h *MentalModelHandler) DeleteFolder(
-	ctx context.Context, req *pb.DeleteFolderRequest,
-) (*pb.DeleteFolderResponse, error) {
+// DeleteMentalModelFolder deletes every model under a folder path.
+func (h *MentalModelHandler) DeleteMentalModelFolder(
+	ctx context.Context, req *pb.DeleteMentalModelFolderRequest,
+) (*pb.DeleteMentalModelFolderResponse, error) {
 	b, err := bankRef(ctx, req.GetBankId())
 	if err != nil {
 		return nil, toStatus(err)
@@ -225,22 +210,22 @@ func (h *MentalModelHandler) DeleteFolder(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.DeleteFolderResponse{Deleted: i32(n)}, nil
+	return &pb.DeleteMentalModelFolderResponse{Deleted: i32(n)}, nil
 }
 
-// SearchPages ranks whole pages by fused full-text and semantic scores.
-func (h *MentalModelHandler) SearchPages(
-	ctx context.Context, req *pb.SearchPagesRequest,
-) (*pb.SearchPagesResponse, error) {
+// SearchMentalModels ranks whole models by fused full-text and semantic scores.
+func (h *MentalModelHandler) SearchMentalModels(
+	ctx context.Context, req *pb.SearchMentalModelsRequest,
+) (*pb.SearchMentalModelsResponse, error) {
 	b, err := bankRef(ctx, req.GetBankId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	in := searchPagesFromProto(req)
+	in := searchFromProto(req)
 	in.Bank = b
 	hits, err := h.MentalModels.SearchMentalModels(ctx, in)
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &pb.SearchPagesResponse{Hits: pageHitsToProto(hits)}, nil
+	return &pb.SearchMentalModelsResponse{Hits: hitsToProto(hits)}, nil
 }

@@ -17,7 +17,7 @@ type mentalModelRepo struct {
 
 var _ store.MentalModelRepo = (*mentalModelRepo)(nil)
 
-// Get returns the model; unknown = domain.ErrNotFound. IsStale is left false: readers compute it.
+// Get returns the model; unknown = domain.ErrNotFound. Stale is left false: readers compute it.
 func (r *mentalModelRepo) Get(
 	ctx context.Context, b domain.BankRef, id domain.MentalModelID,
 ) (domain.MentalModel, error) {

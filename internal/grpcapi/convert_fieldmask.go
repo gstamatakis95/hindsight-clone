@@ -5,6 +5,7 @@ import (
 	"memd/internal/configsvc"
 	"memd/internal/domain"
 	"memd/internal/mentalmodel"
+	"slices"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -109,9 +110,16 @@ func configPatch(patch *pb.BankConfig, mask *fieldmaskpb.FieldMask) (configsvc.P
 	}, nil
 }
 
-// specPatch builds the SpecPatch of UpdateMentalModel; the id cannot be changed. Paths inside overrides
-// name RefreshOverrides fields and are mapped onto the stored config level (refreshPath); the caller
-// validates the patched spec's overrides.
+// scheduleWhen pairs the members of RefreshSchedule's when oneof: a path to one also applies the other, so
+// setting one member clears the other, as on the wire.
+var scheduleWhen = map[string]string{
+	"schedule.after_consolidation": "schedule.cron",
+	"schedule.cron":                "schedule.after_consolidation",
+}
+
+// specPatch builds the SpecPatch of UpdateMentalModel; the id cannot be changed. A path to either member of
+// schedule.when also clears the other. Paths inside overrides name RefreshOverrides fields and are mapped onto
+// the stored config level (refreshPath); the caller validates the patched spec's overrides.
 func specPatch(patch *pb.MentalModelSpec, mask *fieldmaskpb.FieldMask) (mentalmodel.SpecPatch, error) {
 	if patch == nil {
 		patch = &pb.MentalModelSpec{}
@@ -119,6 +127,11 @@ func specPatch(patch *pb.MentalModelSpec, mask *fieldmaskpb.FieldMask) (mentalmo
 	paths, err := maskPaths(patch, mask, "id")
 	if err != nil {
 		return nil, err
+	}
+	for _, p := range paths {
+		if other, ok := scheduleWhen[p]; ok && !slices.Contains(paths, other) {
+			paths = append(paths, other)
+		}
 	}
 	for i, p := range paths {
 		rest, ok := strings.CutPrefix(p, "overrides.")

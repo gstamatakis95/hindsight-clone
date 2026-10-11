@@ -27,8 +27,8 @@ type ListRequest struct {
 	Bank domain.BankRef
 	// FolderPrefix limits models to a folder subtree; empty = all.
 	FolderPrefix string
-	// Detail is how much of each model to load.
-	Detail domain.Detail
+	// View is how much of each model to load.
+	View domain.MentalModelView
 	// Tags filters by the models' own tags, flat form only; empty tags = none, unset match = any.
 	Tags domain.TagFilter
 	// PageSize caps the page (domain.ListPage); 0 = the default.
@@ -112,21 +112,21 @@ func (s *Service) CreateMentalModel(
 	return m, op, nil
 }
 
-// GetMentalModel reads the model, computes is_stale and trims it to detail.
+// GetMentalModel reads the model, computes stale and trims it to view (unspecified = full).
 func (s *Service) GetMentalModel(
-	ctx context.Context, b domain.BankRef, id domain.MentalModelID, detail domain.Detail,
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID, view domain.MentalModelView,
 ) (domain.MentalModel, error) {
 	m, err := loadModel(ctx, s.d.DB, b, id)
 	if err != nil {
 		return domain.MentalModel{}, err
 	}
-	if detail == domain.DetailUnspecified {
-		detail = domain.DetailFull
+	if view == domain.MentalModelViewUnspecified {
+		view = domain.MentalModelViewFull
 	}
-	return s.present(ctx, m, detail)
+	return s.present(ctx, m, view)
 }
 
-// ListMentalModels returns one page of the bank's models ordered by id, at detail (unspecified = metadata). The
+// ListMentalModels returns one page of the bank's models ordered by id, in view (unspecified = basic). The
 // page size follows domain.ListPage and the tag filter must be flat (domain.ErrInvalidArgument otherwise).
 func (s *Service) ListMentalModels(ctx context.Context, req ListRequest) (ModelPage, error) {
 	size, err := domain.ListPage.Size(req.PageSize)
@@ -143,12 +143,12 @@ func (s *Service) ListMentalModels(ctx context.Context, req ListRequest) (ModelP
 	if err != nil {
 		return ModelPage{}, fmt.Errorf("mentalmodel: list: %w", err)
 	}
-	detail := req.Detail
-	if detail == domain.DetailUnspecified {
-		detail = domain.DetailMetadata
+	view := req.View
+	if view == domain.MentalModelViewUnspecified {
+		view = domain.MentalModelViewBasic
 	}
 	for i := range items {
-		if items[i], err = s.present(ctx, items[i], detail); err != nil {
+		if items[i], err = s.present(ctx, items[i], view); err != nil {
 			return ModelPage{}, err
 		}
 	}
@@ -187,7 +187,7 @@ func (s *Service) UpdateMentalModel(
 	if err != nil {
 		return domain.MentalModel{}, fmt.Errorf("mentalmodel: update %s: %w", id, err)
 	}
-	return s.present(ctx, m, domain.DetailFull)
+	return s.present(ctx, m, domain.MentalModelViewFull)
 }
 
 // RefreshMentalModel queues a manual refresh of an existing model, or joins and upgrades the queued one.
@@ -214,41 +214,6 @@ func (s *Service) RefreshMentalModel(ctx context.Context, req RefreshRequest) (d
 		return domain.Operation{}, false, fmt.Errorf("mentalmodel: refresh %s: %w", req.ID, err)
 	}
 	return op, joined, nil
-}
-
-// ClearMentalModel empties content, structured output, sources and the watermark. The cleared content is
-// kept as a version history entry, so nothing is lost.
-func (s *Service) ClearMentalModel(
-	ctx context.Context, b domain.BankRef, id domain.MentalModelID,
-) (domain.MentalModel, error) {
-	keep := s.historyKeep(ctx, b)
-	var m domain.MentalModel
-	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
-		cur, err := lockedModel(ctx, tx, b, id)
-		if err != nil {
-			return err
-		}
-		if cur.ContentMD != "" {
-			e := domain.MentalModelHistoryEntry{
-				Kind: domain.HistoryKindVersion, Version: cur.Version, PreviousContent: cur.ContentMD,
-				ChangedAt: s.d.Clock.Now(),
-			}
-			if err := tx.MentalModels().AppendHistory(ctx, b, id, e, keep); err != nil {
-				return err
-			}
-		}
-		cur.ContentMD, cur.StructuredOutputJSON, cur.SourceIDs, cur.Embedding = "", nil, nil, nil
-		cur.LastSeqSeen, cur.LastTrace = 0, nil
-		if err := tx.MentalModels().Update(ctx, cur); err != nil {
-			return err
-		}
-		m, err = tx.MentalModels().Get(ctx, b, id)
-		return err
-	})
-	if err != nil {
-		return domain.MentalModel{}, fmt.Errorf("mentalmodel: clear %s: %w", id, err)
-	}
-	return s.present(ctx, m, domain.DetailFull)
 }
 
 // ListMentalModelHistory returns one page of the model's history, newest first, paged with an offset token; the
@@ -329,10 +294,12 @@ func (s *Service) DeleteMentalModelFolder(ctx context.Context, b domain.BankRef,
 	return n, nil
 }
 
-// present computes is_stale (full detail only; other details leave it false) and trims m to detail.
-func (s *Service) present(ctx context.Context, m domain.MentalModel, detail domain.Detail) (domain.MentalModel, error) {
-	m.IsStale = false
-	if detail == domain.DetailFull {
+// present computes stale (full view only; other views leave it false) and trims m to view.
+func (s *Service) present(
+	ctx context.Context, m domain.MentalModel, view domain.MentalModelView,
+) (domain.MentalModel, error) {
+	m.Stale = false
+	if view == domain.MentalModelViewFull {
 		cfg, err := s.stalenessConfig(ctx, m)
 		if err != nil {
 			return domain.MentalModel{}, err
@@ -341,20 +308,20 @@ func (s *Service) present(ctx context.Context, m domain.MentalModel, detail doma
 		if err != nil {
 			return domain.MentalModel{}, fmt.Errorf("mentalmodel: staleness of %s: %w", m.Spec.ID, err)
 		}
-		m.IsStale = stale
+		m.Stale = stale
 	}
 	m.Embedding = nil
-	switch detail {
-	case domain.DetailMetadata:
+	switch view {
+	case domain.MentalModelViewBasic:
 		m.ContentMD, m.StructuredOutputJSON, m.LastTrace = "", nil, nil
-	case domain.DetailContent:
+	case domain.MentalModelViewContent:
 		m.LastTrace = nil
 	}
 	return m, nil
 }
 
 // lockedModel takes tx.Seq(b) first, which locks the bank row and so serializes every read-modify-write
-// of a model row (runner write, reconcile, update, clear), then reads the model.
+// of a model row (runner write, reconcile, update), then reads the model.
 func lockedModel(
 	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.MentalModelID,
 ) (domain.MentalModel, error) {
@@ -373,37 +340,24 @@ func (s *Service) stalenessConfig(ctx context.Context, m domain.MentalModel) (do
 	return s.modelConfig(ctx, m)
 }
 
-// historyKeep reads history_max_entries for b (default on any error).
-func (s *Service) historyKeep(ctx context.Context, b domain.BankRef) int {
-	cfg, err := s.d.Config.Effective(ctx, b)
-	if err != nil {
-		return defaultHistoryMaxEntries
-	}
-	return historyKeep(cfg)
-}
-
 // normalizeSpec validates spec and normalizes its tags and folder path.
 func normalizeSpec(spec domain.MentalModelSpec) (domain.MentalModelSpec, error) {
 	if !modelIDPattern.MatchString(string(spec.ID)) {
 		return spec, fmt.Errorf("%w: mental model id %q must be lowercase alphanumerics and hyphens",
 			domain.ErrInvalidArgument, spec.ID)
 	}
-	t := spec.Trigger
-	if t.RefreshAfterConsolidation && strings.TrimSpace(t.RefreshCron) != "" {
-		return spec, fmt.Errorf("%w: refresh_after_consolidation and refresh_cron are mutually exclusive",
-			domain.ErrInvalidArgument)
-	}
-	if expr := strings.TrimSpace(t.RefreshCron); expr != "" {
+	if expr := strings.TrimSpace(spec.Schedule.Cron); expr != "" {
 		if _, err := parseCron(expr); err != nil {
-			return spec, fmt.Errorf("%w: refresh_cron: %w", domain.ErrInvalidArgument, err)
+			return spec, domain.InvalidField("spec.schedule.cron", "%v", err)
 		}
 	}
-	if len(t.Tags.Tags) > 0 {
-		return spec, domain.InvalidField("spec.trigger.tags.tags",
-			"trigger tags.tags must be empty: a model reads with its own tags (spec.tags)")
+	scope := spec.Scope.Tags
+	if len(scope.Tags) > 0 {
+		return spec, domain.InvalidField("spec.scope.tags.tags",
+			"scope tags.tags must be empty: a model reads with its own tags (spec.tags)")
 	}
-	if err := t.Tags.Validate(); err != nil {
-		return spec, fmt.Errorf("mentalmodel: trigger tags: %w", err)
+	if err := scope.Validate(); err != nil {
+		return spec, fmt.Errorf("mentalmodel: scope tags: %w", err)
 	}
 	spec.Tags = domain.NormalizeTags(spec.Tags)
 	spec.FolderPath = normalizeFolder(spec.FolderPath)
@@ -417,8 +371,8 @@ func normalizeFolder(p string) string { return strings.Trim(strings.TrimSpace(p)
 // differs between two specs. Tags and fact types compare as sets and tag groups by value, nil equal to empty.
 func scopeChanged(a, b domain.MentalModelSpec) bool {
 	return a.SourceQuery != b.SourceQuery || !domain.SameTagSet(a.Tags, b.Tags) ||
-		a.Trigger.Tags.Match != b.Trigger.Tags.Match || !sameTagGroups(a.Trigger.Tags.Groups, b.Trigger.Tags.Groups) ||
-		!sameFactTypes(a.Trigger.FactTypes, b.Trigger.FactTypes)
+		a.Scope.Tags.Match != b.Scope.Tags.Match || !sameTagGroups(a.Scope.Tags.Groups, b.Scope.Tags.Groups) ||
+		!sameFactTypes(a.Scope.FactTypes, b.Scope.FactTypes)
 }
 
 // sameFactTypes compares two fact-type lists as sets (order and duplicates ignored, nil equal to empty).
@@ -447,7 +401,7 @@ func sameTagGroups(a, b []domain.TagGroup) bool {
 func (s *Service) PreviewMentalModelRefresh(
 	ctx context.Context, b domain.BankRef, id domain.MentalModelID, strategy domain.RefreshStrategy,
 ) (RefreshOutcome, error) {
-	return s.refresh(ctx, b, id, refreshOptions{Manual: true, DryRun: true, Strategy: strategy})
+	return s.refresh(ctx, b, id, refreshOptions{Manual: true, Preview: true, Strategy: strategy})
 }
 
 // SearchMentalModels ranks the bank's pages by fused full-text and semantic scores (recall.Engine.SearchPages),

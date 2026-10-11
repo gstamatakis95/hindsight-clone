@@ -270,7 +270,7 @@ type Querier interface {
 	// ReadsListMentalModels returns a bank's models ordered by id (byte order) after after_id ('' = from the start):
 	// folder '' or folder_path = folder or LIKE folder_like (folder escaped, then '/%'); tags with
 	// domain.MatchTags semantics under tags_match (filter tags normalized, never NULL); refresh_after keeps only
-	// models whose trigger sets refresh_after_consolidation. A NULL lim returns all.
+	// models whose schedule sets after_consolidation. A NULL lim returns all.
 	ReadsListMentalModels(ctx context.Context, arg ReadsListMentalModelsParams) ([]MentalModel, error)
 	// WP-15 unit reads (decision 1500): GetUnit and ListUnits over live and archived units.
 	// ReadsListUnits returns up to lim units of a bank, newest first ((created_at, id) descending) and strictly

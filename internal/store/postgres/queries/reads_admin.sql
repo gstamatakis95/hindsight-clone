@@ -59,12 +59,12 @@ ORDER BY v.version DESC, v.at DESC, v.id DESC;
 -- ReadsListMentalModels returns a bank's models ordered by id (byte order) after after_id ('' = from the start):
 -- folder '' or folder_path = folder or LIKE folder_like (folder escaped, then '/%'); tags with
 -- domain.MatchTags semantics under tags_match (filter tags normalized, never NULL); refresh_after keeps only
--- models whose trigger sets refresh_after_consolidation. A NULL lim returns all.
+-- models whose schedule sets after_consolidation. A NULL lim returns all.
 -- name: ReadsListMentalModels :many
 SELECT * FROM mental_models
 WHERE tenant_id = @tenant_id AND bank_id = @bank_id
   AND (@folder::text = '' OR folder_path = @folder::text OR folder_path LIKE @folder_like::text)
-  AND (NOT @refresh_after::bool OR COALESCE((trigger ->> 'refresh_after_consolidation')::boolean, false))
+  AND (NOT @refresh_after::bool OR COALESCE((trigger -> 'schedule' ->> 'after_consolidation')::boolean, false))
   AND (@after_id::text = '' OR id COLLATE "C" > @after_id::text)
   AND (CASE @tags_match::text
       WHEN 'exact' THEN tags @> @filter_tags::text[] AND tags <@ @filter_tags::text[]

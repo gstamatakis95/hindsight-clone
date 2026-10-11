@@ -17,7 +17,7 @@ import (
 func deltaSpec(id string, strategy domain.RefreshStrategy) domain.MentalModelSpec {
 	return domain.MentalModelSpec{
 		ID: domain.MentalModelID(id), Name: "Project", SourceQuery: "what is the project status?",
-		Tags: []string{"proj"}, Trigger: domain.RefreshTrigger{Mode: domain.RefreshModeDelta, Strategy: strategy},
+		Tags: []string{"proj"}, Mode: domain.RefreshModeDelta, Strategy: strategy,
 	}
 }
 
@@ -48,7 +48,7 @@ func TestBothStrategiesProduceVersionThroughRunner(t *testing.T) {
 			e := newEnv(t)
 			u := e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 			spec := deltaSpec("status", strategy)
-			spec.Trigger.Mode = domain.RefreshModeFull
+			spec.Mode = domain.RefreshModeFull
 			e.addModel(spec)
 			e.scriptSynthesize("## Status\n\nAlice leads the project.")
 
@@ -275,8 +275,8 @@ func TestModeFallbackReasons(t *testing.T) {
 	}
 }
 
-// TestDryRunWritesNothing checks that a dry run returns the draft and a diff and writes nothing.
-func TestDryRunWritesNothing(t *testing.T) {
+// TestPreviewWritesNothing checks that a preview returns the draft and a diff and writes nothing.
+func TestPreviewWritesNothing(t *testing.T) {
 	e := newEnv(t)
 	before, _ := builtModel(e, domain.RefreshStrategySingleShot)
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
@@ -284,25 +284,25 @@ func TestDryRunWritesNothing(t *testing.T) {
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob joined."},
 	}))
 	seq, _ := e.store.Read().BankSeq(e.ctx, e.bank)
-	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{DryRun: true})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Preview: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !out.WouldPersist || out.VersionWritten != 0 || !strings.Contains(out.Diff, "+Bob joined.") ||
 		!strings.Contains(out.ContentMD, "Bob joined.") || out.WindowAfterSeq != before.LastSeqSeen {
-		t.Fatalf("dry run %+v", out)
+		t.Fatalf("preview %+v", out)
 	}
 	after := e.model("status")
-	after.IsStale, before.IsStale = false, false
+	after.Stale, before.Stale = false, false
 	if after.ContentMD != before.ContentMD || after.Version != 1 || after.LastRefreshedAt != nil ||
 		after.LastSeqSeen != before.LastSeqSeen {
-		t.Fatalf("dry run wrote the model: %+v", after)
+		t.Fatalf("preview wrote the model: %+v", after)
 	}
 	if seq2, _ := e.store.Read().BankSeq(e.ctx, e.bank); seq2 != seq {
-		t.Fatalf("dry run bumped the bank seq %d -> %d", seq, seq2)
+		t.Fatalf("preview bumped the bank seq %d -> %d", seq, seq2)
 	}
 	if len(e.history("status", domain.HistoryKindUnspecified)) != 0 {
-		t.Fatal("dry run wrote history")
+		t.Fatal("preview wrote history")
 	}
 }
 

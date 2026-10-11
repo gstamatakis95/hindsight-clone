@@ -127,28 +127,3 @@ func TestReconcileSkipsFailureOfEarlierModel(t *testing.T) {
 		t.Fatal("recreated model paused by an older failure")
 	}
 }
-
-// TestRebuildAfterClearAddsNoEmptyVersionEntry checks that the refresh after a Clear (which recorded the
-// cleared content itself) adds no VERSION entry with empty previous content.
-func TestRebuildAfterClearAddsNoEmptyVersionEntry(t *testing.T) {
-	e := newEnv(t)
-	adm := e.svc
-	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
-	e.addModel(deltaSpec("status", domain.RefreshStrategySingleShot))
-	e.scriptSynthesize("## Status\n\nAlice leads the project.")
-	if _, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := adm.ClearMentalModel(e.ctx, e.bank, "status"); err != nil {
-		t.Fatal(err)
-	}
-	e.scriptSynthesize("## Status\n\nAlice still leads the project.")
-	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true})
-	if err != nil || out.VersionWritten != 2 {
-		t.Fatalf("rebuild: version %d: %v", out.VersionWritten, err)
-	}
-	h := e.history("status", domain.HistoryKindVersion)
-	if len(h) != 1 || h[0].PreviousContent == "" {
-		t.Fatalf("version history %+v", h)
-	}
-}

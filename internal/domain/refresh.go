@@ -15,7 +15,7 @@ const (
 
 // RefreshDueAt is when an automatic refresh of m may run: now + refresh_debounce_seconds (mc's, else
 // DefaultRefreshDebounceSeconds; a negative value counts as 0), or the end of the interval floor when that
-// is later. The floor is the model trigger's min_refresh_interval_seconds, else mc's; it applies only once
+// is later. The floor is the model schedule's min_interval_seconds, else mc's; it applies only once
 // m has been refreshed. reason is RefreshReasonDebounce or RefreshReasonIntervalFloor. mc may be nil.
 func RefreshDueAt(m MentalModel, mc *MentalModelConfig, now time.Time) (at time.Time, reason string) {
 	debounce, floor := DefaultRefreshDebounceSeconds, 0
@@ -27,8 +27,8 @@ func RefreshDueAt(m MentalModel, mc *MentalModelConfig, now time.Time) (at time.
 			floor = *mc.MinRefreshIntervalSeconds
 		}
 	}
-	if m.Spec.Trigger.MinRefreshIntervalSeconds != nil {
-		floor = *m.Spec.Trigger.MinRefreshIntervalSeconds
+	if m.Spec.Schedule.MinIntervalSeconds != nil {
+		floor = *m.Spec.Schedule.MinIntervalSeconds
 	}
 	at, reason = now.Add(time.Duration(max(debounce, 0))*time.Second), RefreshReasonDebounce
 	if floor > 0 && m.LastRefreshedAt != nil {

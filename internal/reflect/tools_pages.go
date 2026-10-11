@@ -58,7 +58,7 @@ func rememberPages(st *agentState, ms []domain.MentalModel) {
 
 // fullPage returns a page with its whole content.
 func fullPage(m domain.MentalModel) pageOut {
-	p := pageOut{ID: m.Spec.ID, Name: m.Spec.Name, Content: m.ContentMD, Tags: m.Spec.Tags, IsStale: m.IsStale}
+	p := pageOut{ID: m.Spec.ID, Name: m.Spec.Name, Content: m.ContentMD, Tags: m.Spec.Tags, IsStale: m.Stale}
 	if !m.UpdatedAt.IsZero() {
 		updated := m.UpdatedAt
 		p.UpdatedAt = &updated

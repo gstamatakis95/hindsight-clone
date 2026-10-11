@@ -102,8 +102,8 @@ The header of `api/memory/v1/memory.proto` states these once:
 
 - **Paging.** Every List RPC takes `page_size` (0 = 100, at most 1000, negative = `INVALID_ARGUMENT`) and
   `page_token`, and returns `next_page_token` (empty = done). `ListEvents` pages by sequence: `page_size` plus
-  `after_seq`, continuing from the response's `next_after_seq`. `SearchPages` takes `max_results` (0 = 10, at
-  most 100).
+  `after_seq`, continuing from the response's `next_after_seq`. `SearchMentalModels` takes `max_results` (0 =
+  10, at most 100).
 - **Tag filters.** Every request that filters by tag takes one `TagFilter`: flat `tags` under a `match` mode, or
   boolean `groups` (not both). List RPCs accept the flat form only.
 - **Async work.** An RPC that enqueues work returns the `Operation` itself (`operation`, `batch_operation`,
@@ -218,9 +218,12 @@ Each RPC that does work takes its own overrides message, holding only what that 
 | `ReflectOverrides` | Reflect | `reflect`, `recall` (except `recall.arms`), `reflect_model`, `structured_output_model`, `rerank_model` |
 | `ConsolidateOverrides` | Consolidate | the observations group minus `enabled` / `auto_consolidation` / `reconcile_grace_seconds`, `consolidate_model`, `dedup_check_model` |
 | `RederiveOverrides` | UpdateMemory | `entity_match_threshold`, `extract_model`, `time_parse_model` |
-| `RefreshOverrides` | RefreshMentalModel, MentalModelSpec | `reflect`, `max_delta_ratio`, `reflect_model`, `mental_model_model`, `structured_output_model` |
+| `RefreshOverrides` | RefreshMentalModel, MentalModelSpec | `reflect` (including the loop caps `recall_max_tokens` and `search_observations_*`), `max_delta_ratio`, `reflect_model`, `mental_model_model`, `structured_output_model` |
 
-A document keeps its retain overrides (`Document.retain_overrides`) and ReprocessDocument replays them.
+A document keeps its retain overrides (`Document.retain_overrides`) and ReprocessDocument replays them. A mental
+model's spec holds its own refresh settings: `schedule` (a oneof: `cron` or `after_consolidation`, plus
+`min_interval_seconds`), `scope` (tag filter and fact types) and plain run settings (`mode`, `strategy`, `budget`,
+`max_tokens`, ...); `RefreshMentalModelRequest.strategy` overrides the strategy for one call.
 
 ## Model routing
 

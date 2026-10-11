@@ -8,11 +8,45 @@ import (
 	"github.com/google/uuid"
 )
 
-// modelParams maps a mental model onto its columns: the spec's trigger and overrides become JSON,
-// refresh_cron mirrors trigger.refresh_cron, and empty optional values become NULL. IsStale is not stored
-// (readers compute it). A malformed source id is domain.ErrInvalidArgument.
+// refreshSettings is the JSON of the trigger column: the spec fields that have no column of their own (the
+// schedule, the scope and the run settings).
+type refreshSettings struct {
+	Schedule              domain.RefreshSchedule  `json:"schedule,omitzero"`
+	Scope                 domain.MentalModelScope `json:"scope,omitzero"`
+	Mode                  domain.RefreshMode      `json:"mode,omitempty"`
+	Strategy              domain.RefreshStrategy  `json:"strategy,omitempty"`
+	Budget                domain.Budget           `json:"budget,omitempty"`
+	IncludeChunks         *bool                   `json:"include_chunks,omitempty"`
+	RecallChunksMaxTokens *int                    `json:"recall_chunks_max_tokens,omitempty"`
+	ExcludeMentalModels   bool                    `json:"exclude_mental_models,omitempty"`
+	ExcludeMentalModelIDs []domain.MentalModelID  `json:"exclude_mental_model_ids,omitempty"`
+	ResponseSchemaJSON    string                  `json:"response_schema_json,omitempty"`
+	KeepTrace             bool                    `json:"keep_trace,omitempty"`
+}
+
+// settingsOf returns the refreshSettings of s.
+func settingsOf(s domain.MentalModelSpec) refreshSettings {
+	return refreshSettings{
+		Schedule: s.Schedule, Scope: s.Scope, Mode: s.Mode, Strategy: s.Strategy, Budget: s.Budget,
+		IncludeChunks: s.IncludeChunks, RecallChunksMaxTokens: s.RecallChunksMaxTokens,
+		ExcludeMentalModels: s.ExcludeMentalModels, ExcludeMentalModelIDs: s.ExcludeMentalModelIDs,
+		ResponseSchemaJSON: s.ResponseSchemaJSON, KeepTrace: s.KeepTrace,
+	}
+}
+
+// apply copies the settings into s.
+func (r refreshSettings) apply(s *domain.MentalModelSpec) {
+	s.Schedule, s.Scope, s.Mode, s.Strategy, s.Budget = r.Schedule, r.Scope, r.Mode, r.Strategy, r.Budget
+	s.IncludeChunks, s.RecallChunksMaxTokens = r.IncludeChunks, r.RecallChunksMaxTokens
+	s.ExcludeMentalModels, s.ExcludeMentalModelIDs = r.ExcludeMentalModels, r.ExcludeMentalModelIDs
+	s.ResponseSchemaJSON, s.KeepTrace = r.ResponseSchemaJSON, r.KeepTrace
+}
+
+// modelParams maps a mental model onto its columns: the spec's refreshSettings (in the trigger column) and
+// overrides become JSON, refresh_cron mirrors schedule.cron, and empty optional values become NULL. Stale is not
+// stored (readers compute it). A malformed source id is domain.ErrInvalidArgument.
 func modelParams(m domain.MentalModel) (db.MentalModelCreateParams, error) {
-	trigger, err := marshal("mental model trigger", m.Spec.Trigger)
+	trigger, err := marshal("mental model settings", settingsOf(m.Spec))
 	if err != nil {
 		return db.MentalModelCreateParams{}, err
 	}
@@ -43,7 +77,7 @@ func modelParams(m domain.MentalModel) (db.MentalModelCreateParams, error) {
 		MaxTokens: maxTokens, Trigger: trigger, Overrides: overrides, ContentMd: m.ContentMD,
 		StructuredOutputJson: structured, Version: m.Version, LastRefreshedAt: m.LastRefreshedAt,
 		LastSeqSeen: m.LastSeqSeen, LastRefreshFailedAt: m.LastRefreshFailedAt, AutoRefreshPaused: m.AutoRefreshPaused,
-		SourceIds: sources, LastTrace: trace, Embedding: vec(m.Embedding), RefreshCron: textPtr(m.Spec.Trigger.RefreshCron),
+		SourceIds: sources, LastTrace: trace, Embedding: vec(m.Embedding), RefreshCron: textPtr(m.Spec.Schedule.Cron),
 	}, nil
 }
 
@@ -78,9 +112,11 @@ func modelOf(r db.MentalModel) (domain.MentalModel, error) {
 		v := int(*r.MaxTokens)
 		m.Spec.MaxTokens = &v
 	}
-	if err := unmarshal("mental model trigger", r.Trigger, &m.Spec.Trigger); err != nil {
+	var settings refreshSettings
+	if err := unmarshal("mental model settings", r.Trigger, &settings); err != nil {
 		return domain.MentalModel{}, err
 	}
+	settings.apply(&m.Spec)
 	var err error
 	if m.Spec.Overrides, err = unmarshalPtr[domain.BankConfig]("mental model overrides", r.Overrides); err != nil {
 		return domain.MentalModel{}, err

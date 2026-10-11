@@ -376,6 +376,7 @@ MENTAL_MODELS = [
         folder_path            text        NOT NULL DEFAULT '',
         tags                   text[]      NOT NULL DEFAULT '{}',
         max_tokens             integer     NULL,
+        -- The spec's schedule, scope and run settings (the spec fields without a column of their own).
         trigger                jsonb       NOT NULL DEFAULT '{}',
         overrides              jsonb       NULL,
         content_md             text        NOT NULL DEFAULT '',
@@ -390,7 +391,7 @@ MENTAL_MODELS = [
         source_ids             uuid[]      NOT NULL DEFAULT '{}',
         last_trace             jsonb       NULL,
         embedding              vector(768) NULL,
-        -- Copy of trigger.refresh_cron, so the cron tick can use an index.
+        -- Copy of trigger.schedule.cron, so the cron tick can use an index.
         refresh_cron           text        NULL,
         created_at             timestamptz NOT NULL DEFAULT now(),
         updated_at             timestamptz NOT NULL DEFAULT now(),

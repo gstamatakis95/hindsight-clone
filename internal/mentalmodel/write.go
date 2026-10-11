@@ -42,7 +42,7 @@ func (s *Service) write(
 		if dr.nothingInScope {
 			return tx.MentalModels().Update(ctx, next)
 		}
-		next.LastSeqSeen, next.IsStale = p.upTo, false
+		next.LastSeqSeen, next.Stale = p.upTo, false
 		if p.mode == domain.RefreshModeFull {
 			if next.SourceIDs, err = prunedSources(ctx, tx, cur, dr); err != nil {
 				return err
@@ -68,7 +68,7 @@ func (s *Service) write(
 func unchangedSince(read, cur domain.MentalModel) error {
 	if cur.Version != read.Version || cur.ContentMD != read.ContentMD || cur.LastSeqSeen != read.LastSeqSeen ||
 		scopeChanged(read.Spec, cur.Spec) ||
-		cur.Spec.Trigger.ResponseSchemaJSON != read.Spec.Trigger.ResponseSchemaJSON {
+		cur.Spec.ResponseSchemaJSON != read.Spec.ResponseSchemaJSON {
 		return fmt.Errorf("%w: mental model %s changed during the refresh", domain.ErrConflict, cur.Spec.ID)
 	}
 	return nil
@@ -84,7 +84,7 @@ func ranModel(
 	if opts.Manual {
 		next.AutoRefreshPaused = false
 	}
-	if cur.Spec.Trigger.KeepTrace {
+	if cur.Spec.KeepTrace {
 		t := trace
 		next.LastTrace = &t
 	}
@@ -155,15 +155,12 @@ func historyKeep(cfg domain.BankConfig) int {
 	return defaultHistoryMaxEntries
 }
 
-// configLevels are the override levels of a refresh above the bank: the model's stored overrides, the
-// trigger's knobs, then the call's overrides.
+// configLevels are the override levels of a refresh above the bank: the model's stored overrides, then the
+// call's overrides.
 func configLevels(m domain.MentalModel, call *domain.BankConfig) []domain.BankConfig {
 	var levels []domain.BankConfig
 	if m.Spec.Overrides != nil {
 		levels = append(levels, *m.Spec.Overrides)
-	}
-	if t := triggerLevel(m.Spec.Trigger); t != nil {
-		levels = append(levels, *t)
 	}
 	if call != nil {
 		levels = append(levels, *call)
@@ -171,38 +168,25 @@ func configLevels(m domain.MentalModel, call *domain.BankConfig) []domain.BankCo
 	return levels
 }
 
-// triggerLevel maps the trigger's reflect knobs onto a config level; nil when it sets none.
-func triggerLevel(t domain.RefreshTrigger) *domain.BankConfig {
-	rc := domain.ReflectConfig{
-		RecallMaxTokens:                   t.RecallMaxTokens,
-		SearchObservationsMaxTokens:       t.SearchObservationsMaxTokens,
-		SearchObservationsIncludeEntities: t.SearchObservationsIncludeEntities,
-	}
-	if rc.RecallMaxTokens == nil && rc.SearchObservationsMaxTokens == nil && rc.SearchObservationsIncludeEntities == nil {
-		return nil
-	}
-	return &domain.BankConfig{Reflect: &rc}
-}
-
-// effectiveStrategy is the call's strategy, else the trigger's, else the bank default, else agentic.
+// effectiveStrategy is the call's strategy, else the spec's, else the bank default, else agentic.
 func effectiveStrategy(
 	call domain.RefreshStrategy, m domain.MentalModel, cfg domain.BankConfig,
 ) domain.RefreshStrategy {
 	switch {
 	case call != domain.RefreshStrategyUnspecified:
 		return call
-	case m.Spec.Trigger.Strategy != domain.RefreshStrategyUnspecified:
-		return m.Spec.Trigger.Strategy
+	case m.Spec.Strategy != domain.RefreshStrategyUnspecified:
+		return m.Spec.Strategy
 	case cfg.MentalModels != nil && cfg.MentalModels.DefaultStrategy != domain.RefreshStrategyUnspecified:
 		return cfg.MentalModels.DefaultStrategy
 	}
 	return domain.RefreshStrategyAgentic
 }
 
-// requestedMode is the trigger's mode, else the bank default, else full.
+// requestedMode is the spec's mode, else the bank default, else full.
 func requestedMode(m domain.MentalModel, cfg domain.BankConfig) domain.RefreshMode {
-	if m.Spec.Trigger.Mode != domain.RefreshModeUnspecified {
-		return m.Spec.Trigger.Mode
+	if m.Spec.Mode != domain.RefreshModeUnspecified {
+		return m.Spec.Mode
 	}
 	if cfg.MentalModels != nil && cfg.MentalModels.DefaultMode != domain.RefreshModeUnspecified {
 		return cfg.MentalModels.DefaultMode

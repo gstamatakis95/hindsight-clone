@@ -14,10 +14,12 @@ func fuzzySpec() domain.MentalModelSpec {
 	leaf := domain.TagGroup{Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{
 		Tags: []string{"projct"}, Resolve: domain.TagResolveFuzzy,
 	}}
-	return domain.MentalModelSpec{ID: "status", Name: "Status", SourceQuery: "q", Trigger: domain.RefreshTrigger{
-		Mode: domain.RefreshModeFull, Strategy: domain.RefreshStrategySingleShot,
-		Tags: domain.TagFilter{Groups: []domain.TagGroup{{Kind: domain.TagGroupAnyOf, Groups: []domain.TagGroup{leaf}}}},
-	}}
+	return domain.MentalModelSpec{
+		ID: "status", Name: "Status", SourceQuery: "q", Mode: domain.RefreshModeFull,
+		Strategy: domain.RefreshStrategySingleShot, Scope: domain.MentalModelScope{
+			Tags: domain.TagFilter{Groups: []domain.TagGroup{{Kind: domain.TagGroupAnyOf, Groups: []domain.TagGroup{leaf}}}},
+		},
+	}
 }
 
 // TestFuzzyScopeResolvesBankTags checks decision 1203: a fuzzy leaf resolves against the bank's
@@ -82,7 +84,7 @@ func TestAgenticRefreshSetsContext(t *testing.T) {
 func TestDeltaPreCheckReadsUntaggedUnits(t *testing.T) {
 	e := newEnv(t)
 	m, _ := builtModel(e, domain.RefreshStrategySingleShot)
-	m.Spec.Trigger.Tags.Match = domain.TagsMatchAny
+	m.Spec.Scope.Tags.Match = domain.TagsMatchAny
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Carol reviews the project")
 	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
@@ -121,7 +123,7 @@ func TestAutomaticRunSkipsFreshOrFlooredModel(t *testing.T) {
 
 	floor, last := 3600, e.clock.Now()
 	m := e.model("status")
-	m.Spec.Trigger.MinRefreshIntervalSeconds, m.LastRefreshedAt = &floor, &last
+	m.Spec.Schedule.MinIntervalSeconds, m.LastRefreshedAt = &floor, &last
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	e.clock.Advance(time.Minute)
@@ -166,7 +168,7 @@ func TestAgenticAnswerWithoutCitationsFails(t *testing.T) {
 	e := newEnv(t)
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
 	spec := deltaSpec("status", domain.RefreshStrategyAgentic)
-	spec.Trigger.Mode = domain.RefreshModeFull
+	spec.Mode = domain.RefreshModeFull
 	e.addModel(spec)
 	e.llm.citeNothing = true
 	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true})
@@ -208,7 +210,7 @@ func TestFloorSkewTolerance(t *testing.T) {
 	builtModel(e, domain.RefreshStrategySingleShot)
 	floor, last := 60, e.clock.Now()
 	m := e.model("status")
-	m.Spec.Trigger.MinRefreshIntervalSeconds, m.LastRefreshedAt = &floor, &last
+	m.Spec.Schedule.MinIntervalSeconds, m.LastRefreshedAt = &floor, &last
 	e.tx(func(tx store.Tx) error { return tx.MentalModels().Update(e.ctx, m) })
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	e.clock.Set(last.Add(time.Minute - 3*time.Second))
@@ -241,9 +243,9 @@ func TestStalenessUsesBankFuzzyFloor(t *testing.T) {
 				Recall: &domain.RecallConfig{FuzzyTagMinSimilarity: &floor},
 			})
 		})
-		m, err := e.svc.GetMentalModel(e.ctx, e.bank, "status", domain.DetailFull)
-		if err != nil || m.IsStale != tc.stale {
-			t.Fatalf("floor %v: is_stale %v, want %v (%v)", floor, m.IsStale, tc.stale, err)
+		m, err := e.svc.GetMentalModel(e.ctx, e.bank, "status", domain.MentalModelViewFull)
+		if err != nil || m.Stale != tc.stale {
+			t.Fatalf("floor %v: stale %v, want %v (%v)", floor, m.Stale, tc.stale, err)
 		}
 		dec, err := e.svc.decide(e.ctx, m, e.clock.Now())
 		if err != nil || (dec.Kind == decisionSkip) == tc.stale {

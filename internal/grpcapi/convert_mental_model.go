@@ -8,58 +8,57 @@ import (
 	pb "memd/gen/memory/v1"
 )
 
-// Detail defaults per RPC (MentalModelService): GetMentalModel returns everything, ListMentalModels only
-// metadata.
+// View defaults per RPC (MentalModelService): GetMentalModel returns everything, ListMentalModels only the
+// basic view.
 const (
-	// getDetailDefault is GetMentalModel's detail when the request leaves it unspecified.
-	getDetailDefault = domain.DetailFull
-	// listDetailDefault is ListMentalModels' detail when the request leaves it unspecified.
-	listDetailDefault = domain.DetailMetadata
+	// getViewDefault is GetMentalModel's view when the request leaves it unspecified.
+	getViewDefault = domain.MentalModelViewFull
+	// listViewDefault is ListMentalModels' view when the request leaves it unspecified.
+	listViewDefault = domain.MentalModelViewBasic
 )
 
-// detailOr returns detail, or def when detail is unspecified.
-func detailOr(detail, def domain.Detail) domain.Detail {
-	if detail == domain.DetailUnspecified {
+// viewOr returns view, or def when view is unspecified.
+func viewOr(view, def domain.MentalModelView) domain.MentalModelView {
+	if view == domain.MentalModelViewUnspecified {
 		return def
 	}
-	return detail
+	return view
 }
 
-// mentalModelToProto converts a MentalModel trimmed to detail (memory.v1.Detail): METADATA is the spec and
-// status fields, CONTENT adds content_md and structured_output_json, FULL (or unspecified) adds source_ids
-// and last_trace. Callers resolve the RPC's default detail first.
-func mentalModelToProto(m domain.MentalModel, detail domain.Detail) *pb.MentalModel {
+// mentalModelToProto converts a MentalModel trimmed to view (memory.v1.MentalModelView): BASIC is the spec and
+// status fields, CONTENT adds content_md and structured_output_json, FULL (or unspecified) adds
+// source_memory_ids and last_trace. Callers resolve the RPC's default view first.
+func mentalModelToProto(m domain.MentalModel, view domain.MentalModelView) *pb.MentalModel {
 	out := &pb.MentalModel{
 		Spec:                specToProto(m.Spec),
-		BankId:              m.Bank.Bank,
 		Version:             m.Version,
-		IsStale:             m.IsStale,
+		Stale:               m.Stale,
 		LastRefreshedAt:     tsPtrToProto(m.LastRefreshedAt),
 		LastSeqSeen:         m.LastSeqSeen,
 		LastRefreshFailedAt: tsPtrToProto(m.LastRefreshFailedAt),
 		AutoRefreshPaused:   m.AutoRefreshPaused,
 		CreatedAt:           tsToProto(m.CreatedAt),
 	}
-	if detail == domain.DetailMetadata {
+	if view == domain.MentalModelViewBasic {
 		return out
 	}
 	out.ContentMd = m.ContentMD
 	out.StructuredOutputJson = string(m.StructuredOutputJSON)
-	if detail != domain.DetailContent {
-		out.SourceIds = strs[string](m.SourceIDs)
+	if view != domain.MentalModelViewContent {
+		out.SourceMemoryIds = strs[string](m.SourceIDs)
 		out.LastTrace = refreshTracePtrToProto(m.LastTrace)
 	}
 	return out
 }
 
-// mentalModelsToProto converts mental models trimmed to detail; nil stays nil.
-func mentalModelsToProto(in []domain.MentalModel, detail domain.Detail) []*pb.MentalModel {
+// mentalModelsToProto converts mental models trimmed to view; nil stays nil.
+func mentalModelsToProto(in []domain.MentalModel, view domain.MentalModelView) []*pb.MentalModel {
 	if in == nil {
 		return nil
 	}
 	out := make([]*pb.MentalModel, len(in))
 	for i := range in {
-		out[i] = mentalModelToProto(in[i], detail)
+		out[i] = mentalModelToProto(in[i], view)
 	}
 	return out
 }
@@ -122,9 +121,9 @@ func resolvedScopeToProto(s mentalmodel.ResolvedScope) *pb.ResolvedScope {
 	}
 }
 
-// dryRunToProto converts a dry run's RefreshOutcome to its response.
-func dryRunToProto(o mentalmodel.RefreshOutcome) *pb.DryRunRefreshResponse {
-	return &pb.DryRunRefreshResponse{
+// previewToProto converts a preview's RefreshOutcome to its response.
+func previewToProto(o mentalmodel.RefreshOutcome) *pb.PreviewMentalModelRefreshResponse {
+	return &pb.PreviewMentalModelRefreshResponse{
 		RequestedMode:   toEnum[pb.RefreshMode](o.RequestedMode),
 		Trace:           refreshTraceToProto(o.Trace),
 		ResolvedScope:   resolvedScopeToProto(o.ResolvedScope),
@@ -140,9 +139,9 @@ func dryRunToProto(o mentalmodel.RefreshOutcome) *pb.DryRunRefreshResponse {
 // historyEntryToProto converts a MentalModelHistoryEntry; Version is not on the wire.
 func historyEntryToProto(e domain.MentalModelHistoryEntry) *pb.MentalModelHistoryEntry {
 	return &pb.MentalModelHistoryEntry{
-		Kind:            toEnum[pb.HistoryKind](e.Kind),
+		Kind:            toEnum[pb.MentalModelHistoryEntry_Kind](e.Kind),
 		PreviousContent: e.PreviousContent,
-		ChangedAt:       tsToProto(e.ChangedAt),
+		CreatedAt:       tsToProto(e.ChangedAt),
 		Outcome:         toEnum[pb.RefreshOutcome](e.Outcome),
 		FailureReason:   e.FailureReason,
 		ErrorMessage:    e.ErrorMessage,
@@ -150,7 +149,7 @@ func historyEntryToProto(e domain.MentalModelHistoryEntry) *pb.MentalModelHistor
 }
 
 // historyPageToProto converts a HistoryPage to its response.
-func historyPageToProto(p mentalmodel.HistoryPage) *pb.GetMentalModelHistoryResponse {
+func historyPageToProto(p mentalmodel.HistoryPage) *pb.ListMentalModelHistoryResponse {
 	var entries []*pb.MentalModelHistoryEntry
 	if p.Items != nil {
 		entries = make([]*pb.MentalModelHistoryEntry, len(p.Items))
@@ -158,12 +157,12 @@ func historyPageToProto(p mentalmodel.HistoryPage) *pb.GetMentalModelHistoryResp
 			entries[i] = historyEntryToProto(p.Items[i])
 		}
 	}
-	return &pb.GetMentalModelHistoryResponse{Entries: entries, NextPageToken: p.NextPageToken}
+	return &pb.ListMentalModelHistoryResponse{Entries: entries, NextPageToken: p.NextPageToken}
 }
 
-// historyRequestFromProto converts a GetMentalModelHistoryRequest; Bank.Bank carries bank_id (the handler
+// historyRequestFromProto converts a ListMentalModelHistoryRequest; Bank.Bank carries bank_id (the handler
 // sets the full ref).
-func historyRequestFromProto(r *pb.GetMentalModelHistoryRequest) (mentalmodel.HistoryRequest, error) {
+func historyRequestFromProto(r *pb.ListMentalModelHistoryRequest) (mentalmodel.HistoryRequest, error) {
 	var d decoder
 	out := mentalmodel.HistoryRequest{
 		Bank:      domain.BankRef{Bank: r.GetBankId()},
@@ -175,14 +174,14 @@ func historyRequestFromProto(r *pb.GetMentalModelHistoryRequest) (mentalmodel.Hi
 	return out, d.err
 }
 
-// listMentalModelsFromProto converts a ListMentalModelsRequest; Detail stays as sent (the handler applies
+// listMentalModelsFromProto converts a ListMentalModelsRequest; View stays as sent (the handler applies
 // the default) and Bank.Bank carries bank_id.
 func listMentalModelsFromProto(r *pb.ListMentalModelsRequest) (mentalmodel.ListRequest, error) {
 	var d decoder
 	out := mentalmodel.ListRequest{
 		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		FolderPrefix: r.GetFolderPrefix(),
-		Detail:       fromEnum[domain.Detail](&d, r.GetDetail()),
+		View:         fromEnum[domain.MentalModelView](&d, r.GetView()),
 		Tags:         d.tagFilter(r.GetTags()),
 		PageSize:     int(r.GetPageSize()),
 		PageToken:    r.GetPageToken(),
@@ -190,10 +189,10 @@ func listMentalModelsFromProto(r *pb.ListMentalModelsRequest) (mentalmodel.ListR
 	return out, d.err
 }
 
-// mentalModelPageToProto converts a MentalModelPage trimmed to detail.
-func mentalModelPageToProto(p mentalmodel.ModelPage, detail domain.Detail) *pb.ListMentalModelsResponse {
+// mentalModelPageToProto converts a ModelPage trimmed to view.
+func mentalModelPageToProto(p mentalmodel.ModelPage, view domain.MentalModelView) *pb.ListMentalModelsResponse {
 	return &pb.ListMentalModelsResponse{
-		MentalModels:  mentalModelsToProto(p.Items, detail),
+		MentalModels:  mentalModelsToProto(p.Items, view),
 		NextPageToken: p.NextPageToken,
 	}
 }
@@ -211,8 +210,8 @@ func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (mentalmodel.Refre
 	return out, d.err
 }
 
-// searchPagesFromProto converts a SearchPagesRequest; Bank.Bank carries bank_id.
-func searchPagesFromProto(r *pb.SearchPagesRequest) recall.SearchPagesRequest {
+// searchFromProto converts a SearchMentalModelsRequest; Bank.Bank carries bank_id.
+func searchFromProto(r *pb.SearchMentalModelsRequest) recall.SearchPagesRequest {
 	return recall.SearchPagesRequest{
 		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		Query:        r.GetQuery(),
@@ -221,9 +220,9 @@ func searchPagesFromProto(r *pb.SearchPagesRequest) recall.SearchPagesRequest {
 	}
 }
 
-// pageHitToProto converts a PageHit.
-func pageHitToProto(h domain.PageHit) *pb.PageHit {
-	return &pb.PageHit{
+// hitToProto converts a PageHit.
+func hitToProto(h domain.PageHit) *pb.MentalModelHit {
+	return &pb.MentalModelHit{
 		MentalModelId: string(h.MentalModelID),
 		FolderPath:    h.FolderPath,
 		Name:          h.Name,
@@ -232,14 +231,14 @@ func pageHitToProto(h domain.PageHit) *pb.PageHit {
 	}
 }
 
-// pageHitsToProto converts page hits; nil stays nil.
-func pageHitsToProto(in []domain.PageHit) []*pb.PageHit {
+// hitsToProto converts search hits; nil stays nil.
+func hitsToProto(in []domain.PageHit) []*pb.MentalModelHit {
 	if in == nil {
 		return nil
 	}
-	out := make([]*pb.PageHit, len(in))
+	out := make([]*pb.MentalModelHit, len(in))
 	for i := range in {
-		out[i] = pageHitToProto(in[i])
+		out[i] = hitToProto(in[i])
 	}
 	return out
 }

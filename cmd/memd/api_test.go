@@ -53,8 +53,8 @@ func TestEveryRPCWired(t *testing.T) {
 		}
 		return true
 	})
-	if n != 49 {
-		t.Fatalf("found %d RPCs, want 49", n)
+	if n != 48 {
+		t.Fatalf("found %d RPCs, want 48", n)
 	}
 }
 

@@ -18,8 +18,8 @@
 //
 //   - RPCs: [Service.CreateMentalModel], [Service.GetMentalModel], [Service.ListMentalModels],
 //     [Service.UpdateMentalModel], [Service.DeleteMentalModel], [Service.DeleteMentalModelFolder],
-//     [Service.RefreshMentalModel], [Service.PreviewMentalModelRefresh], [Service.ListMentalModelHistory],
-//     [Service.SearchMentalModels] and [Service.ClearMentalModel].
+//     [Service.RefreshMentalModel], [Service.PreviewMentalModelRefresh], [Service.ListMentalModelHistory] and
+//     [Service.SearchMentalModels].
 //   - Job: [Service.RunRefreshJob] handles refresh_mental_model.
 //   - Sweeps: [Service.ReconcileFailedRefreshes] and [Service.EnqueueDueCronRefreshes].
 //
@@ -31,9 +31,9 @@
 // Untagged writes never make a tagged model stale, even when its refresh reads untagged memories. The staleness
 // check reads BankSeq first, then checks both conditions with no model call.
 //
-// The scope (domain.MentalModelSpec.ScopeFilter): the model's tags under the trigger's match mode, which defaults to
-// all_strict for a tagged model and any for an untagged one; the trigger's tag groups override the flat tags (a
-// trigger's tag filter never carries flat tags of its own: they are the model's), and fuzzy tag leaves are resolved to
+// The scope (domain.MentalModelSpec.ScopeFilter): the model's tags under the scope's match mode, which defaults to
+// all_strict for a tagged model and any for an untagged one; the scope's tag groups override the flat tags (a
+// scope's tag filter never carries flat tags of its own: they are the model's), and fuzzy tag leaves are resolved to
 // the bank's exact tags (recall.Engine.CompileTags) before the scope query, at the effective
 // recall.fuzzy_tag_min_similarity of the model (server < tenant < bank < the model's overrides), so staleness sees
 // exactly what recall would retrieve.
@@ -44,9 +44,9 @@
 //
 //  1. Plan: load the model; read BankSeq = S (the snapshot bound: everything the refresh reads has seq <= S,
 //     so a writer that commits late carries a seq above S and is seen next time); resolve the config as
-//     server < tenant < bank < model overrides < trigger knobs < call overrides; pick the synthesizer by
-//     strategy (call, else trigger, else mental_models.default_strategy, else agentic) and the mode (trigger,
-//     else mental_models.default_mode, else full). A requested delta runs in full with a recorded reason
+//     server < tenant < bank < model overrides < call overrides; pick the synthesizer by strategy (call, else
+//     spec, else mental_models.default_strategy, else agentic) and the mode (spec, else
+//     mental_models.default_mode, else full). A requested delta runs in full with a recorded reason
 //     when the call forces full, the model has no content yet, the source query or scope changed (the
 //     watermark was reset), or a cited source was retracted.
 //  2. Pre-checks with no model call: an automatic run (not manual, not forced, not a preview) that starts
@@ -56,19 +56,19 @@
 //  3. Draft. Agentic: the reflect loop over the scope, bounded to the snapshot, answering as a document, with
 //     the model excluded from its own page tools; a delta runs the loop over the window only and integrates the
 //     memories it cites with the delta call. Single-shot: one recall over the scope and window (observations
-//     first, the trigger's budget, default mid), then one synthesize call (full) or one delta call (delta).
+//     first, the spec's budget, default mid), then one synthesize call (full) or one delta call (delta).
 //     Both stop with NO_NEW_FACTS before any model call when retrieval finds nothing.
 //  4. Delta edits: the delta call proposes edit ops over the document's sections and blocks (ids derived
 //     from content), applied at once. One retry shows the model the rejected ops when none
 //     applied or any named an unknown id. If every op is still rejected the refresh fails and the document
 //     stays; a document is never replaced by a partial one. A delta that changes more than
 //     mental_models.max_delta_ratio of the document (0 = no limit) is redone in full.
-//  5. With trigger.response_schema_json set and changed content, reflect.Agent.Project (STRUCTURED_OUTPUT)
+//  5. With the spec's response_schema_json set and changed content, reflect.Agent.Project (STRUCTURED_OUTPUT)
 //     projects the page onto the schema; a failure fails the refresh. The page is embedded for
 //     SearchMentalModels (a failure is only a trace warning).
 //  6. Write in one short transaction: tx.Seq(bank) first (it locks the bank row and serializes every
 //     read-modify-write of model rows), re-read the model and fail with domain.ErrConflict if it changed
-//     since the plan (another version, cleared, query or scope edited; the job retries), then set
+//     since the plan (another version, query, scope or schema edited; the job retries), then set
 //     last_refreshed_at and last_seq_seen = S; a full refresh replaces source_ids (a delta
 //     accumulates them); changed content moves the old content to history (capped at
 //     mental_models.history_max_entries per kind), writes the new version and appends a
@@ -87,12 +87,13 @@
 // replaced when given, manual set; a manual request also releases a parked refresh (run_at = now).
 //
 // An automatic trigger (outside any transaction) skips a paused or fresh model and otherwise parks the refresh
-// until the later of now + refresh_debounce_seconds (default 30) and last_refreshed_at +
-// min_refresh_interval_seconds (trigger value over config; default 0), as domain.RefreshDueAt computes it.
+// until the later of now + refresh_debounce_seconds (default 30) and last_refreshed_at + the interval floor
+// (schedule.min_interval_seconds over mental_models.min_refresh_interval_seconds; default 0), as
+// domain.RefreshDueAt computes it.
 // jobs.QueueModelRefresh does the same inside a transaction without a config resolver: it reads the model's
 // overrides over the bank's own config, skips paused or deleted models, and runs a never-refreshed model now
 // and in full; bank templates (first builds) and curation (refreshes after an invalidate) use it.
-// [Service.EnqueueDueCronRefreshes] serves each refresh_cron schedule (5 fields, UTC) whose latest fire time
+// [Service.EnqueueDueCronRefreshes] serves each schedule.cron (5 fields, UTC) whose latest fire time
 // within the last 5 minutes has no refresh yet. Consolidation enqueues its refreshes in its own apply
 // transaction.
 //
@@ -110,13 +111,13 @@
 //
 // [Service.CreateMentalModel] validates the id (lowercase alphanumerics and hyphens), normalizes tags and folder,
 // creates the bank on first write, and queues the first build as a manual full refresh in the same transaction.
-// [Service.GetMentalModel] computes is_stale at full detail. [Service.ListMentalModels] pages by id (domain.ListPage:
+// [Service.GetMentalModel] computes stale in the full view. [Service.ListMentalModels] pages by id (domain.ListPage:
 // page size 100, max 1000; the tag filter is flat only). [Service.UpdateMentalModel] applies a pure [SpecPatch]; a
 // changed source query or scope resets last_seq_seen so the next refresh runs in full. [Service.RefreshMentalModel]
-// queues a manual refresh or joins and upgrades the queued one. [Service.ClearMentalModel] empties content, structured
-// output, sources and the watermark, keeping the cleared content as a history entry. [Service.ListMentalModelHistory],
+// queues a manual refresh or joins and upgrades the queued one. [Service.ListMentalModelHistory],
 // [Service.DeleteMentalModel] and [Service.DeleteMentalModelFolder] (recursive; an empty path is rejected) complete the
-// admin surface. Create, Update, Refresh and Clear take tx.Seq first.
+// admin surface. Create, Update and Refresh take tx.Seq first. The spec's schedule is a oneof on the wire, so
+// after_consolidation and cron never arrive together; a cron expression must parse.
 //
 // The single-shot synthesize prompt carries the bank's directives that domain.SelectDirectives picks for the
 // model's scope filter: the filter the agentic strategy hands reflect, so both strategies apply the same
@@ -127,9 +128,10 @@
 // mental_models: default_mode (full), default_strategy (agentic), refresh_debounce_seconds (30),
 // min_refresh_interval_seconds (0), history_max_entries (50), max_delta_ratio (unset = no limit) and
 // max_content_tokens; recall.fuzzy_tag_min_similarity for fuzzy scope leaves; the reflect knobs and the REFLECT,
-// MENTAL_MODEL and STRUCTURED_OUTPUT bindings. A model's stored overrides and its trigger's reflect token knobs
-// (recall_max_tokens, search_observations_*) are config levels above the bank; the trigger's mode, strategy,
-// interval floor, budget and response schema are read from the trigger directly.
+// MENTAL_MODEL and STRUCTURED_OUTPUT bindings. A model's stored overrides (which hold the reflect loop's caps:
+// reflect.recall_max_tokens, reflect.search_observations_*) and the call's overrides are config levels above the
+// bank; the spec's mode, strategy, budget, response schema and the schedule's interval floor are read from the
+// spec directly. Each knob has one field per level.
 //
 // # Invariants
 //

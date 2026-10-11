@@ -71,7 +71,7 @@ func (r *run) refreshCandidates(ctx context.Context) ([]domain.MentalModel, erro
 	}
 	var out []domain.MentalModel
 	for _, m := range all {
-		if m.Spec.Trigger.RefreshAfterConsolidation && !m.AutoRefreshPaused {
+		if m.Spec.Schedule.AfterConsolidation && !m.AutoRefreshPaused {
 			out = append(out, m)
 		}
 	}

@@ -107,7 +107,7 @@ func TestPagingInterceptor(t *testing.T) {
 	}{
 		{&pb.ListScopesRequest{PageSize: -1}, "page_size"},
 		{&pb.ListEventsRequest{PageSize: -1}, "page_size"},
-		{&pb.SearchPagesRequest{MaxResults: -1}, "max_results"},
+		{&pb.SearchMentalModelsRequest{MaxResults: -1}, "max_results"},
 		{&pb.ListScopesRequest{}, ""},
 		{&pb.ListEventsRequest{PageSize: 5}, ""},
 	}

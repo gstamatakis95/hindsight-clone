@@ -772,7 +772,7 @@ func crCreateModels(t *testing.T, s store.DB, b domain.BankRef, seeds []crModelS
 		for _, sd := range seeds {
 			m := sampleModel(b, sd.id)
 			m.Spec.FolderPath, m.Spec.Tags = sd.folder, sd.tags
-			m.Spec.Trigger.RefreshAfterConsolidation = sd.rac
+			m.Spec.Schedule.AfterConsolidation = sd.rac
 			m.ContentMD = "# model " + string(sd.id)
 			if err := tx.MentalModels().Create(t.Context(), m); err != nil {
 				return err

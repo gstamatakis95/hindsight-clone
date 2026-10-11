@@ -65,7 +65,7 @@ func (w *wiredStack) mentalModelBothStrategies(t *testing.T, models pb.MentalMod
 	t.Helper()
 	if _, err := models.CreateMentalModel(w.ctx(t), &pb.CreateMentalModelRequest{BankId: bank, Spec: &pb.MentalModelSpec{
 		Id: "alice", Name: "Alice", SourceQuery: "Who is Alice?",
-		Trigger: &pb.RefreshTrigger{Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_AGENTIC},
+		Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_AGENTIC,
 	}}); err != nil {
 		t.Fatal(err)
 	}

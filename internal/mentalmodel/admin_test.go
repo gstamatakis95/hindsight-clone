@@ -13,9 +13,8 @@ func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
 	adm := e.svc
 	bad := []domain.MentalModelSpec{
 		{ID: "Bad_ID"},
-		{ID: "x", Trigger: domain.RefreshTrigger{RefreshAfterConsolidation: true, RefreshCron: "0 * * * *"}},
-		{ID: "y", Trigger: domain.RefreshTrigger{RefreshCron: "not a cron"}},
-		{ID: "z", Trigger: domain.RefreshTrigger{Tags: domain.TagFilter{Tags: []string{"a"}}}}, // flat tags: spec.tags
+		{ID: "y", Schedule: domain.RefreshSchedule{Cron: "not a cron"}},
+		{ID: "z", Scope: domain.MentalModelScope{Tags: domain.TagFilter{Tags: []string{"a"}}}}, // flat tags: spec.tags
 	}
 	for _, s := range bad {
 		if _, _, err := adm.CreateMentalModel(e.ctx, e.bank, s); !errors.Is(err, domain.ErrInvalidArgument) {
@@ -42,21 +41,22 @@ func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
 	}
 }
 
-// TestAdminGetDetailAndStale checks detail trimming, is_stale (computed at full detail only) and NOT_FOUND.
-func TestAdminGetDetailAndStale(t *testing.T) {
+// TestAdminGetViewAndStale checks view trimming, stale (computed in the full view only) and NOT_FOUND.
+func TestAdminGetViewAndStale(t *testing.T) {
 	e := newEnv(t)
 	adm := e.svc
 	builtModel(e, domain.RefreshStrategySingleShot)
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
-	full, err := adm.GetMentalModel(e.ctx, e.bank, "status", domain.DetailUnspecified)
-	if err != nil || full.ContentMD == "" || !full.IsStale {
-		t.Fatalf("get full: stale %v err %v", full.IsStale, err)
+	full, err := adm.GetMentalModel(e.ctx, e.bank, "status", domain.MentalModelViewUnspecified)
+	if err != nil || full.ContentMD == "" || !full.Stale {
+		t.Fatalf("get full: stale %v err %v", full.Stale, err)
 	}
-	meta, _ := adm.GetMentalModel(e.ctx, e.bank, "status", domain.DetailMetadata)
-	if meta.ContentMD != "" || meta.IsStale {
-		t.Fatalf("metadata detail returned content or computed is_stale (%v)", meta.IsStale)
+	basic, _ := adm.GetMentalModel(e.ctx, e.bank, "status", domain.MentalModelViewBasic)
+	if basic.ContentMD != "" || basic.Stale {
+		t.Fatalf("basic view returned content or computed stale (%v)", basic.Stale)
 	}
-	if _, err := adm.GetMentalModel(e.ctx, e.bank, "nope", domain.DetailFull); !errors.Is(err, domain.ErrNotFound) {
+	_, err = adm.GetMentalModel(e.ctx, e.bank, "nope", domain.MentalModelViewFull)
+	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown model: %v", err)
 	}
 }
@@ -86,22 +86,6 @@ func TestAdminUpdateResetsWatermarkOnScopeChange(t *testing.T) {
 	}))
 	if err != nil || m.Spec.ID != "status" || m.LastSeqSeen != 0 {
 		t.Fatalf("query change: %v id %s seq %d", err, m.Spec.ID, m.LastSeqSeen)
-	}
-}
-
-// TestAdminClearKeepsHistory checks that clear empties the model and keeps the content in history.
-func TestAdminClearKeepsHistory(t *testing.T) {
-	e := newEnv(t)
-	adm := e.svc
-	built, _ := builtModel(e, domain.RefreshStrategySingleShot)
-	cleared, err := adm.ClearMentalModel(e.ctx, e.bank, "status")
-	if err != nil || cleared.ContentMD != "" || len(cleared.SourceIDs) != 0 || cleared.LastSeqSeen != 0 {
-		t.Fatalf("clear: %v %+v", err, cleared)
-	}
-	page, err := adm.ListMentalModelHistory(e.ctx, HistoryRequest{Bank: e.bank, ID: "status", PageSize: 1})
-	if err != nil || len(page.Items) != 1 || page.Items[0].PreviousContent != built.ContentMD ||
-		page.NextPageToken != "" {
-		t.Fatalf("history %+v %v", page, err)
 	}
 }
 
@@ -139,21 +123,21 @@ func TestFoldersListAndDelete(t *testing.T) {
 // by value, with nil equal to empty, and still sees real changes.
 func TestScopeChangedComparesSets(t *testing.T) {
 	leaf := domain.TagGroup{Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{Tags: []string{"a"}}}
-	base := domain.MentalModelSpec{SourceQuery: "q", Trigger: domain.RefreshTrigger{
+	base := domain.MentalModelSpec{SourceQuery: "q", Scope: domain.MentalModelScope{
 		FactTypes: []domain.FactType{domain.FactTypeWorld, domain.FactTypeExperience},
 		Tags:      domain.TagFilter{Groups: []domain.TagGroup{leaf}},
 	}}
 	same := base
 	same.Tags = []string{}
-	same.Trigger.FactTypes = []domain.FactType{domain.FactTypeExperience, domain.FactTypeWorld}
-	same.Trigger.Tags.Groups = []domain.TagGroup{leaf}
+	same.Scope.FactTypes = []domain.FactType{domain.FactTypeExperience, domain.FactTypeWorld}
+	same.Scope.Tags.Groups = []domain.TagGroup{leaf}
 	empty, emptied := domain.MentalModelSpec{}, domain.MentalModelSpec{Tags: []string{}}
-	emptied.Trigger.FactTypes, emptied.Trigger.Tags.Groups = []domain.FactType{}, []domain.TagGroup{}
+	emptied.Scope.FactTypes, emptied.Scope.Tags.Groups = []domain.FactType{}, []domain.TagGroup{}
 	if scopeChanged(base, same) || scopeChanged(empty, emptied) {
 		t.Fatal("equal scopes reported changed")
 	}
 	other := same
-	other.Trigger.FactTypes = []domain.FactType{domain.FactTypeWorld}
+	other.Scope.FactTypes = []domain.FactType{domain.FactTypeWorld}
 	if !scopeChanged(base, other) || !scopeChanged(empty, base) {
 		t.Fatal("changed scope not reported")
 	}

@@ -22,7 +22,7 @@ Where a new type goes:
 - A resource message lives in its owning service's Resources, even when other services use it (Memory,
   Directive, MentalModelSpec, Operation).
 - A helper message or enum lives in the subsection of the first RPC that uses it, even when later RPCs of the
-  same service use it too (Detail sits under GetMentalModel).
+  same service use it too (MentalModelView sits under GetMentalModel).
 - Shared types and shared enums hold only types that no service owns.
 
 ## Rules

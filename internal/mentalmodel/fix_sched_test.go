@@ -45,7 +45,7 @@ func TestCronFiresOnScheduleWithinGrace(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t)
 			spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-			spec.Trigger.RefreshCron = "0 * * * *"
+			spec.Schedule.Cron = "0 * * * *"
 			m := e.addModel(spec)
 			if !c.fresh {
 				e.addUnit(domain.FactTypeWorld, "new", "proj")
@@ -66,14 +66,14 @@ func TestCronFiresOnScheduleWithinGrace(t *testing.T) {
 	}
 }
 
-// TestParseCronStrict checks that refresh_cron takes exactly 5 UTC fields: no @ descriptors, no time zone
+// TestParseCronStrict checks that schedule.cron takes exactly 5 UTC fields: no @ descriptors, no time zone
 // prefix and no seconds field, both in the parser and in spec validation.
 func TestParseCronStrict(t *testing.T) {
 	for _, expr := range []string{"@hourly", "@every 1h", "TZ=UTC 0 * * * *", "CRON_TZ=UTC 0 * * *", "0 0 * * * *"} {
 		if _, err := parseCron(expr); err == nil {
 			t.Errorf("%q accepted", expr)
 		}
-		spec := domain.MentalModelSpec{ID: "m", Trigger: domain.RefreshTrigger{RefreshCron: expr}}
+		spec := domain.MentalModelSpec{ID: "m", Schedule: domain.RefreshSchedule{Cron: expr}}
 		if _, err := normalizeSpec(spec); !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("normalizeSpec(%q): %v", expr, err)
 		}
@@ -92,7 +92,7 @@ func TestWeakerJoinerKeepsUpgrade(t *testing.T) {
 	e := newEnv(t)
 	adm := e.svc
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-	spec.Trigger.RefreshAfterConsolidation = true
+	spec.Schedule.AfterConsolidation = true
 	e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "new", "proj")
 	if n, err := autoTrigger(e, "status"); err != nil || n != 1 {

@@ -14,7 +14,7 @@ import (
 func TestUntaggedWriteNeverStalesTaggedModel(t *testing.T) {
 	e := newEnv(t)
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-	spec.Trigger.Tags.Match = domain.TagsMatchAny
+	spec.Scope.Tags.Match = domain.TagsMatchAny
 	m := e.addModel(spec)
 	cases := []struct {
 		name  string
@@ -58,13 +58,13 @@ func TestDecide(t *testing.T) {
 		t.Fatalf("debounce: %+v", d)
 	}
 	floor, last := 600, now.Add(-time.Minute)
-	m.Spec.Trigger.MinRefreshIntervalSeconds, m.LastRefreshedAt = &floor, &last
+	m.Spec.Schedule.MinIntervalSeconds, m.LastRefreshedAt = &floor, &last
 	if d, _ := e.svc.decide(e.ctx, m, now); d.Kind != decisionPark || d.Reason != domain.RefreshReasonIntervalFloor ||
 		!d.Until.Equal(last.Add(10*time.Minute)) {
 		t.Fatalf("floor: %+v", d)
 	}
 	zero := 0
-	m.Spec.Trigger.MinRefreshIntervalSeconds = nil
+	m.Spec.Schedule.MinIntervalSeconds = nil
 	m.Spec.Overrides = &domain.BankConfig{MentalModels: &domain.MentalModelConfig{RefreshDebounceSeconds: &zero}}
 	if d, _ := e.svc.decide(e.ctx, m, now); d.Kind != decisionRunNow {
 		t.Fatalf("run now: %+v", d)
@@ -102,7 +102,7 @@ func TestJoiningQueuedRefreshWithForceFullUpgrades(t *testing.T) {
 	e := newEnv(t)
 	adm := e.svc
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-	spec.Trigger.RefreshAfterConsolidation = true
+	spec.Schedule.AfterConsolidation = true
 	e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "new", "proj")
 	if n, err := autoTrigger(e, "status"); err != nil || n != 1 {
@@ -146,7 +146,7 @@ func assertUpgraded(t *testing.T, e *env, op domain.OperationID) {
 func TestPauseAndManualUnpause(t *testing.T) {
 	e := newEnv(t)
 	spec := deltaSpec("status", domain.RefreshStrategySingleShot)
-	spec.Trigger.RefreshAfterConsolidation = true
+	spec.Schedule.AfterConsolidation = true
 	e.addModel(spec)
 	e.addUnit(domain.FactTypeWorld, "Alice leads", "proj")
 	e.maint.failed = []store.FailedRefresh{{
