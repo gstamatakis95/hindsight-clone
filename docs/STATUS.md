@@ -29,6 +29,7 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
 | WP-19 | Fix-up: retag keeps label tags | merged (7f516a1) | wp/WP-19-retag-label-tags | 35e6b55 | — | WP-19-1 approved | see decision 1900 |
 | WP-20 | Fix-up: worker/cmd hardening | merged (916f85a) | wp/WP-20-worker-hardening | f14624a | — | — | see log |
 | WP-21 | Fix-up: config writes | merged (36cbff2) | wp/WP-21-config-writes | 51bdd4e | — | — | see decision 2100 |
+| WP-22 | Fix-up: partial retain stamped complete | merged (35ab2d9) | worktree branch | 4d9f65c | — | — | see decision 2200 |
 
 ## Environment notes
 
@@ -349,3 +350,18 @@ Orchestrator log for the build driven by `docs/SWARM_PROMPT.md`. Merges are loca
   (incl. buf breaking vs contracts-v1), go test -race -count=1 ./... (incl. Postgres) and make e2e all pass;
   docs/rules.md maps every Jobs/Curation/Behavioural-rules bullet to a passing test (accepted gap: reprocess op id
   on audit/archive rows); the final review and closing verification leave no CRITICAL/HIGH.
+- 2026-10-11 POST-BUILD ADVERSARIAL REVIEW (two independent reviewers, Opus and Fable, on main @ 08c3ef6).
+  - Opus: 1 HIGH (confirmed by test): overlapping retains of the same content. A run that replaces a completed
+    document's units and then fails left it stamped complete, so retries and later retains reported Unchanged
+    with facts missing. Fixed in WP-22 (replace reopens the document, decision 2200); merged as 35ab2d9; gen, lint
+    and go test -race -count=1 ./... pass.
+  - Fable: no CRITICAL/HIGH; 4 MEDIUM: concurrent config patches lose an update (bank and tenant); Attach
+    silently drops an entity pruned concurrently by graph maintenance; ListEvents limit 0 is uncapped (proto
+    says server default); a sync retain longer than the RPC deadline can never complete (documented, not
+    changed). -> WP-25. LOWs accepted: multi-item sync retain ids on partial failure; BankStats unconsolidated
+    count includes NULL-embedding units; a pre-queued refresh runs after its model is paused; restore of a unit
+    archived before a reprocess.
+- 2026-10-11 user requests: optional Datadog (dd-trace-go v2 directly, no OTel; off by default) -> WP-24, CCR
+  WP-24-1 approved (depguard deny of DataDog in engine/domain/port). Extensive doc.go for every package ->
+  WP-23 (A: engines/runtime, B: adapters/contracts/tooling), CCR WP-23-1 approved (comment-only port/domain
+  doc.go); runs after WP-24 so the docs cover Datadog. Then a reviewer guide and repo cleanup.
