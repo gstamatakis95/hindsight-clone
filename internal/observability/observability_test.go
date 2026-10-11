@@ -20,6 +20,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	grpctrace "github.com/DataDog/dd-trace-go/contrib/google.golang.org/grpc/v2"
 )
 
 // These tests swap the global tracer, so none of them runs in parallel.
@@ -119,6 +124,35 @@ func TestGatewayAndJobSpansCarryOnlyIdsAndErrorClass(t *testing.T) {
 	}
 	if spans[1].OperationName() != SpanTick || spans[1].Tag(ext.ErrorMsg) != nil {
 		t.Fatalf("tick span: %v", spans[1])
+	}
+}
+
+// TestGRPCSpanErrorIsCodeOnly checks that a failed RPC's span records only the status code while the
+// client still receives the full status message.
+func TestGRPCSpanErrorIsCodeOnly(t *testing.T) {
+	mt := mocktracer.Start()
+	defer mt.Stop()
+	icpt := codeOnlyErrors(grpctrace.UnaryServerInterceptor())
+	info := &grpc.UnaryServerInfo{FullMethod: "/memory.v1.MemoryService/Recall"}
+	_, err := icpt(context.Background(), nil, info, func(context.Context, any) (any, error) {
+		return nil, status.Error(codes.Unavailable, "gateway said: the prompt was 'my secret diary'")
+	})
+	if status.Code(err) != codes.Unavailable || !strings.Contains(err.Error(), "secret") {
+		t.Fatalf("client error = %v, want the full status", err)
+	}
+	resp, err := icpt(context.Background(), nil, info, func(context.Context, any) (any, error) { return "ok", nil })
+	if err != nil || resp != "ok" {
+		t.Fatalf("successful call = %v, %v", resp, err)
+	}
+	spans := mt.FinishedSpans()
+	if len(spans) != 2 {
+		t.Fatalf("got %d spans, want 2", len(spans))
+	}
+	if msg := fmt.Sprint(spans[0].Tag(ext.ErrorMsg)); strings.Contains(msg, "secret") {
+		t.Fatalf("span error message %q leaks the status message", msg)
+	}
+	if spans[0].Tag(ext.ResourceName) != info.FullMethod || spans[1].Tag(ext.ErrorMsg) != nil {
+		t.Fatalf("spans: %v", spans)
 	}
 }
 

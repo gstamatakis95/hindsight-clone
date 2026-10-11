@@ -7,6 +7,7 @@ import (
 	"memd/internal/worker"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/ext"
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/mocktracer"
@@ -55,9 +56,32 @@ func TestDatadogSpansNest(t *testing.T) {
 	t.Cleanup(mt.Stop)
 	w := startWiredWith(t, observability.New(slog.New(slog.NewTextHandler(io.Discard, nil))))
 	retainOne(t, w, "b")
-	spans := mt.FinishedSpans()
+	// A job span finishes just after its row is settled, so idle() can return a moment before it does; wait
+	// for the consolidate job's and a tick's spans.
+	spans := waitSpans(t, mt, func(spans []*mocktracer.Span) bool {
+		return findSpan(spans, isConsolidateJob) != nil &&
+			findSpan(spans, func(s *mocktracer.Span) bool { return s.OperationName() == observability.SpanTick }) != nil
+	})
 	checkRPCSpans(t, spans)
 	checkJobSpans(t, spans)
+}
+
+// isConsolidateJob matches a consolidate job span.
+func isConsolidateJob(s *mocktracer.Span) bool {
+	return s.OperationName() == observability.SpanJob && s.Tag(ext.ResourceName) == "consolidate"
+}
+
+// waitSpans polls the finished spans until done accepts them (or 10 s pass) and returns them.
+func waitSpans(t *testing.T, mt mocktracer.Tracer, done func([]*mocktracer.Span) bool) []*mocktracer.Span {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		spans := mt.FinishedSpans()
+		if done(spans) || time.Now().After(deadline) {
+			return spans
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // checkRPCSpans checks the Retain RPC's span, its extract gateway call and that call's HTTP attempt.
@@ -89,9 +113,7 @@ func checkRPCSpans(t *testing.T, spans []*mocktracer.Span) {
 // checkJobSpans checks the consolidate job's span, a gateway call under it and the maintenance tick span.
 func checkJobSpans(t *testing.T, spans []*mocktracer.Span) {
 	t.Helper()
-	job := findSpan(spans, func(s *mocktracer.Span) bool {
-		return s.OperationName() == observability.SpanJob && s.Tag(ext.ResourceName) == "consolidate"
-	})
+	job := findSpan(spans, isConsolidateJob)
 	if job == nil || job.Tag(observability.TagOutcome) != worker.OutcomeCompleted ||
 		job.Tag(observability.TagBank) != "b" || job.Tag(observability.TagTenant) != "t" ||
 		job.Tag(observability.TagOperationID) == "" {

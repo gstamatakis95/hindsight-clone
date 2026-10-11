@@ -90,8 +90,10 @@ The SPEC says nothing about observability.
   Span errors on memd's own spans (job, tick, gateway call, Postgres) carry only the error class: the domain
   sentinel ("unavailable", "not found", ...), a context error, or a generic "details in the memd logs". The
   message is left out because memd's error chains can quote model output, gateway response bodies or key
-  values; the logs keep the full error with the trace id. The gRPC span's error is the status message the
-  client receives anyway. The contrib marks every non-OK code except CANCELLED as an error.
+  values; the logs keep the full error with the trace id. The gRPC span records only the status code as its
+  error message: the status message embeds the full error chain (toStatus), so a wrapper hands the contrib
+  a code-only status while the client still gets the full one. The contrib marks every non-OK code except
+  CANCELLED as an error.
 
 ## Consequences
 - With Datadog off, the cost is a nil check per job, tick and gateway call.

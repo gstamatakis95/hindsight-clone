@@ -53,7 +53,7 @@
 // document content, SQL bind parameters and HTTP headers. Span errors carry only the error's class
 // ("unavailable", "not found", context.Canceled, ...), never its message, because memd's error chains can
 // quote model output or gateway response bodies; the full error stays in the memd logs, which carry the
-// trace id. The gRPC span's error is the status the client also receives.
+// trace id. The gRPC span records only the status code of a failed call, never its message.
 //
 // # Testing
 //
