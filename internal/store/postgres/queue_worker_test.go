@@ -219,7 +219,10 @@ func testStaleWorkerFenced(t *testing.T, q queueEnv) {
 	wantErrIs(t, "Fail by the stale worker", q.c.Fail(t.Context(), id, cause, ptr(past())), domain.ErrFailedPrecondition)
 	wantErrIs(t, "Complete by the stale worker", q.c.Complete(t.Context(), id, json.RawMessage(`{}`), nil),
 		domain.ErrFailedPrecondition)
-	wantErrIs(t, "Progress by the stale worker", q.c.Progress(t.Context(), id, domain.Progress{Stage: "late", At: day(1)}),
+	wantErrIs(t, "Progress by the stale worker", q.c.Progress(t.Context(), id, domain.Progress{
+		Stage:      "late",
+		RecordedAt: day(1),
+	}),
 		domain.ErrFailedPrecondition)
 	op := q.get(t, bankA, id)
 	if op.Status != domain.OperationStatusPending || op.Attempts != 1 || op.Progress != nil ||
@@ -247,7 +250,7 @@ func testTerminalFenced(t *testing.T, q queueEnv) {
 		domain.ErrFailedPrecondition)
 	wantErrIs(t, "Fail(completed)", q.c.Fail(t.Context(), id, cause, nil), domain.ErrFailedPrecondition)
 	wantErrIs(t, "Fail(completed, retry)", q.c.Fail(t.Context(), id, cause, ptr(past())), domain.ErrFailedPrecondition)
-	wantErrIs(t, "Progress(completed)", q.c.Progress(t.Context(), id, domain.Progress{Stage: "late", At: day(1)}),
+	wantErrIs(t, "Progress(completed)", q.c.Progress(t.Context(), id, domain.Progress{Stage: "late", RecordedAt: day(1)}),
 		domain.ErrFailedPrecondition)
 	op := q.get(t, bankA, id)
 	if op.Status != domain.OperationStatusCompleted || strings.Contains(op.Error, cause.Error()) {
@@ -338,14 +341,15 @@ func testProgress(t *testing.T, q queueEnv) {
 	id := q.add(t, doc("1"))
 	q.claimOne(t, id)
 	for _, p := range []domain.Progress{
-		{Stage: "extract", At: day(3), Processed: 1, Total: 3},
-		{Stage: "embed", At: day(4), Processed: 2, Total: 3},
+		{Stage: "extract", RecordedAt: day(3), Processed: 1, Total: 3},
+		{Stage: "embed", RecordedAt: day(4), Processed: 2, Total: 3},
 	} {
 		if err := q.c.Progress(t.Context(), id, p); err != nil {
 			t.Fatalf("Progress: %v", err)
 		}
 		got := q.get(t, bankA, id).Progress
-		if got == nil || got.Stage != p.Stage || got.Processed != p.Processed || got.Total != p.Total || !got.At.Equal(p.At) {
+		if got == nil || got.Stage != p.Stage || got.Processed != p.Processed || got.Total != p.Total ||
+			!got.RecordedAt.Equal(p.RecordedAt) {
 			t.Errorf("Get().Progress = %+v, want %+v", got, p)
 		}
 	}

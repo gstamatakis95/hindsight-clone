@@ -34,7 +34,7 @@ defaults:
     # custom_extraction_prompt: ""      # with EXTRACTION_MODE_CUSTOM
     # entity_labels: []                 # typed key:value labels
     entities_allow_free_form: true
-    default_observation_scopes: {mode: MODE_COMBINED, max_combinations: 15}
+    default_observation_scope_modes: {mode: MODE_COMBINED, max_combinations: 15}
     # chunk_max_tokens: 750
     # chunk_overlap_tokens: 0
     entity_match_threshold: 0.6

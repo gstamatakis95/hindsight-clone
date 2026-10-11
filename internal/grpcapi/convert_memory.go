@@ -32,18 +32,18 @@ func retainRequestFromProto(r *pb.RetainRequest) (memory.RetainRequest, error) {
 // retainItem converts a RetainItem.
 func (d *decoder) retainItem(it *pb.RetainItem) memory.RetainItem {
 	return memory.RetainItem{
-		Content:           it.GetContent(),
-		Context:           it.GetContext(),
-		Timestamp:         d.tsPtr(it.GetTimestamp()),
-		Timeless:          it.GetTimeless(),
-		DocumentID:        domain.DocumentID(it.GetDocumentId()),
-		Tags:              it.GetTags(),
-		ObservationScopes: d.scopes(it.GetObservationScopes()),
-		Metadata:          it.GetMetadata(),
-		Entities:          entityHintsFromProto(it.GetEntities()),
-		ResolveEntities:   optCopy(it.ResolveEntities),
-		Overrides:         d.retainOverrides(it.GetOverrides()),
-		ForceReextract:    it.GetForceReextract(),
+		Content:               it.GetContent(),
+		Context:               it.GetContext(),
+		Timestamp:             d.tsPtr(it.GetTimestamp()),
+		Timeless:              it.GetTimeless(),
+		DocumentID:            domain.DocumentID(it.GetDocumentId()),
+		Tags:                  it.GetTags(),
+		ObservationScopeModes: d.scopes(it.GetObservationScopeModes()),
+		Metadata:              it.GetMetadata(),
+		Entities:              entityHintsFromProto(it.GetEntities()),
+		ResolveEntities:       optCopy(it.ResolveEntities),
+		Overrides:             d.retainOverrides(it.GetOverrides()),
+		ForceReextract:        it.GetForceReextract(),
 	}
 }
 
@@ -62,7 +62,7 @@ func (d *decoder) retainItems(in []*pb.RetainItem) []memory.RetainItem {
 // retainedDocToProto converts a RetainedDocument.
 func retainedDocToProto(x memory.RetainedDocument) *pb.RetainedDocument {
 	return &pb.RetainedDocument{
-		DocumentId: string(x.DocumentID), MemoriesCreated: i32(x.UnitsCreated), Unchanged: x.Unchanged,
+		DocumentId: string(x.DocumentID), MemoriesCreated: i32(x.MemoriesCreated), Unchanged: x.Unchanged,
 		Operation: operationPtrToProto(x.Operation),
 	}
 }
@@ -90,7 +90,7 @@ func recallRequestFromProto(r *pb.RecallRequest) (recall.Request, error) {
 	out := recall.Request{
 		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
-		Types:              fromEnums[domain.FactType](&d, r.GetFactTypes()),
+		FactTypes:          fromEnums[domain.FactType](&d, r.GetFactTypes()),
 		Tags:               d.tagFilter(r.GetTags()),
 		Budget:             fromEnum[domain.Budget](&d, r.GetBudget()),
 		MaxTokens:          int(r.GetMaxTokens()),
@@ -202,7 +202,7 @@ func reflectIncludeFromProto(x *pb.ReflectInclude) reflecteng.Include {
 		return reflecteng.Include{}
 	}
 	return reflecteng.Include{
-		Facts: optCopy(x.BasedOn), ToolCalls: x.GetTrace(), ToolOutputs: optCopy(x.ToolOutputs),
+		BasedOn: optCopy(x.BasedOn), Trace: x.GetTrace(), ToolOutputs: optCopy(x.ToolOutputs),
 	}
 }
 

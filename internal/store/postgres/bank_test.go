@@ -55,7 +55,7 @@ func richConfig() domain.BankConfig {
 				Key: "cuisine", Type: domain.LabelTypeValue, Optional: ptr(true),
 				Values: []domain.LabelValue{{Value: "thai"}, {Value: "greek", Description: "Greek food"}},
 			}},
-			DefaultObservationScopes: &domain.ObservationScopes{
+			DefaultObservationScopeModes: &domain.ObservationScopeModes{
 				Mode: domain.ScopeModeCustom, Custom: []domain.TagSet{{Tags: []string{"a", "b"}}},
 			},
 		},
@@ -378,7 +378,7 @@ func testModelUpdate(t *testing.T, s store.DB) {
 
 // historyEntry builds a version or failure entry numbered n, written at day(n).
 func historyEntry(kind domain.HistoryKind, n int) domain.MentalModelHistoryEntry {
-	e := domain.MentalModelHistoryEntry{Kind: kind, ChangedAt: day(n)}
+	e := domain.MentalModelHistoryEntry{Kind: kind, CreatedAt: day(n)}
 	if kind == domain.HistoryKindVersion {
 		e.Version, e.PreviousContent, e.Outcome = int64(n), fmt.Sprintf("content %d", n), domain.RefreshOutcomeContentWritten
 	} else {
@@ -406,7 +406,7 @@ func history(t *testing.T, s store.DB, id domain.MentalModelID, kind domain.Hist
 // describeEntry renders the stored fields of a history entry for comparison.
 func describeEntry(e domain.MentalModelHistoryEntry) string {
 	return fmt.Sprintf("%s v%d %q %s %q %q @%s", e.Kind, e.Version, e.PreviousContent, e.Outcome, e.FailureReason,
-		e.ErrorMessage, e.ChangedAt.UTC().Format("2006-01-02"))
+		e.ErrorMessage, e.CreatedAt.UTC().Format("2006-01-02"))
 }
 
 // describeEntries renders entries numbered ns of the given kinds (v = version, f = failure).

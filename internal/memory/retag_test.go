@@ -71,13 +71,13 @@ func (e *env) reprocess(overrides *domain.BankConfig) {
 		}
 		if err := tx.Documents().Upsert(e.ctx, domain.Document{
 			ID: d.ID, Bank: testBank, Overrides: d.Overrides, Tags: d.Tags, BlobKey: d.BlobKey,
-			ObservationScopes: d.ObservationScopes,
+			ObservationScopeModes: d.ObservationScopeModes,
 		}); err != nil {
 			return err
 		}
 		p := jobs.RetainPayload{
 			DocumentID: d.ID, ContentHash: d.BlobKey[strings.LastIndex(d.BlobKey, "/")+1:], BlobKey: d.BlobKey,
-			Tags: domain.NormalizeTags(d.Tags), ObservationScopes: d.ObservationScopes, ForceReextract: true,
+			Tags: domain.NormalizeTags(d.Tags), ObservationScopeModes: d.ObservationScopeModes, ForceReextract: true,
 		}
 		_, _, err = jobs.EnqueueRetainDocument(e.ctx, tx, testBank, p, d.Overrides, "")
 		return err
@@ -115,9 +115,9 @@ func (e *env) applyRetag(j store.Job) {
 func (e *env) checkRetagged(stage string, tags ...string) {
 	e.t.Helper()
 	d := e.document("d1")
-	if d.ExtractedAt == nil || d.UnitCount != 3 || !domain.SameTagSet(d.Tags, tags) {
+	if d.ExtractedAt == nil || d.MemoryCount != 3 || !domain.SameTagSet(d.Tags, tags) {
 		e.t.Errorf("%s: document extracted_at %v, %d units, tags %v; want complete, 3 units, %v", stage,
-			d.ExtractedAt, d.UnitCount, d.Tags, tags)
+			d.ExtractedAt, d.MemoryCount, d.Tags, tags)
 	}
 	var texts []string
 	for _, u := range e.docUnits("d1") {
@@ -139,7 +139,7 @@ func (e *env) runRetaggedBetweenBatches(j store.Job) {
 	e.t.Helper()
 	e.scriptChunks(3, false)
 	res, err := e.hookedRetainerBatch(1, 2, func() { e.retag("new") }).ProcessDocument(e.ctx, jobs.Inline(j))
-	if err != nil || res.Superseded || res.UnitsCreated != 3 {
+	if err != nil || res.Superseded || res.MemoriesCreated != 3 {
 		e.t.Fatalf("retagged run = %+v, %v; want 3 units, not superseded", res, err)
 	}
 	var stale int
@@ -192,7 +192,7 @@ func TestReprocessRetaggedBeforeFirstBatchCompletes(t *testing.T) {
 	j := e.claimRetain()
 	e.scriptChunks(3, false)
 	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
-	if err != nil || res.Superseded || res.UnitsCreated != 3 {
+	if err != nil || res.Superseded || res.MemoriesCreated != 3 {
 		t.Fatalf("reprocess after retag = %+v, %v; want 3 units, not superseded", res, err)
 	}
 	e.checkRetagged("before retag_document", "new")

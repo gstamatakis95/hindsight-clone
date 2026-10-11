@@ -5,11 +5,11 @@ SELECT * FROM mental_models WHERE tenant_id = @tenant_id AND bank_id = @bank_id 
 -- MentalModelCreate inserts a new mental model.
 -- name: MentalModelCreate :exec
 INSERT INTO mental_models (
-    tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, trigger, overrides, content_md,
+    tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md,
     structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at,
     auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron
 ) VALUES (
-    @tenant_id, @bank_id, @id, @name, @source_query, @folder_path, @tags, @max_tokens, @trigger, @overrides,
+    @tenant_id, @bank_id, @id, @name, @source_query, @folder_path, @tags, @max_tokens, @refresh_settings, @overrides,
     @content_md, @structured_output_json, @version, @last_refreshed_at, @last_seq_seen, @last_refresh_failed_at,
     @auto_refresh_paused, @source_ids, @last_trace, @embedding, @refresh_cron
 );
@@ -18,7 +18,7 @@ INSERT INTO mental_models (
 -- name: MentalModelUpdate :execrows
 UPDATE mental_models SET
     name = @name, source_query = @source_query, folder_path = @folder_path, tags = @tags,
-    max_tokens = @max_tokens, trigger = @trigger, overrides = @overrides, content_md = @content_md,
+    max_tokens = @max_tokens, refresh_settings = @refresh_settings, overrides = @overrides, content_md = @content_md,
     structured_output_json = @structured_output_json, version = @version, last_refreshed_at = @last_refreshed_at,
     last_seq_seen = @last_seq_seen, last_refresh_failed_at = @last_refresh_failed_at,
     auto_refresh_paused = @auto_refresh_paused, source_ids = @source_ids, last_trace = @last_trace,

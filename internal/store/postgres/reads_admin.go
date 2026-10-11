@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// The WP-15 admin reads (decision 1500): tag counts, bank stats, observation history, mental-model and document
+// The admin reads: tag counts, bank stats, observation history, mental-model and document
 // listings, and the cross-bank cron and failed-refresh sweeps. The unit reads live in reads_units.go.
 
 // likeLiteral escapes LIKE's metacharacters (%, _ and the escape character \) so s matches only itself.
@@ -38,7 +38,7 @@ func tagFilterArgs(tags []string, mode domain.TagsMatch) (match string, filter [
 }
 
 // listedBank returns domain.ErrNotFound unless b exists and is not tombstoned: the regime of listings and
-// stats (CCR WP-15-1 §0).
+// stats.
 func (r *reader) listedBank(ctx context.Context, b domain.BankRef) error {
 	row, err := r.queries().GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
 	if err != nil {
@@ -115,7 +115,7 @@ func (r *reader) ObservationHistory(
 	out := make([]domain.ObservationVersion, len(rows))
 	for i, row := range rows {
 		out[i] = domain.ObservationVersion{
-			Version: row.Version, Text: row.Text, SourceIDs: idsOf[domain.UnitID](row.SourceIds), At: row.At,
+			Version: row.Version, Text: row.Text, SourceFactIDs: idsOf[domain.UnitID](row.SourceIds), CreatedAt: row.At,
 		}
 	}
 	return out, nil
@@ -157,9 +157,9 @@ func (r *reader) BankStats(ctx context.Context, b domain.BankRef) (domain.BankSt
 		return domain.BankStats{}, err
 	}
 	return domain.BankStats{
-		UnitsByFactType: byType, InvalidatedUnits: row.InvalidatedUnits, Documents: row.Documents,
+		MemoriesByFactType: byType, InvalidatedMemories: row.InvalidatedUnits, Documents: row.Documents,
 		Entities: row.Entities, MentalModels: row.MentalModels, PendingOperationsByKind: byKind,
-		UnconsolidatedUnits: row.UnconsolidatedUnits, LastMemoryWriteAt: row.LastMemoryWriteAt,
+		UnconsolidatedMemories: row.UnconsolidatedUnits, LastMemoryWriteAt: row.LastMemoryWriteAt,
 		ChangeSeq: row.ChangeSeq,
 	}, nil
 }
@@ -225,7 +225,7 @@ func (r *reader) ListDocuments(ctx context.Context, q store.DocumentQuery) ([]do
 		return nil, fmt.Errorf("%w: limit %d must be positive", domain.ErrInvalidArgument, q.Limit)
 	}
 	switch q.TimeField {
-	case domain.DocTimeFieldUnspecified, domain.DocTimeFieldCreatedAt, domain.DocTimeFieldUpdatedAt:
+	case domain.DocumentTimeFieldUnspecified, domain.DocumentTimeFieldCreatedAt, domain.DocumentTimeFieldUpdatedAt:
 	default:
 		return nil, fmt.Errorf("%w: unknown document time field %q", domain.ErrInvalidArgument, q.TimeField)
 	}
@@ -234,7 +234,7 @@ func (r *reader) ListDocuments(ctx context.Context, q store.DocumentQuery) ([]do
 	}
 	match, tags := tagFilterArgs(q.Tags, q.TagsMatch)
 	p := db.ReadsListDocumentsParams{
-		TenantID: q.Bank.Tenant, BankID: q.Bank.Bank, IDLike: containsPattern(q.Q), TagsMatch: match,
+		TenantID: q.Bank.Tenant, BankID: q.Bank.Bank, IDLike: containsPattern(q.DocumentIDContains), TagsMatch: match,
 		FilterTags: tags, StartAt: q.Start, TimeField: string(q.TimeField), EndAt: q.End,
 		Lim: toInt32Sat(q.Limit),
 	}
@@ -251,11 +251,11 @@ func (r *reader) ListDocuments(ctx context.Context, q store.DocumentQuery) ([]do
 		if err != nil {
 			return nil, err
 		}
-		if d.UnitsByFactType, err = countMap[domain.FactType]("document unit counts", row.UnitsByFactType); err != nil {
+		if d.MemoriesByFactType, err = countMap[domain.FactType]("document unit counts", row.UnitsByFactType); err != nil {
 			return nil, err
 		}
-		for _, n := range d.UnitsByFactType {
-			d.UnitCount += n
+		for _, n := range d.MemoriesByFactType {
+			d.MemoryCount += n
 		}
 		out[i] = d
 	}

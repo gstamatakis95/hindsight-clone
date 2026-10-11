@@ -305,7 +305,7 @@ type Querier interface {
 	ScopeListPage(ctx context.Context, arg ScopeListPageParams) ([]ScopeListPageRow, error)
 	// ScopeObservationCount counts the bank's live observations whose scope key is the given one.
 	ScopeObservationCount(ctx context.Context, arg ScopeObservationCountParams) (int64, error)
-	// ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
+	// ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListObservationScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
 	ScopeUnconsolidated(ctx context.Context, arg ScopeUnconsolidatedParams) ([]ScopeUnconsolidatedRow, error)
 	// SettleRetainBatches ends every PENDING retain_batch parent whose retain_document children are all terminal
 	// (SPEC "Operations": the parent's status aggregates its children; WP-14b, decision 1453): FAILED when a child

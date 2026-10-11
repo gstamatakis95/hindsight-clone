@@ -12,11 +12,11 @@ GROUP BY fact_type;
 -- DocumentUpsert inserts a document or replaces its tags, overrides, observation scopes and blob key; either
 -- way extracted_at is cleared and the hashes of the last completed retain are kept.
 -- name: DocumentUpsert :exec
-INSERT INTO documents AS d (tenant_id, bank_id, id, overrides, tags, blob_key, observation_scopes, extracted_at)
-VALUES (@tenant_id, @bank_id, @id, @overrides, @tags, @blob_key, @observation_scopes, NULL)
+INSERT INTO documents AS d (tenant_id, bank_id, id, overrides, tags, blob_key, observation_scope_modes, extracted_at)
+VALUES (@tenant_id, @bank_id, @id, @overrides, @tags, @blob_key, @observation_scope_modes, NULL)
 ON CONFLICT (tenant_id, bank_id, id) DO UPDATE
 SET overrides = EXCLUDED.overrides, tags = EXCLUDED.tags, blob_key = EXCLUDED.blob_key,
-    observation_scopes = EXCLUDED.observation_scopes, extracted_at = NULL, updated_at = now();
+    observation_scope_modes = EXCLUDED.observation_scope_modes, extracted_at = NULL, updated_at = now();
 
 -- DocumentComplete stamps the hashes and extracted_at of a finished retain.
 -- name: DocumentComplete :execrows

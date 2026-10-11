@@ -31,7 +31,7 @@ func (s *Service) ListObservationScopes(
 			return ScopePage{}, fmt.Errorf("list scopes: %w", err)
 		}
 	}
-	items, err := s.d.DB.Read().ListScopes(ctx, b, after, size+1)
+	items, err := s.d.DB.Read().ListObservationScopes(ctx, b, after, size+1)
 	if err != nil {
 		return ScopePage{}, fmt.Errorf("list scopes: %w", err)
 	}

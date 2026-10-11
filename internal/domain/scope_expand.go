@@ -16,7 +16,7 @@ import (
 //   - per_tag: one scope per tag.
 //   - all_combinations: every non-empty subset, at most max_combinations (default 15) of them.
 //   - custom: the explicit tag sets as given (normalized); none = combined.
-func ExpandScopes(b BankRef, tags []string, s ObservationScopes) ([]ScopeKey, error) {
+func ExpandScopes(b BankRef, tags []string, s ObservationScopeModes) ([]ScopeKey, error) {
 	tags = NormalizeTags(tags)
 	var sets [][]string
 	switch s.Mode {

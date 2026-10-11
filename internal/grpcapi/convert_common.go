@@ -34,25 +34,25 @@ func tagSetsToProto(in []domain.TagSet) []*pb.TagSet {
 	return out
 }
 
-// scopesFromProto converts ObservationScopes; nil = nil.
-func (d *decoder) scopes(s *pb.ObservationScopes) *domain.ObservationScopes {
+// scopesFromProto converts ObservationScopeModes; nil = nil.
+func (d *decoder) scopes(s *pb.ObservationScopeModes) *domain.ObservationScopeModes {
 	if s == nil {
 		return nil
 	}
-	return &domain.ObservationScopes{
+	return &domain.ObservationScopeModes{
 		Mode:            fromEnum[domain.ScopeMode](d, s.GetMode()),
 		Custom:          tagSetsFromProto(s.GetCustom()),
 		MaxCombinations: optInt(s.MaxCombinations),
 	}
 }
 
-// scopesToProto converts ObservationScopes; nil = nil.
-func scopesToProto(s *domain.ObservationScopes) *pb.ObservationScopes {
+// scopesToProto converts ObservationScopeModes; nil = nil.
+func scopesToProto(s *domain.ObservationScopeModes) *pb.ObservationScopeModes {
 	if s == nil {
 		return nil
 	}
-	return &pb.ObservationScopes{
-		Mode:            toEnum[pb.ObservationScopes_Mode](s.Mode),
+	return &pb.ObservationScopeModes{
+		Mode:            toEnum[pb.ObservationScopeModes_Mode](s.Mode),
 		Custom:          tagSetsToProto(s.Custom),
 		MaxCombinations: optInt32(s.MaxCombinations),
 	}
@@ -267,7 +267,8 @@ func directivesToProto(in []domain.Directive) []*pb.Directive {
 // usageToProto converts a Usage.
 func usageToProto(u domain.Usage) *pb.SlotUsage {
 	return &pb.SlotUsage{
-		Slot: toEnum[pb.ModelSlot](u.Slot), Model: u.Model, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		Slot: toEnum[pb.SlotUsage_ModelSlot](u.Slot), Model: u.Model, InputTokens: u.InputTokens,
+		OutputTokens: u.OutputTokens,
 	}
 }
 

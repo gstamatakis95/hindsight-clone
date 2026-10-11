@@ -111,7 +111,7 @@ type Catalog interface {
 		ctx context.Context, b domain.BankRef, id domain.UnitID, before int64, limit int,
 	) ([]domain.ObservationVersion, error)
 	// ListDocuments returns up to q.Limit documents matching q, newest first (created_at, then id, both
-	// descending), strictly after q.After, with UnitCount and UnitsByFactType filled. Unknown or tombstoned
+	// descending), strictly after q.After, with MemoryCount and MemoriesByFactType filled. Unknown or tombstoned
 	// bank: domain.ErrNotFound.
 	ListDocuments(ctx context.Context, q DocumentQuery) ([]domain.Document, error)
 	// BankStats returns b's counts from indexed COUNT queries. Unknown or tombstoned bank: domain.ErrNotFound.
@@ -122,13 +122,13 @@ type Catalog interface {
 	TagCounts(
 		ctx context.Context, b domain.BankRef, source domain.TagSource, prefix, after string, limit int,
 	) ([]domain.TagCount, error)
-	// ListScopes returns up to limit (> 0) of b's observation scopes (its observation_scopes rows: every
+	// ListObservationScopes returns up to limit (> 0) of b's observation scopes (its observation_scopes rows: every
 	// scope that has held an observation) ordered by ScopeKey.String() in byte order, starting strictly
 	// after after ("" = from the start, shared scope included). The shared scope's key is "", so to continue
 	// after a page that ends at it, pass "0" (decision 1560). Observations counts the scope's live
-	// observations and UnconsolidatedUnits the facts StaleScopes would match. Unknown or tombstoned bank:
+	// observations and UnconsolidatedMemories the facts StaleScopes would match. Unknown or tombstoned bank:
 	// domain.ErrNotFound.
-	ListScopes(ctx context.Context, b domain.BankRef, after string, limit int) ([]domain.ScopeInfo, error)
+	ListObservationScopes(ctx context.Context, b domain.BankRef, after string, limit int) ([]domain.ScopeInfo, error)
 	// ListMentalModels returns one page of q.Bank's models matching q, ordered by id and with content, and
 	// the next page token ("" = last page). Unknown or tombstoned bank: domain.ErrNotFound.
 	ListMentalModels(ctx context.Context, q ModelQuery) ([]domain.MentalModel, string, error)

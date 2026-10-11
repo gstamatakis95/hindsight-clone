@@ -22,11 +22,19 @@
 // that does work takes its own *Overrides message holding only what that RPC can change; the server turns it
 // into a BankConfig level. Model routing: see ModelBindings.
 //
+// Deadlines. A call that arrives without a deadline gets the server's default deadline (a server setting, so
+// set your own for anything slower). A call that runs out of time fails with DEADLINE_EXCEEDED; work already
+// committed stays. Recall, Reflect and PreviewMentalModelRefresh run within the call's deadline.
+//
+// Recall arms. A recall retrieves candidates with several named arms (built in: vector, text, graph, temporal)
+// and fuses them. Arms are open-ended, so anything per arm is keyed by arm name, never a field per arm;
+// ListRecallArms lists the names a server accepts. An unknown arm name is INVALID_ARGUMENT.
+//
 // Async work. Background work runs as operations. An RPC whose requested work runs in the background returns
 // the Operation it enqueued, in a field named operation (or operations, batch_operation,
 // mental_model_operations), never a bare id; OperationService reports its status and progress. Follow-up jobs
 // an RPC triggers on its own (such as consolidation after a retain) are not returned. Retain is synchronous by
-// default, returning once units are committed; run_async=true makes it return the enqueued operations instead.
+// default, returning once the memories are committed; run_async=true makes it return the enqueued operations instead.
 // Recall and Reflect are synchronous.
 //
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
@@ -45,7 +53,8 @@
 // Errors. Every error carries a canonical gRPC code and a google.rpc.ErrorInfo detail with domain "memd" and
 // a stable reason; INVALID_ARGUMENT also carries a google.rpc.BadRequest detail whose field violations name
 // the offending request fields (for a config, the BankConfig path, for example reflect.disposition.empathy)
-// when the server knows them. Clients branch on the code, then the reason; the message is for humans. The reasons, by code:
+// when the server knows them. Clients branch on the code, then the reason; the message is for humans. The
+// reasons, by code:
 //   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
 //                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
 //   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
@@ -1541,15 +1550,15 @@ type BankServiceClient interface {
 	GetBank(ctx context.Context, in *GetBankRequest, opts ...grpc.CallOption) (*GetBankResponse, error)
 	// ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
 	ListBanks(ctx context.Context, in *ListBanksRequest, opts ...grpc.CallOption) (*ListBanksResponse, error)
-	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one transaction, and
-	// returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
+	// DeleteBank marks the bank as being deleted, cancels its pending operations and enqueues delete_bank, all
+	// at once, and returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
 	// (BANK_DELETING) and reads NOT_FOUND (BANK_NOT_FOUND), except GetOperation of the bank's delete_bank
 	// operations. To observe completion, poll GetOperation with the returned operation id: it answers while the
 	// delete runs, and NOT_FOUND once the bank is gone, because the delete's last step removes the bank with all
 	// its operations and events. A large delete runs in bounded steps, so the returned operation may end
 	// COMPLETED while a later step finishes the work. Once the bank is gone, a write creates a new, empty bank.
 	DeleteBank(ctx context.Context, in *DeleteBankRequest, opts ...grpc.CallOption) (*DeleteBankResponse, error)
-	// GetBankStats returns counts from indexed COUNT queries; poll pending_operations_by_kind as an eval
+	// GetBankStats returns counts of the bank's contents; poll pending_operations_by_kind as an eval
 	// barrier.
 	GetBankStats(ctx context.Context, in *GetBankStatsRequest, opts ...grpc.CallOption) (*GetBankStatsResponse, error)
 	// ListTags pages through the bank's tags with usage counts.
@@ -1651,15 +1660,15 @@ type BankServiceServer interface {
 	GetBank(context.Context, *GetBankRequest) (*GetBankResponse, error)
 	// ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
 	ListBanks(context.Context, *ListBanksRequest) (*ListBanksResponse, error)
-	// DeleteBank tombstones the bank, cancels its pending jobs and enqueues delete_bank, in one transaction, and
-	// returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
+	// DeleteBank marks the bank as being deleted, cancels its pending operations and enqueues delete_bank, all
+	// at once, and returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
 	// (BANK_DELETING) and reads NOT_FOUND (BANK_NOT_FOUND), except GetOperation of the bank's delete_bank
 	// operations. To observe completion, poll GetOperation with the returned operation id: it answers while the
 	// delete runs, and NOT_FOUND once the bank is gone, because the delete's last step removes the bank with all
 	// its operations and events. A large delete runs in bounded steps, so the returned operation may end
 	// COMPLETED while a later step finishes the work. Once the bank is gone, a write creates a new, empty bank.
 	DeleteBank(context.Context, *DeleteBankRequest) (*DeleteBankResponse, error)
-	// GetBankStats returns counts from indexed COUNT queries; poll pending_operations_by_kind as an eval
+	// GetBankStats returns counts of the bank's contents; poll pending_operations_by_kind as an eval
 	// barrier.
 	GetBankStats(context.Context, *GetBankStatsRequest) (*GetBankStatsResponse, error)
 	// ListTags pages through the bank's tags with usage counts.
@@ -2419,11 +2428,11 @@ type OperationServiceClient interface {
 	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
 	ListOperations(ctx context.Context, in *ListOperationsRequest, opts ...grpc.CallOption) (*ListOperationsResponse, error)
 	// CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
-	// A processing one stays PROCESSING with the cancel recorded (its serial key stays held) until its
-	// handler stops at the next checkpoint, then becomes CANCELLED; committed work stays.
+	// A processing one stays PROCESSING with the cancel recorded until it
+	// stops at its next checkpoint, then becomes CANCELLED; committed work stays.
 	CancelOperation(ctx context.Context, in *CancelOperationRequest, opts ...grpc.CallOption) (*CancelOperationResponse, error)
-	// RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
-	// next_run_at = now. Other states are rejected.
+	// RetryOperation re-queues a FAILED or CANCELLED operation: it sets it back to PENDING to run
+	// again at once. Other states are rejected.
 	RetryOperation(ctx context.Context, in *RetryOperationRequest, opts ...grpc.CallOption) (*RetryOperationResponse, error)
 	// ListEvents polls the bank's lifecycle events by sequence number.
 	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
@@ -2500,11 +2509,11 @@ type OperationServiceServer interface {
 	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
 	ListOperations(context.Context, *ListOperationsRequest) (*ListOperationsResponse, error)
 	// CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
-	// A processing one stays PROCESSING with the cancel recorded (its serial key stays held) until its
-	// handler stops at the next checkpoint, then becomes CANCELLED; committed work stays.
+	// A processing one stays PROCESSING with the cancel recorded until it
+	// stops at its next checkpoint, then becomes CANCELLED; committed work stays.
 	CancelOperation(context.Context, *CancelOperationRequest) (*CancelOperationResponse, error)
-	// RetryOperation re-queues a FAILED or CANCELLED operation: it resets the row to PENDING with
-	// next_run_at = now. Other states are rejected.
+	// RetryOperation re-queues a FAILED or CANCELLED operation: it sets it back to PENDING to run
+	// again at once. Other states are rejected.
 	RetryOperation(context.Context, *RetryOperationRequest) (*RetryOperationResponse, error)
 	// ListEvents polls the bank's lifecycle events by sequence number.
 	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)

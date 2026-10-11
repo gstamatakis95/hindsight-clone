@@ -71,8 +71,8 @@ func (s OperationStatus) Terminal() bool {
 type Progress struct {
 	// Stage names the current step.
 	Stage string `json:"stage"`
-	// At is when the progress was reported.
-	At time.Time `json:"at"`
+	// RecordedAt is when the progress was reported.
+	RecordedAt time.Time `json:"recorded_at"`
 	// Processed counts items done.
 	Processed int64 `json:"processed"`
 	// Total counts items overall, when known.
@@ -146,8 +146,8 @@ type LifecycleEvent struct {
 	Type EventType
 	// Bank owns the event.
 	Bank BankRef
-	// At is when the event was written.
-	At time.Time
+	// CreatedAt is when the event was written.
+	CreatedAt time.Time
 	// OperationID is the operation that caused it, if any.
 	OperationID OperationID
 	// SubjectID is the document, memory or mental model id.

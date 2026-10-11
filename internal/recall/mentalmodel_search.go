@@ -19,8 +19,8 @@ const (
 	pageSnippetRunes = 200
 )
 
-// SearchPagesRequest mirrors memory.v1.SearchMentalModelsRequest.
-type SearchPagesRequest struct {
+// SearchMentalModelsRequest mirrors memory.v1.SearchMentalModelsRequest.
+type SearchMentalModelsRequest struct {
 	// Bank is the bank searched.
 	Bank domain.BankRef
 	// Query is the search text.
@@ -39,12 +39,15 @@ type pageScore struct {
 	fused    float64
 }
 
-// SearchPages ranks whole mental-model pages for req.Query, best first, at most req.Limit (default 10): it lists the
+// SearchMentalModels ranks whole mental-model pages for req.Query, best first, at most req.Limit (default 10): it
+// lists the
 // folder's pages, scores each by term overlap (name weighted double) and by cosine similarity to the query
 // embedding, and fuses the two rankings with RRF (k = 60), with no rerank. A bank holds tens to hundreds of pages, so
 // they are scored in Go over one listing. A page that matches neither (no shared term, similarity <= 0) is not a
 // hit. When the embedder fails the search ranks by terms only. An empty query is domain.ErrInvalidArgument.
-func (r *Engine) SearchPages(ctx context.Context, req SearchPagesRequest) ([]domain.PageHit, error) {
+func (r *Engine) SearchMentalModels(ctx context.Context, req SearchMentalModelsRequest) ([]domain.MentalModelHit,
+	error,
+) {
 	terms := pageTerms(req.Query)
 	if len(terms) == 0 {
 		return nil, fmt.Errorf("%w: query is empty", domain.ErrInvalidArgument)
@@ -69,12 +72,12 @@ func (r *Engine) SearchPages(ctx context.Context, req SearchPagesRequest) ([]dom
 	if limit <= 0 {
 		limit = domain.SearchResults.Default
 	}
-	var hits []domain.PageHit
+	var hits []domain.MentalModelHit
 	for _, sc := range scores {
 		if sc.fused <= 0 || len(hits) == limit {
 			continue
 		}
-		hits = append(hits, domain.PageHit{
+		hits = append(hits, domain.MentalModelHit{
 			MentalModelID: sc.m.Spec.ID, FolderPath: sc.m.Spec.FolderPath, Name: sc.m.Spec.Name,
 			Snippet: pageSnippet(sc.m.ContentMD, terms), Score: sc.fused,
 		})

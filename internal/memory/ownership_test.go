@@ -31,7 +31,7 @@ func TestRetainSupersededAfterInterveningRetain(t *testing.T) {
 		t.Fatalf("resume = %+v, %v; want superseded", res, err)
 	}
 	d := e.document("d1")
-	if e.extractCalls() != 0 || d.UnitCount != 1 || d.ContentHash != contentHash("Short B.") || d.ExtractedAt == nil {
+	if e.extractCalls() != 0 || d.MemoryCount != 1 || d.ContentHash != contentHash("Short B.") || d.ExtractedAt == nil {
 		t.Errorf("calls %d, document %+v; want the newer retain's single unit, untouched", e.extractCalls(), d)
 	}
 }
@@ -65,16 +65,16 @@ func TestRetainRetryOperationAfterNewerRetain(t *testing.T) {
 	if err != nil || !res.Superseded {
 		t.Fatalf("retried J1 = %+v, %v; want superseded", res, err)
 	}
-	if n := e.document("d1").UnitCount; n != 1 {
+	if n := e.document("d1").MemoryCount; n != 1 {
 		t.Errorf("%d units, want J2's 1", n)
 	}
 	r := e.ingest(RetainRequest{Items: []RetainItem{{
 		DocumentID: "d1", Content: paragraphs(6, "one"),
 		Overrides: chunkTokens(12),
 	}}})
-	if r.Documents[0].Unchanged || r.Documents[0].UnitsCreated != 6 || e.document("d1").UnitCount != 6 {
+	if r.Documents[0].Unchanged || r.Documents[0].MemoriesCreated != 6 || e.document("d1").MemoryCount != 6 {
 		t.Errorf("re-retain of J1's content = %+v, units %d; want 6 new units", r.Documents[0],
-			e.document("d1").UnitCount)
+			e.document("d1").MemoryCount)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestRetainOverlappingRetainsOfOneDocument(t *testing.T) {
 			}
 			want := len(chunkWith(other, chunkOptions{MaxTokens: 12}, nil))
 			d := e.document("d1")
-			if d.UnitCount != int64(want) || d.ContentHash != contentHash(other) || d.ExtractedAt == nil {
+			if d.MemoryCount != int64(want) || d.ContentHash != contentHash(other) || d.ExtractedAt == nil {
 				t.Errorf("document %+v, want the newer retain's %d units", d, want)
 			}
 		})
@@ -163,9 +163,9 @@ func TestRetainOverlappingRetainsOfOneDocument(t *testing.T) {
 func TestIngestFanOutRejectionUnknownBankCreatesNothing(t *testing.T) {
 	e := newEnv(t, 0)
 	_, err := e.ingestor.Ingest(e.ctx, RetainRequest{Bank: testBank, Items: []RetainItem{{
-		Content:           "x",
-		Tags:              []string{"a", "b", "c", "d", "e"},
-		ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeAllCombinations},
+		Content:               "x",
+		Tags:                  []string{"a", "b", "c", "d", "e"},
+		ObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModeAllCombinations},
 	}}})
 	if !errors.Is(err, domain.ErrTooManyScopes) {
 		t.Fatalf("err = %v", err)
@@ -175,7 +175,7 @@ func TestIngestFanOutRejectionUnknownBankCreatesNothing(t *testing.T) {
 	}
 	e.llm.RespondJSON(domain.ModelSlotExtract, prompts.ExtractConcise, factsBody(t, fact("x")))
 	r := e.ingest(RetainRequest{Items: []RetainItem{{DocumentID: "d1", Content: "x"}}})
-	if r.Documents[0].UnitsCreated != 1 {
+	if r.Documents[0].MemoriesCreated != 1 {
 		t.Errorf("first valid retain on a new bank: %+v", r)
 	}
 }
@@ -190,7 +190,7 @@ func TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged(t *testing.T) 
 	j := e.asyncRetain("d1", content, false)
 	sync := func() {
 		r := e.ingest(RetainRequest{Items: []RetainItem{{DocumentID: "d1", Content: content, Overrides: chunkTokens(12)}}})
-		if r.Documents[0].UnitsCreated != 6 {
+		if r.Documents[0].MemoriesCreated != 6 {
 			t.Fatalf("sync retain = %+v", r.Documents[0])
 		}
 	}
@@ -199,15 +199,15 @@ func TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged(t *testing.T) 
 		t.Fatalf("job first attempt: %v", err)
 	}
 	if d := e.document("d1"); d.ExtractedAt != nil {
-		t.Fatalf("after the failed attempt: document %+v is stamped complete with %d units", d, d.UnitCount)
+		t.Fatalf("after the failed attempt: document %+v is stamped complete with %d units", d, d.MemoryCount)
 	}
 	e.scriptChunks(6, false)
 	res, err := e.retainer.ProcessDocument(e.ctx, jobs.Inline(j))
-	if err != nil || res.Unchanged || res.ChunksSkipped != 1 || res.UnitsCreated != 5 {
+	if err != nil || res.Unchanged || res.ChunksSkipped != 1 || res.MemoriesCreated != 5 {
 		t.Fatalf("job retry = %+v, %v; want a resume committing chunks 2-6", res, err)
 	}
 	r := e.ingest(RetainRequest{Items: []RetainItem{{DocumentID: "d1", Content: content, Overrides: chunkTokens(12)}}})
-	if n := e.document("d1").UnitCount; !r.Documents[0].Unchanged || n != 6 {
+	if n := e.document("d1").MemoryCount; !r.Documents[0].Unchanged || n != 6 {
 		t.Errorf("later sync retain = %+v; document has %d units, want unchanged with 6", r.Documents[0], n)
 	}
 }
@@ -221,7 +221,7 @@ func TestRetainSyncVictimPartialReplaceIsNotUnchanged(t *testing.T) {
 	content := paragraphs(6, "one")
 	item := RetainItem{
 		DocumentID: "d1", Content: content, Overrides: chunkTokens(12), Tags: []string{"t1"},
-		ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModePerTag},
+		ObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModePerTag},
 	}
 	e.ingest(RetainRequest{RunAsync: true, Items: []RetainItem{item}})
 	j := e.claimRetain()
@@ -239,12 +239,12 @@ func TestRetainSyncVictimPartialReplaceIsNotUnchanged(t *testing.T) {
 	}
 	d := e.document("d1")
 	if d.ExtractedAt != nil || !slices.Equal(d.Tags, []string{"t1"}) || d.Overrides == nil ||
-		d.ObservationScopes == nil || d.ObservationScopes.Mode != domain.ScopeModePerTag {
+		d.ObservationScopeModes == nil || d.ObservationScopeModes.Mode != domain.ScopeModePerTag {
 		t.Fatalf("after the failed sync run: document %+v; want in flight with its fields intact", d)
 	}
 	e.scriptChunks(6, false)
 	r := e.ingest(RetainRequest{Items: []RetainItem{item}})
-	if n := e.document("d1").UnitCount; r.Documents[0].Unchanged || n != 6 {
+	if n := e.document("d1").MemoryCount; r.Documents[0].Unchanged || n != 6 {
 		t.Errorf("client retry = %+v; document has %d units, want 6", r.Documents[0], n)
 	}
 }

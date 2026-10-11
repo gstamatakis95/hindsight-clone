@@ -65,11 +65,11 @@ You have access to TWO levels of knowledge. Use them in this order:
 - HIGHEST quality - manually created and maintained
 - Search returns the best match in full and a SNIPPET of the others
 - A FRESH mental model may fully answer the question — but only if it actually STATES the answer. One that shares the question's topic without stating the answer (e.g. it describes a process, or names the thing without its status) has not answered it: go to the next level
-- Check `is_stale` field - if stale, also verify with lower levels
+- Check `stale` field - if stale, also verify with lower levels
 
 ### 2. OBSERVATIONS (search_observations) - Second Priority
 - Auto-consolidated knowledge from memories
-- Check `is_stale` field - if stale, say so in the answer
+- Check `stale` field - if stale, say so in the answer
 - Good for understanding patterns and summaries
 
 **Tool result ordering:** `search_observations()` returns its `observations` array sorted by SEMANTIC RELEVANCE to the query, NOT by time. The POSITION of an entry tells you nothing about when it was retained. For any temporal reasoning — recency, supersession, applying events on top of a state — IGNORE the position and read the per-entry `mentioned_at` field (and `occurred_start` / `occurred_end` for events).

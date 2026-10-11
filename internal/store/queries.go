@@ -155,8 +155,8 @@ type UnitQuery struct {
 	Bank domain.BankRef
 	// Types limits fact types; empty = all.
 	Types []domain.FactType
-	// Q is a case-insensitive substring filter on the text; empty = none.
-	Q string
+	// TextContains is a case-insensitive substring filter on the text; empty = none.
+	TextContains string
 	// DocumentID limits units to one document.
 	DocumentID domain.DocumentID
 	// EntityID limits units to live units attached to the entity (archived units never match).
@@ -192,8 +192,8 @@ type UnitCursor struct {
 type DocumentQuery struct {
 	// Bank is the bank listed.
 	Bank domain.BankRef
-	// Q is a case-insensitive substring filter on the document id.
-	Q string
+	// DocumentIDContains is a case-insensitive substring filter on the document id.
+	DocumentIDContains string
 	// Tags filters by normalized document tags with domain.MatchTags semantics; empty = none.
 	Tags []string
 	// TagsMatch is how Tags compare.
@@ -203,7 +203,7 @@ type DocumentQuery struct {
 	// End is the exclusive upper bound on TimeField; nil = unbounded.
 	End *time.Time
 	// TimeField is the timestamp Start and End filter on; unspecified = created_at.
-	TimeField domain.DocTimeField
+	TimeField domain.DocumentTimeField
 	// After continues a listing: only documents strictly after this cursor; nil = first page.
 	After *DocumentCursor
 	// Limit caps the result (> 0).

@@ -163,7 +163,7 @@ func TestListObservationHistoryNewestFirst(t *testing.T) {
 	e, s := adminEnv(t)
 	e.tx(func(tx store.Tx) error {
 		for n := int64(1); n <= 3; n++ {
-			v := domain.ObservationVersion{Version: n, Text: fmt.Sprintf("v%d", n), SourceIDs: []domain.UnitID{uid("f1")}}
+			v := domain.ObservationVersion{Version: n, Text: fmt.Sprintf("v%d", n), SourceFactIDs: []domain.UnitID{uid("f1")}}
 			if err := tx.Units().RecordObservationVersion(t.Context(), bank, uid("o1"), v); err != nil {
 				return err
 			}

@@ -33,7 +33,7 @@ func TestRetainOlderRunCannotOverwriteNewerTags(t *testing.T) {
 	if err != nil || res.Superseded {
 		t.Fatalf("older run = %+v, %v; want it to complete under the adopted tags", res, err)
 	}
-	if d := e.document("d1"); d.UnitCount != 3 || d.ExtractedAt == nil || !domain.SameTagSet(d.Tags, []string{"new"}) {
+	if d := e.document("d1"); d.MemoryCount != 3 || d.ExtractedAt == nil || !domain.SameTagSet(d.Tags, []string{"new"}) {
 		t.Errorf("document = %+v, want 3 units tagged new, complete", d)
 	}
 	hits, err := e.store.Read().SearchText(e.ctx, store.TextQuery{Bank: testBank, Text: "fact", Limit: 100})

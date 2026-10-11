@@ -22,11 +22,19 @@
 // that does work takes its own *Overrides message holding only what that RPC can change; the server turns it
 // into a BankConfig level. Model routing: see ModelBindings.
 //
+// Deadlines. A call that arrives without a deadline gets the server's default deadline (a server setting, so
+// set your own for anything slower). A call that runs out of time fails with DEADLINE_EXCEEDED; work already
+// committed stays. Recall, Reflect and PreviewMentalModelRefresh run within the call's deadline.
+//
+// Recall arms. A recall retrieves candidates with several named arms (built in: vector, text, graph, temporal)
+// and fuses them. Arms are open-ended, so anything per arm is keyed by arm name, never a field per arm;
+// ListRecallArms lists the names a server accepts. An unknown arm name is INVALID_ARGUMENT.
+//
 // Async work. Background work runs as operations. An RPC whose requested work runs in the background returns
 // the Operation it enqueued, in a field named operation (or operations, batch_operation,
 // mental_model_operations), never a bare id; OperationService reports its status and progress. Follow-up jobs
 // an RPC triggers on its own (such as consolidation after a retain) are not returned. Retain is synchronous by
-// default, returning once units are committed; run_async=true makes it return the enqueued operations instead.
+// default, returning once the memories are committed; run_async=true makes it return the enqueued operations instead.
 // Recall and Reflect are synchronous.
 //
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
@@ -45,7 +53,8 @@
 // Errors. Every error carries a canonical gRPC code and a google.rpc.ErrorInfo detail with domain "memd" and
 // a stable reason; INVALID_ARGUMENT also carries a google.rpc.BadRequest detail whose field violations name
 // the offending request fields (for a config, the BankConfig path, for example reflect.disposition.empathy)
-// when the server knows them. Clients branch on the code, then the reason; the message is for humans. The reasons, by code:
+// when the server knows them. Clients branch on the code, then the reason; the message is for humans. The
+// reasons, by code:
 //   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
 //                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
 //   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
@@ -261,234 +270,6 @@ func (RefreshOutcome) EnumDescriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{2}
 }
 
-// TagSource picks which objects ListTags counts tags on.
-type TagSource int32
-
-const (
-	// Not set; same as TAG_SOURCE_MEMORIES.
-	TagSource_TAG_SOURCE_UNSPECIFIED TagSource = 0
-	// Tags of memories.
-	TagSource_TAG_SOURCE_MEMORIES TagSource = 1
-	// Tags of mental models.
-	TagSource_TAG_SOURCE_MENTAL_MODELS TagSource = 2
-	// Tags of documents.
-	TagSource_TAG_SOURCE_DOCUMENTS TagSource = 3
-)
-
-// Enum value maps for TagSource.
-var (
-	TagSource_name = map[int32]string{
-		0: "TAG_SOURCE_UNSPECIFIED",
-		1: "TAG_SOURCE_MEMORIES",
-		2: "TAG_SOURCE_MENTAL_MODELS",
-		3: "TAG_SOURCE_DOCUMENTS",
-	}
-	TagSource_value = map[string]int32{
-		"TAG_SOURCE_UNSPECIFIED":   0,
-		"TAG_SOURCE_MEMORIES":      1,
-		"TAG_SOURCE_MENTAL_MODELS": 2,
-		"TAG_SOURCE_DOCUMENTS":     3,
-	}
-)
-
-func (x TagSource) Enum() *TagSource {
-	p := new(TagSource)
-	*p = x
-	return p
-}
-
-func (x TagSource) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (TagSource) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[3].Descriptor()
-}
-
-func (TagSource) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[3]
-}
-
-func (x TagSource) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use TagSource.Descriptor instead.
-func (TagSource) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{3}
-}
-
-// PromptOperation picks which operation's prompt to preview.
-type PromptOperation int32
-
-const (
-	// Not set; rejected with INVALID_ARGUMENT.
-	PromptOperation_PROMPT_OPERATION_UNSPECIFIED PromptOperation = 0
-	// Retain extraction.
-	PromptOperation_PROMPT_OPERATION_RETAIN PromptOperation = 1
-	// Consolidation decisions.
-	PromptOperation_PROMPT_OPERATION_CONSOLIDATION PromptOperation = 2
-	// Reflect system prompt.
-	PromptOperation_PROMPT_OPERATION_REFLECT PromptOperation = 3
-	// Delta mental-model refresh.
-	PromptOperation_PROMPT_OPERATION_MENTAL_MODEL_DELTA PromptOperation = 4
-	// Single-shot full mental-model synthesis.
-	PromptOperation_PROMPT_OPERATION_SYNTHESIZE PromptOperation = 5
-)
-
-// Enum value maps for PromptOperation.
-var (
-	PromptOperation_name = map[int32]string{
-		0: "PROMPT_OPERATION_UNSPECIFIED",
-		1: "PROMPT_OPERATION_RETAIN",
-		2: "PROMPT_OPERATION_CONSOLIDATION",
-		3: "PROMPT_OPERATION_REFLECT",
-		4: "PROMPT_OPERATION_MENTAL_MODEL_DELTA",
-		5: "PROMPT_OPERATION_SYNTHESIZE",
-	}
-	PromptOperation_value = map[string]int32{
-		"PROMPT_OPERATION_UNSPECIFIED":        0,
-		"PROMPT_OPERATION_RETAIN":             1,
-		"PROMPT_OPERATION_CONSOLIDATION":      2,
-		"PROMPT_OPERATION_REFLECT":            3,
-		"PROMPT_OPERATION_MENTAL_MODEL_DELTA": 4,
-		"PROMPT_OPERATION_SYNTHESIZE":         5,
-	}
-)
-
-func (x PromptOperation) Enum() *PromptOperation {
-	p := new(PromptOperation)
-	*p = x
-	return p
-}
-
-func (x PromptOperation) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (PromptOperation) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[4].Descriptor()
-}
-
-func (PromptOperation) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[4]
-}
-
-func (x PromptOperation) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use PromptOperation.Descriptor instead.
-func (PromptOperation) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{4}
-}
-
-// PromptRole is the chat role of a rendered message.
-type PromptRole int32
-
-const (
-	// Not set; never returned.
-	PromptRole_PROMPT_ROLE_UNSPECIFIED PromptRole = 0
-	// System message.
-	PromptRole_PROMPT_ROLE_SYSTEM PromptRole = 1
-	// User message.
-	PromptRole_PROMPT_ROLE_USER PromptRole = 2
-)
-
-// Enum value maps for PromptRole.
-var (
-	PromptRole_name = map[int32]string{
-		0: "PROMPT_ROLE_UNSPECIFIED",
-		1: "PROMPT_ROLE_SYSTEM",
-		2: "PROMPT_ROLE_USER",
-	}
-	PromptRole_value = map[string]int32{
-		"PROMPT_ROLE_UNSPECIFIED": 0,
-		"PROMPT_ROLE_SYSTEM":      1,
-		"PROMPT_ROLE_USER":        2,
-	}
-)
-
-func (x PromptRole) Enum() *PromptRole {
-	p := new(PromptRole)
-	*p = x
-	return p
-}
-
-func (x PromptRole) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (PromptRole) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[5].Descriptor()
-}
-
-func (PromptRole) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[5]
-}
-
-func (x PromptRole) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use PromptRole.Descriptor instead.
-func (PromptRole) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{5}
-}
-
-// PromptSource says where a prompt block's text comes from.
-type PromptSource int32
-
-const (
-	// Not set; never returned.
-	PromptSource_PROMPT_SOURCE_UNSPECIFIED PromptSource = 0
-	// Built-in template text.
-	PromptSource_PROMPT_SOURCE_BUILTIN PromptSource = 1
-	// Text from the effective BankConfig (a mission, disposition, custom prompt, ...).
-	PromptSource_PROMPT_SOURCE_CONFIG PromptSource = 2
-)
-
-// Enum value maps for PromptSource.
-var (
-	PromptSource_name = map[int32]string{
-		0: "PROMPT_SOURCE_UNSPECIFIED",
-		1: "PROMPT_SOURCE_BUILTIN",
-		2: "PROMPT_SOURCE_CONFIG",
-	}
-	PromptSource_value = map[string]int32{
-		"PROMPT_SOURCE_UNSPECIFIED": 0,
-		"PROMPT_SOURCE_BUILTIN":     1,
-		"PROMPT_SOURCE_CONFIG":      2,
-	}
-)
-
-func (x PromptSource) Enum() *PromptSource {
-	p := new(PromptSource)
-	*p = x
-	return p
-}
-
-func (x PromptSource) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (PromptSource) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[6].Descriptor()
-}
-
-func (PromptSource) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[6]
-}
-
-func (x PromptSource) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use PromptSource.Descriptor instead.
-func (PromptSource) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{6}
-}
-
 // FactType classifies a memory.
 type FactType int32
 
@@ -530,11 +311,11 @@ func (x FactType) String() string {
 }
 
 func (FactType) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[7].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[3].Descriptor()
 }
 
 func (FactType) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[7]
+	return &file_memory_v1_memory_proto_enumTypes[3]
 }
 
 func (x FactType) Number() protoreflect.EnumNumber {
@@ -543,7 +324,7 @@ func (x FactType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FactType.Descriptor instead.
 func (FactType) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{7}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{3}
 }
 
 // Budget picks a size class for recall and reflect work. Through RecallConfig (budget_low / budget_mid /
@@ -589,11 +370,11 @@ func (x Budget) String() string {
 }
 
 func (Budget) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[8].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[4].Descriptor()
 }
 
 func (Budget) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[8]
+	return &file_memory_v1_memory_proto_enumTypes[4]
 }
 
 func (x Budget) Number() protoreflect.EnumNumber {
@@ -602,7 +383,7 @@ func (x Budget) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Budget.Descriptor instead.
 func (Budget) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{8}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{4}
 }
 
 // TagsMatch decides how a tag list filters memories. The STRICT variants exclude untagged memories; the
@@ -657,11 +438,11 @@ func (x TagsMatch) String() string {
 }
 
 func (TagsMatch) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[9].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[5].Descriptor()
 }
 
 func (TagsMatch) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[9]
+	return &file_memory_v1_memory_proto_enumTypes[5]
 }
 
 func (x TagsMatch) Number() protoreflect.EnumNumber {
@@ -670,7 +451,7 @@ func (x TagsMatch) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TagsMatch.Descriptor instead.
 func (TagsMatch) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{9}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{5}
 }
 
 // RefreshMode decides whether a mental-model refresh rewrites the page or edits it.
@@ -711,11 +492,11 @@ func (x RefreshMode) String() string {
 }
 
 func (RefreshMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[10].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[6].Descriptor()
 }
 
 func (RefreshMode) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[10]
+	return &file_memory_v1_memory_proto_enumTypes[6]
 }
 
 func (x RefreshMode) Number() protoreflect.EnumNumber {
@@ -724,7 +505,7 @@ func (x RefreshMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use RefreshMode.Descriptor instead.
 func (RefreshMode) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{10}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{6}
 }
 
 // RefreshStrategy picks how a mental-model refresh drafts content. Settable per bank, per model or per
@@ -767,11 +548,11 @@ func (x RefreshStrategy) String() string {
 }
 
 func (RefreshStrategy) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[11].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[7].Descriptor()
 }
 
 func (RefreshStrategy) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[11]
+	return &file_memory_v1_memory_proto_enumTypes[7]
 }
 
 func (x RefreshStrategy) Number() protoreflect.EnumNumber {
@@ -780,214 +561,7 @@ func (x RefreshStrategy) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use RefreshStrategy.Descriptor instead.
 func (RefreshStrategy) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{11}
-}
-
-// ExtractionMode picks how retain turns content into facts.
-type ExtractionMode int32
-
-const (
-	// Not set; inherit, ending at the server default.
-	ExtractionMode_EXTRACTION_MODE_UNSPECIFIED ExtractionMode = 0
-	// Short, deduplicated facts.
-	ExtractionMode_EXTRACTION_MODE_CONCISE ExtractionMode = 1
-	// Detailed facts keeping more of the source's wording and context.
-	ExtractionMode_EXTRACTION_MODE_VERBOSE ExtractionMode = 2
-	// Facts that quote the source verbatim.
-	ExtractionMode_EXTRACTION_MODE_VERBATIM ExtractionMode = 3
-	// No LLM call: chunks are stored as units as they are.
-	ExtractionMode_EXTRACTION_MODE_CHUNKS ExtractionMode = 4
-	// Extraction driven by BankConfig.custom_extraction_prompt.
-	ExtractionMode_EXTRACTION_MODE_CUSTOM ExtractionMode = 5
-)
-
-// Enum value maps for ExtractionMode.
-var (
-	ExtractionMode_name = map[int32]string{
-		0: "EXTRACTION_MODE_UNSPECIFIED",
-		1: "EXTRACTION_MODE_CONCISE",
-		2: "EXTRACTION_MODE_VERBOSE",
-		3: "EXTRACTION_MODE_VERBATIM",
-		4: "EXTRACTION_MODE_CHUNKS",
-		5: "EXTRACTION_MODE_CUSTOM",
-	}
-	ExtractionMode_value = map[string]int32{
-		"EXTRACTION_MODE_UNSPECIFIED": 0,
-		"EXTRACTION_MODE_CONCISE":     1,
-		"EXTRACTION_MODE_VERBOSE":     2,
-		"EXTRACTION_MODE_VERBATIM":    3,
-		"EXTRACTION_MODE_CHUNKS":      4,
-		"EXTRACTION_MODE_CUSTOM":      5,
-	}
-)
-
-func (x ExtractionMode) Enum() *ExtractionMode {
-	p := new(ExtractionMode)
-	*p = x
-	return p
-}
-
-func (x ExtractionMode) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (ExtractionMode) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[12].Descriptor()
-}
-
-func (ExtractionMode) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[12]
-}
-
-func (x ExtractionMode) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use ExtractionMode.Descriptor instead.
-func (ExtractionMode) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{12}
-}
-
-// BudgetFunction picks how a recall Budget becomes the per-arm candidate cap.
-type BudgetFunction int32
-
-const (
-	// Not set; inherit, ending at the server default.
-	BudgetFunction_BUDGET_FUNCTION_UNSPECIFIED BudgetFunction = 0
-	// Use budget_low / budget_mid / budget_high as fixed candidate caps.
-	BudgetFunction_BUDGET_FUNCTION_FIXED BudgetFunction = 1
-	// Scale the cap with the request's max_tokens, clamped to [budget_min, budget_max].
-	BudgetFunction_BUDGET_FUNCTION_ADAPTIVE BudgetFunction = 2
-)
-
-// Enum value maps for BudgetFunction.
-var (
-	BudgetFunction_name = map[int32]string{
-		0: "BUDGET_FUNCTION_UNSPECIFIED",
-		1: "BUDGET_FUNCTION_FIXED",
-		2: "BUDGET_FUNCTION_ADAPTIVE",
-	}
-	BudgetFunction_value = map[string]int32{
-		"BUDGET_FUNCTION_UNSPECIFIED": 0,
-		"BUDGET_FUNCTION_FIXED":       1,
-		"BUDGET_FUNCTION_ADAPTIVE":    2,
-	}
-)
-
-func (x BudgetFunction) Enum() *BudgetFunction {
-	p := new(BudgetFunction)
-	*p = x
-	return p
-}
-
-func (x BudgetFunction) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (BudgetFunction) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[13].Descriptor()
-}
-
-func (BudgetFunction) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[13]
-}
-
-func (x BudgetFunction) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use BudgetFunction.Descriptor instead.
-func (BudgetFunction) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{13}
-}
-
-// ModelSlot names one model-backed step that can be routed to its own gateway model (see ModelBindings). Usage
-// is recorded per slot.
-type ModelSlot int32
-
-const (
-	// Not set; never recorded in usage.
-	ModelSlot_MODEL_SLOT_UNSPECIFIED ModelSlot = 0
-	// Retain fact, entity and label extraction. Overridable on Retain, ReprocessDocument, UpdateMemory and
-	// RestoreMemory (re-deriving).
-	ModelSlot_MODEL_SLOT_EXTRACT ModelSlot = 1
-	// Relative dates at retain, and query time windows at recall (only when a cue is found and the rules
-	// fail). Overridable on Retain, Recall, ReprocessDocument, UpdateMemory and RestoreMemory.
-	ModelSlot_MODEL_SLOT_TIME_PARSE ModelSlot = 2
-	// Create / update / none decisions per observation scope. Overridable on a manual Consolidate request
-	// or the matching consolidation strategy, never by the retain that triggered the consolidation.
-	ModelSlot_MODEL_SLOT_CONSOLIDATE ModelSlot = 3
-	// Merge-or-keep check for near-duplicate observations. Overridable like MODEL_SLOT_CONSOLIDATE.
-	ModelSlot_MODEL_SLOT_DEDUP_CHECK ModelSlot = 4
-	// Tool-calling turns of the reflect loop and of agentic mental-model refresh. Overridable on Reflect and
-	// RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
-	ModelSlot_MODEL_SLOT_REFLECT ModelSlot = 5
-	// Second pass projecting prose into a JSON Schema (response_schema_json). Overridable on Reflect and
-	// RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
-	ModelSlot_MODEL_SLOT_STRUCTURED_OUTPUT ModelSlot = 6
-	// Single-shot mental-model refresh: the full page synthesis and the delta edit ops. Overridable on
-	// RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
-	ModelSlot_MODEL_SLOT_MENTAL_MODEL ModelSlot = 7
-	// Cross-encoder scores in recall. Overridable on Recall and Reflect.
-	ModelSlot_MODEL_SLOT_RERANK ModelSlot = 8
-	// Embeddings of units, observations, queries and pages. Bound only in the server config file (one vector
-	// space per database, 768 dimensions).
-	ModelSlot_MODEL_SLOT_EMBED ModelSlot = 9
-)
-
-// Enum value maps for ModelSlot.
-var (
-	ModelSlot_name = map[int32]string{
-		0: "MODEL_SLOT_UNSPECIFIED",
-		1: "MODEL_SLOT_EXTRACT",
-		2: "MODEL_SLOT_TIME_PARSE",
-		3: "MODEL_SLOT_CONSOLIDATE",
-		4: "MODEL_SLOT_DEDUP_CHECK",
-		5: "MODEL_SLOT_REFLECT",
-		6: "MODEL_SLOT_STRUCTURED_OUTPUT",
-		7: "MODEL_SLOT_MENTAL_MODEL",
-		8: "MODEL_SLOT_RERANK",
-		9: "MODEL_SLOT_EMBED",
-	}
-	ModelSlot_value = map[string]int32{
-		"MODEL_SLOT_UNSPECIFIED":       0,
-		"MODEL_SLOT_EXTRACT":           1,
-		"MODEL_SLOT_TIME_PARSE":        2,
-		"MODEL_SLOT_CONSOLIDATE":       3,
-		"MODEL_SLOT_DEDUP_CHECK":       4,
-		"MODEL_SLOT_REFLECT":           5,
-		"MODEL_SLOT_STRUCTURED_OUTPUT": 6,
-		"MODEL_SLOT_MENTAL_MODEL":      7,
-		"MODEL_SLOT_RERANK":            8,
-		"MODEL_SLOT_EMBED":             9,
-	}
-)
-
-func (x ModelSlot) Enum() *ModelSlot {
-	p := new(ModelSlot)
-	*p = x
-	return p
-}
-
-func (x ModelSlot) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (ModelSlot) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[14].Descriptor()
-}
-
-func (ModelSlot) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[14]
-}
-
-func (x ModelSlot) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use ModelSlot.Descriptor instead.
-func (ModelSlot) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{14}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{7}
 }
 
 // OperationKind is the job type of an operation.
@@ -1000,17 +574,17 @@ const (
 	OperationKind_OPERATION_KIND_RETAIN_BATCH OperationKind = 1
 	// Extract, embed, resolve and link one document; resumes by chunk hash; enqueues consolidation.
 	OperationKind_OPERATION_KIND_RETAIN_DOCUMENT OperationKind = 2
-	// Consolidate the bank's oldest unconsolidated units into observations; one at a time per bank.
+	// Consolidate the bank's oldest unconsolidated memories into observations; one at a time per bank.
 	OperationKind_OPERATION_KIND_CONSOLIDATE OperationKind = 3
-	// Re-embed, re-resolve and re-link a curated unit, then enqueue consolidation.
+	// Re-embed, re-resolve and re-link a curated memory, then enqueue consolidation.
 	OperationKind_OPERATION_KIND_REDERIVE_MEMORY OperationKind = 4
-	// Rewrite a document's unit tags, clear their observations and enqueue consolidation.
+	// Rewrite a document's memory tags, clear their observations and enqueue consolidation.
 	OperationKind_OPERATION_KIND_RETAG_DOCUMENT OperationKind = 5
 	// Refresh one mental model (agentic or single-shot, delta or full) and write a version.
 	OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL OperationKind = 6
-	// Refill links of neighbours of removed units and prune orphaned entities; one at a time per bank.
+	// Refill links of neighbours of removed memories and prune orphaned entities; one at a time per bank.
 	OperationKind_OPERATION_KIND_GRAPH_MAINTENANCE OperationKind = 7
-	// Delete all of a tombstoned bank's rows and blobs, then the bank row.
+	// Delete everything the bank holds, then the bank itself.
 	OperationKind_OPERATION_KIND_DELETE_BANK OperationKind = 8
 )
 
@@ -1051,11 +625,11 @@ func (x OperationKind) String() string {
 }
 
 func (OperationKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[15].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[8].Descriptor()
 }
 
 func (OperationKind) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[15]
+	return &file_memory_v1_memory_proto_enumTypes[8]
 }
 
 func (x OperationKind) Number() protoreflect.EnumNumber {
@@ -1064,7 +638,7 @@ func (x OperationKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OperationKind.Descriptor instead.
 func (OperationKind) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{15}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{8}
 }
 
 // OperationStatus is the lifecycle state of an operation.
@@ -1075,7 +649,7 @@ const (
 	OperationStatus_OPERATION_STATUS_UNSPECIFIED OperationStatus = 0
 	// Queued, possibly parked until next_run_at.
 	OperationStatus_OPERATION_STATUS_PENDING OperationStatus = 1
-	// Claimed by a worker, which heartbeats it; reclaimed to PENDING if the worker stops heartbeating.
+	// Running; if the server running it stops reporting progress, it goes back to PENDING.
 	OperationStatus_OPERATION_STATUS_PROCESSING OperationStatus = 2
 	// Finished successfully. Terminal; pruned after the retention period.
 	OperationStatus_OPERATION_STATUS_COMPLETED OperationStatus = 3
@@ -1117,11 +691,11 @@ func (x OperationStatus) String() string {
 }
 
 func (OperationStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[16].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[9].Descriptor()
 }
 
 func (OperationStatus) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[16]
+	return &file_memory_v1_memory_proto_enumTypes[9]
 }
 
 func (x OperationStatus) Number() protoreflect.EnumNumber {
@@ -1130,7 +704,7 @@ func (x OperationStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use OperationStatus.Descriptor instead.
 func (OperationStatus) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{16}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{9}
 }
 
 // EventType is the kind of state change a lifecycle event records.
@@ -1139,7 +713,7 @@ type EventType int32
 const (
 	// Not set; never stored. In a ListEvents filter it is ignored.
 	EventType_EVENT_TYPE_UNSPECIFIED EventType = 0
-	// A document's retain finished and its units are committed.
+	// A document's retain finished and its memories are committed.
 	EventType_EVENT_TYPE_RETAIN_COMPLETED EventType = 1
 	// A consolidation run finished writing observations.
 	EventType_EVENT_TYPE_CONSOLIDATION_COMPLETED EventType = 2
@@ -1186,11 +760,11 @@ func (x EventType) String() string {
 }
 
 func (EventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[17].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[10].Descriptor()
 }
 
 func (EventType) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[17]
+	return &file_memory_v1_memory_proto_enumTypes[10]
 }
 
 func (x EventType) Number() protoreflect.EnumNumber {
@@ -1199,7 +773,7 @@ func (x EventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EventType.Descriptor instead.
 func (EventType) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{17}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{10}
 }
 
 // TimeField picks the memory timestamp the time range applies to.
@@ -1251,11 +825,11 @@ func (x ListMemoriesRequest_TimeField) String() string {
 }
 
 func (ListMemoriesRequest_TimeField) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[18].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[11].Descriptor()
 }
 
 func (ListMemoriesRequest_TimeField) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[18]
+	return &file_memory_v1_memory_proto_enumTypes[11]
 }
 
 func (x ListMemoriesRequest_TimeField) Number() protoreflect.EnumNumber {
@@ -1304,11 +878,11 @@ func (x ListDocumentsRequest_TimeField) String() string {
 }
 
 func (ListDocumentsRequest_TimeField) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[19].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[12].Descriptor()
 }
 
 func (ListDocumentsRequest_TimeField) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[19]
+	return &file_memory_v1_memory_proto_enumTypes[12]
 }
 
 func (x ListDocumentsRequest_TimeField) Number() protoreflect.EnumNumber {
@@ -1358,11 +932,11 @@ func (x MentalModelHistoryEntry_Kind) String() string {
 }
 
 func (MentalModelHistoryEntry_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[20].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[13].Descriptor()
 }
 
 func (MentalModelHistoryEntry_Kind) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[20]
+	return &file_memory_v1_memory_proto_enumTypes[13]
 }
 
 func (x MentalModelHistoryEntry_Kind) Number() protoreflect.EnumNumber {
@@ -1435,11 +1009,11 @@ func (x DeltaOp_Kind) String() string {
 }
 
 func (DeltaOp_Kind) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[21].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[14].Descriptor()
 }
 
 func (DeltaOp_Kind) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[21]
+	return &file_memory_v1_memory_proto_enumTypes[14]
 }
 
 func (x DeltaOp_Kind) Number() protoreflect.EnumNumber {
@@ -1451,27 +1025,255 @@ func (DeltaOp_Kind) EnumDescriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{79, 0}
 }
 
-// Mode is how a unit's tags expand into observation scopes.
-type ObservationScopes_Mode int32
+// TagSource picks which objects ListTags counts tags on.
+type ListTagsRequest_TagSource int32
 
 const (
-	// Not set; inherit the bank's default_observation_scopes.
-	ObservationScopes_MODE_UNSPECIFIED ObservationScopes_Mode = 0
-	// One scope: the unit's full tag set.
-	ObservationScopes_MODE_COMBINED ObservationScopes_Mode = 1
-	// The shared (untagged) scope only.
-	ObservationScopes_MODE_SHARED ObservationScopes_Mode = 2
-	// One scope per individual tag.
-	ObservationScopes_MODE_PER_TAG ObservationScopes_Mode = 3
-	// One scope per non-empty combination of the unit's tags, capped by max_combinations.
-	ObservationScopes_MODE_ALL_COMBINATIONS ObservationScopes_Mode = 4
-	// Exactly the scopes listed in custom.
-	ObservationScopes_MODE_CUSTOM ObservationScopes_Mode = 5
+	// Not set; same as TAG_SOURCE_MEMORIES.
+	ListTagsRequest_TAG_SOURCE_UNSPECIFIED ListTagsRequest_TagSource = 0
+	// Tags of memories.
+	ListTagsRequest_TAG_SOURCE_MEMORIES ListTagsRequest_TagSource = 1
+	// Tags of mental models.
+	ListTagsRequest_TAG_SOURCE_MENTAL_MODELS ListTagsRequest_TagSource = 2
+	// Tags of documents.
+	ListTagsRequest_TAG_SOURCE_DOCUMENTS ListTagsRequest_TagSource = 3
 )
 
-// Enum value maps for ObservationScopes_Mode.
+// Enum value maps for ListTagsRequest_TagSource.
 var (
-	ObservationScopes_Mode_name = map[int32]string{
+	ListTagsRequest_TagSource_name = map[int32]string{
+		0: "TAG_SOURCE_UNSPECIFIED",
+		1: "TAG_SOURCE_MEMORIES",
+		2: "TAG_SOURCE_MENTAL_MODELS",
+		3: "TAG_SOURCE_DOCUMENTS",
+	}
+	ListTagsRequest_TagSource_value = map[string]int32{
+		"TAG_SOURCE_UNSPECIFIED":   0,
+		"TAG_SOURCE_MEMORIES":      1,
+		"TAG_SOURCE_MENTAL_MODELS": 2,
+		"TAG_SOURCE_DOCUMENTS":     3,
+	}
+)
+
+func (x ListTagsRequest_TagSource) Enum() *ListTagsRequest_TagSource {
+	p := new(ListTagsRequest_TagSource)
+	*p = x
+	return p
+}
+
+func (x ListTagsRequest_TagSource) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ListTagsRequest_TagSource) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[15].Descriptor()
+}
+
+func (ListTagsRequest_TagSource) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[15]
+}
+
+func (x ListTagsRequest_TagSource) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ListTagsRequest_TagSource.Descriptor instead.
+func (ListTagsRequest_TagSource) EnumDescriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{92, 0}
+}
+
+// PromptOperation picks which operation's prompt to preview.
+type PreviewPromptRequest_PromptOperation int32
+
+const (
+	// Not set; rejected with INVALID_ARGUMENT.
+	PreviewPromptRequest_PROMPT_OPERATION_UNSPECIFIED PreviewPromptRequest_PromptOperation = 0
+	// Retain extraction.
+	PreviewPromptRequest_PROMPT_OPERATION_RETAIN PreviewPromptRequest_PromptOperation = 1
+	// Consolidation decisions.
+	PreviewPromptRequest_PROMPT_OPERATION_CONSOLIDATION PreviewPromptRequest_PromptOperation = 2
+	// Reflect system prompt.
+	PreviewPromptRequest_PROMPT_OPERATION_REFLECT PreviewPromptRequest_PromptOperation = 3
+	// Delta mental-model refresh.
+	PreviewPromptRequest_PROMPT_OPERATION_MENTAL_MODEL_DELTA PreviewPromptRequest_PromptOperation = 4
+	// Single-shot full mental-model synthesis.
+	PreviewPromptRequest_PROMPT_OPERATION_SYNTHESIZE PreviewPromptRequest_PromptOperation = 5
+)
+
+// Enum value maps for PreviewPromptRequest_PromptOperation.
+var (
+	PreviewPromptRequest_PromptOperation_name = map[int32]string{
+		0: "PROMPT_OPERATION_UNSPECIFIED",
+		1: "PROMPT_OPERATION_RETAIN",
+		2: "PROMPT_OPERATION_CONSOLIDATION",
+		3: "PROMPT_OPERATION_REFLECT",
+		4: "PROMPT_OPERATION_MENTAL_MODEL_DELTA",
+		5: "PROMPT_OPERATION_SYNTHESIZE",
+	}
+	PreviewPromptRequest_PromptOperation_value = map[string]int32{
+		"PROMPT_OPERATION_UNSPECIFIED":        0,
+		"PROMPT_OPERATION_RETAIN":             1,
+		"PROMPT_OPERATION_CONSOLIDATION":      2,
+		"PROMPT_OPERATION_REFLECT":            3,
+		"PROMPT_OPERATION_MENTAL_MODEL_DELTA": 4,
+		"PROMPT_OPERATION_SYNTHESIZE":         5,
+	}
+)
+
+func (x PreviewPromptRequest_PromptOperation) Enum() *PreviewPromptRequest_PromptOperation {
+	p := new(PreviewPromptRequest_PromptOperation)
+	*p = x
+	return p
+}
+
+func (x PreviewPromptRequest_PromptOperation) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PreviewPromptRequest_PromptOperation) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[16].Descriptor()
+}
+
+func (PreviewPromptRequest_PromptOperation) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[16]
+}
+
+func (x PreviewPromptRequest_PromptOperation) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PreviewPromptRequest_PromptOperation.Descriptor instead.
+func (PreviewPromptRequest_PromptOperation) EnumDescriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{110, 0}
+}
+
+// PromptRole is the chat role of a rendered message.
+type PromptMessage_PromptRole int32
+
+const (
+	// Not set; never returned.
+	PromptMessage_PROMPT_ROLE_UNSPECIFIED PromptMessage_PromptRole = 0
+	// System message.
+	PromptMessage_PROMPT_ROLE_SYSTEM PromptMessage_PromptRole = 1
+	// User message.
+	PromptMessage_PROMPT_ROLE_USER PromptMessage_PromptRole = 2
+)
+
+// Enum value maps for PromptMessage_PromptRole.
+var (
+	PromptMessage_PromptRole_name = map[int32]string{
+		0: "PROMPT_ROLE_UNSPECIFIED",
+		1: "PROMPT_ROLE_SYSTEM",
+		2: "PROMPT_ROLE_USER",
+	}
+	PromptMessage_PromptRole_value = map[string]int32{
+		"PROMPT_ROLE_UNSPECIFIED": 0,
+		"PROMPT_ROLE_SYSTEM":      1,
+		"PROMPT_ROLE_USER":        2,
+	}
+)
+
+func (x PromptMessage_PromptRole) Enum() *PromptMessage_PromptRole {
+	p := new(PromptMessage_PromptRole)
+	*p = x
+	return p
+}
+
+func (x PromptMessage_PromptRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PromptMessage_PromptRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[17].Descriptor()
+}
+
+func (PromptMessage_PromptRole) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[17]
+}
+
+func (x PromptMessage_PromptRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PromptMessage_PromptRole.Descriptor instead.
+func (PromptMessage_PromptRole) EnumDescriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{113, 0}
+}
+
+// PromptSource says where a prompt block's text comes from.
+type PromptBlock_PromptSource int32
+
+const (
+	// Not set; never returned.
+	PromptBlock_PROMPT_SOURCE_UNSPECIFIED PromptBlock_PromptSource = 0
+	// Built-in template text.
+	PromptBlock_PROMPT_SOURCE_BUILTIN PromptBlock_PromptSource = 1
+	// Text from the effective BankConfig (a mission, disposition, custom prompt, ...).
+	PromptBlock_PROMPT_SOURCE_CONFIG PromptBlock_PromptSource = 2
+)
+
+// Enum value maps for PromptBlock_PromptSource.
+var (
+	PromptBlock_PromptSource_name = map[int32]string{
+		0: "PROMPT_SOURCE_UNSPECIFIED",
+		1: "PROMPT_SOURCE_BUILTIN",
+		2: "PROMPT_SOURCE_CONFIG",
+	}
+	PromptBlock_PromptSource_value = map[string]int32{
+		"PROMPT_SOURCE_UNSPECIFIED": 0,
+		"PROMPT_SOURCE_BUILTIN":     1,
+		"PROMPT_SOURCE_CONFIG":      2,
+	}
+)
+
+func (x PromptBlock_PromptSource) Enum() *PromptBlock_PromptSource {
+	p := new(PromptBlock_PromptSource)
+	*p = x
+	return p
+}
+
+func (x PromptBlock_PromptSource) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PromptBlock_PromptSource) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[18].Descriptor()
+}
+
+func (PromptBlock_PromptSource) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[18]
+}
+
+func (x PromptBlock_PromptSource) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PromptBlock_PromptSource.Descriptor instead.
+func (PromptBlock_PromptSource) EnumDescriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{114, 0}
+}
+
+// Mode is how a memory's tags expand into observation scopes.
+type ObservationScopeModes_Mode int32
+
+const (
+	// Not set; inherit the bank's default_observation_scope_modes.
+	ObservationScopeModes_MODE_UNSPECIFIED ObservationScopeModes_Mode = 0
+	// One scope: the memory's full tag set.
+	ObservationScopeModes_MODE_COMBINED ObservationScopeModes_Mode = 1
+	// The shared (untagged) scope only.
+	ObservationScopeModes_MODE_SHARED ObservationScopeModes_Mode = 2
+	// One scope per individual tag.
+	ObservationScopeModes_MODE_PER_TAG ObservationScopeModes_Mode = 3
+	// One scope per non-empty combination of the memory's tags, capped by max_combinations.
+	ObservationScopeModes_MODE_ALL_COMBINATIONS ObservationScopeModes_Mode = 4
+	// Exactly the scopes listed in custom.
+	ObservationScopeModes_MODE_CUSTOM ObservationScopeModes_Mode = 5
+)
+
+// Enum value maps for ObservationScopeModes_Mode.
+var (
+	ObservationScopeModes_Mode_name = map[int32]string{
 		0: "MODE_UNSPECIFIED",
 		1: "MODE_COMBINED",
 		2: "MODE_SHARED",
@@ -1479,7 +1281,7 @@ var (
 		4: "MODE_ALL_COMBINATIONS",
 		5: "MODE_CUSTOM",
 	}
-	ObservationScopes_Mode_value = map[string]int32{
+	ObservationScopeModes_Mode_value = map[string]int32{
 		"MODE_UNSPECIFIED":      0,
 		"MODE_COMBINED":         1,
 		"MODE_SHARED":           2,
@@ -1489,30 +1291,30 @@ var (
 	}
 )
 
-func (x ObservationScopes_Mode) Enum() *ObservationScopes_Mode {
-	p := new(ObservationScopes_Mode)
+func (x ObservationScopeModes_Mode) Enum() *ObservationScopeModes_Mode {
+	p := new(ObservationScopeModes_Mode)
 	*p = x
 	return p
 }
 
-func (x ObservationScopes_Mode) String() string {
+func (x ObservationScopeModes_Mode) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (ObservationScopes_Mode) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[22].Descriptor()
+func (ObservationScopeModes_Mode) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[19].Descriptor()
 }
 
-func (ObservationScopes_Mode) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[22]
+func (ObservationScopeModes_Mode) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[19]
 }
 
-func (x ObservationScopes_Mode) Number() protoreflect.EnumNumber {
+func (x ObservationScopeModes_Mode) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ObservationScopes_Mode.Descriptor instead.
-func (ObservationScopes_Mode) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use ObservationScopeModes_Mode.Descriptor instead.
+func (ObservationScopeModes_Mode) EnumDescriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{139, 0}
 }
 
@@ -1554,11 +1356,11 @@ func (x TagLeaf_Resolve) String() string {
 }
 
 func (TagLeaf_Resolve) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[23].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[20].Descriptor()
 }
 
 func (TagLeaf_Resolve) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[23]
+	return &file_memory_v1_memory_proto_enumTypes[20]
 }
 
 func (x TagLeaf_Resolve) Number() protoreflect.EnumNumber {
@@ -1568,6 +1370,160 @@ func (x TagLeaf_Resolve) Number() protoreflect.EnumNumber {
 // Deprecated: Use TagLeaf_Resolve.Descriptor instead.
 func (TagLeaf_Resolve) EnumDescriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{143, 0}
+}
+
+// ModelSlot names one model-backed step that can be routed to its own gateway model (see ModelBindings). Usage
+// is recorded per slot.
+type SlotUsage_ModelSlot int32
+
+const (
+	// Not set; never recorded in usage.
+	SlotUsage_MODEL_SLOT_UNSPECIFIED SlotUsage_ModelSlot = 0
+	// Retain fact, entity and label extraction. Overridable on Retain, ReprocessDocument, UpdateMemory and
+	// RestoreMemory (re-deriving).
+	SlotUsage_MODEL_SLOT_EXTRACT SlotUsage_ModelSlot = 1
+	// Relative dates at retain, and query time windows at recall (only when a cue is found and the rules
+	// fail). Overridable on Retain, Recall, ReprocessDocument, UpdateMemory and RestoreMemory.
+	SlotUsage_MODEL_SLOT_TIME_PARSE SlotUsage_ModelSlot = 2
+	// Create / update / none decisions per observation scope. Overridable on a manual Consolidate request
+	// or the matching consolidation strategy, never by the retain that triggered the consolidation.
+	SlotUsage_MODEL_SLOT_CONSOLIDATE SlotUsage_ModelSlot = 3
+	// Merge-or-keep check for near-duplicate observations. Overridable like MODEL_SLOT_CONSOLIDATE.
+	SlotUsage_MODEL_SLOT_DEDUP_CHECK SlotUsage_ModelSlot = 4
+	// Tool-calling turns of the reflect loop and of agentic mental-model refresh. Overridable on Reflect and
+	// RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+	SlotUsage_MODEL_SLOT_REFLECT SlotUsage_ModelSlot = 5
+	// Second pass projecting prose into a JSON Schema (response_schema_json). Overridable on Reflect and
+	// RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+	SlotUsage_MODEL_SLOT_STRUCTURED_OUTPUT SlotUsage_ModelSlot = 6
+	// Single-shot mental-model refresh: the full page synthesis and the delta edit ops. Overridable on
+	// RefreshMentalModel, or stored on the model (MentalModelSpec.overrides).
+	SlotUsage_MODEL_SLOT_MENTAL_MODEL SlotUsage_ModelSlot = 7
+	// Cross-encoder scores in recall. Overridable on Recall and Reflect.
+	SlotUsage_MODEL_SLOT_RERANK SlotUsage_ModelSlot = 8
+	// Embeddings of memories, observations, queries and mental models. Bound only in the server config file (one vector
+	// space per database, 768 dimensions).
+	SlotUsage_MODEL_SLOT_EMBED SlotUsage_ModelSlot = 9
+)
+
+// Enum value maps for SlotUsage_ModelSlot.
+var (
+	SlotUsage_ModelSlot_name = map[int32]string{
+		0: "MODEL_SLOT_UNSPECIFIED",
+		1: "MODEL_SLOT_EXTRACT",
+		2: "MODEL_SLOT_TIME_PARSE",
+		3: "MODEL_SLOT_CONSOLIDATE",
+		4: "MODEL_SLOT_DEDUP_CHECK",
+		5: "MODEL_SLOT_REFLECT",
+		6: "MODEL_SLOT_STRUCTURED_OUTPUT",
+		7: "MODEL_SLOT_MENTAL_MODEL",
+		8: "MODEL_SLOT_RERANK",
+		9: "MODEL_SLOT_EMBED",
+	}
+	SlotUsage_ModelSlot_value = map[string]int32{
+		"MODEL_SLOT_UNSPECIFIED":       0,
+		"MODEL_SLOT_EXTRACT":           1,
+		"MODEL_SLOT_TIME_PARSE":        2,
+		"MODEL_SLOT_CONSOLIDATE":       3,
+		"MODEL_SLOT_DEDUP_CHECK":       4,
+		"MODEL_SLOT_REFLECT":           5,
+		"MODEL_SLOT_STRUCTURED_OUTPUT": 6,
+		"MODEL_SLOT_MENTAL_MODEL":      7,
+		"MODEL_SLOT_RERANK":            8,
+		"MODEL_SLOT_EMBED":             9,
+	}
+)
+
+func (x SlotUsage_ModelSlot) Enum() *SlotUsage_ModelSlot {
+	p := new(SlotUsage_ModelSlot)
+	*p = x
+	return p
+}
+
+func (x SlotUsage_ModelSlot) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SlotUsage_ModelSlot) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[21].Descriptor()
+}
+
+func (SlotUsage_ModelSlot) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[21]
+}
+
+func (x SlotUsage_ModelSlot) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SlotUsage_ModelSlot.Descriptor instead.
+func (SlotUsage_ModelSlot) EnumDescriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{147, 0}
+}
+
+// ExtractionMode picks how retain turns content into facts.
+type RetainConfig_ExtractionMode int32
+
+const (
+	// Not set; inherit, ending at the server default.
+	RetainConfig_EXTRACTION_MODE_UNSPECIFIED RetainConfig_ExtractionMode = 0
+	// Short, deduplicated facts.
+	RetainConfig_EXTRACTION_MODE_CONCISE RetainConfig_ExtractionMode = 1
+	// Detailed facts keeping more of the source's wording and context.
+	RetainConfig_EXTRACTION_MODE_VERBOSE RetainConfig_ExtractionMode = 2
+	// Facts that quote the source verbatim.
+	RetainConfig_EXTRACTION_MODE_VERBATIM RetainConfig_ExtractionMode = 3
+	// No LLM call: chunks are stored as memories as they are.
+	RetainConfig_EXTRACTION_MODE_CHUNKS RetainConfig_ExtractionMode = 4
+	// Extraction driven by BankConfig.custom_extraction_prompt.
+	RetainConfig_EXTRACTION_MODE_CUSTOM RetainConfig_ExtractionMode = 5
+)
+
+// Enum value maps for RetainConfig_ExtractionMode.
+var (
+	RetainConfig_ExtractionMode_name = map[int32]string{
+		0: "EXTRACTION_MODE_UNSPECIFIED",
+		1: "EXTRACTION_MODE_CONCISE",
+		2: "EXTRACTION_MODE_VERBOSE",
+		3: "EXTRACTION_MODE_VERBATIM",
+		4: "EXTRACTION_MODE_CHUNKS",
+		5: "EXTRACTION_MODE_CUSTOM",
+	}
+	RetainConfig_ExtractionMode_value = map[string]int32{
+		"EXTRACTION_MODE_UNSPECIFIED": 0,
+		"EXTRACTION_MODE_CONCISE":     1,
+		"EXTRACTION_MODE_VERBOSE":     2,
+		"EXTRACTION_MODE_VERBATIM":    3,
+		"EXTRACTION_MODE_CHUNKS":      4,
+		"EXTRACTION_MODE_CUSTOM":      5,
+	}
+)
+
+func (x RetainConfig_ExtractionMode) Enum() *RetainConfig_ExtractionMode {
+	p := new(RetainConfig_ExtractionMode)
+	*p = x
+	return p
+}
+
+func (x RetainConfig_ExtractionMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RetainConfig_ExtractionMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[22].Descriptor()
+}
+
+func (RetainConfig_ExtractionMode) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[22]
+}
+
+func (x RetainConfig_ExtractionMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RetainConfig_ExtractionMode.Descriptor instead.
+func (RetainConfig_ExtractionMode) EnumDescriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{153, 0}
 }
 
 // Type is the shape of a label's value.
@@ -1619,11 +1575,11 @@ func (x EntityLabel_Type) String() string {
 }
 
 func (EntityLabel_Type) Descriptor() protoreflect.EnumDescriptor {
-	return file_memory_v1_memory_proto_enumTypes[24].Descriptor()
+	return file_memory_v1_memory_proto_enumTypes[23].Descriptor()
 }
 
 func (EntityLabel_Type) Type() protoreflect.EnumType {
-	return &file_memory_v1_memory_proto_enumTypes[24]
+	return &file_memory_v1_memory_proto_enumTypes[23]
 }
 
 func (x EntityLabel_Type) Number() protoreflect.EnumNumber {
@@ -1633,6 +1589,59 @@ func (x EntityLabel_Type) Number() protoreflect.EnumNumber {
 // Deprecated: Use EntityLabel_Type.Descriptor instead.
 func (EntityLabel_Type) EnumDescriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{156, 0}
+}
+
+// BudgetFunction picks how a recall Budget becomes the per-arm candidate cap.
+type RecallConfig_BudgetFunction int32
+
+const (
+	// Not set; inherit, ending at the server default.
+	RecallConfig_BUDGET_FUNCTION_UNSPECIFIED RecallConfig_BudgetFunction = 0
+	// Use budget_low / budget_mid / budget_high as fixed candidate caps.
+	RecallConfig_BUDGET_FUNCTION_FIXED RecallConfig_BudgetFunction = 1
+	// Scale the cap with the request's max_tokens, clamped to [budget_min, budget_max].
+	RecallConfig_BUDGET_FUNCTION_ADAPTIVE RecallConfig_BudgetFunction = 2
+)
+
+// Enum value maps for RecallConfig_BudgetFunction.
+var (
+	RecallConfig_BudgetFunction_name = map[int32]string{
+		0: "BUDGET_FUNCTION_UNSPECIFIED",
+		1: "BUDGET_FUNCTION_FIXED",
+		2: "BUDGET_FUNCTION_ADAPTIVE",
+	}
+	RecallConfig_BudgetFunction_value = map[string]int32{
+		"BUDGET_FUNCTION_UNSPECIFIED": 0,
+		"BUDGET_FUNCTION_FIXED":       1,
+		"BUDGET_FUNCTION_ADAPTIVE":    2,
+	}
+)
+
+func (x RecallConfig_BudgetFunction) Enum() *RecallConfig_BudgetFunction {
+	p := new(RecallConfig_BudgetFunction)
+	*p = x
+	return p
+}
+
+func (x RecallConfig_BudgetFunction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RecallConfig_BudgetFunction) Descriptor() protoreflect.EnumDescriptor {
+	return file_memory_v1_memory_proto_enumTypes[24].Descriptor()
+}
+
+func (RecallConfig_BudgetFunction) Type() protoreflect.EnumType {
+	return &file_memory_v1_memory_proto_enumTypes[24]
+}
+
+func (x RecallConfig_BudgetFunction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RecallConfig_BudgetFunction.Descriptor instead.
+func (RecallConfig_BudgetFunction) EnumDescriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{159, 0}
 }
 
 // RetainRequest retains a batch of documents into one bank.
@@ -1734,7 +1743,7 @@ type RetainResponse struct {
 	Documents []*RetainedDocument `protobuf:"bytes,1,rep,name=documents,proto3" json:"documents,omitempty"`
 	// The retain_batch parent operation; set when run_async enqueued more than one document. Its status
 	// aggregates the retain_document children.
-	BatchOperation *Operation `protobuf:"bytes,4,opt,name=batch_operation,json=batchOperation,proto3" json:"batch_operation,omitempty"`
+	BatchOperation *Operation `protobuf:"bytes,2,opt,name=batch_operation,json=batchOperation,proto3" json:"batch_operation,omitempty"`
 	// Token usage per slot and model of the LLM and embedding calls a synchronous retain made; empty when
 	// run_async (the usage is then on the retain_document operations).
 	Usage         []*SlotUsage `protobuf:"bytes,3,rep,name=usage,proto3" json:"usage,omitempty"`
@@ -1808,8 +1817,8 @@ type RetainItem struct {
 	DocumentId string `protobuf:"bytes,5,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
 	// Tags of the document's memories, added to the request's document_tags.
 	Tags []string `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
-	// Observation scopes for this item; unset = retain.default_observation_scopes of the config.
-	ObservationScopes *ObservationScopes `protobuf:"bytes,7,opt,name=observation_scopes,json=observationScopes,proto3" json:"observation_scopes,omitempty"`
+	// Observation scopes for this item; unset = retain.default_observation_scope_modes of the config.
+	ObservationScopeModes *ObservationScopeModes `protobuf:"bytes,7,opt,name=observation_scope_modes,json=observationScopeModes,proto3" json:"observation_scope_modes,omitempty"`
 	// Metadata copied onto every memory of the document.
 	Metadata map[string]string `protobuf:"bytes,8,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Entities the extractor should link.
@@ -1897,9 +1906,9 @@ func (x *RetainItem) GetTags() []string {
 	return nil
 }
 
-func (x *RetainItem) GetObservationScopes() *ObservationScopes {
+func (x *RetainItem) GetObservationScopeModes() *ObservationScopeModes {
 	if x != nil {
-		return x.ObservationScopes
+		return x.ObservationScopeModes
 	}
 	return nil
 }
@@ -2000,11 +2009,11 @@ type RetainedDocument struct {
 	// Document id (given or generated).
 	DocumentId string `protobuf:"bytes,1,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
 	// Memories created; 0 when unchanged or async.
-	MemoriesCreated int32 `protobuf:"varint,6,opt,name=memories_created,json=memoriesCreated,proto3" json:"memories_created,omitempty"`
+	MemoriesCreated int32 `protobuf:"varint,2,opt,name=memories_created,json=memoriesCreated,proto3" json:"memories_created,omitempty"`
 	// Same content and overrides hash as the last completed retain: nothing was re-extracted.
 	Unchanged bool `protobuf:"varint,3,opt,name=unchanged,proto3" json:"unchanged,omitempty"`
 	// The retain_document operation; set when run_async and the document changed.
-	Operation     *Operation `protobuf:"bytes,5,opt,name=operation,proto3" json:"operation,omitempty"`
+	Operation     *Operation `protobuf:"bytes,4,opt,name=operation,proto3" json:"operation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2075,34 +2084,34 @@ type RecallRequest struct {
 	// Query text, at most 500 tokens.
 	Query string `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	// Fact types to return; empty = all.
-	FactTypes []FactType `protobuf:"varint,18,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`
+	FactTypes []FactType `protobuf:"varint,3,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`
 	// Tag filter on the memories' tags; unset = no filter. Flat tags or groups; tags.match unset =
 	// TAGS_MATCH_ANY.
 	Tags *TagFilter `protobuf:"bytes,4,opt,name=tags,proto3" json:"tags,omitempty"`
 	// Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
-	Budget Budget `protobuf:"varint,7,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
+	Budget Budget `protobuf:"varint,5,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
 	// Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
-	MaxTokens int32 `protobuf:"varint,8,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
+	MaxTokens int32 `protobuf:"varint,6,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 	// Reference time for relative expressions and recency; unset = now.
-	QueryTime *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=query_time,json=queryTime,proto3" json:"query_time,omitempty"`
+	QueryTime *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=query_time,json=queryTime,proto3" json:"query_time,omitempty"`
 	// Explicit time window start; when set, the query is not parsed for a window.
-	TimeWindowStart *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=time_window_start,json=timeWindowStart,proto3" json:"time_window_start,omitempty"`
+	TimeWindowStart *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=time_window_start,json=timeWindowStart,proto3" json:"time_window_start,omitempty"`
 	// Explicit time window end.
-	TimeWindowEnd *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=time_window_end,json=timeWindowEnd,proto3" json:"time_window_end,omitempty"`
+	TimeWindowEnd *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=time_window_end,json=timeWindowEnd,proto3" json:"time_window_end,omitempty"`
 	// Prefer observations: drop raw facts covered by a returned observation and backfill the budget.
-	PreferObservations bool `protobuf:"varint,12,opt,name=prefer_observations,json=preferObservations,proto3" json:"prefer_observations,omitempty"`
+	PreferObservations bool `protobuf:"varint,10,opt,name=prefer_observations,json=preferObservations,proto3" json:"prefer_observations,omitempty"`
 	// Score floors.
-	MinScores *MinScores `protobuf:"bytes,13,opt,name=min_scores,json=minScores,proto3" json:"min_scores,omitempty"`
+	MinScores *MinScores `protobuf:"bytes,11,opt,name=min_scores,json=minScores,proto3" json:"min_scores,omitempty"`
 	// Extra material to attach.
-	Include *RecallInclude `protobuf:"bytes,14,opt,name=include,proto3" json:"include,omitempty"`
+	Include *RecallInclude `protobuf:"bytes,12,opt,name=include,proto3" json:"include,omitempty"`
 	// Return a RecallTrace.
-	Trace bool `protobuf:"varint,15,opt,name=trace,proto3" json:"trace,omitempty"`
+	Trace bool `protobuf:"varint,13,opt,name=trace,proto3" json:"trace,omitempty"`
 	// Overrides for this call only.
-	Overrides *RecallOverrides `protobuf:"bytes,16,opt,name=overrides,proto3" json:"overrides,omitempty"`
+	Overrides *RecallOverrides `protobuf:"bytes,14,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	// Recall arms to run, by name (ListRecallArms), e.g. ["graph", "vector"] runs only those two; empty = the
 	// effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
 	// INVALID_ARGUMENT.
-	Arms          []string `protobuf:"bytes,17,rep,name=arms,proto3" json:"arms,omitempty"`
+	Arms          []string `protobuf:"bytes,15,rep,name=arms,proto3" json:"arms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2490,25 +2499,25 @@ type ReflectRequest struct {
 	// Flat tags or groups; tags.match unset = TAGS_MATCH_ANY.
 	Tags *TagFilter `protobuf:"bytes,3,opt,name=tags,proto3" json:"tags,omitempty"`
 	// Size class scaling iterations and recall budgets, default BUDGET_LOW.
-	Budget Budget `protobuf:"varint,6,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
+	Budget Budget `protobuf:"varint,4,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
 	// Token cap on the final answer; overrides ReflectConfig.max_answer_tokens.
-	MaxTokens *int32 `protobuf:"varint,7,opt,name=max_tokens,json=maxTokens,proto3,oneof" json:"max_tokens,omitempty"`
+	MaxTokens *int32 `protobuf:"varint,5,opt,name=max_tokens,json=maxTokens,proto3,oneof" json:"max_tokens,omitempty"`
 	// JSON Schema for a structured second pass (STRUCTURED_OUTPUT slot); empty = prose only.
-	ResponseSchemaJson string `protobuf:"bytes,8,opt,name=response_schema_json,json=responseSchemaJson,proto3" json:"response_schema_json,omitempty"`
+	ResponseSchemaJson string `protobuf:"bytes,6,opt,name=response_schema_json,json=responseSchemaJson,proto3" json:"response_schema_json,omitempty"`
 	// Apply every active directive, not only those matching the request tags.
-	ApplyAllDirectives bool `protobuf:"varint,9,opt,name=apply_all_directives,json=applyAllDirectives,proto3" json:"apply_all_directives,omitempty"`
+	ApplyAllDirectives bool `protobuf:"varint,7,opt,name=apply_all_directives,json=applyAllDirectives,proto3" json:"apply_all_directives,omitempty"`
 	// Directives added for this call only; stored directives can never be removed by a request.
-	ExtraDirectives []*Directive `protobuf:"bytes,10,rep,name=extra_directives,json=extraDirectives,proto3" json:"extra_directives,omitempty"`
+	ExtraDirectives []*Directive `protobuf:"bytes,8,rep,name=extra_directives,json=extraDirectives,proto3" json:"extra_directives,omitempty"`
 	// What to return beside the answer.
-	Include *ReflectInclude `protobuf:"bytes,11,opt,name=include,proto3" json:"include,omitempty"`
+	Include *ReflectInclude `protobuf:"bytes,9,opt,name=include,proto3" json:"include,omitempty"`
 	// Reference time for relative expressions; unset = now.
-	QueryTime *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=query_time,json=queryTime,proto3" json:"query_time,omitempty"`
+	QueryTime *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=query_time,json=queryTime,proto3" json:"query_time,omitempty"`
 	// Overrides for this call only. Extra directives come through extra_directives.
-	Overrides *ReflectOverrides `protobuf:"bytes,13,opt,name=overrides,proto3" json:"overrides,omitempty"`
+	Overrides *ReflectOverrides `protobuf:"bytes,11,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	// Recall arms the agent's recall and search_observations tools run, by name (ListRecallArms); empty = the
 	// effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
 	// INVALID_ARGUMENT.
-	Arms          []string `protobuf:"bytes,14,rep,name=arms,proto3" json:"arms,omitempty"`
+	Arms          []string `protobuf:"bytes,12,rep,name=arms,proto3" json:"arms,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2722,9 +2731,9 @@ func (x *ReflectResponse) GetUsage() []*SlotUsage {
 type ReflectInclude struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Return based_on (the memories, models and directives used); unset = true.
-	BasedOn *bool `protobuf:"varint,4,opt,name=based_on,json=basedOn,proto3,oneof" json:"based_on,omitempty"`
+	BasedOn *bool `protobuf:"varint,1,opt,name=based_on,json=basedOn,proto3,oneof" json:"based_on,omitempty"`
 	// Return the trace with tool calls.
-	Trace bool `protobuf:"varint,5,opt,name=trace,proto3" json:"trace,omitempty"`
+	Trace bool `protobuf:"varint,2,opt,name=trace,proto3" json:"trace,omitempty"`
 	// Include tool outputs in the trace; unset = true when trace.
 	ToolOutputs   *bool `protobuf:"varint,3,opt,name=tool_outputs,json=toolOutputs,proto3,oneof" json:"tool_outputs,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -2990,9 +2999,9 @@ type ListMemoriesRequest struct {
 	// Bank to list; unknown bank = NOT_FOUND.
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Fact types; empty = all.
-	FactTypes []FactType `protobuf:"varint,14,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`
+	FactTypes []FactType `protobuf:"varint,2,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`
 	// Case-insensitive substring the memory text must contain; empty = no filter.
-	TextContains string `protobuf:"bytes,15,opt,name=text_contains,json=textContains,proto3" json:"text_contains,omitempty"`
+	TextContains string `protobuf:"bytes,3,opt,name=text_contains,json=textContains,proto3" json:"text_contains,omitempty"`
 	// Only memories of this document.
 	DocumentId string `protobuf:"bytes,4,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
 	// Only live memories linked to this entity.
@@ -3009,9 +3018,9 @@ type ListMemoriesRequest struct {
 	// TAGS_MATCH_ANY.
 	Tags *TagFilter `protobuf:"bytes,10,opt,name=tags,proto3" json:"tags,omitempty"`
 	// Maximum memories per page; 0 = 100, at most 1000.
-	PageSize int32 `protobuf:"varint,12,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageSize int32 `protobuf:"varint,11,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Token from a previous response; empty = first page.
-	PageToken     string `protobuf:"bytes,13,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageToken     string `protobuf:"bytes,12,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3134,7 +3143,7 @@ func (x *ListMemoriesRequest) GetPageToken() string {
 type ListMemoriesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Memories on this page, newest first.
-	Memories []*Memory `protobuf:"bytes,3,rep,name=memories,proto3" json:"memories,omitempty"`
+	Memories []*Memory `protobuf:"bytes,1,rep,name=memories,proto3" json:"memories,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -3286,7 +3295,7 @@ func (x *GetMemoryResponse) GetMemory() *Memory {
 	return nil
 }
 
-// UpdateMemoryRequest edits one live raw fact. The edit commits with an audit row, clears the embedding until
+// UpdateMemoryRequest edits one live raw fact. The edit is recorded in the memory's history, clears the embedding until
 // the rederive_memory job writes a new one, deletes the observations citing the fact and queues refreshes of
 // the mental models that cite one of those observations.
 type UpdateMemoryRequest struct {
@@ -3297,18 +3306,18 @@ type UpdateMemoryRequest struct {
 	// invalidated or unknown memory = NOT_FOUND.
 	MemoryId string `protobuf:"bytes,2,opt,name=memory_id,json=memoryId,proto3" json:"memory_id,omitempty"`
 	// The new values; only the fields update_mask names are applied.
-	Memory *MemoryEdit `protobuf:"bytes,14,opt,name=memory,proto3" json:"memory,omitempty"`
+	Memory *MemoryEdit `protobuf:"bytes,3,opt,name=memory,proto3" json:"memory,omitempty"`
 	// Fields of memory to apply: text, context, occurred_start, occurred_end, fact_type, entities. Empty = the
 	// populated fields of memory. A named field left unset clears it, so clearing a field (the entities, or
 	// both occurred bounds to make the fact timeless) needs it named here. Any other path, or nothing to
 	// apply, = INVALID_ARGUMENT.
-	UpdateMask *fieldmaskpb.FieldMask `protobuf:"bytes,15,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
+	UpdateMask *fieldmaskpb.FieldMask `protobuf:"bytes,4,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
 	// false = take the new entity names literally instead of resolving them to existing entities; unset = true.
-	ResolveEntities *bool `protobuf:"varint,10,opt,name=resolve_entities,json=resolveEntities,proto3,oneof" json:"resolve_entities,omitempty"`
-	// Why the change was made; stored on the audit row.
-	Reason string `protobuf:"bytes,12,opt,name=reason,proto3" json:"reason,omitempty"`
+	ResolveEntities *bool `protobuf:"varint,5,opt,name=resolve_entities,json=resolveEntities,proto3,oneof" json:"resolve_entities,omitempty"`
+	// Why the change was made; recorded with the edit.
+	Reason string `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`
 	// Overrides for re-deriving; kept on the rederive operation.
-	Overrides     *RederiveOverrides `protobuf:"bytes,13,opt,name=overrides,proto3" json:"overrides,omitempty"`
+	Overrides     *RederiveOverrides `protobuf:"bytes,7,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3398,7 +3407,7 @@ type UpdateMemoryResponse struct {
 	// The memory after the edit.
 	Memory *Memory `protobuf:"bytes,1,opt,name=memory,proto3" json:"memory,omitempty"`
 	// The rederive_memory operation, which re-embeds and re-links the fact.
-	Operation     *Operation `protobuf:"bytes,3,opt,name=operation,proto3" json:"operation,omitempty"`
+	Operation     *Operation `protobuf:"bytes,2,opt,name=operation,proto3" json:"operation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3548,7 +3557,7 @@ type InvalidateMemoryRequest struct {
 	// Memory id; must be a live raw fact. An observation = INVALID_ARGUMENT (reason MEMORY_IS_OBSERVATION); an
 	// invalidated or unknown memory = NOT_FOUND.
 	MemoryId string `protobuf:"bytes,2,opt,name=memory_id,json=memoryId,proto3" json:"memory_id,omitempty"`
-	// Why the fact is invalidated; stored on the audit row.
+	// Why the fact is invalidated; recorded with the change.
 	Reason        string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3660,7 +3669,7 @@ type RestoreMemoryRequest struct {
 	// Memory id. An unknown memory = NOT_FOUND; an observation = INVALID_ARGUMENT (reason
 	// MEMORY_IS_OBSERVATION); a live fact is left unchanged.
 	MemoryId string `protobuf:"bytes,2,opt,name=memory_id,json=memoryId,proto3" json:"memory_id,omitempty"`
-	// Why the fact is restored; stored on the audit row.
+	// Why the fact is restored; recorded with the change.
 	Reason string `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`
 	// false = re-attach the fact's entity names literally instead of resolving them to existing entities;
 	// unset = true.
@@ -3797,7 +3806,7 @@ type Memory struct {
 	// Memory id.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// World, experience or observation.
-	FactType FactType `protobuf:"varint,19,opt,name=fact_type,json=factType,proto3,enum=memory.v1.FactType" json:"fact_type,omitempty"`
+	FactType FactType `protobuf:"varint,2,opt,name=fact_type,json=factType,proto3,enum=memory.v1.FactType" json:"fact_type,omitempty"`
 	// The fact or observation text.
 	Text string `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
 	// Context given at retain (or by curation).
@@ -3996,20 +4005,20 @@ type ListDocumentsRequest struct {
 	// Bank to list; unknown bank = NOT_FOUND.
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Case-insensitive substring the document id must contain; empty = no filter.
-	DocumentIdContains string `protobuf:"bytes,10,opt,name=document_id_contains,json=documentIdContains,proto3" json:"document_id_contains,omitempty"`
+	DocumentIdContains string `protobuf:"bytes,2,opt,name=document_id_contains,json=documentIdContains,proto3" json:"document_id_contains,omitempty"`
 	// Tag filter on the documents' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
 	// TAGS_MATCH_ANY_STRICT.
 	Tags *TagFilter `protobuf:"bytes,3,opt,name=tags,proto3" json:"tags,omitempty"`
 	// Inclusive start of the time range on time_field.
-	Start *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=start,proto3" json:"start,omitempty"`
+	Start *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=start,proto3" json:"start,omitempty"`
 	// Exclusive end of the time range on time_field.
-	End *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=end,proto3" json:"end,omitempty"`
+	End *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=end,proto3" json:"end,omitempty"`
 	// Timestamp the range applies to.
-	TimeField ListDocumentsRequest_TimeField `protobuf:"varint,7,opt,name=time_field,json=timeField,proto3,enum=memory.v1.ListDocumentsRequest_TimeField" json:"time_field,omitempty"`
+	TimeField ListDocumentsRequest_TimeField `protobuf:"varint,6,opt,name=time_field,json=timeField,proto3,enum=memory.v1.ListDocumentsRequest_TimeField" json:"time_field,omitempty"`
 	// Maximum documents per page; 0 = 100, at most 1000.
-	PageSize int32 `protobuf:"varint,8,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageSize int32 `protobuf:"varint,7,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Token from a previous response; empty = first page.
-	PageToken     string `protobuf:"bytes,9,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageToken     string `protobuf:"bytes,8,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4497,10 +4506,10 @@ type Document struct {
 	// Document tags, applied to its memories.
 	Tags []string `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
 	// Live memories extracted from the document (count).
-	MemoryCount int64 `protobuf:"varint,11,opt,name=memory_count,json=memoryCount,proto3" json:"memory_count,omitempty"`
+	MemoryCount int64 `protobuf:"varint,4,opt,name=memory_count,json=memoryCount,proto3" json:"memory_count,omitempty"`
 	// Live memory counts keyed by lowercase fact type: "world" and "experience" (a document has no
 	// observations). A type with no memories is absent.
-	MemoriesByFactType map[string]int64 `protobuf:"bytes,12,rep,name=memories_by_fact_type,json=memoriesByFactType,proto3" json:"memories_by_fact_type,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	MemoriesByFactType map[string]int64 `protobuf:"bytes,5,rep,name=memories_by_fact_type,json=memoriesByFactType,proto3" json:"memories_by_fact_type,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Retain overrides stored with the document (the request's merged with the item's); ReprocessDocument
 	// replays them.
 	RetainOverrides *RetainOverrides `protobuf:"bytes,6,opt,name=retain_overrides,json=retainOverrides,proto3" json:"retain_overrides,omitempty"`
@@ -4623,7 +4632,7 @@ type ConsolidateRequest struct {
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Scopes to consolidate; empty = every scope.
 	Scopes []*TagSet `protobuf:"bytes,2,rep,name=scopes,proto3" json:"scopes,omitempty"`
-	// Overrides for this run only; kept on the operation row.
+	// Overrides for this run only; kept on the operation.
 	Overrides     *ConsolidateOverrides `protobuf:"bytes,3,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5045,9 +5054,9 @@ type ObservationVersion struct {
 	// Observation text at this version.
 	Text string `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
 	// Ids of the raw facts the observation cited at this version.
-	SourceFactIds []string `protobuf:"bytes,5,rep,name=source_fact_ids,json=sourceFactIds,proto3" json:"source_fact_ids,omitempty"`
+	SourceFactIds []string `protobuf:"bytes,3,rep,name=source_fact_ids,json=sourceFactIds,proto3" json:"source_fact_ids,omitempty"`
 	// When the version was written.
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5125,7 +5134,7 @@ type ClearObservationsRequest struct {
 	Target isClearObservationsRequest_Target `protobuf_oneof:"target"`
 	// Enqueue a consolidation of what was cleared afterwards: the same scopes, or every scope for memory_id
 	// and all.
-	Reconsolidate bool `protobuf:"varint,3,opt,name=reconsolidate,proto3" json:"reconsolidate,omitempty"`
+	Reconsolidate bool `protobuf:"varint,5,opt,name=reconsolidate,proto3" json:"reconsolidate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5215,17 +5224,17 @@ type isClearObservationsRequest_Target interface {
 type ClearObservationsRequest_Scopes struct {
 	// Every observation of exactly these scopes (tag sets, compared as sets); other scopes, supersets and
 	// subsets included, are kept.
-	Scopes *TagSetList `protobuf:"bytes,4,opt,name=scopes,proto3,oneof"`
+	Scopes *TagSetList `protobuf:"bytes,2,opt,name=scopes,proto3,oneof"`
 }
 
 type ClearObservationsRequest_MemoryId struct {
 	// Every observation citing this memory (unknown = NOT_FOUND); a raw fact then consolidates again.
-	MemoryId string `protobuf:"bytes,5,opt,name=memory_id,json=memoryId,proto3,oneof"`
+	MemoryId string `protobuf:"bytes,3,opt,name=memory_id,json=memoryId,proto3,oneof"`
 }
 
 type ClearObservationsRequest_All struct {
 	// true clears every observation of the bank.
-	All bool `protobuf:"varint,6,opt,name=all,proto3,oneof"`
+	All bool `protobuf:"varint,4,opt,name=all,proto3,oneof"`
 }
 
 func (*ClearObservationsRequest_Scopes) isClearObservationsRequest_Target() {}
@@ -5570,7 +5579,7 @@ type CreateMentalModelResponse struct {
 	// The model, with no content yet.
 	MentalModel *MentalModel `protobuf:"bytes,1,opt,name=mental_model,json=mentalModel,proto3" json:"mental_model,omitempty"`
 	// The refresh_mental_model operation building the first version.
-	Operation     *Operation `protobuf:"bytes,3,opt,name=operation,proto3" json:"operation,omitempty"`
+	Operation     *Operation `protobuf:"bytes,2,opt,name=operation,proto3" json:"operation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5627,7 +5636,7 @@ type GetMentalModelRequest struct {
 	// Model id.
 	MentalModelId string `protobuf:"bytes,2,opt,name=mental_model_id,json=mentalModelId,proto3" json:"mental_model_id,omitempty"`
 	// How much to return; unset = MENTAL_MODEL_VIEW_FULL.
-	View          MentalModelView `protobuf:"varint,4,opt,name=view,proto3,enum=memory.v1.MentalModelView" json:"view,omitempty"`
+	View          MentalModelView `protobuf:"varint,3,opt,name=view,proto3,enum=memory.v1.MentalModelView" json:"view,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5737,14 +5746,14 @@ type ListMentalModelsRequest struct {
 	// Only models whose folder path starts with this; empty = all.
 	FolderPrefix string `protobuf:"bytes,2,opt,name=folder_prefix,json=folderPrefix,proto3" json:"folder_prefix,omitempty"`
 	// How much of each model to return; unset = MENTAL_MODEL_VIEW_BASIC.
-	View MentalModelView `protobuf:"varint,8,opt,name=view,proto3,enum=memory.v1.MentalModelView" json:"view,omitempty"`
+	View MentalModelView `protobuf:"varint,3,opt,name=view,proto3,enum=memory.v1.MentalModelView" json:"view,omitempty"`
 	// Tag filter on the models' own tags (MentalModelSpec.tags); unset or empty tags = no filter. Flat form
 	// only; tags.match unset = TAGS_MATCH_ANY.
 	Tags *TagFilter `protobuf:"bytes,4,opt,name=tags,proto3" json:"tags,omitempty"`
 	// Maximum models per page; 0 = 100, at most 1000.
-	PageSize int32 `protobuf:"varint,6,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageSize int32 `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Token from a previous response; empty = first page.
-	PageToken     string `protobuf:"bytes,7,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
+	PageToken     string `protobuf:"bytes,6,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6323,7 +6332,7 @@ type ResolvedScope struct {
 	// Effective tag filter: the scope's groups, or the model's tags under the effective match mode.
 	Tags *TagFilter `protobuf:"bytes,1,opt,name=tags,proto3" json:"tags,omitempty"`
 	// Effective fact types; empty = all.
-	FactTypes     []FactType `protobuf:"varint,4,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`
+	FactTypes     []FactType `protobuf:"varint,2,rep,packed,name=fact_types,json=factTypes,proto3,enum=memory.v1.FactType" json:"fact_types,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6517,7 +6526,7 @@ type MentalModelHistoryEntry struct {
 	// Content before the change (KIND_VERSION).
 	PreviousContent string `protobuf:"bytes,2,opt,name=previous_content,json=previousContent,proto3" json:"previous_content,omitempty"`
 	// When the entry was recorded.
-	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// Outcome of the refresh behind the entry.
 	Outcome RefreshOutcome `protobuf:"varint,4,opt,name=outcome,proto3,enum=memory.v1.RefreshOutcome" json:"outcome,omitempty"`
 	// Machine-readable failure reason (KIND_REFRESH_FAILED).
@@ -6803,7 +6812,7 @@ type SearchMentalModelsRequest struct {
 	// Only models whose folder path starts with this; empty = all.
 	FolderPrefix string `protobuf:"bytes,3,opt,name=folder_prefix,json=folderPrefix,proto3" json:"folder_prefix,omitempty"`
 	// Maximum hits; 0 = 10, at most 100, negative = INVALID_ARGUMENT.
-	MaxResults    int32 `protobuf:"varint,5,opt,name=max_results,json=maxResults,proto3" json:"max_results,omitempty"`
+	MaxResults    int32 `protobuf:"varint,4,opt,name=max_results,json=maxResults,proto3" json:"max_results,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7000,30 +7009,30 @@ type MentalModel struct {
 	// The writable spec.
 	Spec *MentalModelSpec `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"`
 	// Page content in Markdown.
-	ContentMd string `protobuf:"bytes,3,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
+	ContentMd string `protobuf:"bytes,2,opt,name=content_md,json=contentMd,proto3" json:"content_md,omitempty"`
 	// Structured output matching spec.response_schema_json; empty when none.
-	StructuredOutputJson string `protobuf:"bytes,4,opt,name=structured_output_json,json=structuredOutputJson,proto3" json:"structured_output_json,omitempty"`
+	StructuredOutputJson string `protobuf:"bytes,3,opt,name=structured_output_json,json=structuredOutputJson,proto3" json:"structured_output_json,omitempty"`
 	// Content version, incremented on every write.
-	Version int64 `protobuf:"varint,5,opt,name=version,proto3" json:"version,omitempty"`
+	Version int64 `protobuf:"varint,4,opt,name=version,proto3" json:"version,omitempty"`
 	// True when an in-scope memory or observation changed after last_seq_seen, or a source was retracted;
 	// computed in MENTAL_MODEL_VIEW_FULL only (false otherwise).
-	Stale bool `protobuf:"varint,14,opt,name=stale,proto3" json:"stale,omitempty"`
+	Stale bool `protobuf:"varint,5,opt,name=stale,proto3" json:"stale,omitempty"`
 	// Wall clock of the last completed refresh, including no-op refreshes.
-	LastRefreshedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_refreshed_at,json=lastRefreshedAt,proto3" json:"last_refreshed_at,omitempty"`
+	LastRefreshedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_refreshed_at,json=lastRefreshedAt,proto3" json:"last_refreshed_at,omitempty"`
 	// The bank change_seq the last successful refresh read up to (its watermark): the same counter as
 	// LifecycleEvent.seq and BankStats.change_seq.
-	LastSeqSeen int64 `protobuf:"varint,8,opt,name=last_seq_seen,json=lastSeqSeen,proto3" json:"last_seq_seen,omitempty"`
+	LastSeqSeen int64 `protobuf:"varint,7,opt,name=last_seq_seen,json=lastSeqSeen,proto3" json:"last_seq_seen,omitempty"`
 	// When the last refresh failed; unset if none has.
-	LastRefreshFailedAt *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=last_refresh_failed_at,json=lastRefreshFailedAt,proto3" json:"last_refresh_failed_at,omitempty"`
+	LastRefreshFailedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_refresh_failed_at,json=lastRefreshFailedAt,proto3" json:"last_refresh_failed_at,omitempty"`
 	// Set by a failed refresh; automatic refreshes skip the model until a manual refresh succeeds.
-	AutoRefreshPaused bool `protobuf:"varint,10,opt,name=auto_refresh_paused,json=autoRefreshPaused,proto3" json:"auto_refresh_paused,omitempty"`
+	AutoRefreshPaused bool `protobuf:"varint,9,opt,name=auto_refresh_paused,json=autoRefreshPaused,proto3" json:"auto_refresh_paused,omitempty"`
 	// Ids of the memories the content cites, accumulated across refreshes; pruned on full refresh and on
 	// invalidate. MENTAL_MODEL_VIEW_FULL only.
-	SourceMemoryIds []string `protobuf:"bytes,15,rep,name=source_memory_ids,json=sourceMemoryIds,proto3" json:"source_memory_ids,omitempty"`
+	SourceMemoryIds []string `protobuf:"bytes,10,rep,name=source_memory_ids,json=sourceMemoryIds,proto3" json:"source_memory_ids,omitempty"`
 	// Trace of the last refresh when spec.keep_trace; MENTAL_MODEL_VIEW_FULL only.
-	LastTrace *RefreshTrace `protobuf:"bytes,12,opt,name=last_trace,json=lastTrace,proto3" json:"last_trace,omitempty"`
+	LastTrace *RefreshTrace `protobuf:"bytes,11,opt,name=last_trace,json=lastTrace,proto3" json:"last_trace,omitempty"`
 	// When the model was created.
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7159,36 +7168,36 @@ type MentalModelSpec struct {
 	// and when it goes stale (see MentalModelScope.tags).
 	Tags []string `protobuf:"bytes,5,rep,name=tags,proto3" json:"tags,omitempty"`
 	// When the model refreshes on its own; unset = manual refreshes only.
-	Schedule *RefreshSchedule `protobuf:"bytes,9,opt,name=schedule,proto3" json:"schedule,omitempty"`
+	Schedule *RefreshSchedule `protobuf:"bytes,6,opt,name=schedule,proto3" json:"schedule,omitempty"`
 	// What the model reads; unset = everything its tags select.
-	Scope *MentalModelScope `protobuf:"bytes,10,opt,name=scope,proto3" json:"scope,omitempty"`
+	Scope *MentalModelScope `protobuf:"bytes,7,opt,name=scope,proto3" json:"scope,omitempty"`
 	// Full or delta; unset = MentalModelConfig.default_mode.
-	Mode RefreshMode `protobuf:"varint,11,opt,name=mode,proto3,enum=memory.v1.RefreshMode" json:"mode,omitempty"`
+	Mode RefreshMode `protobuf:"varint,8,opt,name=mode,proto3,enum=memory.v1.RefreshMode" json:"mode,omitempty"`
 	// Agentic or single-shot; unset = MentalModelConfig.default_strategy. RefreshMentalModelRequest.strategy
 	// wins for one call.
-	Strategy RefreshStrategy `protobuf:"varint,12,opt,name=strategy,proto3,enum=memory.v1.RefreshStrategy" json:"strategy,omitempty"`
+	Strategy RefreshStrategy `protobuf:"varint,9,opt,name=strategy,proto3,enum=memory.v1.RefreshStrategy" json:"strategy,omitempty"`
 	// Size class of a refresh; unset = BUDGET_MID.
-	Budget Budget `protobuf:"varint,13,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
+	Budget Budget `protobuf:"varint,10,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
 	// Token cap on the content; unset = MentalModelConfig.max_content_tokens.
-	MaxTokens *int32 `protobuf:"varint,6,opt,name=max_tokens,json=maxTokens,proto3,oneof" json:"max_tokens,omitempty"`
+	MaxTokens *int32 `protobuf:"varint,11,opt,name=max_tokens,json=maxTokens,proto3,oneof" json:"max_tokens,omitempty"`
 	// Include source chunks in the refresh's recall results; unset = no chunks.
-	IncludeChunks *bool `protobuf:"varint,14,opt,name=include_chunks,json=includeChunks,proto3,oneof" json:"include_chunks,omitempty"`
+	IncludeChunks *bool `protobuf:"varint,12,opt,name=include_chunks,json=includeChunks,proto3,oneof" json:"include_chunks,omitempty"`
 	// Token cap on chunks attached to a recall during refresh; unset = the recall default.
-	RecallChunksMaxTokens *int32 `protobuf:"varint,15,opt,name=recall_chunks_max_tokens,json=recallChunksMaxTokens,proto3,oneof" json:"recall_chunks_max_tokens,omitempty"`
+	RecallChunksMaxTokens *int32 `protobuf:"varint,13,opt,name=recall_chunks_max_tokens,json=recallChunksMaxTokens,proto3,oneof" json:"recall_chunks_max_tokens,omitempty"`
 	// Do not read other mental models while refreshing (agentic refresh).
-	ExcludeMentalModels bool `protobuf:"varint,16,opt,name=exclude_mental_models,json=excludeMentalModels,proto3" json:"exclude_mental_models,omitempty"`
+	ExcludeMentalModels bool `protobuf:"varint,14,opt,name=exclude_mental_models,json=excludeMentalModels,proto3" json:"exclude_mental_models,omitempty"`
 	// Mental models never read while refreshing (agentic refresh); the model itself is always excluded.
-	ExcludeMentalModelIds []string `protobuf:"bytes,17,rep,name=exclude_mental_model_ids,json=excludeMentalModelIds,proto3" json:"exclude_mental_model_ids,omitempty"`
+	ExcludeMentalModelIds []string `protobuf:"bytes,15,rep,name=exclude_mental_model_ids,json=excludeMentalModelIds,proto3" json:"exclude_mental_model_ids,omitempty"`
 	// JSON Schema for structured output projected from the page (MentalModel.structured_output_json); empty =
 	// none.
-	ResponseSchemaJson string `protobuf:"bytes,18,opt,name=response_schema_json,json=responseSchemaJson,proto3" json:"response_schema_json,omitempty"`
+	ResponseSchemaJson string `protobuf:"bytes,16,opt,name=response_schema_json,json=responseSchemaJson,proto3" json:"response_schema_json,omitempty"`
 	// Keep the last refresh trace on the model (MentalModel.last_trace).
-	KeepTrace bool `protobuf:"varint,19,opt,name=keep_trace,json=keepTrace,proto3" json:"keep_trace,omitempty"`
+	KeepTrace bool `protobuf:"varint,17,opt,name=keep_trace,json=keepTrace,proto3" json:"keep_trace,omitempty"`
 	// Overrides stored on the model and applied to every refresh; the reflect loop's caps
 	// (reflect.recall_max_tokens, reflect.search_observations_max_tokens,
 	// reflect.search_observations_include_entities) are set here. In an update_mask, paths go inside it
 	// (overrides.reflect.mission, overrides.mental_model_model).
-	Overrides     *RefreshOverrides `protobuf:"bytes,8,opt,name=overrides,proto3" json:"overrides,omitempty"`
+	Overrides     *RefreshOverrides `protobuf:"bytes,18,opt,name=overrides,proto3" json:"overrides,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8363,14 +8372,14 @@ func (x *GetBankStatsResponse) GetStats() *BankStats {
 	return nil
 }
 
-// BankStats summarizes a bank, read with indexed COUNT queries (no counter tables).
+// BankStats summarizes a bank, as a snapshot of its counts.
 type BankStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Live memory counts keyed by lowercase fact type: "world", "experience" and "observation". A type with no
 	// memories is absent.
-	MemoriesByFactType map[string]int64 `protobuf:"bytes,10,rep,name=memories_by_fact_type,json=memoriesByFactType,proto3" json:"memories_by_fact_type,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	MemoriesByFactType map[string]int64 `protobuf:"bytes,1,rep,name=memories_by_fact_type,json=memoriesByFactType,proto3" json:"memories_by_fact_type,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Memories archived by invalidation (count).
-	InvalidatedMemories int64 `protobuf:"varint,11,opt,name=invalidated_memories,json=invalidatedMemories,proto3" json:"invalidated_memories,omitempty"`
+	InvalidatedMemories int64 `protobuf:"varint,2,opt,name=invalidated_memories,json=invalidatedMemories,proto3" json:"invalidated_memories,omitempty"`
 	// Documents retained in the bank (count).
 	Documents int64 `protobuf:"varint,3,opt,name=documents,proto3" json:"documents,omitempty"`
 	// Entities (free-form and label) in the bank (count).
@@ -8381,7 +8390,7 @@ type BankStats struct {
 	// "retain_document"); a kind with none is absent. Eval barrier: poll until empty.
 	PendingOperationsByKind map[string]int64 `protobuf:"bytes,6,rep,name=pending_operations_by_kind,json=pendingOperationsByKind,proto3" json:"pending_operations_by_kind,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Live facts not yet consolidated (count).
-	UnconsolidatedMemories int64 `protobuf:"varint,12,opt,name=unconsolidated_memories,json=unconsolidatedMemories,proto3" json:"unconsolidated_memories,omitempty"`
+	UnconsolidatedMemories int64 `protobuf:"varint,7,opt,name=unconsolidated_memories,json=unconsolidatedMemories,proto3" json:"unconsolidated_memories,omitempty"`
 	// Time of the last write to memory content.
 	LastMemoryWriteAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_memory_write_at,json=lastMemoryWriteAt,proto3" json:"last_memory_write_at,omitempty"`
 	// The bank's commit-ordered change counter: the same counter as LifecycleEvent.seq and
@@ -8490,7 +8499,7 @@ type ListTagsRequest struct {
 	// Bank id; unknown = NOT_FOUND.
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Which objects to count tags on.
-	Source TagSource `protobuf:"varint,2,opt,name=source,proto3,enum=memory.v1.TagSource" json:"source,omitempty"`
+	Source ListTagsRequest_TagSource `protobuf:"varint,2,opt,name=source,proto3,enum=memory.v1.ListTagsRequest_TagSource" json:"source,omitempty"`
 	// Only tags starting with this; empty = all.
 	Prefix string `protobuf:"bytes,3,opt,name=prefix,proto3" json:"prefix,omitempty"`
 	// Maximum tags per page; 0 = 100, at most 1000.
@@ -8538,11 +8547,11 @@ func (x *ListTagsRequest) GetBankId() string {
 	return ""
 }
 
-func (x *ListTagsRequest) GetSource() TagSource {
+func (x *ListTagsRequest) GetSource() ListTagsRequest_TagSource {
 	if x != nil {
 		return x.Source
 	}
-	return TagSource_TAG_SOURCE_UNSPECIFIED
+	return ListTagsRequest_TAG_SOURCE_UNSPECIFIED
 }
 
 func (x *ListTagsRequest) GetPrefix() string {
@@ -8776,7 +8785,7 @@ type Bank struct {
 	// Display name.
 	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// When the bank was created.
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8873,7 +8882,7 @@ func (*GetTenantConfigRequest) Descriptor() ([]byte, []int) {
 type GetTenantConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// own: the tenant's overrides (unset fields inherit server defaults); effective: server < tenant.
-	Config        *ConfigView `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
+	Config        *ConfigView `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8975,7 +8984,7 @@ func (x *UpdateTenantConfigRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 type UpdateTenantConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The tenant's config after the patch.
-	Config        *ConfigView `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
+	Config        *ConfigView `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9160,7 +9169,7 @@ func (x *GetBankConfigRequest) GetBankId() string {
 type GetBankConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// own: only what the bank itself sets; effective: server < tenant < bank, merged.
-	Config        *ConfigView `protobuf:"bytes,3,opt,name=config,proto3" json:"config,omitempty"`
+	Config        *ConfigView `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9272,7 +9281,7 @@ func (x *UpdateBankConfigRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 type UpdateBankConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The bank's config after the patch.
-	Config        *ConfigView `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
+	Config        *ConfigView `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9321,7 +9330,7 @@ type ResetBankConfigRequest struct {
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// BankConfig paths to reset, so they inherit again; the single path "*" resets everything. Empty =
 	// INVALID_ARGUMENT.
-	ResetMask     *fieldmaskpb.FieldMask `protobuf:"bytes,3,opt,name=reset_mask,json=resetMask,proto3" json:"reset_mask,omitempty"`
+	ResetMask     *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=reset_mask,json=resetMask,proto3" json:"reset_mask,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9374,7 +9383,7 @@ func (x *ResetBankConfigRequest) GetResetMask() *fieldmaskpb.FieldMask {
 type ResetBankConfigResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The bank's config after the reset.
-	Config        *ConfigView `protobuf:"bytes,2,opt,name=config,proto3" json:"config,omitempty"`
+	Config        *ConfigView `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9422,7 +9431,7 @@ type PreviewPromptRequest struct {
 	// Bank whose effective config is used.
 	BankId string `protobuf:"bytes,1,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Operation to render.
-	Operation PromptOperation `protobuf:"varint,2,opt,name=operation,proto3,enum=memory.v1.PromptOperation" json:"operation,omitempty"`
+	Operation PreviewPromptRequest_PromptOperation `protobuf:"varint,2,opt,name=operation,proto3,enum=memory.v1.PreviewPromptRequest_PromptOperation" json:"operation,omitempty"`
 	// Request-level overrides to render with, as a real request would. The kind must match operation (retain
 	// for RETAIN, consolidation for CONSOLIDATION, reflect for REFLECT, mental_model for MENTAL_MODEL_DELTA and
 	// SYNTHESIZE); a mismatch is INVALID_ARGUMENT. Unset = none.
@@ -9475,11 +9484,11 @@ func (x *PreviewPromptRequest) GetBankId() string {
 	return ""
 }
 
-func (x *PreviewPromptRequest) GetOperation() PromptOperation {
+func (x *PreviewPromptRequest) GetOperation() PreviewPromptRequest_PromptOperation {
 	if x != nil {
 		return x.Operation
 	}
-	return PromptOperation_PROMPT_OPERATION_UNSPECIFIED
+	return PreviewPromptRequest_PROMPT_OPERATION_UNSPECIFIED
 }
 
 func (x *PreviewPromptRequest) GetOverrides() isPreviewPromptRequest_Overrides {
@@ -9531,22 +9540,22 @@ type isPreviewPromptRequest_Overrides interface {
 
 type PreviewPromptRequest_Retain struct {
 	// Overrides of a Retain.
-	Retain *RetainOverrides `protobuf:"bytes,4,opt,name=retain,proto3,oneof"`
+	Retain *RetainOverrides `protobuf:"bytes,3,opt,name=retain,proto3,oneof"`
 }
 
 type PreviewPromptRequest_Consolidation struct {
 	// Overrides of a Consolidate.
-	Consolidation *ConsolidateOverrides `protobuf:"bytes,5,opt,name=consolidation,proto3,oneof"`
+	Consolidation *ConsolidateOverrides `protobuf:"bytes,4,opt,name=consolidation,proto3,oneof"`
 }
 
 type PreviewPromptRequest_Reflect struct {
 	// Overrides of a Reflect.
-	Reflect *ReflectOverrides `protobuf:"bytes,6,opt,name=reflect,proto3,oneof"`
+	Reflect *ReflectOverrides `protobuf:"bytes,5,opt,name=reflect,proto3,oneof"`
 }
 
 type PreviewPromptRequest_MentalModel struct {
 	// Overrides of a RefreshMentalModel.
-	MentalModel *RefreshOverrides `protobuf:"bytes,7,opt,name=mental_model,json=mentalModel,proto3,oneof"`
+	MentalModel *RefreshOverrides `protobuf:"bytes,6,opt,name=mental_model,json=mentalModel,proto3,oneof"`
 }
 
 func (*PreviewPromptRequest_Retain) isPreviewPromptRequest_Overrides() {}
@@ -9671,7 +9680,7 @@ func (x *PromptPreview) GetSkippedReason() string {
 type PromptMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Chat role.
-	Role PromptRole `protobuf:"varint,1,opt,name=role,proto3,enum=memory.v1.PromptRole" json:"role,omitempty"`
+	Role PromptMessage_PromptRole `protobuf:"varint,1,opt,name=role,proto3,enum=memory.v1.PromptMessage_PromptRole" json:"role,omitempty"`
 	// Blocks in order; their texts concatenate into the message.
 	Blocks        []*PromptBlock `protobuf:"bytes,2,rep,name=blocks,proto3" json:"blocks,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -9708,11 +9717,11 @@ func (*PromptMessage) Descriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{113}
 }
 
-func (x *PromptMessage) GetRole() PromptRole {
+func (x *PromptMessage) GetRole() PromptMessage_PromptRole {
 	if x != nil {
 		return x.Role
 	}
-	return PromptRole_PROMPT_ROLE_UNSPECIFIED
+	return PromptMessage_PROMPT_ROLE_UNSPECIFIED
 }
 
 func (x *PromptMessage) GetBlocks() []*PromptBlock {
@@ -9728,7 +9737,7 @@ type PromptBlock struct {
 	// Rendered text; empty when the block is inactive.
 	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
 	// Built-in or config text.
-	Source PromptSource `protobuf:"varint,2,opt,name=source,proto3,enum=memory.v1.PromptSource" json:"source,omitempty"`
+	Source PromptBlock_PromptSource `protobuf:"varint,2,opt,name=source,proto3,enum=memory.v1.PromptBlock_PromptSource" json:"source,omitempty"`
 	// BankConfig field path behind the block (for example retain.mission), if any.
 	Field string `protobuf:"bytes,3,opt,name=field,proto3" json:"field,omitempty"`
 	// Prompt section the block belongs to, for example disposition or directives.
@@ -9776,11 +9785,11 @@ func (x *PromptBlock) GetText() string {
 	return ""
 }
 
-func (x *PromptBlock) GetSource() PromptSource {
+func (x *PromptBlock) GetSource() PromptBlock_PromptSource {
 	if x != nil {
 		return x.Source
 	}
-	return PromptSource_PROMPT_SOURCE_UNSPECIFIED
+	return PromptBlock_PROMPT_SOURCE_UNSPECIFIED
 }
 
 func (x *PromptBlock) GetField() string {
@@ -10855,7 +10864,7 @@ type ListEventsRequest struct {
 	AfterSeq int64 `protobuf:"varint,2,opt,name=after_seq,json=afterSeq,proto3" json:"after_seq,omitempty"`
 	// Soft maximum of events per page; 0 = 100, at most 1000, negative = INVALID_ARGUMENT. A page never
 	// splits a seq group: it is extended past page_size to finish the last seq it includes.
-	PageSize int32 `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	PageSize int32 `protobuf:"varint,3,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Only these event types; empty = all types.
 	Types         []EventType `protobuf:"varint,4,rep,packed,name=types,proto3,enum=memory.v1.EventType" json:"types,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -10928,7 +10937,7 @@ type ListEventsResponse struct {
 	// Seq to pass as after_seq on the next poll: the highest seq scanned for this page, including events
 	// the types filter dropped, and never below the request's after_seq (so a filter over non-matching
 	// events still advances). An integer cursor a consumer can persist.
-	NextAfterSeq  int64 `protobuf:"varint,3,opt,name=next_after_seq,json=nextAfterSeq,proto3" json:"next_after_seq,omitempty"`
+	NextAfterSeq  int64 `protobuf:"varint,2,opt,name=next_after_seq,json=nextAfterSeq,proto3" json:"next_after_seq,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -10977,7 +10986,7 @@ func (x *ListEventsResponse) GetNextAfterSeq() int64 {
 	return 0
 }
 
-// LifecycleEvent is one row of the lifecycle_events table, written in the state change's transaction.
+// LifecycleEvent records one state change of a bank.
 type LifecycleEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The bank's change_seq for the change: commit-ordered within the bank, so polling by seq never skips.
@@ -10988,7 +10997,7 @@ type LifecycleEvent struct {
 	// Bank the event belongs to.
 	BankId string `protobuf:"bytes,3,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Commit time of the change.
-	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// Operation that caused the change, if any.
 	OperationId string `protobuf:"bytes,5,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	// Document, memory or mental-model id the event is about.
@@ -11075,37 +11084,37 @@ type Operation struct {
 	// Operation (job) id.
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// Bank the operation belongs to; GetOperation, CancelOperation and RetryOperation take it with id.
-	BankId string `protobuf:"bytes,15,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
+	BankId string `protobuf:"bytes,2,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Job type.
-	Kind OperationKind `protobuf:"varint,2,opt,name=kind,proto3,enum=memory.v1.OperationKind" json:"kind,omitempty"`
+	Kind OperationKind `protobuf:"varint,3,opt,name=kind,proto3,enum=memory.v1.OperationKind" json:"kind,omitempty"`
 	// Lifecycle state.
-	Status OperationStatus `protobuf:"varint,3,opt,name=status,proto3,enum=memory.v1.OperationStatus" json:"status,omitempty"`
+	Status OperationStatus `protobuf:"varint,4,opt,name=status,proto3,enum=memory.v1.OperationStatus" json:"status,omitempty"`
 	// Last error message; set when FAILED.
-	Error string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
+	Error string `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`
 	// A kind-specific summary of the outcome as a JSON object, for people and logs. It is NOT a stable
 	// contract: keys may change in any release, so never parse it in client logic.
-	DebugSummary string `protobuf:"bytes,16,opt,name=debug_summary,json=debugSummary,proto3" json:"debug_summary,omitempty"`
+	DebugSummary string `protobuf:"bytes,6,opt,name=debug_summary,json=debugSummary,proto3" json:"debug_summary,omitempty"`
 	// Token usage per slot and model of every LLM call the job made.
-	Usage []*SlotUsage `protobuf:"bytes,6,rep,name=usage,proto3" json:"usage,omitempty"`
+	Usage []*SlotUsage `protobuf:"bytes,7,rep,name=usage,proto3" json:"usage,omitempty"`
 	// The overrides the run actually used (request, strategy and stored overrides merged).
-	EffectiveOverrides *BankConfig `protobuf:"bytes,7,opt,name=effective_overrides,json=effectiveOverrides,proto3" json:"effective_overrides,omitempty"`
+	EffectiveOverrides *BankConfig `protobuf:"bytes,8,opt,name=effective_overrides,json=effectiveOverrides,proto3" json:"effective_overrides,omitempty"`
 	// Parent operation (a retain_batch); empty for top-level operations.
-	ParentId string `protobuf:"bytes,8,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
+	ParentId string `protobuf:"bytes,9,opt,name=parent_id,json=parentId,proto3" json:"parent_id,omitempty"`
 	// Last reported checkpoint.
-	Progress *Progress `protobuf:"bytes,9,opt,name=progress,proto3" json:"progress,omitempty"`
+	Progress *Progress `protobuf:"bytes,10,opt,name=progress,proto3" json:"progress,omitempty"`
 	// When the operation was enqueued.
-	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	// Last change to the row.
-	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
-	// When a parked job becomes claimable: backoff, debounce or refresh interval floor.
-	NextRunAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=next_run_at,json=nextRunAt,proto3" json:"next_run_at,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Last change to the operation.
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// When a parked operation becomes runnable: backoff, debounce or refresh interval floor.
+	NextRunAt *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=next_run_at,json=nextRunAt,proto3" json:"next_run_at,omitempty"`
 	// Earlier attempts that failed with a retry or were reclaimed (0 on the first run); transient failures
 	// retry with backoff up to the kind's limit (consolidate: unbounded). With next_run_at it tells a
 	// retrying operation from a parked one.
-	Attempts int32 `protobuf:"varint,13,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	// Last sign of life from the worker while PROCESSING; an old value means the operation is stalled and
-	// will be reclaimed.
-	HeartbeatAt   *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=heartbeat_at,json=heartbeatAt,proto3" json:"heartbeat_at,omitempty"`
+	Attempts int32 `protobuf:"varint,14,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	// Last sign of life from the server while PROCESSING; an old value means the operation is stalled and
+	// will be picked up again.
+	HeartbeatAt   *timestamppb.Timestamp `protobuf:"bytes,15,opt,name=heartbeat_at,json=heartbeatAt,proto3" json:"heartbeat_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11245,13 +11254,13 @@ func (x *Operation) GetHeartbeatAt() *timestamppb.Timestamp {
 	return nil
 }
 
-// Progress is the last checkpoint a handler reported.
+// Progress is the last checkpoint an operation reported.
 type Progress struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Handler-defined stage name.
+	// Stage name; its values depend on the operation kind.
 	Stage string `protobuf:"bytes,1,opt,name=stage,proto3" json:"stage,omitempty"`
 	// When the checkpoint was written.
-	RecordedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=recorded_at,json=recordedAt,proto3" json:"recorded_at,omitempty"`
+	RecordedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=recorded_at,json=recordedAt,proto3" json:"recorded_at,omitempty"`
 	// Items done so far in this stage.
 	Processed int64 `protobuf:"varint,3,opt,name=processed,proto3" json:"processed,omitempty"`
 	// Items in this stage, if known; 0 = unknown.
@@ -11364,11 +11373,11 @@ func (x *TagSet) GetTags() []string {
 	return nil
 }
 
-// ObservationScopes decides which tag scopes a unit consolidates under.
-type ObservationScopes struct {
+// ObservationScopeModes decides which tag scopes a memory consolidates under.
+type ObservationScopeModes struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Expansion mode.
-	Mode ObservationScopes_Mode `protobuf:"varint,1,opt,name=mode,proto3,enum=memory.v1.ObservationScopes_Mode" json:"mode,omitempty"`
+	Mode ObservationScopeModes_Mode `protobuf:"varint,1,opt,name=mode,proto3,enum=memory.v1.ObservationScopeModes_Mode" json:"mode,omitempty"`
 	// Explicit scopes; MODE_CUSTOM only.
 	Custom []*TagSet `protobuf:"bytes,2,rep,name=custom,proto3" json:"custom,omitempty"`
 	// Cap on MODE_ALL_COMBINATIONS fan-out, default 15. Checked synchronously at Retain: exceeding it
@@ -11378,20 +11387,20 @@ type ObservationScopes struct {
 	sizeCache       protoimpl.SizeCache
 }
 
-func (x *ObservationScopes) Reset() {
-	*x = ObservationScopes{}
+func (x *ObservationScopeModes) Reset() {
+	*x = ObservationScopeModes{}
 	mi := &file_memory_v1_memory_proto_msgTypes[139]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ObservationScopes) String() string {
+func (x *ObservationScopeModes) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ObservationScopes) ProtoMessage() {}
+func (*ObservationScopeModes) ProtoMessage() {}
 
-func (x *ObservationScopes) ProtoReflect() protoreflect.Message {
+func (x *ObservationScopeModes) ProtoReflect() protoreflect.Message {
 	mi := &file_memory_v1_memory_proto_msgTypes[139]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -11403,26 +11412,26 @@ func (x *ObservationScopes) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ObservationScopes.ProtoReflect.Descriptor instead.
-func (*ObservationScopes) Descriptor() ([]byte, []int) {
+// Deprecated: Use ObservationScopeModes.ProtoReflect.Descriptor instead.
+func (*ObservationScopeModes) Descriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{139}
 }
 
-func (x *ObservationScopes) GetMode() ObservationScopes_Mode {
+func (x *ObservationScopeModes) GetMode() ObservationScopeModes_Mode {
 	if x != nil {
 		return x.Mode
 	}
-	return ObservationScopes_MODE_UNSPECIFIED
+	return ObservationScopeModes_MODE_UNSPECIFIED
 }
 
-func (x *ObservationScopes) GetCustom() []*TagSet {
+func (x *ObservationScopeModes) GetCustom() []*TagSet {
 	if x != nil {
 		return x.Custom
 	}
 	return nil
 }
 
-func (x *ObservationScopes) GetMaxCombinations() int32 {
+func (x *ObservationScopeModes) GetMaxCombinations() int32 {
 	if x != nil && x.MaxCombinations != nil {
 		return *x.MaxCombinations
 	}
@@ -11859,7 +11868,7 @@ func (x *MinScores) GetFinal() float64 {
 	return 0
 }
 
-// Chunk is a slice of a retained document that units were extracted from.
+// Chunk is a slice of a retained document that memories were extracted from.
 type Chunk struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Chunk id.
@@ -11936,7 +11945,7 @@ func (x *Chunk) GetTruncated() bool {
 type SlotUsage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Slot the calls were made for.
-	Slot ModelSlot `protobuf:"varint,1,opt,name=slot,proto3,enum=memory.v1.ModelSlot" json:"slot,omitempty"`
+	Slot SlotUsage_ModelSlot `protobuf:"varint,1,opt,name=slot,proto3,enum=memory.v1.SlotUsage_ModelSlot" json:"slot,omitempty"`
 	// Gateway model that served them.
 	Model string `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
 	// Prompt tokens.
@@ -11977,11 +11986,11 @@ func (*SlotUsage) Descriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{147}
 }
 
-func (x *SlotUsage) GetSlot() ModelSlot {
+func (x *SlotUsage) GetSlot() SlotUsage_ModelSlot {
 	if x != nil {
 		return x.Slot
 	}
-	return ModelSlot_MODEL_SLOT_UNSPECIFIED
+	return SlotUsage_MODEL_SLOT_UNSPECIFIED
 }
 
 func (x *SlotUsage) GetModel() string {
@@ -12376,17 +12385,17 @@ func (x *ReflectTrace) GetDurationMs() int64 {
 type BankConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Retain: mission, extraction, labels, default scopes, chunking, entity matching and linking.
-	Retain *RetainConfig `protobuf:"bytes,15,opt,name=retain,proto3" json:"retain,omitempty"`
+	Retain *RetainConfig `protobuf:"bytes,1,opt,name=retain,proto3" json:"retain,omitempty"`
 	// Observations: whether and how consolidation runs, its strategies.
-	Observations *ObservationConfig `protobuf:"bytes,24,opt,name=observations,proto3" json:"observations,omitempty"`
+	Observations *ObservationConfig `protobuf:"bytes,2,opt,name=observations,proto3" json:"observations,omitempty"`
 	// Recall tuning, also used by reflect, consolidation and single-shot refresh.
-	Recall *RecallConfig `protobuf:"bytes,13,opt,name=recall,proto3" json:"recall,omitempty"`
+	Recall *RecallConfig `protobuf:"bytes,3,opt,name=recall,proto3" json:"recall,omitempty"`
 	// Reflect: mission, disposition and loop tuning.
-	Reflect *ReflectConfig `protobuf:"bytes,16,opt,name=reflect,proto3" json:"reflect,omitempty"`
+	Reflect *ReflectConfig `protobuf:"bytes,4,opt,name=reflect,proto3" json:"reflect,omitempty"`
 	// Bank-level mental-model defaults.
-	MentalModels *MentalModelConfig `protobuf:"bytes,17,opt,name=mental_models,json=mentalModels,proto3" json:"mental_models,omitempty"`
+	MentalModels *MentalModelConfig `protobuf:"bytes,5,opt,name=mental_models,json=mentalModels,proto3" json:"mental_models,omitempty"`
 	// Model bindings; see "Model routing" above.
-	Models        *ModelBindings `protobuf:"bytes,14,opt,name=models,proto3" json:"models,omitempty"`
+	Models        *ModelBindings `protobuf:"bytes,6,opt,name=models,proto3" json:"models,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -12472,9 +12481,9 @@ type RetainConfig struct {
 	ChunkOverlapTokens *int32 `protobuf:"varint,2,opt,name=chunk_overlap_tokens,json=chunkOverlapTokens,proto3,oneof" json:"chunk_overlap_tokens,omitempty"`
 	// Minimum resolver score (name similarity + co-occurrence + temporal proximity) to reuse an entity.
 	EntityMatchThreshold *float64 `protobuf:"fixed64,3,opt,name=entity_match_threshold,json=entityMatchThreshold,proto3,oneof" json:"entity_match_threshold,omitempty"`
-	// Window in hours within which units get temporal links.
+	// Window in hours within which memories get temporal links.
 	TemporalLinkWindowHours *int32 `protobuf:"varint,4,opt,name=temporal_link_window_hours,json=temporalLinkWindowHours,proto3,oneof" json:"temporal_link_window_hours,omitempty"`
-	// Nearest neighbours considered for semantic links; also the semantic link cap per unit.
+	// Nearest neighbours considered for semantic links; also the semantic link cap per memory.
 	SemanticLinkK *int32 `protobuf:"varint,5,opt,name=semantic_link_k,json=semanticLinkK,proto3,oneof" json:"semantic_link_k,omitempty"`
 	// Minimum cosine similarity for a semantic link.
 	SemanticLinkMinSimilarity *float64 `protobuf:"fixed64,6,opt,name=semantic_link_min_similarity,json=semanticLinkMinSimilarity,proto3,oneof" json:"semantic_link_min_similarity,omitempty"`
@@ -12482,12 +12491,12 @@ type RetainConfig struct {
 	ExtractCausalLinks *bool `protobuf:"varint,7,opt,name=extract_causal_links,json=extractCausalLinks,proto3,oneof" json:"extract_causal_links,omitempty"`
 	// Keep a JSONL line or chat turn whole in one chunk up to this many tokens.
 	StructuredChunkMaxTokens *int32 `protobuf:"varint,8,opt,name=structured_chunk_max_tokens,json=structuredChunkMaxTokens,proto3,oneof" json:"structured_chunk_max_tokens,omitempty"`
-	// Temporal link cap per unit, default 20.
+	// Temporal link cap per memory, default 20.
 	TemporalLinkCap *int32 `protobuf:"varint,9,opt,name=temporal_link_cap,json=temporalLinkCap,proto3,oneof" json:"temporal_link_cap,omitempty"`
 	// Mission injected into retain extraction prompts.
 	Mission string `protobuf:"bytes,10,opt,name=mission,proto3" json:"mission,omitempty"`
 	// How retain extracts facts.
-	ExtractionMode ExtractionMode `protobuf:"varint,11,opt,name=extraction_mode,json=extractionMode,proto3,enum=memory.v1.ExtractionMode" json:"extraction_mode,omitempty"`
+	ExtractionMode RetainConfig_ExtractionMode `protobuf:"varint,11,opt,name=extraction_mode,json=extractionMode,proto3,enum=memory.v1.RetainConfig_ExtractionMode" json:"extraction_mode,omitempty"`
 	// Extraction prompt used with EXTRACTION_MODE_CUSTOM.
 	CustomExtractionPrompt string `protobuf:"bytes,12,opt,name=custom_extraction_prompt,json=customExtractionPrompt,proto3" json:"custom_extraction_prompt,omitempty"`
 	// Typed entity labels extracted at retain as key:value label entities.
@@ -12495,9 +12504,9 @@ type RetainConfig struct {
 	// false = only label entities are created (no free-form entities); unset = inherited.
 	EntitiesAllowFreeForm *bool `protobuf:"varint,14,opt,name=entities_allow_free_form,json=entitiesAllowFreeForm,proto3,oneof" json:"entities_allow_free_form,omitempty"`
 	// Observation scopes used when a retained item does not set its own.
-	DefaultObservationScopes *ObservationScopes `protobuf:"bytes,15,opt,name=default_observation_scopes,json=defaultObservationScopes,proto3" json:"default_observation_scopes,omitempty"`
-	unknownFields            protoimpl.UnknownFields
-	sizeCache                protoimpl.SizeCache
+	DefaultObservationScopeModes *ObservationScopeModes `protobuf:"bytes,15,opt,name=default_observation_scope_modes,json=defaultObservationScopeModes,proto3" json:"default_observation_scope_modes,omitempty"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *RetainConfig) Reset() {
@@ -12600,11 +12609,11 @@ func (x *RetainConfig) GetMission() string {
 	return ""
 }
 
-func (x *RetainConfig) GetExtractionMode() ExtractionMode {
+func (x *RetainConfig) GetExtractionMode() RetainConfig_ExtractionMode {
 	if x != nil {
 		return x.ExtractionMode
 	}
-	return ExtractionMode_EXTRACTION_MODE_UNSPECIFIED
+	return RetainConfig_EXTRACTION_MODE_UNSPECIFIED
 }
 
 func (x *RetainConfig) GetCustomExtractionPrompt() string {
@@ -12628,9 +12637,9 @@ func (x *RetainConfig) GetEntitiesAllowFreeForm() bool {
 	return false
 }
 
-func (x *RetainConfig) GetDefaultObservationScopes() *ObservationScopes {
+func (x *RetainConfig) GetDefaultObservationScopeModes() *ObservationScopeModes {
 	if x != nil {
-		return x.DefaultObservationScopes
+		return x.DefaultObservationScopeModes
 	}
 	return nil
 }
@@ -12640,7 +12649,7 @@ type ObservationConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// false = no consolidation at all; unset = inherited.
 	Enabled *bool `protobuf:"varint,1,opt,name=enabled,proto3,oneof" json:"enabled,omitempty"`
-	// Enqueue consolidation automatically after retain, and let the maintenance tick catch up on facts left
+	// Enqueue consolidation automatically after retain, and let periodic maintenance catch up on facts left
 	// behind; unset = inherited.
 	AutoConsolidation *bool `protobuf:"varint,2,opt,name=auto_consolidation,json=autoConsolidation,proto3,oneof" json:"auto_consolidation,omitempty"`
 	// Mission injected into consolidation prompts; a matching strategy's mission wins.
@@ -12655,12 +12664,12 @@ type ObservationConfig struct {
 	SourceFactsMaxTokensPerObservation *int32 `protobuf:"varint,7,opt,name=source_facts_max_tokens_per_observation,json=sourceFactsMaxTokensPerObservation,proto3,oneof" json:"source_facts_max_tokens_per_observation,omitempty"`
 	// Facts per consolidation LLM call, default 8. A failing batch is halved and retried.
 	LlmBatchSize *int32 `protobuf:"varint,8,opt,name=llm_batch_size,json=llmBatchSize,proto3,oneof" json:"llm_batch_size,omitempty"`
-	// Units one consolidation run takes before the job re-enqueues itself, default 100.
+	// Memories one consolidation run takes before it re-enqueues itself, default 100.
 	MaxUnitsPerRun *int32 `protobuf:"varint,9,opt,name=max_units_per_run,json=maxUnitsPerRun,proto3,oneof" json:"max_units_per_run,omitempty"`
 	// Per-scope consolidation strategies; the first whose patterns match a scope wins.
 	Strategies []*ConsolidationStrategy `protobuf:"bytes,10,rep,name=strategies,proto3" json:"strategies,omitempty"`
-	// Seconds a fact may wait unconsolidated before the maintenance tick consolidates its bank, default 600.
-	// Keeps the tick from pre-empting a manual Consolidate after a retain with skip_consolidation.
+	// Seconds a fact may wait unconsolidated before periodic maintenance consolidates its bank, default 600.
+	// Keeps maintenance from pre-empting a manual Consolidate after a retain with skip_consolidation.
 	ReconcileGraceSeconds *int32 `protobuf:"varint,11,opt,name=reconcile_grace_seconds,json=reconcileGraceSeconds,proto3,oneof" json:"reconcile_grace_seconds,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
@@ -12853,7 +12862,7 @@ type EntityLabel struct {
 	Fields map[string]*EntityLabel `protobuf:"bytes,5,rep,name=fields,proto3" json:"fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Whether a fact may omit the label, default true.
 	Optional *bool `protobuf:"varint,6,opt,name=optional,proto3,oneof" json:"optional,omitempty"`
-	// Also copy extracted values into the unit's tags.
+	// Also copy extracted values into the memory's tags.
 	WriteToTags   bool `protobuf:"varint,7,opt,name=write_to_tags,json=writeToTags,proto3" json:"write_to_tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -13014,9 +13023,9 @@ type ConsolidationStrategy struct {
 	// Token budget for the source facts shown per existing observation.
 	SourceFactsMaxTokensPerObservation *int32 `protobuf:"varint,6,opt,name=source_facts_max_tokens_per_observation,json=sourceFactsMaxTokensPerObservation,proto3,oneof" json:"source_facts_max_tokens_per_observation,omitempty"`
 	// CONSOLIDATE model for matched scopes; unset = the bank's.
-	ConsolidateModel *ModelBinding `protobuf:"bytes,8,opt,name=consolidate_model,json=consolidateModel,proto3" json:"consolidate_model,omitempty"`
+	ConsolidateModel *ModelBinding `protobuf:"bytes,7,opt,name=consolidate_model,json=consolidateModel,proto3" json:"consolidate_model,omitempty"`
 	// DEDUP_CHECK model for matched scopes; unset = the bank's.
-	DedupCheckModel *ModelBinding `protobuf:"bytes,9,opt,name=dedup_check_model,json=dedupCheckModel,proto3" json:"dedup_check_model,omitempty"`
+	DedupCheckModel *ModelBinding `protobuf:"bytes,8,opt,name=dedup_check_model,json=dedupCheckModel,proto3" json:"dedup_check_model,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -13111,7 +13120,7 @@ func (x *ConsolidationStrategy) GetDedupCheckModel() *ModelBinding {
 type RecallConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// How a Budget becomes the per-arm candidate cap.
-	BudgetFunction BudgetFunction `protobuf:"varint,1,opt,name=budget_function,json=budgetFunction,proto3,enum=memory.v1.BudgetFunction" json:"budget_function,omitempty"`
+	BudgetFunction RecallConfig_BudgetFunction `protobuf:"varint,1,opt,name=budget_function,json=budgetFunction,proto3,enum=memory.v1.RecallConfig_BudgetFunction" json:"budget_function,omitempty"`
 	// Per-arm candidate cap for BUDGET_LOW, default 100.
 	BudgetLow *int32 `protobuf:"varint,2,opt,name=budget_low,json=budgetLow,proto3,oneof" json:"budget_low,omitempty"`
 	// Per-arm candidate cap for BUDGET_MID, default 300.
@@ -13182,11 +13191,11 @@ func (*RecallConfig) Descriptor() ([]byte, []int) {
 	return file_memory_v1_memory_proto_rawDescGZIP(), []int{159}
 }
 
-func (x *RecallConfig) GetBudgetFunction() BudgetFunction {
+func (x *RecallConfig) GetBudgetFunction() RecallConfig_BudgetFunction {
 	if x != nil {
 		return x.BudgetFunction
 	}
-	return BudgetFunction_BUDGET_FUNCTION_UNSPECIFIED
+	return RecallConfig_BUDGET_FUNCTION_UNSPECIFIED
 }
 
 func (x *RecallConfig) GetBudgetLow() int32 {
@@ -14015,7 +14024,7 @@ type ConsolidateOverrides struct {
 	SourceFactsMaxTokensPerObservation *int32 `protobuf:"varint,4,opt,name=source_facts_max_tokens_per_observation,json=sourceFactsMaxTokensPerObservation,proto3,oneof" json:"source_facts_max_tokens_per_observation,omitempty"`
 	// Facts per consolidation LLM call.
 	LlmBatchSize *int32 `protobuf:"varint,5,opt,name=llm_batch_size,json=llmBatchSize,proto3,oneof" json:"llm_batch_size,omitempty"`
-	// Units one consolidation run takes before the job re-enqueues itself.
+	// Memories one consolidation run takes before it re-enqueues itself.
 	MaxUnitsPerRun *int32 `protobuf:"varint,6,opt,name=max_units_per_run,json=maxUnitsPerRun,proto3,oneof" json:"max_units_per_run,omitempty"`
 	// Near-duplicate cosine threshold.
 	DedupThreshold *float64 `protobuf:"fixed64,7,opt,name=dedup_threshold,json=dedupThreshold,proto3,oneof" json:"dedup_threshold,omitempty"`
@@ -14289,11 +14298,11 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\rdocument_tags\x18\x03 \x03(\tR\fdocumentTags\x128\n" +
 	"\toverrides\x18\x04 \x01(\v2\x1a.memory.v1.RetainOverridesR\toverrides\x12-\n" +
 	"\x12skip_consolidation\x18\x05 \x01(\bR\x11skipConsolidation\x12\x1b\n" +
-	"\trun_async\x18\x06 \x01(\bR\brunAsync\"\xd1\x01\n" +
+	"\trun_async\x18\x06 \x01(\bR\brunAsync\"\xb6\x01\n" +
 	"\x0eRetainResponse\x129\n" +
 	"\tdocuments\x18\x01 \x03(\v2\x1b.memory.v1.RetainedDocumentR\tdocuments\x12=\n" +
-	"\x0fbatch_operation\x18\x04 \x01(\v2\x14.memory.v1.OperationR\x0ebatchOperation\x12*\n" +
-	"\x05usage\x18\x03 \x03(\v2\x14.memory.v1.SlotUsageR\x05usageJ\x04\b\x02\x10\x03R\x13parent_operation_id\"\xf1\x04\n" +
+	"\x0fbatch_operation\x18\x02 \x01(\v2\x14.memory.v1.OperationR\x0ebatchOperation\x12*\n" +
+	"\x05usage\x18\x03 \x03(\v2\x14.memory.v1.SlotUsageR\x05usage\"\xfe\x04\n" +
 	"\n" +
 	"RetainItem\x12\x18\n" +
 	"\acontent\x18\x01 \x01(\tR\acontent\x12\x18\n" +
@@ -14302,8 +14311,8 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\btimeless\x18\x04 \x01(\bR\btimeless\x12\x1f\n" +
 	"\vdocument_id\x18\x05 \x01(\tR\n" +
 	"documentId\x12\x12\n" +
-	"\x04tags\x18\x06 \x03(\tR\x04tags\x12K\n" +
-	"\x12observation_scopes\x18\a \x01(\v2\x1c.memory.v1.ObservationScopesR\x11observationScopes\x12?\n" +
+	"\x04tags\x18\x06 \x03(\tR\x04tags\x12X\n" +
+	"\x17observation_scope_modes\x18\a \x01(\v2 .memory.v1.ObservationScopeModesR\x15observationScopeModes\x12?\n" +
 	"\bmetadata\x18\b \x03(\v2#.memory.v1.RetainItem.MetadataEntryR\bmetadata\x121\n" +
 	"\bentities\x18\t \x03(\v2\x15.memory.v1.EntityHintR\bentities\x12.\n" +
 	"\x10resolve_entities\x18\n" +
@@ -14317,36 +14326,34 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\n" +
 	"EntityHint\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
-	"\x04type\x18\x02 \x01(\tR\x04type\"\xd9\x01\n" +
+	"\x04type\x18\x02 \x01(\tR\x04type\"\xb0\x01\n" +
 	"\x10RetainedDocument\x12\x1f\n" +
 	"\vdocument_id\x18\x01 \x01(\tR\n" +
 	"documentId\x12)\n" +
-	"\x10memories_created\x18\x06 \x01(\x05R\x0fmemoriesCreated\x12\x1c\n" +
+	"\x10memories_created\x18\x02 \x01(\x05R\x0fmemoriesCreated\x12\x1c\n" +
 	"\tunchanged\x18\x03 \x01(\bR\tunchanged\x122\n" +
-	"\toperation\x18\x05 \x01(\v2\x14.memory.v1.OperationR\toperationJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\runits_createdR\foperation_id\"\xdc\x05\n" +
+	"\toperation\x18\x04 \x01(\v2\x14.memory.v1.OperationR\toperation\"\xab\x05\n" +
 	"\rRecallRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x122\n" +
 	"\n" +
-	"fact_types\x18\x12 \x03(\x0e2\x13.memory.v1.FactTypeR\tfactTypes\x12(\n" +
+	"fact_types\x18\x03 \x03(\x0e2\x13.memory.v1.FactTypeR\tfactTypes\x12(\n" +
 	"\x04tags\x18\x04 \x01(\v2\x14.memory.v1.TagFilterR\x04tags\x12)\n" +
-	"\x06budget\x18\a \x01(\x0e2\x11.memory.v1.BudgetR\x06budget\x12\x1d\n" +
+	"\x06budget\x18\x05 \x01(\x0e2\x11.memory.v1.BudgetR\x06budget\x12\x1d\n" +
 	"\n" +
-	"max_tokens\x18\b \x01(\x05R\tmaxTokens\x129\n" +
+	"max_tokens\x18\x06 \x01(\x05R\tmaxTokens\x129\n" +
 	"\n" +
-	"query_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tqueryTime\x12F\n" +
-	"\x11time_window_start\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x0ftimeWindowStart\x12B\n" +
-	"\x0ftime_window_end\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\rtimeWindowEnd\x12/\n" +
-	"\x13prefer_observations\x18\f \x01(\bR\x12preferObservations\x123\n" +
+	"query_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tqueryTime\x12F\n" +
+	"\x11time_window_start\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x0ftimeWindowStart\x12B\n" +
+	"\x0ftime_window_end\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\rtimeWindowEnd\x12/\n" +
+	"\x13prefer_observations\x18\n" +
+	" \x01(\bR\x12preferObservations\x123\n" +
 	"\n" +
-	"min_scores\x18\r \x01(\v2\x14.memory.v1.MinScoresR\tminScores\x122\n" +
-	"\ainclude\x18\x0e \x01(\v2\x18.memory.v1.RecallIncludeR\ainclude\x12\x14\n" +
-	"\x05trace\x18\x0f \x01(\bR\x05trace\x128\n" +
-	"\toverrides\x18\x10 \x01(\v2\x1a.memory.v1.RecallOverridesR\toverrides\x12\x12\n" +
-	"\x04arms\x18\x11 \x03(\tR\x04armsJ\x04\b\x03\x10\x04J\x04\b\x05\x10\x06J\x04\b\x06\x10\aR\x05typesR\n" +
-	"tags_matchR\n" +
-	"tag_groups\"\xe9\x04\n" +
+	"min_scores\x18\v \x01(\v2\x14.memory.v1.MinScoresR\tminScores\x122\n" +
+	"\ainclude\x18\f \x01(\v2\x18.memory.v1.RecallIncludeR\ainclude\x12\x14\n" +
+	"\x05trace\x18\r \x01(\bR\x05trace\x128\n" +
+	"\toverrides\x18\x0e \x01(\v2\x1a.memory.v1.RecallOverridesR\toverrides\x12\x12\n" +
+	"\x04arms\x18\x0f \x03(\tR\x04arms\"\xe9\x04\n" +
 	"\x0eRecallResponse\x12+\n" +
 	"\aresults\x18\x01 \x03(\v2\x11.memory.v1.MemoryR\aresults\x12M\n" +
 	"\fsource_facts\x18\x02 \x03(\v2*.memory.v1.RecallResponse.SourceFactsEntryR\vsourceFacts\x124\n" +
@@ -14377,40 +14384,37 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\vEntityState\x12\x1b\n" +
 	"\tentity_id\x18\x01 \x01(\tR\bentityId\x12%\n" +
 	"\x0ecanonical_name\x18\x02 \x01(\tR\rcanonicalName\x12'\n" +
-	"\x0fobservation_ids\x18\x03 \x03(\tR\x0eobservationIds\"\xcf\x04\n" +
+	"\x0fobservation_ids\x18\x03 \x03(\tR\x0eobservationIds\"\xab\x04\n" +
 	"\x0eReflectRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12(\n" +
 	"\x04tags\x18\x03 \x01(\v2\x14.memory.v1.TagFilterR\x04tags\x12)\n" +
-	"\x06budget\x18\x06 \x01(\x0e2\x11.memory.v1.BudgetR\x06budget\x12\"\n" +
+	"\x06budget\x18\x04 \x01(\x0e2\x11.memory.v1.BudgetR\x06budget\x12\"\n" +
 	"\n" +
-	"max_tokens\x18\a \x01(\x05H\x00R\tmaxTokens\x88\x01\x01\x120\n" +
-	"\x14response_schema_json\x18\b \x01(\tR\x12responseSchemaJson\x120\n" +
-	"\x14apply_all_directives\x18\t \x01(\bR\x12applyAllDirectives\x12?\n" +
-	"\x10extra_directives\x18\n" +
-	" \x03(\v2\x14.memory.v1.DirectiveR\x0fextraDirectives\x123\n" +
-	"\ainclude\x18\v \x01(\v2\x19.memory.v1.ReflectIncludeR\ainclude\x129\n" +
+	"max_tokens\x18\x05 \x01(\x05H\x00R\tmaxTokens\x88\x01\x01\x120\n" +
+	"\x14response_schema_json\x18\x06 \x01(\tR\x12responseSchemaJson\x120\n" +
+	"\x14apply_all_directives\x18\a \x01(\bR\x12applyAllDirectives\x12?\n" +
+	"\x10extra_directives\x18\b \x03(\v2\x14.memory.v1.DirectiveR\x0fextraDirectives\x123\n" +
+	"\ainclude\x18\t \x01(\v2\x19.memory.v1.ReflectIncludeR\ainclude\x129\n" +
 	"\n" +
-	"query_time\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tqueryTime\x129\n" +
-	"\toverrides\x18\r \x01(\v2\x1b.memory.v1.ReflectOverridesR\toverrides\x12\x12\n" +
-	"\x04arms\x18\x0e \x03(\tR\x04armsB\r\n" +
-	"\v_max_tokensJ\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\n" +
-	"tags_matchR\n" +
-	"tag_groups\"\x9d\x02\n" +
+	"query_time\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\tqueryTime\x129\n" +
+	"\toverrides\x18\v \x01(\v2\x1b.memory.v1.ReflectOverridesR\toverrides\x12\x12\n" +
+	"\x04arms\x18\f \x03(\tR\x04armsB\r\n" +
+	"\v_max_tokens\"\x9d\x02\n" +
 	"\x0fReflectResponse\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x124\n" +
 	"\x16structured_output_json\x18\x02 \x01(\tR\x14structuredOutputJson\x126\n" +
 	"\x17structured_output_error\x18\x03 \x01(\tR\x15structuredOutputError\x12-\n" +
 	"\bbased_on\x18\x04 \x01(\v2\x12.memory.v1.BasedOnR\abasedOn\x12-\n" +
 	"\x05trace\x18\x05 \x01(\v2\x17.memory.v1.ReflectTraceR\x05trace\x12*\n" +
-	"\x05usage\x18\x06 \x03(\v2\x14.memory.v1.SlotUsageR\x05usage\"\xab\x01\n" +
+	"\x05usage\x18\x06 \x03(\v2\x14.memory.v1.SlotUsageR\x05usage\"\x8c\x01\n" +
 	"\x0eReflectInclude\x12\x1e\n" +
-	"\bbased_on\x18\x04 \x01(\bH\x00R\abasedOn\x88\x01\x01\x12\x14\n" +
-	"\x05trace\x18\x05 \x01(\bR\x05trace\x12&\n" +
+	"\bbased_on\x18\x01 \x01(\bH\x00R\abasedOn\x88\x01\x01\x12\x14\n" +
+	"\x05trace\x18\x02 \x01(\bR\x05trace\x12&\n" +
 	"\ftool_outputs\x18\x03 \x01(\bH\x01R\vtoolOutputs\x88\x01\x01B\v\n" +
 	"\t_based_onB\x0f\n" +
-	"\r_tool_outputsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x05factsR\n" +
-	"tool_calls\"\x87\x01\n" +
+	"\r_tool_outputs\"\x87\x01\n" +
 	"\aBasedOn\x12-\n" +
 	"\bmemories\x18\x01 \x03(\v2\x11.memory.v1.MemoryR\bmemories\x12(\n" +
 	"\x10mental_model_ids\x18\x02 \x03(\tR\x0ementalModelIds\x12#\n" +
@@ -14420,12 +14424,12 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x04arms\x18\x01 \x03(\v2\x14.memory.v1.RecallArmR\x04arms\"A\n" +
 	"\tRecallArm\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xe3\x05\n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xbb\x05\n" +
 	"\x13ListMemoriesRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x122\n" +
 	"\n" +
-	"fact_types\x18\x0e \x03(\x0e2\x13.memory.v1.FactTypeR\tfactTypes\x12#\n" +
-	"\rtext_contains\x18\x0f \x01(\tR\ftextContains\x12\x1f\n" +
+	"fact_types\x18\x02 \x03(\x0e2\x13.memory.v1.FactTypeR\tfactTypes\x12#\n" +
+	"\rtext_contains\x18\x03 \x01(\tR\ftextContains\x12\x1f\n" +
 	"\vdocument_id\x18\x04 \x01(\tR\n" +
 	"documentId\x12\x1b\n" +
 	"\tentity_id\x18\x05 \x01(\tR\bentityId\x12,\n" +
@@ -14436,40 +14440,37 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"time_field\x18\t \x01(\x0e2(.memory.v1.ListMemoriesRequest.TimeFieldR\ttimeField\x12(\n" +
 	"\x04tags\x18\n" +
 	" \x01(\v2\x14.memory.v1.TagFilterR\x04tags\x12\x1b\n" +
-	"\tpage_size\x18\f \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\tpage_size\x18\v \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\r \x01(\tR\tpageToken\"\xb6\x01\n" +
+	"page_token\x18\f \x01(\tR\tpageToken\"\xb6\x01\n" +
 	"\tTimeField\x12\x1a\n" +
 	"\x16TIME_FIELD_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15TIME_FIELD_CREATED_AT\x10\x01\x12\x19\n" +
 	"\x15TIME_FIELD_UPDATED_AT\x10\x02\x12\x1b\n" +
 	"\x17TIME_FIELD_MENTIONED_AT\x10\x03\x12\x1d\n" +
 	"\x19TIME_FIELD_OCCURRED_START\x10\x04\x12\x1b\n" +
-	"\x17TIME_FIELD_OCCURRED_END\x10\x05J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\v\x10\fR\x05typesR\x01qR\n" +
-	"tags_match\"z\n" +
+	"\x17TIME_FIELD_OCCURRED_END\x10\x05\"m\n" +
 	"\x14ListMemoriesResponse\x12-\n" +
-	"\bmemories\x18\x03 \x03(\v2\x11.memory.v1.MemoryR\bmemories\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageTokenJ\x04\b\x01\x10\x02R\x05items\"H\n" +
+	"\bmemories\x18\x01 \x03(\v2\x11.memory.v1.MemoryR\bmemories\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"H\n" +
 	"\x10GetMemoryRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12\x1b\n" +
 	"\tmemory_id\x18\x02 \x01(\tR\bmemoryId\">\n" +
 	"\x11GetMemoryResponse\x12)\n" +
-	"\x06memory\x18\x01 \x01(\v2\x11.memory.v1.MemoryR\x06memory\"\xd9\x03\n" +
+	"\x06memory\x18\x01 \x01(\v2\x11.memory.v1.MemoryR\x06memory\"\xd0\x02\n" +
 	"\x13UpdateMemoryRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12\x1b\n" +
 	"\tmemory_id\x18\x02 \x01(\tR\bmemoryId\x12-\n" +
-	"\x06memory\x18\x0e \x01(\v2\x15.memory.v1.MemoryEditR\x06memory\x12;\n" +
-	"\vupdate_mask\x18\x0f \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
+	"\x06memory\x18\x03 \x01(\v2\x15.memory.v1.MemoryEditR\x06memory\x12;\n" +
+	"\vupdate_mask\x18\x04 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
 	"updateMask\x12.\n" +
-	"\x10resolve_entities\x18\n" +
-	" \x01(\bH\x00R\x0fresolveEntities\x88\x01\x01\x12\x16\n" +
-	"\x06reason\x18\f \x01(\tR\x06reason\x12:\n" +
-	"\toverrides\x18\r \x01(\v2\x1c.memory.v1.RederiveOverridesR\toverridesB\x13\n" +
-	"\x11_resolve_entitiesJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
-	"J\x04\b\v\x10\fR\x04textR\acontextR\x0eoccurred_startR\foccurred_endR\x0eclear_occurredR\tfact_typeR\bentitiesR\x05state\"\x89\x01\n" +
+	"\x10resolve_entities\x18\x05 \x01(\bH\x00R\x0fresolveEntities\x88\x01\x01\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\x12:\n" +
+	"\toverrides\x18\a \x01(\v2\x1c.memory.v1.RederiveOverridesR\toverridesB\x13\n" +
+	"\x11_resolve_entities\"u\n" +
 	"\x14UpdateMemoryResponse\x12)\n" +
 	"\x06memory\x18\x01 \x01(\v2\x11.memory.v1.MemoryR\x06memory\x122\n" +
-	"\toperation\x18\x03 \x01(\v2\x14.memory.v1.OperationR\toperationJ\x04\b\x02\x10\x03R\foperation_id\"\x8a\x02\n" +
+	"\toperation\x18\x02 \x01(\v2\x14.memory.v1.OperationR\toperation\"\x8a\x02\n" +
 	"\n" +
 	"MemoryEdit\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x18\n" +
@@ -14493,10 +14494,10 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x11_resolve_entities\"v\n" +
 	"\x15RestoreMemoryResponse\x12)\n" +
 	"\x06memory\x18\x01 \x01(\v2\x11.memory.v1.MemoryR\x06memory\x122\n" +
-	"\toperation\x18\x02 \x01(\v2\x14.memory.v1.OperationR\toperation\"\x9c\x06\n" +
+	"\toperation\x18\x02 \x01(\v2\x14.memory.v1.OperationR\toperation\"\x90\x06\n" +
 	"\x06Memory\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x120\n" +
-	"\tfact_type\x18\x13 \x01(\x0e2\x13.memory.v1.FactTypeR\bfactType\x12\x12\n" +
+	"\tfact_type\x18\x02 \x01(\x0e2\x13.memory.v1.FactTypeR\bfactType\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\x12\x18\n" +
 	"\acontext\x18\x04 \x01(\tR\acontext\x12;\n" +
 	"\bmetadata\x18\x05 \x03(\v2\x1f.memory.v1.Memory.MetadataEntryR\bmetadata\x12\x12\n" +
@@ -14518,24 +14519,22 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x05stale\x18\x12 \x01(\bR\x05stale\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x02\x10\x03R\x04type\"\xeb\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd0\x03\n" +
 	"\x14ListDocumentsRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x120\n" +
-	"\x14document_id_contains\x18\n" +
-	" \x01(\tR\x12documentIdContains\x12(\n" +
+	"\x14document_id_contains\x18\x02 \x01(\tR\x12documentIdContains\x12(\n" +
 	"\x04tags\x18\x03 \x01(\v2\x14.memory.v1.TagFilterR\x04tags\x120\n" +
-	"\x05start\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x05start\x12,\n" +
-	"\x03end\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\x12H\n" +
+	"\x05start\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x05start\x12,\n" +
+	"\x03end\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x03end\x12H\n" +
 	"\n" +
-	"time_field\x18\a \x01(\x0e2).memory.v1.ListDocumentsRequest.TimeFieldR\ttimeField\x12\x1b\n" +
-	"\tpage_size\x18\b \x01(\x05R\bpageSize\x12\x1d\n" +
+	"time_field\x18\x06 \x01(\x0e2).memory.v1.ListDocumentsRequest.TimeFieldR\ttimeField\x12\x1b\n" +
+	"\tpage_size\x18\a \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\t \x01(\tR\tpageToken\"]\n" +
+	"page_token\x18\b \x01(\tR\tpageToken\"]\n" +
 	"\tTimeField\x12\x1a\n" +
 	"\x16TIME_FIELD_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15TIME_FIELD_CREATED_AT\x10\x01\x12\x19\n" +
-	"\x15TIME_FIELD_UPDATED_AT\x10\x02J\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\x01qR\n" +
-	"tags_match\"r\n" +
+	"\x15TIME_FIELD_UPDATED_AT\x10\x02\"r\n" +
 	"\x15ListDocumentsResponse\x121\n" +
 	"\tdocuments\x18\x01 \x03(\v2\x13.memory.v1.DocumentR\tdocuments\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"q\n" +
@@ -14559,13 +14558,13 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"documentId\x128\n" +
 	"\toverrides\x18\x03 \x01(\v2\x1a.memory.v1.RetainOverridesR\toverrides\"O\n" +
 	"\x19ReprocessDocumentResponse\x122\n" +
-	"\toperation\x18\x01 \x01(\v2\x14.memory.v1.OperationR\toperation\"\xef\x04\n" +
+	"\toperation\x18\x01 \x01(\v2\x14.memory.v1.OperationR\toperation\"\xbc\x04\n" +
 	"\bDocument\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fcontent_hash\x18\x02 \x01(\tR\vcontentHash\x12\x12\n" +
 	"\x04tags\x18\x03 \x03(\tR\x04tags\x12!\n" +
-	"\fmemory_count\x18\v \x01(\x03R\vmemoryCount\x12^\n" +
-	"\x15memories_by_fact_type\x18\f \x03(\v2+.memory.v1.Document.MemoriesByFactTypeEntryR\x12memoriesByFactType\x12E\n" +
+	"\fmemory_count\x18\x04 \x01(\x03R\vmemoryCount\x12^\n" +
+	"\x15memories_by_fact_type\x18\x05 \x03(\v2+.memory.v1.Document.MemoriesByFactTypeEntryR\x12memoriesByFactType\x12E\n" +
 	"\x10retain_overrides\x18\x06 \x01(\v2\x1a.memory.v1.RetainOverridesR\x0fretainOverrides\x129\n" +
 	"\n" +
 	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
@@ -14576,7 +14575,7 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\vextractedAt\x1aE\n" +
 	"\x17MemoriesByFactTypeEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06R\x11memory_unit_countR\x12units_by_fact_type\"\x97\x01\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\x97\x01\n" +
 	"\x12ConsolidateRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12)\n" +
 	"\x06scopes\x18\x02 \x03(\v2\x11.memory.v1.TagSetR\x06scopes\x12=\n" +
@@ -14603,21 +14602,20 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"page_token\x18\x04 \x01(\tR\tpageToken\"\x83\x01\n" +
 	"\x1eListObservationHistoryResponse\x129\n" +
 	"\bversions\x18\x01 \x03(\v2\x1d.memory.v1.ObservationVersionR\bversions\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xc1\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xa5\x01\n" +
 	"\x12ObservationVersion\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\x03R\aversion\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12&\n" +
-	"\x0fsource_fact_ids\x18\x05 \x03(\tR\rsourceFactIds\x129\n" +
+	"\x0fsource_fact_ids\x18\x03 \x03(\tR\rsourceFactIds\x129\n" +
 	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAtJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\n" +
-	"source_idsR\x02at\"\xcd\x01\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xc7\x01\n" +
 	"\x18ClearObservationsRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12/\n" +
-	"\x06scopes\x18\x04 \x01(\v2\x15.memory.v1.TagSetListH\x00R\x06scopes\x12\x1d\n" +
-	"\tmemory_id\x18\x05 \x01(\tH\x00R\bmemoryId\x12\x12\n" +
-	"\x03all\x18\x06 \x01(\bH\x00R\x03all\x12$\n" +
-	"\rreconsolidate\x18\x03 \x01(\bR\rreconsolidateB\b\n" +
-	"\x06targetJ\x04\b\x02\x10\x03\":\n" +
+	"\x06scopes\x18\x02 \x01(\v2\x15.memory.v1.TagSetListH\x00R\x06scopes\x12\x1d\n" +
+	"\tmemory_id\x18\x03 \x01(\tH\x00R\bmemoryId\x12\x12\n" +
+	"\x03all\x18\x04 \x01(\bH\x00R\x03all\x12$\n" +
+	"\rreconsolidate\x18\x05 \x01(\bR\rreconsolidateB\b\n" +
+	"\x06target\":\n" +
 	"\n" +
 	"TagSetList\x12,\n" +
 	"\btag_sets\x18\x01 \x03(\v2\x11.memory.v1.TagSetR\atagSets\"i\n" +
@@ -14638,25 +14636,24 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x0fshadowed_scopes\x18\x03 \x03(\tR\x0eshadowedScopes\"c\n" +
 	"\x18CreateMentalModelRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12.\n" +
-	"\x04spec\x18\x02 \x01(\v2\x1a.memory.v1.MentalModelSpecR\x04spec\"\x97\x01\n" +
+	"\x04spec\x18\x02 \x01(\v2\x1a.memory.v1.MentalModelSpecR\x04spec\"\x8a\x01\n" +
 	"\x19CreateMentalModelResponse\x129\n" +
 	"\fmental_model\x18\x01 \x01(\v2\x16.memory.v1.MentalModelR\vmentalModel\x122\n" +
-	"\toperation\x18\x03 \x01(\v2\x14.memory.v1.OperationR\toperationJ\x04\b\x02\x10\x03R\x05build\"\x96\x01\n" +
+	"\toperation\x18\x02 \x01(\v2\x14.memory.v1.OperationR\toperation\"\x88\x01\n" +
 	"\x15GetMentalModelRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12&\n" +
 	"\x0fmental_model_id\x18\x02 \x01(\tR\rmentalModelId\x12.\n" +
-	"\x04view\x18\x04 \x01(\x0e2\x1a.memory.v1.MentalModelViewR\x04viewJ\x04\b\x03\x10\x04R\x06detail\"S\n" +
+	"\x04view\x18\x03 \x01(\x0e2\x1a.memory.v1.MentalModelViewR\x04view\"S\n" +
 	"\x16GetMentalModelResponse\x129\n" +
-	"\fmental_model\x18\x01 \x01(\v2\x16.memory.v1.MentalModelR\vmentalModel\"\x8d\x02\n" +
+	"\fmental_model\x18\x01 \x01(\v2\x16.memory.v1.MentalModelR\vmentalModel\"\xed\x01\n" +
 	"\x17ListMentalModelsRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12#\n" +
 	"\rfolder_prefix\x18\x02 \x01(\tR\ffolderPrefix\x12.\n" +
-	"\x04view\x18\b \x01(\x0e2\x1a.memory.v1.MentalModelViewR\x04view\x12(\n" +
+	"\x04view\x18\x03 \x01(\x0e2\x1a.memory.v1.MentalModelViewR\x04view\x12(\n" +
 	"\x04tags\x18\x04 \x01(\v2\x14.memory.v1.TagFilterR\x04tags\x12\x1b\n" +
-	"\tpage_size\x18\x06 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\tpage_size\x18\x05 \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\a \x01(\tR\tpageTokenJ\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\x06detailR\n" +
-	"tags_match\"\x7f\n" +
+	"page_token\x18\x06 \x01(\tR\tpageToken\"\x7f\n" +
 	"\x18ListMentalModelsResponse\x12;\n" +
 	"\rmental_models\x18\x01 \x03(\v2\x16.memory.v1.MentalModelR\fmentalModels\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xc8\x01\n" +
@@ -14692,13 +14689,11 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\n" +
 	"facts_used\x18\a \x01(\x05R\tfactsUsed\x12\x12\n" +
 	"\x04diff\x18\b \x01(\tR\x04diff\x12#\n" +
-	"\rwould_persist\x18\t \x01(\bR\fwouldPersist\"\x91\x01\n" +
+	"\rwould_persist\x18\t \x01(\bR\fwouldPersist\"m\n" +
 	"\rResolvedScope\x12(\n" +
 	"\x04tags\x18\x01 \x01(\v2\x14.memory.v1.TagFilterR\x04tags\x122\n" +
 	"\n" +
-	"fact_types\x18\x04 \x03(\x0e2\x13.memory.v1.FactTypeR\tfactTypesJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\n" +
-	"tags_matchR\n" +
-	"tag_groups\"\xd9\x01\n" +
+	"fact_types\x18\x02 \x03(\x0e2\x13.memory.v1.FactTypeR\tfactTypes\"\xd9\x01\n" +
 	"\x1dListMentalModelHistoryRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12&\n" +
 	"\x0fmental_model_id\x18\x02 \x01(\tR\rmentalModelId\x12;\n" +
@@ -14708,20 +14703,19 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"page_token\x18\x05 \x01(\tR\tpageToken\"\x86\x01\n" +
 	"\x1eListMentalModelHistoryResponse\x12<\n" +
 	"\aentries\x18\x01 \x03(\v2\".memory.v1.MentalModelHistoryEntryR\aentries\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x98\x03\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x86\x03\n" +
 	"\x17MentalModelHistoryEntry\x12;\n" +
 	"\x04kind\x18\x01 \x01(\x0e2'.memory.v1.MentalModelHistoryEntry.KindR\x04kind\x12)\n" +
 	"\x10previous_content\x18\x02 \x01(\tR\x0fpreviousContent\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x123\n" +
+	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x123\n" +
 	"\aoutcome\x18\x04 \x01(\x0e2\x19.memory.v1.RefreshOutcomeR\aoutcome\x12%\n" +
 	"\x0efailure_reason\x18\x05 \x01(\tR\rfailureReason\x12#\n" +
 	"\rerror_message\x18\x06 \x01(\tR\ferrorMessage\"G\n" +
 	"\x04Kind\x12\x14\n" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fKIND_VERSION\x10\x01\x12\x17\n" +
-	"\x13KIND_REFRESH_FAILED\x10\x02J\x04\b\x03\x10\x04R\n" +
-	"changed_at\"[\n" +
+	"\x13KIND_REFRESH_FAILED\x10\x02\"[\n" +
 	"\x18DeleteMentalModelRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12&\n" +
 	"\x0fmental_model_id\x18\x02 \x01(\tR\rmentalModelId\"\x1b\n" +
@@ -14731,13 +14725,13 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\vfolder_path\x18\x02 \x01(\tR\n" +
 	"folderPath\";\n" +
 	"\x1fDeleteMentalModelFolderResponse\x12\x18\n" +
-	"\adeleted\x18\x01 \x01(\x05R\adeleted\"\x9d\x01\n" +
+	"\adeleted\x18\x01 \x01(\x05R\adeleted\"\x90\x01\n" +
 	"\x19SearchMentalModelsRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12#\n" +
 	"\rfolder_prefix\x18\x03 \x01(\tR\ffolderPrefix\x12\x1f\n" +
-	"\vmax_results\x18\x05 \x01(\x05R\n" +
-	"maxResultsJ\x04\b\x04\x10\x05R\x05limit\"K\n" +
+	"\vmax_results\x18\x04 \x01(\x05R\n" +
+	"maxResults\"K\n" +
 	"\x1aSearchMentalModelsResponse\x12-\n" +
 	"\x04hits\x18\x01 \x03(\v2\x19.memory.v1.MentalModelHitR\x04hits\"\x9d\x01\n" +
 	"\x0eMentalModelHit\x12&\n" +
@@ -14746,25 +14740,24 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"folderPath\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x18\n" +
 	"\asnippet\x18\x04 \x01(\tR\asnippet\x12\x14\n" +
-	"\x05score\x18\x05 \x01(\x01R\x05score\"\xff\x04\n" +
+	"\x05score\x18\x05 \x01(\x01R\x05score\"\xce\x04\n" +
 	"\vMentalModel\x12.\n" +
 	"\x04spec\x18\x01 \x01(\v2\x1a.memory.v1.MentalModelSpecR\x04spec\x12\x1d\n" +
 	"\n" +
-	"content_md\x18\x03 \x01(\tR\tcontentMd\x124\n" +
-	"\x16structured_output_json\x18\x04 \x01(\tR\x14structuredOutputJson\x12\x18\n" +
-	"\aversion\x18\x05 \x01(\x03R\aversion\x12\x14\n" +
-	"\x05stale\x18\x0e \x01(\bR\x05stale\x12F\n" +
-	"\x11last_refreshed_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\x0flastRefreshedAt\x12\"\n" +
-	"\rlast_seq_seen\x18\b \x01(\x03R\vlastSeqSeen\x12O\n" +
-	"\x16last_refresh_failed_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\x13lastRefreshFailedAt\x12.\n" +
-	"\x13auto_refresh_paused\x18\n" +
-	" \x01(\bR\x11autoRefreshPaused\x12*\n" +
-	"\x11source_memory_ids\x18\x0f \x03(\tR\x0fsourceMemoryIds\x126\n" +
+	"content_md\x18\x02 \x01(\tR\tcontentMd\x124\n" +
+	"\x16structured_output_json\x18\x03 \x01(\tR\x14structuredOutputJson\x12\x18\n" +
+	"\aversion\x18\x04 \x01(\x03R\aversion\x12\x14\n" +
+	"\x05stale\x18\x05 \x01(\bR\x05stale\x12F\n" +
+	"\x11last_refreshed_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x0flastRefreshedAt\x12\"\n" +
+	"\rlast_seq_seen\x18\a \x01(\x03R\vlastSeqSeen\x12O\n" +
+	"\x16last_refresh_failed_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x13lastRefreshFailedAt\x12.\n" +
+	"\x13auto_refresh_paused\x18\t \x01(\bR\x11autoRefreshPaused\x12*\n" +
+	"\x11source_memory_ids\x18\n" +
+	" \x03(\tR\x0fsourceMemoryIds\x126\n" +
 	"\n" +
-	"last_trace\x18\f \x01(\v2\x17.memory.v1.RefreshTraceR\tlastTrace\x129\n" +
+	"last_trace\x18\v \x01(\v2\x17.memory.v1.RefreshTraceR\tlastTrace\x129\n" +
 	"\n" +
-	"created_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAtJ\x04\b\x02\x10\x03J\x04\b\x06\x10\aJ\x04\b\v\x10\fR\abank_idR\bis_staleR\n" +
-	"source_ids\"\xdc\x06\n" +
+	"created_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\xcd\x06\n" +
 	"\x0fMentalModelSpec\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
@@ -14772,25 +14765,25 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\vfolder_path\x18\x04 \x01(\tR\n" +
 	"folderPath\x12\x12\n" +
 	"\x04tags\x18\x05 \x03(\tR\x04tags\x126\n" +
-	"\bschedule\x18\t \x01(\v2\x1a.memory.v1.RefreshScheduleR\bschedule\x121\n" +
-	"\x05scope\x18\n" +
-	" \x01(\v2\x1b.memory.v1.MentalModelScopeR\x05scope\x12*\n" +
-	"\x04mode\x18\v \x01(\x0e2\x16.memory.v1.RefreshModeR\x04mode\x126\n" +
-	"\bstrategy\x18\f \x01(\x0e2\x1a.memory.v1.RefreshStrategyR\bstrategy\x12)\n" +
-	"\x06budget\x18\r \x01(\x0e2\x11.memory.v1.BudgetR\x06budget\x12\"\n" +
+	"\bschedule\x18\x06 \x01(\v2\x1a.memory.v1.RefreshScheduleR\bschedule\x121\n" +
+	"\x05scope\x18\a \x01(\v2\x1b.memory.v1.MentalModelScopeR\x05scope\x12*\n" +
+	"\x04mode\x18\b \x01(\x0e2\x16.memory.v1.RefreshModeR\x04mode\x126\n" +
+	"\bstrategy\x18\t \x01(\x0e2\x1a.memory.v1.RefreshStrategyR\bstrategy\x12)\n" +
+	"\x06budget\x18\n" +
+	" \x01(\x0e2\x11.memory.v1.BudgetR\x06budget\x12\"\n" +
 	"\n" +
-	"max_tokens\x18\x06 \x01(\x05H\x00R\tmaxTokens\x88\x01\x01\x12*\n" +
-	"\x0einclude_chunks\x18\x0e \x01(\bH\x01R\rincludeChunks\x88\x01\x01\x12<\n" +
-	"\x18recall_chunks_max_tokens\x18\x0f \x01(\x05H\x02R\x15recallChunksMaxTokens\x88\x01\x01\x122\n" +
-	"\x15exclude_mental_models\x18\x10 \x01(\bR\x13excludeMentalModels\x127\n" +
-	"\x18exclude_mental_model_ids\x18\x11 \x03(\tR\x15excludeMentalModelIds\x120\n" +
-	"\x14response_schema_json\x18\x12 \x01(\tR\x12responseSchemaJson\x12\x1d\n" +
+	"max_tokens\x18\v \x01(\x05H\x00R\tmaxTokens\x88\x01\x01\x12*\n" +
+	"\x0einclude_chunks\x18\f \x01(\bH\x01R\rincludeChunks\x88\x01\x01\x12<\n" +
+	"\x18recall_chunks_max_tokens\x18\r \x01(\x05H\x02R\x15recallChunksMaxTokens\x88\x01\x01\x122\n" +
+	"\x15exclude_mental_models\x18\x0e \x01(\bR\x13excludeMentalModels\x127\n" +
+	"\x18exclude_mental_model_ids\x18\x0f \x03(\tR\x15excludeMentalModelIds\x120\n" +
+	"\x14response_schema_json\x18\x10 \x01(\tR\x12responseSchemaJson\x12\x1d\n" +
 	"\n" +
-	"keep_trace\x18\x13 \x01(\bR\tkeepTrace\x129\n" +
-	"\toverrides\x18\b \x01(\v2\x1b.memory.v1.RefreshOverridesR\toverridesB\r\n" +
+	"keep_trace\x18\x11 \x01(\bR\tkeepTrace\x129\n" +
+	"\toverrides\x18\x12 \x01(\v2\x1b.memory.v1.RefreshOverridesR\toverridesB\r\n" +
 	"\v_max_tokensB\x11\n" +
 	"\x0f_include_chunksB\x1b\n" +
-	"\x19_recall_chunks_max_tokensJ\x04\b\a\x10\bR\atrigger\"\xb2\x01\n" +
+	"\x19_recall_chunks_max_tokens\"\xb2\x01\n" +
 	"\x0fRefreshSchedule\x121\n" +
 	"\x13after_consolidation\x18\x01 \x01(\bH\x00R\x12afterConsolidation\x12\x14\n" +
 	"\x04cron\x18\x02 \x01(\tH\x00R\x04cron\x125\n" +
@@ -14871,16 +14864,15 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x13GetBankStatsRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\"B\n" +
 	"\x14GetBankStatsResponse\x12*\n" +
-	"\x05stats\x18\x01 \x01(\v2\x14.memory.v1.BankStatsR\x05stats\"\xf5\x05\n" +
+	"\x05stats\x18\x01 \x01(\v2\x14.memory.v1.BankStatsR\x05stats\"\xa6\x05\n" +
 	"\tBankStats\x12_\n" +
-	"\x15memories_by_fact_type\x18\n" +
-	" \x03(\v2,.memory.v1.BankStats.MemoriesByFactTypeEntryR\x12memoriesByFactType\x121\n" +
-	"\x14invalidated_memories\x18\v \x01(\x03R\x13invalidatedMemories\x12\x1c\n" +
+	"\x15memories_by_fact_type\x18\x01 \x03(\v2,.memory.v1.BankStats.MemoriesByFactTypeEntryR\x12memoriesByFactType\x121\n" +
+	"\x14invalidated_memories\x18\x02 \x01(\x03R\x13invalidatedMemories\x12\x1c\n" +
 	"\tdocuments\x18\x03 \x01(\x03R\tdocuments\x12\x1a\n" +
 	"\bentities\x18\x04 \x01(\x03R\bentities\x12#\n" +
 	"\rmental_models\x18\x05 \x01(\x03R\fmentalModels\x12n\n" +
 	"\x1apending_operations_by_kind\x18\x06 \x03(\v21.memory.v1.BankStats.PendingOperationsByKindEntryR\x17pendingOperationsByKind\x127\n" +
-	"\x17unconsolidated_memories\x18\f \x01(\x03R\x16unconsolidatedMemories\x12K\n" +
+	"\x17unconsolidated_memories\x18\a \x01(\x03R\x16unconsolidatedMemories\x12K\n" +
 	"\x14last_memory_write_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x11lastMemoryWriteAt\x12\x1d\n" +
 	"\n" +
 	"change_seq\x18\t \x01(\x03R\tchangeSeq\x1aE\n" +
@@ -14889,14 +14881,19 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\x1aJ\n" +
 	"\x1cPendingOperationsByKindEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01J\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\a\x10\bR\x12units_by_fact_typeR\x11invalidated_unitsR\x14unconsolidated_units\"\xac\x01\n" +
+	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\xb6\x02\n" +
 	"\x0fListTagsRequest\x12\x17\n" +
-	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12,\n" +
-	"\x06source\x18\x02 \x01(\x0e2\x14.memory.v1.TagSourceR\x06source\x12\x16\n" +
+	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12<\n" +
+	"\x06source\x18\x02 \x01(\x0e2$.memory.v1.ListTagsRequest.TagSourceR\x06source\x12\x16\n" +
 	"\x06prefix\x18\x03 \x01(\tR\x06prefix\x12\x1b\n" +
 	"\tpage_size\x18\x04 \x01(\x05R\bpageSize\x12\x1d\n" +
 	"\n" +
-	"page_token\x18\x05 \x01(\tR\tpageToken\"c\n" +
+	"page_token\x18\x05 \x01(\tR\tpageToken\"x\n" +
+	"\tTagSource\x12\x1a\n" +
+	"\x16TAG_SOURCE_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13TAG_SOURCE_MEMORIES\x10\x01\x12\x1c\n" +
+	"\x18TAG_SOURCE_MENTAL_MODELS\x10\x02\x12\x18\n" +
+	"\x14TAG_SOURCE_DOCUMENTS\x10\x03\"c\n" +
 	"\x10ListTagsResponse\x12'\n" +
 	"\x04tags\x18\x01 \x03(\v2\x13.memory.v1.TagCountR\x04tags\x12&\n" +
 	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"2\n" +
@@ -14906,66 +14903,82 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x19ExportBankTemplateRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\"Q\n" +
 	"\x1aExportBankTemplateResponse\x123\n" +
-	"\btemplate\x18\x01 \x01(\v2\x17.memory.v1.BankTemplateR\btemplate\"\x83\x01\n" +
+	"\btemplate\x18\x01 \x01(\v2\x17.memory.v1.BankTemplateR\btemplate\"e\n" +
 	"\x04Bank\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x129\n" +
 	"\n" +
-	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAtJ\x04\b\x03\x10\x04J\x04\b\x05\x10\x06R\x06configR\bdeleting\"\x18\n" +
-	"\x16GetTenantConfigRequest\"N\n" +
+	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"\x18\n" +
+	"\x16GetTenantConfigRequest\"H\n" +
 	"\x17GetTenantConfigResponse\x12-\n" +
-	"\x06config\x18\x02 \x01(\v2\x15.memory.v1.ConfigViewR\x06configJ\x04\b\x01\x10\x02\"\x87\x01\n" +
+	"\x06config\x18\x01 \x01(\v2\x15.memory.v1.ConfigViewR\x06config\"\x87\x01\n" +
 	"\x19UpdateTenantConfigRequest\x12-\n" +
 	"\x06config\x18\x01 \x01(\v2\x15.memory.v1.BankConfigR\x06config\x12;\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
-	"updateMask\"Q\n" +
+	"updateMask\"K\n" +
 	"\x1aUpdateTenantConfigResponse\x12-\n" +
-	"\x06config\x18\x02 \x01(\v2\x15.memory.v1.ConfigViewR\x06configJ\x04\b\x01\x10\x02\"U\n" +
+	"\x06config\x18\x01 \x01(\v2\x15.memory.v1.ConfigViewR\x06config\"U\n" +
 	"\x18ResetTenantConfigRequest\x129\n" +
 	"\n" +
 	"reset_mask\x18\x01 \x01(\v2\x1a.google.protobuf.FieldMaskR\tresetMask\"J\n" +
 	"\x19ResetTenantConfigResponse\x12-\n" +
 	"\x06config\x18\x01 \x01(\v2\x15.memory.v1.ConfigViewR\x06config\"/\n" +
 	"\x14GetBankConfigRequest\x12\x17\n" +
-	"\abank_id\x18\x01 \x01(\tR\x06bankId\"g\n" +
+	"\abank_id\x18\x01 \x01(\tR\x06bankId\"F\n" +
 	"\x15GetBankConfigResponse\x12-\n" +
-	"\x06config\x18\x03 \x01(\v2\x15.memory.v1.ConfigViewR\x06configJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\bresolvedR\toverrides\"\x9e\x01\n" +
+	"\x06config\x18\x01 \x01(\v2\x15.memory.v1.ConfigViewR\x06config\"\x9e\x01\n" +
 	"\x17UpdateBankConfigRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12-\n" +
 	"\x06config\x18\x02 \x01(\v2\x15.memory.v1.BankConfigR\x06config\x12;\n" +
 	"\vupdate_mask\x18\x03 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
-	"updateMask\"U\n" +
+	"updateMask\"I\n" +
 	"\x18UpdateBankConfigResponse\x12-\n" +
-	"\x06config\x18\x02 \x01(\v2\x15.memory.v1.ConfigViewR\x06configJ\x04\b\x01\x10\x02R\x04bank\"y\n" +
+	"\x06config\x18\x01 \x01(\v2\x15.memory.v1.ConfigViewR\x06config\"l\n" +
 	"\x16ResetBankConfigRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x129\n" +
 	"\n" +
-	"reset_mask\x18\x03 \x01(\v2\x1a.google.protobuf.FieldMaskR\tresetMaskJ\x04\b\x02\x10\x03R\x05paths\"T\n" +
+	"reset_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\tresetMask\"H\n" +
 	"\x17ResetBankConfigResponse\x12-\n" +
-	"\x06config\x18\x02 \x01(\v2\x15.memory.v1.ConfigViewR\x06configJ\x04\b\x01\x10\x02R\x04bank\"\xf6\x02\n" +
+	"\x06config\x18\x01 \x01(\v2\x15.memory.v1.ConfigViewR\x06config\"\xe4\x04\n" +
 	"\x14PreviewPromptRequest\x12\x17\n" +
-	"\abank_id\x18\x01 \x01(\tR\x06bankId\x128\n" +
-	"\toperation\x18\x02 \x01(\x0e2\x1a.memory.v1.PromptOperationR\toperation\x124\n" +
-	"\x06retain\x18\x04 \x01(\v2\x1a.memory.v1.RetainOverridesH\x00R\x06retain\x12G\n" +
-	"\rconsolidation\x18\x05 \x01(\v2\x1f.memory.v1.ConsolidateOverridesH\x00R\rconsolidation\x127\n" +
-	"\areflect\x18\x06 \x01(\v2\x1b.memory.v1.ReflectOverridesH\x00R\areflect\x12@\n" +
-	"\fmental_model\x18\a \x01(\v2\x1b.memory.v1.RefreshOverridesH\x00R\vmentalModelB\v\n" +
-	"\toverridesJ\x04\b\x03\x10\x04\"K\n" +
+	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12M\n" +
+	"\toperation\x18\x02 \x01(\x0e2/.memory.v1.PreviewPromptRequest.PromptOperationR\toperation\x124\n" +
+	"\x06retain\x18\x03 \x01(\v2\x1a.memory.v1.RetainOverridesH\x00R\x06retain\x12G\n" +
+	"\rconsolidation\x18\x04 \x01(\v2\x1f.memory.v1.ConsolidateOverridesH\x00R\rconsolidation\x127\n" +
+	"\areflect\x18\x05 \x01(\v2\x1b.memory.v1.ReflectOverridesH\x00R\areflect\x12@\n" +
+	"\fmental_model\x18\x06 \x01(\v2\x1b.memory.v1.RefreshOverridesH\x00R\vmentalModel\"\xdc\x01\n" +
+	"\x0fPromptOperation\x12 \n" +
+	"\x1cPROMPT_OPERATION_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17PROMPT_OPERATION_RETAIN\x10\x01\x12\"\n" +
+	"\x1ePROMPT_OPERATION_CONSOLIDATION\x10\x02\x12\x1c\n" +
+	"\x18PROMPT_OPERATION_REFLECT\x10\x03\x12'\n" +
+	"#PROMPT_OPERATION_MENTAL_MODEL_DELTA\x10\x04\x12\x1f\n" +
+	"\x1bPROMPT_OPERATION_SYNTHESIZE\x10\x05B\v\n" +
+	"\toverrides\"K\n" +
 	"\x15PreviewPromptResponse\x122\n" +
 	"\apreview\x18\x01 \x01(\v2\x18.memory.v1.PromptPreviewR\apreview\"\x9e\x01\n" +
 	"\rPromptPreview\x124\n" +
 	"\bmessages\x18\x01 \x03(\v2\x18.memory.v1.PromptMessageR\bmessages\x120\n" +
 	"\x14response_schema_json\x18\x02 \x01(\tR\x12responseSchemaJson\x12%\n" +
-	"\x0eskipped_reason\x18\x03 \x01(\tR\rskippedReason\"j\n" +
-	"\rPromptMessage\x12)\n" +
-	"\x04role\x18\x01 \x01(\x0e2\x15.memory.v1.PromptRoleR\x04role\x12.\n" +
-	"\x06blocks\x18\x02 \x03(\v2\x16.memory.v1.PromptBlockR\x06blocks\"\x9a\x01\n" +
+	"\x0eskipped_reason\x18\x03 \x01(\tR\rskippedReason\"\xd1\x01\n" +
+	"\rPromptMessage\x127\n" +
+	"\x04role\x18\x01 \x01(\x0e2#.memory.v1.PromptMessage.PromptRoleR\x04role\x12.\n" +
+	"\x06blocks\x18\x02 \x03(\v2\x16.memory.v1.PromptBlockR\x06blocks\"W\n" +
+	"\n" +
+	"PromptRole\x12\x1b\n" +
+	"\x17PROMPT_ROLE_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12PROMPT_ROLE_SYSTEM\x10\x01\x12\x14\n" +
+	"\x10PROMPT_ROLE_USER\x10\x02\"\x8a\x02\n" +
 	"\vPromptBlock\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text\x12/\n" +
-	"\x06source\x18\x02 \x01(\x0e2\x17.memory.v1.PromptSourceR\x06source\x12\x14\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12;\n" +
+	"\x06source\x18\x02 \x01(\x0e2#.memory.v1.PromptBlock.PromptSourceR\x06source\x12\x14\n" +
 	"\x05field\x18\x03 \x01(\tR\x05field\x12\x18\n" +
 	"\asection\x18\x04 \x01(\tR\asection\x12\x16\n" +
-	"\x06active\x18\x05 \x01(\bR\x06active\"e\n" +
+	"\x06active\x18\x05 \x01(\bR\x06active\"b\n" +
+	"\fPromptSource\x12\x1d\n" +
+	"\x19PROMPT_SOURCE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15PROMPT_SOURCE_BUILTIN\x10\x01\x12\x18\n" +
+	"\x14PROMPT_SOURCE_CONFIG\x10\x02\"e\n" +
 	"\x16CreateDirectiveRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x122\n" +
 	"\tdirective\x18\x02 \x01(\v2\x14.memory.v1.DirectiveR\tdirective\"M\n" +
@@ -15033,53 +15046,53 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12!\n" +
 	"\foperation_id\x18\x02 \x01(\tR\voperationId\"L\n" +
 	"\x16RetryOperationResponse\x122\n" +
-	"\toperation\x18\x01 \x01(\v2\x14.memory.v1.OperationR\toperation\"\x9f\x01\n" +
+	"\toperation\x18\x01 \x01(\v2\x14.memory.v1.OperationR\toperation\"\x92\x01\n" +
 	"\x11ListEventsRequest\x12\x17\n" +
 	"\abank_id\x18\x01 \x01(\tR\x06bankId\x12\x1b\n" +
 	"\tafter_seq\x18\x02 \x01(\x03R\bafterSeq\x12\x1b\n" +
-	"\tpage_size\x18\x05 \x01(\x05R\bpageSize\x12*\n" +
-	"\x05types\x18\x04 \x03(\x0e2\x14.memory.v1.EventTypeR\x05typesJ\x04\b\x03\x10\x04R\x05limit\"}\n" +
+	"\tpage_size\x18\x03 \x01(\x05R\bpageSize\x12*\n" +
+	"\x05types\x18\x04 \x03(\x0e2\x14.memory.v1.EventTypeR\x05types\"m\n" +
 	"\x12ListEventsResponse\x121\n" +
 	"\x06events\x18\x01 \x03(\v2\x19.memory.v1.LifecycleEventR\x06events\x12$\n" +
-	"\x0enext_after_seq\x18\x03 \x01(\x03R\fnextAfterSeqJ\x04\b\x02\x10\x03R\blast_seq\"\xec\x01\n" +
+	"\x0enext_after_seq\x18\x02 \x01(\x03R\fnextAfterSeq\"\xe2\x01\n" +
 	"\x0eLifecycleEvent\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x03R\x03seq\x12(\n" +
 	"\x04type\x18\x02 \x01(\x0e2\x14.memory.v1.EventTypeR\x04type\x12\x17\n" +
 	"\abank_id\x18\x03 \x01(\tR\x06bankId\x129\n" +
 	"\n" +
-	"created_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12!\n" +
+	"created_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12!\n" +
 	"\foperation_id\x18\x05 \x01(\tR\voperationId\x12\x1d\n" +
 	"\n" +
-	"subject_id\x18\x06 \x01(\tR\tsubjectIdJ\x04\b\x04\x10\x05R\x02at\"\xae\x05\n" +
+	"subject_id\x18\x06 \x01(\tR\tsubjectId\"\xa0\x05\n" +
 	"\tOperation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
-	"\abank_id\x18\x0f \x01(\tR\x06bankId\x12,\n" +
-	"\x04kind\x18\x02 \x01(\x0e2\x18.memory.v1.OperationKindR\x04kind\x122\n" +
-	"\x06status\x18\x03 \x01(\x0e2\x1a.memory.v1.OperationStatusR\x06status\x12\x14\n" +
-	"\x05error\x18\x04 \x01(\tR\x05error\x12#\n" +
-	"\rdebug_summary\x18\x10 \x01(\tR\fdebugSummary\x12*\n" +
-	"\x05usage\x18\x06 \x03(\v2\x14.memory.v1.SlotUsageR\x05usage\x12F\n" +
-	"\x13effective_overrides\x18\a \x01(\v2\x15.memory.v1.BankConfigR\x12effectiveOverrides\x12\x1b\n" +
-	"\tparent_id\x18\b \x01(\tR\bparentId\x12/\n" +
-	"\bprogress\x18\t \x01(\v2\x13.memory.v1.ProgressR\bprogress\x129\n" +
+	"\abank_id\x18\x02 \x01(\tR\x06bankId\x12,\n" +
+	"\x04kind\x18\x03 \x01(\x0e2\x18.memory.v1.OperationKindR\x04kind\x122\n" +
+	"\x06status\x18\x04 \x01(\x0e2\x1a.memory.v1.OperationStatusR\x06status\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\x12#\n" +
+	"\rdebug_summary\x18\x06 \x01(\tR\fdebugSummary\x12*\n" +
+	"\x05usage\x18\a \x03(\v2\x14.memory.v1.SlotUsageR\x05usage\x12F\n" +
+	"\x13effective_overrides\x18\b \x01(\v2\x15.memory.v1.BankConfigR\x12effectiveOverrides\x12\x1b\n" +
+	"\tparent_id\x18\t \x01(\tR\bparentId\x12/\n" +
+	"\bprogress\x18\n" +
+	" \x01(\v2\x13.memory.v1.ProgressR\bprogress\x129\n" +
 	"\n" +
-	"created_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12:\n" +
-	"\vnext_run_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tnextRunAt\x12\x1a\n" +
-	"\battempts\x18\r \x01(\x05R\battempts\x12=\n" +
-	"\fheartbeat_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\vheartbeatAtJ\x04\b\x05\x10\x06R\x06result\"\x9b\x01\n" +
+	"updated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12:\n" +
+	"\vnext_run_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tnextRunAt\x12\x1a\n" +
+	"\battempts\x18\x0e \x01(\x05R\battempts\x12=\n" +
+	"\fheartbeat_at\x18\x0f \x01(\v2\x1a.google.protobuf.TimestampR\vheartbeatAt\"\x91\x01\n" +
 	"\bProgress\x12\x14\n" +
 	"\x05stage\x18\x01 \x01(\tR\x05stage\x12;\n" +
-	"\vrecorded_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"\vrecorded_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"recordedAt\x12\x1c\n" +
 	"\tprocessed\x18\x03 \x01(\x03R\tprocessed\x12\x14\n" +
-	"\x05total\x18\x04 \x01(\x03R\x05totalJ\x04\b\x02\x10\x03R\x02at\"\x1c\n" +
+	"\x05total\x18\x04 \x01(\x03R\x05total\"\x1c\n" +
 	"\x06TagSet\x12\x12\n" +
-	"\x04tags\x18\x01 \x03(\tR\x04tags\"\xba\x02\n" +
-	"\x11ObservationScopes\x125\n" +
-	"\x04mode\x18\x01 \x01(\x0e2!.memory.v1.ObservationScopes.ModeR\x04mode\x12)\n" +
+	"\x04tags\x18\x01 \x03(\tR\x04tags\"\xc2\x02\n" +
+	"\x15ObservationScopeModes\x129\n" +
+	"\x04mode\x18\x01 \x01(\x0e2%.memory.v1.ObservationScopeModes.ModeR\x04mode\x12)\n" +
 	"\x06custom\x18\x02 \x03(\v2\x11.memory.v1.TagSetR\x06custom\x12.\n" +
 	"\x10max_combinations\x18\x03 \x01(\x05H\x00R\x0fmaxCombinations\x88\x01\x01\"~\n" +
 	"\x04Mode\x12\x14\n" +
@@ -15132,12 +15145,23 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x12\x1f\n" +
 	"\vchunk_index\x18\x03 \x01(\x05R\n" +
 	"chunkIndex\x12\x1c\n" +
-	"\ttruncated\x18\x04 \x01(\bR\ttruncated\"\x93\x01\n" +
-	"\tSlotUsage\x12(\n" +
-	"\x04slot\x18\x01 \x01(\x0e2\x14.memory.v1.ModelSlotR\x04slot\x12\x14\n" +
+	"\ttruncated\x18\x04 \x01(\bR\ttruncated\"\xb6\x03\n" +
+	"\tSlotUsage\x122\n" +
+	"\x04slot\x18\x01 \x01(\x0e2\x1e.memory.v1.SlotUsage.ModelSlotR\x04slot\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12!\n" +
 	"\finput_tokens\x18\x03 \x01(\x03R\vinputTokens\x12#\n" +
-	"\routput_tokens\x18\x04 \x01(\x03R\foutputTokens\"\xf1\x02\n" +
+	"\routput_tokens\x18\x04 \x01(\x03R\foutputTokens\"\x96\x02\n" +
+	"\tModelSlot\x12\x1a\n" +
+	"\x16MODEL_SLOT_UNSPECIFIED\x10\x00\x12\x16\n" +
+	"\x12MODEL_SLOT_EXTRACT\x10\x01\x12\x19\n" +
+	"\x15MODEL_SLOT_TIME_PARSE\x10\x02\x12\x1a\n" +
+	"\x16MODEL_SLOT_CONSOLIDATE\x10\x03\x12\x1a\n" +
+	"\x16MODEL_SLOT_DEDUP_CHECK\x10\x04\x12\x16\n" +
+	"\x12MODEL_SLOT_REFLECT\x10\x05\x12 \n" +
+	"\x1cMODEL_SLOT_STRUCTURED_OUTPUT\x10\x06\x12\x1b\n" +
+	"\x17MODEL_SLOT_MENTAL_MODEL\x10\a\x12\x15\n" +
+	"\x11MODEL_SLOT_RERANK\x10\b\x12\x14\n" +
+	"\x10MODEL_SLOT_EMBED\x10\t\"\xf1\x02\n" +
 	"\vRecallTrace\x12'\n" +
 	"\x04arms\x18\x01 \x03(\v2\x13.memory.v1.ArmTraceR\x04arms\x12\x14\n" +
 	"\x05fused\x18\x02 \x01(\x05R\x05fused\x12\x1a\n" +
@@ -15177,15 +15201,16 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"stopReason\x12#\n" +
 	"\rdirective_ids\x18\x04 \x03(\tR\fdirectiveIds\x12\x1f\n" +
 	"\vduration_ms\x18\x05 \x01(\x03R\n" +
-	"durationMs\"\xe5\x02\n" +
+	"durationMs\"\xd9\x02\n" +
 	"\n" +
 	"BankConfig\x12/\n" +
-	"\x06retain\x18\x0f \x01(\v2\x17.memory.v1.RetainConfigR\x06retain\x12@\n" +
-	"\fobservations\x18\x18 \x01(\v2\x1c.memory.v1.ObservationConfigR\fobservations\x12/\n" +
-	"\x06recall\x18\r \x01(\v2\x17.memory.v1.RecallConfigR\x06recall\x122\n" +
-	"\areflect\x18\x10 \x01(\v2\x18.memory.v1.ReflectConfigR\areflect\x12A\n" +
-	"\rmental_models\x18\x11 \x01(\v2\x1c.memory.v1.MentalModelConfigR\fmentalModels\x120\n" +
-	"\x06models\x18\x0e \x01(\v2\x18.memory.v1.ModelBindingsR\x06modelsJ\x04\b\x01\x10\rJ\x04\b\x12\x10\x18\"\x88\t\n" +
+	"\x06retain\x18\x01 \x01(\v2\x17.memory.v1.RetainConfigR\x06retain\x12@\n" +
+	"\fobservations\x18\x02 \x01(\v2\x1c.memory.v1.ObservationConfigR\fobservations\x12/\n" +
+	"\x06recall\x18\x03 \x01(\v2\x17.memory.v1.RecallConfigR\x06recall\x122\n" +
+	"\areflect\x18\x04 \x01(\v2\x18.memory.v1.ReflectConfigR\areflect\x12A\n" +
+	"\rmental_models\x18\x05 \x01(\v2\x1c.memory.v1.MentalModelConfigR\fmentalModels\x120\n" +
+	"\x06models\x18\x06 \x01(\v2\x18.memory.v1.ModelBindingsR\x06models\"\xe6\n" +
+	"\n" +
 	"\fRetainConfig\x12-\n" +
 	"\x10chunk_max_tokens\x18\x01 \x01(\x05H\x00R\x0echunkMaxTokens\x88\x01\x01\x125\n" +
 	"\x14chunk_overlap_tokens\x18\x02 \x01(\x05H\x01R\x12chunkOverlapTokens\x88\x01\x01\x129\n" +
@@ -15197,12 +15222,19 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x1bstructured_chunk_max_tokens\x18\b \x01(\x05H\aR\x18structuredChunkMaxTokens\x88\x01\x01\x12/\n" +
 	"\x11temporal_link_cap\x18\t \x01(\x05H\bR\x0ftemporalLinkCap\x88\x01\x01\x12\x18\n" +
 	"\amission\x18\n" +
-	" \x01(\tR\amission\x12B\n" +
-	"\x0fextraction_mode\x18\v \x01(\x0e2\x19.memory.v1.ExtractionModeR\x0eextractionMode\x128\n" +
+	" \x01(\tR\amission\x12O\n" +
+	"\x0fextraction_mode\x18\v \x01(\x0e2&.memory.v1.RetainConfig.ExtractionModeR\x0eextractionMode\x128\n" +
 	"\x18custom_extraction_prompt\x18\f \x01(\tR\x16customExtractionPrompt\x12;\n" +
 	"\rentity_labels\x18\r \x03(\v2\x16.memory.v1.EntityLabelR\fentityLabels\x12<\n" +
-	"\x18entities_allow_free_form\x18\x0e \x01(\bH\tR\x15entitiesAllowFreeForm\x88\x01\x01\x12Z\n" +
-	"\x1adefault_observation_scopes\x18\x0f \x01(\v2\x1c.memory.v1.ObservationScopesR\x18defaultObservationScopesB\x13\n" +
+	"\x18entities_allow_free_form\x18\x0e \x01(\bH\tR\x15entitiesAllowFreeForm\x88\x01\x01\x12g\n" +
+	"\x1fdefault_observation_scope_modes\x18\x0f \x01(\v2 .memory.v1.ObservationScopeModesR\x1cdefaultObservationScopeModes\"\xc1\x01\n" +
+	"\x0eExtractionMode\x12\x1f\n" +
+	"\x1bEXTRACTION_MODE_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17EXTRACTION_MODE_CONCISE\x10\x01\x12\x1b\n" +
+	"\x17EXTRACTION_MODE_VERBOSE\x10\x02\x12\x1c\n" +
+	"\x18EXTRACTION_MODE_VERBATIM\x10\x03\x12\x1a\n" +
+	"\x16EXTRACTION_MODE_CHUNKS\x10\x04\x12\x1a\n" +
+	"\x16EXTRACTION_MODE_CUSTOM\x10\x05B\x13\n" +
 	"\x11_chunk_max_tokensB\x17\n" +
 	"\x15_chunk_overlap_tokensB\x19\n" +
 	"\x17_entity_match_thresholdB\x1d\n" +
@@ -15269,7 +15301,7 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\n" +
 	"LabelValue\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12 \n" +
-	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xc3\x04\n" +
+	"\vdescription\x18\x02 \x01(\tR\vdescription\"\xbd\x04\n" +
 	"\x15ConsolidationStrategy\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\x06scopes\x18\x02 \x03(\v2\x14.memory.v1.TagFilterR\x06scopes\x12\x18\n" +
@@ -15277,13 +15309,13 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x1amax_observations_per_scope\x18\x04 \x01(\x05H\x00R\x17maxObservationsPerScope\x88\x01\x01\x12:\n" +
 	"\x17source_facts_max_tokens\x18\x05 \x01(\x05H\x01R\x14sourceFactsMaxTokens\x88\x01\x01\x12X\n" +
 	"'source_facts_max_tokens_per_observation\x18\x06 \x01(\x05H\x02R\"sourceFactsMaxTokensPerObservation\x88\x01\x01\x12D\n" +
-	"\x11consolidate_model\x18\b \x01(\v2\x17.memory.v1.ModelBindingR\x10consolidateModel\x12C\n" +
-	"\x11dedup_check_model\x18\t \x01(\v2\x17.memory.v1.ModelBindingR\x0fdedupCheckModelB\x1d\n" +
+	"\x11consolidate_model\x18\a \x01(\v2\x17.memory.v1.ModelBindingR\x10consolidateModel\x12C\n" +
+	"\x11dedup_check_model\x18\b \x01(\v2\x17.memory.v1.ModelBindingR\x0fdedupCheckModelB\x1d\n" +
 	"\x1b_max_observations_per_scopeB\x1a\n" +
 	"\x18_source_facts_max_tokensB*\n" +
-	"(_source_facts_max_tokens_per_observationJ\x04\b\a\x10\b\"\xf1\b\n" +
-	"\fRecallConfig\x12B\n" +
-	"\x0fbudget_function\x18\x01 \x01(\x0e2\x19.memory.v1.BudgetFunctionR\x0ebudgetFunction\x12\"\n" +
+	"(_source_facts_max_tokens_per_observation\"\xea\t\n" +
+	"\fRecallConfig\x12O\n" +
+	"\x0fbudget_function\x18\x01 \x01(\x0e2&.memory.v1.RecallConfig.BudgetFunctionR\x0ebudgetFunction\x12\"\n" +
 	"\n" +
 	"budget_low\x18\x02 \x01(\x05H\x00R\tbudgetLow\x88\x01\x01\x12\"\n" +
 	"\n" +
@@ -15312,7 +15344,11 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"budget_max\x18\x12 \x01(\x05H\x0eR\tbudgetMax\x88\x01\x01\x1a<\n" +
 	"\x0eArmBoostsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01B\r\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"j\n" +
+	"\x0eBudgetFunction\x12\x1f\n" +
+	"\x1bBUDGET_FUNCTION_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15BUDGET_FUNCTION_FIXED\x10\x01\x12\x1c\n" +
+	"\x18BUDGET_FUNCTION_ADAPTIVE\x10\x02B\r\n" +
 	"\v_budget_lowB\r\n" +
 	"\v_budget_midB\x0e\n" +
 	"\f_budget_highB\x1a\n" +
@@ -15450,28 +15486,7 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x1bREFRESH_OUTCOME_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fREFRESH_OUTCOME_CONTENT_WRITTEN\x10\x01\x12 \n" +
 	"\x1cREFRESH_OUTCOME_NO_NEW_FACTS\x10\x02\x12\x1a\n" +
-	"\x16REFRESH_OUTCOME_FAILED\x10\x03*x\n" +
-	"\tTagSource\x12\x1a\n" +
-	"\x16TAG_SOURCE_UNSPECIFIED\x10\x00\x12\x17\n" +
-	"\x13TAG_SOURCE_MEMORIES\x10\x01\x12\x1c\n" +
-	"\x18TAG_SOURCE_MENTAL_MODELS\x10\x02\x12\x18\n" +
-	"\x14TAG_SOURCE_DOCUMENTS\x10\x03*\xdc\x01\n" +
-	"\x0fPromptOperation\x12 \n" +
-	"\x1cPROMPT_OPERATION_UNSPECIFIED\x10\x00\x12\x1b\n" +
-	"\x17PROMPT_OPERATION_RETAIN\x10\x01\x12\"\n" +
-	"\x1ePROMPT_OPERATION_CONSOLIDATION\x10\x02\x12\x1c\n" +
-	"\x18PROMPT_OPERATION_REFLECT\x10\x03\x12'\n" +
-	"#PROMPT_OPERATION_MENTAL_MODEL_DELTA\x10\x04\x12\x1f\n" +
-	"\x1bPROMPT_OPERATION_SYNTHESIZE\x10\x05*W\n" +
-	"\n" +
-	"PromptRole\x12\x1b\n" +
-	"\x17PROMPT_ROLE_UNSPECIFIED\x10\x00\x12\x16\n" +
-	"\x12PROMPT_ROLE_SYSTEM\x10\x01\x12\x14\n" +
-	"\x10PROMPT_ROLE_USER\x10\x02*b\n" +
-	"\fPromptSource\x12\x1d\n" +
-	"\x19PROMPT_SOURCE_UNSPECIFIED\x10\x00\x12\x19\n" +
-	"\x15PROMPT_SOURCE_BUILTIN\x10\x01\x12\x18\n" +
-	"\x14PROMPT_SOURCE_CONFIG\x10\x02*o\n" +
+	"\x16REFRESH_OUTCOME_FAILED\x10\x03*o\n" +
 	"\bFactType\x12\x19\n" +
 	"\x15FACT_TYPE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fFACT_TYPE_WORLD\x10\x01\x12\x18\n" +
@@ -15498,31 +15513,7 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x0fRefreshStrategy\x12 \n" +
 	"\x1cREFRESH_STRATEGY_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18REFRESH_STRATEGY_AGENTIC\x10\x01\x12 \n" +
-	"\x1cREFRESH_STRATEGY_SINGLE_SHOT\x10\x02*\xc1\x01\n" +
-	"\x0eExtractionMode\x12\x1f\n" +
-	"\x1bEXTRACTION_MODE_UNSPECIFIED\x10\x00\x12\x1b\n" +
-	"\x17EXTRACTION_MODE_CONCISE\x10\x01\x12\x1b\n" +
-	"\x17EXTRACTION_MODE_VERBOSE\x10\x02\x12\x1c\n" +
-	"\x18EXTRACTION_MODE_VERBATIM\x10\x03\x12\x1a\n" +
-	"\x16EXTRACTION_MODE_CHUNKS\x10\x04\x12\x1a\n" +
-	"\x16EXTRACTION_MODE_CUSTOM\x10\x05*j\n" +
-	"\x0eBudgetFunction\x12\x1f\n" +
-	"\x1bBUDGET_FUNCTION_UNSPECIFIED\x10\x00\x12\x19\n" +
-	"\x15BUDGET_FUNCTION_FIXED\x10\x01\x12\x1c\n" +
-	"\x18BUDGET_FUNCTION_ADAPTIVE\x10\x02*\xd2\x02\n" +
-	"\tModelSlot\x12\x1a\n" +
-	"\x16MODEL_SLOT_UNSPECIFIED\x10\x00\x12\x16\n" +
-	"\x12MODEL_SLOT_EXTRACT\x10\x01\x12\x19\n" +
-	"\x15MODEL_SLOT_TIME_PARSE\x10\x02\x12\x1a\n" +
-	"\x16MODEL_SLOT_CONSOLIDATE\x10\x03\x12\x1a\n" +
-	"\x16MODEL_SLOT_DEDUP_CHECK\x10\x04\x12\x16\n" +
-	"\x12MODEL_SLOT_REFLECT\x10\x05\x12 \n" +
-	"\x1cMODEL_SLOT_STRUCTURED_OUTPUT\x10\x06\x12\x1b\n" +
-	"\x17MODEL_SLOT_MENTAL_MODEL\x10\a\x12\x15\n" +
-	"\x11MODEL_SLOT_RERANK\x10\b\x12\x14\n" +
-	"\x10MODEL_SLOT_EMBED\x10\t\"\x04\b\n" +
-	"\x10\n" +
-	"*\x15MODEL_SLOT_SYNTHESIZE*\x1dMODEL_SLOT_MENTAL_MODEL_DELTA*\xca\x02\n" +
+	"\x1cREFRESH_STRATEGY_SINGLE_SHOT\x10\x02*\xca\x02\n" +
 	"\rOperationKind\x12\x1e\n" +
 	"\x1aOPERATION_KIND_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bOPERATION_KIND_RETAIN_BATCH\x10\x01\x12\"\n" +
@@ -15628,28 +15619,28 @@ var file_memory_v1_memory_proto_goTypes = []any{
 	(MemoryState)(0),                               // 0: memory.v1.MemoryState
 	(MentalModelView)(0),                           // 1: memory.v1.MentalModelView
 	(RefreshOutcome)(0),                            // 2: memory.v1.RefreshOutcome
-	(TagSource)(0),                                 // 3: memory.v1.TagSource
-	(PromptOperation)(0),                           // 4: memory.v1.PromptOperation
-	(PromptRole)(0),                                // 5: memory.v1.PromptRole
-	(PromptSource)(0),                              // 6: memory.v1.PromptSource
-	(FactType)(0),                                  // 7: memory.v1.FactType
-	(Budget)(0),                                    // 8: memory.v1.Budget
-	(TagsMatch)(0),                                 // 9: memory.v1.TagsMatch
-	(RefreshMode)(0),                               // 10: memory.v1.RefreshMode
-	(RefreshStrategy)(0),                           // 11: memory.v1.RefreshStrategy
-	(ExtractionMode)(0),                            // 12: memory.v1.ExtractionMode
-	(BudgetFunction)(0),                            // 13: memory.v1.BudgetFunction
-	(ModelSlot)(0),                                 // 14: memory.v1.ModelSlot
-	(OperationKind)(0),                             // 15: memory.v1.OperationKind
-	(OperationStatus)(0),                           // 16: memory.v1.OperationStatus
-	(EventType)(0),                                 // 17: memory.v1.EventType
-	(ListMemoriesRequest_TimeField)(0),             // 18: memory.v1.ListMemoriesRequest.TimeField
-	(ListDocumentsRequest_TimeField)(0),            // 19: memory.v1.ListDocumentsRequest.TimeField
-	(MentalModelHistoryEntry_Kind)(0),              // 20: memory.v1.MentalModelHistoryEntry.Kind
-	(DeltaOp_Kind)(0),                              // 21: memory.v1.DeltaOp.Kind
-	(ObservationScopes_Mode)(0),                    // 22: memory.v1.ObservationScopes.Mode
-	(TagLeaf_Resolve)(0),                           // 23: memory.v1.TagLeaf.Resolve
-	(EntityLabel_Type)(0),                          // 24: memory.v1.EntityLabel.Type
+	(FactType)(0),                                  // 3: memory.v1.FactType
+	(Budget)(0),                                    // 4: memory.v1.Budget
+	(TagsMatch)(0),                                 // 5: memory.v1.TagsMatch
+	(RefreshMode)(0),                               // 6: memory.v1.RefreshMode
+	(RefreshStrategy)(0),                           // 7: memory.v1.RefreshStrategy
+	(OperationKind)(0),                             // 8: memory.v1.OperationKind
+	(OperationStatus)(0),                           // 9: memory.v1.OperationStatus
+	(EventType)(0),                                 // 10: memory.v1.EventType
+	(ListMemoriesRequest_TimeField)(0),             // 11: memory.v1.ListMemoriesRequest.TimeField
+	(ListDocumentsRequest_TimeField)(0),            // 12: memory.v1.ListDocumentsRequest.TimeField
+	(MentalModelHistoryEntry_Kind)(0),              // 13: memory.v1.MentalModelHistoryEntry.Kind
+	(DeltaOp_Kind)(0),                              // 14: memory.v1.DeltaOp.Kind
+	(ListTagsRequest_TagSource)(0),                 // 15: memory.v1.ListTagsRequest.TagSource
+	(PreviewPromptRequest_PromptOperation)(0),      // 16: memory.v1.PreviewPromptRequest.PromptOperation
+	(PromptMessage_PromptRole)(0),                  // 17: memory.v1.PromptMessage.PromptRole
+	(PromptBlock_PromptSource)(0),                  // 18: memory.v1.PromptBlock.PromptSource
+	(ObservationScopeModes_Mode)(0),                // 19: memory.v1.ObservationScopeModes.Mode
+	(TagLeaf_Resolve)(0),                           // 20: memory.v1.TagLeaf.Resolve
+	(SlotUsage_ModelSlot)(0),                       // 21: memory.v1.SlotUsage.ModelSlot
+	(RetainConfig_ExtractionMode)(0),               // 22: memory.v1.RetainConfig.ExtractionMode
+	(EntityLabel_Type)(0),                          // 23: memory.v1.EntityLabel.Type
+	(RecallConfig_BudgetFunction)(0),               // 24: memory.v1.RecallConfig.BudgetFunction
 	(*RetainRequest)(nil),                          // 25: memory.v1.RetainRequest
 	(*RetainResponse)(nil),                         // 26: memory.v1.RetainResponse
 	(*RetainItem)(nil),                             // 27: memory.v1.RetainItem
@@ -15789,7 +15780,7 @@ var file_memory_v1_memory_proto_goTypes = []any{
 	(*Operation)(nil),                              // 161: memory.v1.Operation
 	(*Progress)(nil),                               // 162: memory.v1.Progress
 	(*TagSet)(nil),                                 // 163: memory.v1.TagSet
-	(*ObservationScopes)(nil),                      // 164: memory.v1.ObservationScopes
+	(*ObservationScopeModes)(nil),                  // 164: memory.v1.ObservationScopeModes
 	(*TagFilter)(nil),                              // 165: memory.v1.TagFilter
 	(*TagGroup)(nil),                               // 166: memory.v1.TagGroup
 	(*TagGroupList)(nil),                           // 167: memory.v1.TagGroupList
@@ -15843,14 +15834,14 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	161, // 3: memory.v1.RetainResponse.batch_operation:type_name -> memory.v1.Operation
 	172, // 4: memory.v1.RetainResponse.usage:type_name -> memory.v1.SlotUsage
 	207, // 5: memory.v1.RetainItem.timestamp:type_name -> google.protobuf.Timestamp
-	164, // 6: memory.v1.RetainItem.observation_scopes:type_name -> memory.v1.ObservationScopes
+	164, // 6: memory.v1.RetainItem.observation_scope_modes:type_name -> memory.v1.ObservationScopeModes
 	195, // 7: memory.v1.RetainItem.metadata:type_name -> memory.v1.RetainItem.MetadataEntry
 	28,  // 8: memory.v1.RetainItem.entities:type_name -> memory.v1.EntityHint
 	189, // 9: memory.v1.RetainItem.overrides:type_name -> memory.v1.RetainOverrides
 	161, // 10: memory.v1.RetainedDocument.operation:type_name -> memory.v1.Operation
-	7,   // 11: memory.v1.RecallRequest.fact_types:type_name -> memory.v1.FactType
+	3,   // 11: memory.v1.RecallRequest.fact_types:type_name -> memory.v1.FactType
 	165, // 12: memory.v1.RecallRequest.tags:type_name -> memory.v1.TagFilter
-	8,   // 13: memory.v1.RecallRequest.budget:type_name -> memory.v1.Budget
+	4,   // 13: memory.v1.RecallRequest.budget:type_name -> memory.v1.Budget
 	207, // 14: memory.v1.RecallRequest.query_time:type_name -> google.protobuf.Timestamp
 	207, // 15: memory.v1.RecallRequest.time_window_start:type_name -> google.protobuf.Timestamp
 	207, // 16: memory.v1.RecallRequest.time_window_end:type_name -> google.protobuf.Timestamp
@@ -15863,7 +15854,7 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	198, // 23: memory.v1.RecallResponse.entities:type_name -> memory.v1.RecallResponse.EntitiesEntry
 	173, // 24: memory.v1.RecallResponse.trace:type_name -> memory.v1.RecallTrace
 	165, // 25: memory.v1.ReflectRequest.tags:type_name -> memory.v1.TagFilter
-	8,   // 26: memory.v1.ReflectRequest.budget:type_name -> memory.v1.Budget
+	4,   // 26: memory.v1.ReflectRequest.budget:type_name -> memory.v1.Budget
 	149, // 27: memory.v1.ReflectRequest.extra_directives:type_name -> memory.v1.Directive
 	36,  // 28: memory.v1.ReflectRequest.include:type_name -> memory.v1.ReflectInclude
 	207, // 29: memory.v1.ReflectRequest.query_time:type_name -> google.protobuf.Timestamp
@@ -15873,11 +15864,11 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	172, // 33: memory.v1.ReflectResponse.usage:type_name -> memory.v1.SlotUsage
 	52,  // 34: memory.v1.BasedOn.memories:type_name -> memory.v1.Memory
 	40,  // 35: memory.v1.ListRecallArmsResponse.arms:type_name -> memory.v1.RecallArm
-	7,   // 36: memory.v1.ListMemoriesRequest.fact_types:type_name -> memory.v1.FactType
+	3,   // 36: memory.v1.ListMemoriesRequest.fact_types:type_name -> memory.v1.FactType
 	0,   // 37: memory.v1.ListMemoriesRequest.state:type_name -> memory.v1.MemoryState
 	207, // 38: memory.v1.ListMemoriesRequest.start:type_name -> google.protobuf.Timestamp
 	207, // 39: memory.v1.ListMemoriesRequest.end:type_name -> google.protobuf.Timestamp
-	18,  // 40: memory.v1.ListMemoriesRequest.time_field:type_name -> memory.v1.ListMemoriesRequest.TimeField
+	11,  // 40: memory.v1.ListMemoriesRequest.time_field:type_name -> memory.v1.ListMemoriesRequest.TimeField
 	165, // 41: memory.v1.ListMemoriesRequest.tags:type_name -> memory.v1.TagFilter
 	52,  // 42: memory.v1.ListMemoriesResponse.memories:type_name -> memory.v1.Memory
 	52,  // 43: memory.v1.GetMemoryResponse.memory:type_name -> memory.v1.Memory
@@ -15888,12 +15879,12 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	161, // 48: memory.v1.UpdateMemoryResponse.operation:type_name -> memory.v1.Operation
 	207, // 49: memory.v1.MemoryEdit.occurred_start:type_name -> google.protobuf.Timestamp
 	207, // 50: memory.v1.MemoryEdit.occurred_end:type_name -> google.protobuf.Timestamp
-	7,   // 51: memory.v1.MemoryEdit.fact_type:type_name -> memory.v1.FactType
+	3,   // 51: memory.v1.MemoryEdit.fact_type:type_name -> memory.v1.FactType
 	52,  // 52: memory.v1.InvalidateMemoryResponse.memory:type_name -> memory.v1.Memory
 	193, // 53: memory.v1.RestoreMemoryRequest.overrides:type_name -> memory.v1.RederiveOverrides
 	52,  // 54: memory.v1.RestoreMemoryResponse.memory:type_name -> memory.v1.Memory
 	161, // 55: memory.v1.RestoreMemoryResponse.operation:type_name -> memory.v1.Operation
-	7,   // 56: memory.v1.Memory.fact_type:type_name -> memory.v1.FactType
+	3,   // 56: memory.v1.Memory.fact_type:type_name -> memory.v1.FactType
 	199, // 57: memory.v1.Memory.metadata:type_name -> memory.v1.Memory.MetadataEntry
 	207, // 58: memory.v1.Memory.occurred_start:type_name -> google.protobuf.Timestamp
 	207, // 59: memory.v1.Memory.occurred_end:type_name -> google.protobuf.Timestamp
@@ -15904,7 +15895,7 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	165, // 64: memory.v1.ListDocumentsRequest.tags:type_name -> memory.v1.TagFilter
 	207, // 65: memory.v1.ListDocumentsRequest.start:type_name -> google.protobuf.Timestamp
 	207, // 66: memory.v1.ListDocumentsRequest.end:type_name -> google.protobuf.Timestamp
-	19,  // 67: memory.v1.ListDocumentsRequest.time_field:type_name -> memory.v1.ListDocumentsRequest.TimeField
+	12,  // 67: memory.v1.ListDocumentsRequest.time_field:type_name -> memory.v1.ListDocumentsRequest.TimeField
 	61,  // 68: memory.v1.ListDocumentsResponse.documents:type_name -> memory.v1.Document
 	61,  // 69: memory.v1.GetDocumentResponse.document:type_name -> memory.v1.Document
 	163, // 70: memory.v1.RetagDocumentRequest.tags:type_name -> memory.v1.TagSet
@@ -15940,17 +15931,17 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	208, // 100: memory.v1.UpdateMentalModelRequest.update_mask:type_name -> google.protobuf.FieldMask
 	99,  // 101: memory.v1.UpdateMentalModelResponse.mental_model:type_name -> memory.v1.MentalModel
 	194, // 102: memory.v1.RefreshMentalModelRequest.overrides:type_name -> memory.v1.RefreshOverrides
-	11,  // 103: memory.v1.RefreshMentalModelRequest.strategy:type_name -> memory.v1.RefreshStrategy
+	7,   // 103: memory.v1.RefreshMentalModelRequest.strategy:type_name -> memory.v1.RefreshStrategy
 	161, // 104: memory.v1.RefreshMentalModelResponse.operation:type_name -> memory.v1.Operation
-	11,  // 105: memory.v1.PreviewMentalModelRefreshRequest.strategy:type_name -> memory.v1.RefreshStrategy
-	10,  // 106: memory.v1.PreviewMentalModelRefreshResponse.requested_mode:type_name -> memory.v1.RefreshMode
+	7,   // 105: memory.v1.PreviewMentalModelRefreshRequest.strategy:type_name -> memory.v1.RefreshStrategy
+	6,   // 106: memory.v1.PreviewMentalModelRefreshResponse.requested_mode:type_name -> memory.v1.RefreshMode
 	103, // 107: memory.v1.PreviewMentalModelRefreshResponse.trace:type_name -> memory.v1.RefreshTrace
 	88,  // 108: memory.v1.PreviewMentalModelRefreshResponse.resolved_scope:type_name -> memory.v1.ResolvedScope
 	165, // 109: memory.v1.ResolvedScope.tags:type_name -> memory.v1.TagFilter
-	7,   // 110: memory.v1.ResolvedScope.fact_types:type_name -> memory.v1.FactType
-	20,  // 111: memory.v1.ListMentalModelHistoryRequest.kind:type_name -> memory.v1.MentalModelHistoryEntry.Kind
+	3,   // 110: memory.v1.ResolvedScope.fact_types:type_name -> memory.v1.FactType
+	13,  // 111: memory.v1.ListMentalModelHistoryRequest.kind:type_name -> memory.v1.MentalModelHistoryEntry.Kind
 	91,  // 112: memory.v1.ListMentalModelHistoryResponse.entries:type_name -> memory.v1.MentalModelHistoryEntry
-	20,  // 113: memory.v1.MentalModelHistoryEntry.kind:type_name -> memory.v1.MentalModelHistoryEntry.Kind
+	13,  // 113: memory.v1.MentalModelHistoryEntry.kind:type_name -> memory.v1.MentalModelHistoryEntry.Kind
 	207, // 114: memory.v1.MentalModelHistoryEntry.created_at:type_name -> google.protobuf.Timestamp
 	2,   // 115: memory.v1.MentalModelHistoryEntry.outcome:type_name -> memory.v1.RefreshOutcome
 	98,  // 116: memory.v1.SearchMentalModelsResponse.hits:type_name -> memory.v1.MentalModelHit
@@ -15961,20 +15952,20 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	207, // 121: memory.v1.MentalModel.created_at:type_name -> google.protobuf.Timestamp
 	101, // 122: memory.v1.MentalModelSpec.schedule:type_name -> memory.v1.RefreshSchedule
 	102, // 123: memory.v1.MentalModelSpec.scope:type_name -> memory.v1.MentalModelScope
-	10,  // 124: memory.v1.MentalModelSpec.mode:type_name -> memory.v1.RefreshMode
-	11,  // 125: memory.v1.MentalModelSpec.strategy:type_name -> memory.v1.RefreshStrategy
-	8,   // 126: memory.v1.MentalModelSpec.budget:type_name -> memory.v1.Budget
+	6,   // 124: memory.v1.MentalModelSpec.mode:type_name -> memory.v1.RefreshMode
+	7,   // 125: memory.v1.MentalModelSpec.strategy:type_name -> memory.v1.RefreshStrategy
+	4,   // 126: memory.v1.MentalModelSpec.budget:type_name -> memory.v1.Budget
 	194, // 127: memory.v1.MentalModelSpec.overrides:type_name -> memory.v1.RefreshOverrides
 	165, // 128: memory.v1.MentalModelScope.tags:type_name -> memory.v1.TagFilter
-	7,   // 129: memory.v1.MentalModelScope.fact_types:type_name -> memory.v1.FactType
-	10,  // 130: memory.v1.RefreshTrace.effective_mode:type_name -> memory.v1.RefreshMode
+	3,   // 129: memory.v1.MentalModelScope.fact_types:type_name -> memory.v1.FactType
+	6,   // 130: memory.v1.RefreshTrace.effective_mode:type_name -> memory.v1.RefreshMode
 	2,   // 131: memory.v1.RefreshTrace.outcome:type_name -> memory.v1.RefreshOutcome
 	175, // 132: memory.v1.RefreshTrace.tool_calls:type_name -> memory.v1.ToolCallTrace
 	104, // 133: memory.v1.RefreshTrace.delta_operations:type_name -> memory.v1.DeltaOp
 	172, // 134: memory.v1.RefreshTrace.usage:type_name -> memory.v1.SlotUsage
 	207, // 135: memory.v1.RefreshTrace.recorded_at:type_name -> google.protobuf.Timestamp
-	11,  // 136: memory.v1.RefreshTrace.effective_strategy:type_name -> memory.v1.RefreshStrategy
-	21,  // 137: memory.v1.DeltaOp.kind:type_name -> memory.v1.DeltaOp.Kind
+	7,   // 136: memory.v1.RefreshTrace.effective_strategy:type_name -> memory.v1.RefreshStrategy
+	14,  // 137: memory.v1.DeltaOp.kind:type_name -> memory.v1.DeltaOp.Kind
 	177, // 138: memory.v1.CreateBankRequest.config:type_name -> memory.v1.BankConfig
 	107, // 139: memory.v1.CreateBankRequest.template:type_name -> memory.v1.BankTemplate
 	122, // 140: memory.v1.CreateBankResponse.bank:type_name -> memory.v1.Bank
@@ -15989,7 +15980,7 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	201, // 149: memory.v1.BankStats.memories_by_fact_type:type_name -> memory.v1.BankStats.MemoriesByFactTypeEntry
 	202, // 150: memory.v1.BankStats.pending_operations_by_kind:type_name -> memory.v1.BankStats.PendingOperationsByKindEntry
 	207, // 151: memory.v1.BankStats.last_memory_write_at:type_name -> google.protobuf.Timestamp
-	3,   // 152: memory.v1.ListTagsRequest.source:type_name -> memory.v1.TagSource
+	15,  // 152: memory.v1.ListTagsRequest.source:type_name -> memory.v1.ListTagsRequest.TagSource
 	119, // 153: memory.v1.ListTagsResponse.tags:type_name -> memory.v1.TagCount
 	107, // 154: memory.v1.ExportBankTemplateResponse.template:type_name -> memory.v1.BankTemplate
 	207, // 155: memory.v1.Bank.created_at:type_name -> google.protobuf.Timestamp
@@ -16005,16 +15996,16 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	148, // 165: memory.v1.UpdateBankConfigResponse.config:type_name -> memory.v1.ConfigView
 	208, // 166: memory.v1.ResetBankConfigRequest.reset_mask:type_name -> google.protobuf.FieldMask
 	148, // 167: memory.v1.ResetBankConfigResponse.config:type_name -> memory.v1.ConfigView
-	4,   // 168: memory.v1.PreviewPromptRequest.operation:type_name -> memory.v1.PromptOperation
+	16,  // 168: memory.v1.PreviewPromptRequest.operation:type_name -> memory.v1.PreviewPromptRequest.PromptOperation
 	189, // 169: memory.v1.PreviewPromptRequest.retain:type_name -> memory.v1.RetainOverrides
 	192, // 170: memory.v1.PreviewPromptRequest.consolidation:type_name -> memory.v1.ConsolidateOverrides
 	191, // 171: memory.v1.PreviewPromptRequest.reflect:type_name -> memory.v1.ReflectOverrides
 	194, // 172: memory.v1.PreviewPromptRequest.mental_model:type_name -> memory.v1.RefreshOverrides
 	137, // 173: memory.v1.PreviewPromptResponse.preview:type_name -> memory.v1.PromptPreview
 	138, // 174: memory.v1.PromptPreview.messages:type_name -> memory.v1.PromptMessage
-	5,   // 175: memory.v1.PromptMessage.role:type_name -> memory.v1.PromptRole
+	17,  // 175: memory.v1.PromptMessage.role:type_name -> memory.v1.PromptMessage.PromptRole
 	139, // 176: memory.v1.PromptMessage.blocks:type_name -> memory.v1.PromptBlock
-	6,   // 177: memory.v1.PromptBlock.source:type_name -> memory.v1.PromptSource
+	18,  // 177: memory.v1.PromptBlock.source:type_name -> memory.v1.PromptBlock.PromptSource
 	149, // 178: memory.v1.CreateDirectiveRequest.directive:type_name -> memory.v1.Directive
 	149, // 179: memory.v1.CreateDirectiveResponse.directive:type_name -> memory.v1.Directive
 	149, // 180: memory.v1.UpdateDirectiveRequest.directive:type_name -> memory.v1.Directive
@@ -16025,17 +16016,17 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	177, // 185: memory.v1.ConfigView.own:type_name -> memory.v1.BankConfig
 	177, // 186: memory.v1.ConfigView.effective:type_name -> memory.v1.BankConfig
 	161, // 187: memory.v1.GetOperationResponse.operation:type_name -> memory.v1.Operation
-	16,  // 188: memory.v1.ListOperationsRequest.status:type_name -> memory.v1.OperationStatus
-	15,  // 189: memory.v1.ListOperationsRequest.kind:type_name -> memory.v1.OperationKind
+	9,   // 188: memory.v1.ListOperationsRequest.status:type_name -> memory.v1.OperationStatus
+	8,   // 189: memory.v1.ListOperationsRequest.kind:type_name -> memory.v1.OperationKind
 	161, // 190: memory.v1.ListOperationsResponse.operations:type_name -> memory.v1.Operation
 	161, // 191: memory.v1.CancelOperationResponse.operation:type_name -> memory.v1.Operation
 	161, // 192: memory.v1.RetryOperationResponse.operation:type_name -> memory.v1.Operation
-	17,  // 193: memory.v1.ListEventsRequest.types:type_name -> memory.v1.EventType
+	10,  // 193: memory.v1.ListEventsRequest.types:type_name -> memory.v1.EventType
 	160, // 194: memory.v1.ListEventsResponse.events:type_name -> memory.v1.LifecycleEvent
-	17,  // 195: memory.v1.LifecycleEvent.type:type_name -> memory.v1.EventType
+	10,  // 195: memory.v1.LifecycleEvent.type:type_name -> memory.v1.EventType
 	207, // 196: memory.v1.LifecycleEvent.created_at:type_name -> google.protobuf.Timestamp
-	15,  // 197: memory.v1.Operation.kind:type_name -> memory.v1.OperationKind
-	16,  // 198: memory.v1.Operation.status:type_name -> memory.v1.OperationStatus
+	8,   // 197: memory.v1.Operation.kind:type_name -> memory.v1.OperationKind
+	9,   // 198: memory.v1.Operation.status:type_name -> memory.v1.OperationStatus
 	172, // 199: memory.v1.Operation.usage:type_name -> memory.v1.SlotUsage
 	177, // 200: memory.v1.Operation.effective_overrides:type_name -> memory.v1.BankConfig
 	162, // 201: memory.v1.Operation.progress:type_name -> memory.v1.Progress
@@ -16044,20 +16035,20 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	207, // 204: memory.v1.Operation.next_run_at:type_name -> google.protobuf.Timestamp
 	207, // 205: memory.v1.Operation.heartbeat_at:type_name -> google.protobuf.Timestamp
 	207, // 206: memory.v1.Progress.recorded_at:type_name -> google.protobuf.Timestamp
-	22,  // 207: memory.v1.ObservationScopes.mode:type_name -> memory.v1.ObservationScopes.Mode
-	163, // 208: memory.v1.ObservationScopes.custom:type_name -> memory.v1.TagSet
-	9,   // 209: memory.v1.TagFilter.match:type_name -> memory.v1.TagsMatch
+	19,  // 207: memory.v1.ObservationScopeModes.mode:type_name -> memory.v1.ObservationScopeModes.Mode
+	163, // 208: memory.v1.ObservationScopeModes.custom:type_name -> memory.v1.TagSet
+	5,   // 209: memory.v1.TagFilter.match:type_name -> memory.v1.TagsMatch
 	166, // 210: memory.v1.TagFilter.groups:type_name -> memory.v1.TagGroup
 	168, // 211: memory.v1.TagGroup.leaf:type_name -> memory.v1.TagLeaf
 	167, // 212: memory.v1.TagGroup.all_of:type_name -> memory.v1.TagGroupList
 	167, // 213: memory.v1.TagGroup.any_of:type_name -> memory.v1.TagGroupList
 	166, // 214: memory.v1.TagGroup.none_of:type_name -> memory.v1.TagGroup
 	166, // 215: memory.v1.TagGroupList.groups:type_name -> memory.v1.TagGroup
-	9,   // 216: memory.v1.TagLeaf.match:type_name -> memory.v1.TagsMatch
-	23,  // 217: memory.v1.TagLeaf.resolve:type_name -> memory.v1.TagLeaf.Resolve
+	5,   // 216: memory.v1.TagLeaf.match:type_name -> memory.v1.TagsMatch
+	20,  // 217: memory.v1.TagLeaf.resolve:type_name -> memory.v1.TagLeaf.Resolve
 	203, // 218: memory.v1.Scores.arms:type_name -> memory.v1.Scores.ArmsEntry
 	204, // 219: memory.v1.MinScores.arms:type_name -> memory.v1.MinScores.ArmsEntry
-	14,  // 220: memory.v1.SlotUsage.slot:type_name -> memory.v1.ModelSlot
+	21,  // 220: memory.v1.SlotUsage.slot:type_name -> memory.v1.SlotUsage.ModelSlot
 	174, // 221: memory.v1.RecallTrace.arms:type_name -> memory.v1.ArmTrace
 	207, // 222: memory.v1.RecallTrace.time_window_start:type_name -> google.protobuf.Timestamp
 	207, // 223: memory.v1.RecallTrace.time_window_end:type_name -> google.protobuf.Timestamp
@@ -16068,22 +16059,22 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	185, // 228: memory.v1.BankConfig.reflect:type_name -> memory.v1.ReflectConfig
 	186, // 229: memory.v1.BankConfig.mental_models:type_name -> memory.v1.MentalModelConfig
 	187, // 230: memory.v1.BankConfig.models:type_name -> memory.v1.ModelBindings
-	12,  // 231: memory.v1.RetainConfig.extraction_mode:type_name -> memory.v1.ExtractionMode
+	22,  // 231: memory.v1.RetainConfig.extraction_mode:type_name -> memory.v1.RetainConfig.ExtractionMode
 	181, // 232: memory.v1.RetainConfig.entity_labels:type_name -> memory.v1.EntityLabel
-	164, // 233: memory.v1.RetainConfig.default_observation_scopes:type_name -> memory.v1.ObservationScopes
+	164, // 233: memory.v1.RetainConfig.default_observation_scope_modes:type_name -> memory.v1.ObservationScopeModes
 	183, // 234: memory.v1.ObservationConfig.strategies:type_name -> memory.v1.ConsolidationStrategy
-	24,  // 235: memory.v1.EntityLabel.type:type_name -> memory.v1.EntityLabel.Type
+	23,  // 235: memory.v1.EntityLabel.type:type_name -> memory.v1.EntityLabel.Type
 	182, // 236: memory.v1.EntityLabel.values:type_name -> memory.v1.LabelValue
 	205, // 237: memory.v1.EntityLabel.fields:type_name -> memory.v1.EntityLabel.FieldsEntry
 	165, // 238: memory.v1.ConsolidationStrategy.scopes:type_name -> memory.v1.TagFilter
 	188, // 239: memory.v1.ConsolidationStrategy.consolidate_model:type_name -> memory.v1.ModelBinding
 	188, // 240: memory.v1.ConsolidationStrategy.dedup_check_model:type_name -> memory.v1.ModelBinding
-	13,  // 241: memory.v1.RecallConfig.budget_function:type_name -> memory.v1.BudgetFunction
+	24,  // 241: memory.v1.RecallConfig.budget_function:type_name -> memory.v1.RecallConfig.BudgetFunction
 	206, // 242: memory.v1.RecallConfig.arm_boosts:type_name -> memory.v1.RecallConfig.ArmBoostsEntry
-	8,   // 243: memory.v1.ReflectConfig.recall_budget:type_name -> memory.v1.Budget
+	4,   // 243: memory.v1.ReflectConfig.recall_budget:type_name -> memory.v1.Budget
 	180, // 244: memory.v1.ReflectConfig.disposition:type_name -> memory.v1.Disposition
-	10,  // 245: memory.v1.MentalModelConfig.default_mode:type_name -> memory.v1.RefreshMode
-	11,  // 246: memory.v1.MentalModelConfig.default_strategy:type_name -> memory.v1.RefreshStrategy
+	6,   // 245: memory.v1.MentalModelConfig.default_mode:type_name -> memory.v1.RefreshMode
+	7,   // 246: memory.v1.MentalModelConfig.default_strategy:type_name -> memory.v1.RefreshStrategy
 	188, // 247: memory.v1.ModelBindings.default:type_name -> memory.v1.ModelBinding
 	188, // 248: memory.v1.ModelBindings.extract:type_name -> memory.v1.ModelBinding
 	188, // 249: memory.v1.ModelBindings.time_parse:type_name -> memory.v1.ModelBinding

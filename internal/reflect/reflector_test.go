@@ -226,7 +226,7 @@ func TestReflectMalformedToolCallReturnsToModel(t *testing.T) {
 		recallCall(),
 		doneCall("Alice likes tea.", "u1"),
 	)
-	res, err := h.reflect(func(r *rf.Request) { r.Include.ToolCalls = true })
+	res, err := h.reflect(func(r *rf.Request) { r.Include.Trace = true })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestReflectCitationFiltering(t *testing.T) {
 	t.Run("include.based_on=false", func(t *testing.T) {
 		h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
 		h.turns(recallCall(), doneCall("tea", "u1"))
-		res, err := h.reflect(func(r *rf.Request) { r.Include.Facts = ptr(false) })
+		res, err := h.reflect(func(r *rf.Request) { r.Include.BasedOn = ptr(false) })
 		if err != nil || len(res.BasedOn.Memories) != 0 {
 			t.Fatalf("memories %v err %v", res.BasedOn.Memories, err)
 		}
@@ -499,7 +499,7 @@ func TestReflectTraceAndUsage(t *testing.T) {
 	h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
 	h.turns(withUsage(recallCall(), 100, 10), withUsage(doneCall("tea", "u1"), 120, 20))
 	res, err := h.reflect(func(r *rf.Request) {
-		r.Include.ToolCalls = true
+		r.Include.Trace = true
 		r.Include.ToolOutputs = ptr(false)
 	})
 	if err != nil {
@@ -519,7 +519,7 @@ func TestReflectTraceAndUsage(t *testing.T) {
 
 	h.llm.Reset()
 	h.turns(recallCall(), doneCall("tea", "u1"))
-	res, err = h.reflect(func(r *rf.Request) { r.Include.ToolCalls = true })
+	res, err = h.reflect(func(r *rf.Request) { r.Include.Trace = true })
 	if err != nil || len(res.Trace.ToolCalls) != 1 ||
 		!strings.Contains(res.Trace.ToolCalls[0].OutputJSON, string(uid("u1"))) {
 		t.Errorf("outputs default to on with tool_calls: %+v %v", res.Trace.ToolCalls, err)

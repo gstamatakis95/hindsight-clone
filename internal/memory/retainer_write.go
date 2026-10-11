@@ -256,7 +256,7 @@ func reopen(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.Docume
 	}
 	return tx.Documents().Upsert(ctx, domain.Document{
 		ID: d.ID, Bank: d.Bank, Overrides: d.Overrides, Tags: d.Tags, BlobKey: d.BlobKey,
-		ObservationScopes: d.ObservationScopes,
+		ObservationScopeModes: d.ObservationScopeModes,
 	})
 }
 
@@ -282,7 +282,7 @@ func (r *retainer) complete(ctx context.Context, rn *run) error {
 			return err
 		}
 		if err := tx.Events().Append(ctx, domain.LifecycleEvent{
-			Seq: seq, Type: domain.EventTypeRetainCompleted, Bank: b, At: r.now(), OperationID: rn.j.ID,
+			Seq: seq, Type: domain.EventTypeRetainCompleted, Bank: b, CreatedAt: r.now(), OperationID: rn.j.ID,
 			SubjectID: string(doc),
 		}); err != nil {
 			return err

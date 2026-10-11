@@ -115,7 +115,7 @@ func TestToolsRecallAndObservations(t *testing.T) {
 	}
 	res, err = e.tool(ToolSearchObservations).Call(context.Background(), st, json.RawMessage(
 		`{"reason":"x","query":"alice"}`))
-	if err != nil || !strings.Contains(string(res.Output), `"is_stale":true`) ||
+	if err != nil || !strings.Contains(string(res.Output), `"stale":true`) ||
 		strings.Contains(string(res.Output), string(fact.ID)) {
 		t.Fatalf("search_observations (observations only, stale while u1 is unconsolidated): %s %v", res.Output, err)
 	}

@@ -11,7 +11,7 @@ import (
 // TestUnknownEnumRejected checks an undefined enum number is INVALID_ARGUMENT.
 func TestUnknownEnumRejected(t *testing.T) {
 	var d decoder
-	d.config(&pb.BankConfig{Retain: &pb.RetainConfig{ExtractionMode: pb.ExtractionMode(99)}})
+	d.config(&pb.BankConfig{Retain: &pb.RetainConfig{ExtractionMode: pb.RetainConfig_ExtractionMode(99)}})
 	if err := d.err; err == nil || !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("err = %v, want ErrInvalidArgument", err)
 	}

@@ -51,13 +51,13 @@ type Request struct {
 	Context string
 }
 
-// Include mirrors memory.v1.Include.
+// Include mirrors memory.v1.ReflectInclude.
 type Include struct {
-	// Facts fills BasedOn; nil = true.
-	Facts *bool
-	// ToolCalls fills the trace's tool calls.
-	ToolCalls bool
-	// ToolOutputs adds each tool call's output to the trace; nil = true when ToolCalls.
+	// BasedOn includes the cited evidence in the result; nil = true.
+	BasedOn *bool
+	// Trace includes the loop trace (tool calls) in the result.
+	Trace bool
+	// ToolOutputs adds each tool call's output to the trace; nil = true when Trace.
 	ToolOutputs *bool
 }
 

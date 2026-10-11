@@ -26,7 +26,7 @@ WHERE e.tenant_id = @tenant_id AND e.bank_id = @bank_id AND e.id IN (
 )
 ORDER BY e.id;
 
--- ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
+-- ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListObservationScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
 -- name: ScopeUnconsolidated :many
 SELECT s.ord::int AS ord, (
     SELECT count(*) FROM memory_units u

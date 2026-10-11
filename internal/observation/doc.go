@@ -21,7 +21,7 @@
 // all_combinations (every non-empty subset, at most max_combinations, default 15, else
 // domain.ErrTooManyScopes, which retain reports synchronously) and custom (explicit tag sets). Untagged
 // units have only the shared scope, except in custom mode. A unit's mode is its document's item-level
-// observation_scopes, else the document's override default_observation_scopes, else the run config's
+// observation_scope_modes, else the document's override default_observation_scope_modes, else the run config's
 // default, else combined; if the mode no longer expands (a lowered cap), the unit falls back to its combined
 // scope rather than being stranded.
 //
@@ -125,7 +125,7 @@
 // The observations group: enabled (true), auto_consolidation (true), reconcile_grace_seconds (600),
 // max_units_per_run (100), llm_batch_size (8), source_facts_max_tokens_per_observation (256),
 // source_facts_max_tokens (unset = no cap), max_observations_per_scope (unset or negative = uncapped; 0 = no
-// creates), dedup_threshold (0.97), mission and strategies; retain.default_observation_scopes; the CONSOLIDATE
+// creates), dedup_threshold (0.97), mission and strategies; retain.default_observation_scope_modes; the CONSOLIDATE
 // and DEDUP_CHECK bindings (overridable only by a Consolidate request or a matching strategy, never by the
 // retain that triggered the job) and mental_models refresh_debounce_seconds / min_refresh_interval_seconds.
 //

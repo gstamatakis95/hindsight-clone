@@ -22,8 +22,8 @@ func TestRunRetainJobResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, usage := run.Result()
-	want := `{"chunks_skipped":0,"chunks_total":1,"document_id":"d1","superseded":false,"unchanged":false,` +
-		`"units_created":2}`
+	want := `{"chunks_skipped":0,"chunks_total":1,"document_id":"d1",` +
+		`"memories_created":2,"superseded":false,"unchanged":false}`
 	if string(result) != want || len(usage) != 1 || usage[0].Slot != domain.ModelSlotExtract {
 		t.Fatalf("result %s usage %+v, want %s and the EXTRACT usage", result, usage, want)
 	}

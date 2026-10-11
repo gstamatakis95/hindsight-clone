@@ -48,8 +48,8 @@ type RetainItem struct {
 	DocumentID domain.DocumentID
 	// Tags are the item's tags (merged with RetainRequest.DocumentTags).
 	Tags []string
-	// ObservationScopes picks the item's scope fan-out; nil = the bank's default.
-	ObservationScopes *domain.ObservationScopes
+	// ObservationScopeModes picks the item's scope fan-out; nil = the bank's default.
+	ObservationScopeModes *domain.ObservationScopeModes
 	// Metadata is string metadata stored on every unit.
 	Metadata map[string]string
 	// Entities are caller-supplied entity hints merged with extracted mentions.
@@ -78,8 +78,8 @@ type RetainResult struct {
 type RetainedDocument struct {
 	// DocumentID is the item's document (generated when the item left it empty).
 	DocumentID domain.DocumentID
-	// UnitsCreated counts the units inserted (sync only).
-	UnitsCreated int
+	// MemoriesCreated counts the units inserted (sync only).
+	MemoriesCreated int
 	// Unchanged reports the same content + overrides hash; nothing re-extracted.
 	Unchanged bool
 	// Operation is the retain_document operation (async, changed document), or nil for an inline run.
@@ -200,10 +200,10 @@ func (i *ingestor) plan(
 		return nil, fmt.Errorf("%w: extraction mode custom needs custom_extraction_prompt", domain.ErrInvalidArgument)
 	}
 	tags := domain.NormalizeTags(append(slices.Clone(it.Tags), req.DocumentTags...))
-	if err := i.checkFanout(req.Bank, tags, scopeMode(it.ObservationScopes, cfg)); err != nil {
+	if err := i.checkFanout(req.Bank, tags, scopeMode(it.ObservationScopeModes, cfg)); err != nil {
 		return nil, err
 	}
-	oh, err := noopHash(overrides, it.ObservationScopes)
+	oh, err := noopHash(overrides, it.ObservationScopeModes)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +214,7 @@ func (i *ingestor) plan(
 	p := jobs.RetainPayload{
 		DocumentID: doc, ContentHash: contentHash(it.Content), Tags: tags, Context: it.Context,
 		Timeless: it.Timeless, Metadata: it.Metadata, Entities: payloadHints(it.Entities),
-		ResolveEntities: it.ResolveEntities, ObservationScopes: it.ObservationScopes,
+		ResolveEntities: it.ResolveEntities, ObservationScopeModes: it.ObservationScopeModes,
 		ForceReextract: it.ForceReextract, SkipConsolidation: req.SkipConsolidation,
 	}
 	p.BlobKey = blob.Key(req.Bank, doc, p.ContentHash)
@@ -261,7 +261,7 @@ func mergeOverrides(req, item *domain.BankConfig) *domain.BankConfig {
 }
 
 // checkFanout rejects a scope fan-out over its cap (domain.ExpandScopes).
-func (i *ingestor) checkFanout(b domain.BankRef, tags []string, s domain.ObservationScopes) error {
+func (i *ingestor) checkFanout(b domain.BankRef, tags []string, s domain.ObservationScopeModes) error {
 	if _, err := domain.ExpandScopes(b, tags, s); err != nil {
 		return fmt.Errorf("retain: observation scopes: %w", err)
 	}
@@ -343,7 +343,7 @@ func (i *ingestor) write(ctx context.Context, req RetainRequest, plans []*itemPl
 			}
 			if err := tx.Documents().Upsert(ctx, domain.Document{
 				ID: p.doc, Bank: req.Bank, Overrides: p.overrides, Tags: p.payload.Tags, BlobKey: p.payload.BlobKey,
-				ObservationScopes: p.payload.ObservationScopes,
+				ObservationScopeModes: p.payload.ObservationScopeModes,
 			}); err != nil {
 				return err
 			}
@@ -432,7 +432,7 @@ func (i *ingestor) runInline(
 		if err != nil {
 			return RetainResult{}, fmt.Errorf("retain document %s: %w", p.doc, err)
 		}
-		res.Documents[k].UnitsCreated = out.UnitsCreated
+		res.Documents[k].MemoriesCreated = out.MemoriesCreated
 		res.Documents[k].Unchanged = out.Unchanged
 	}
 	res.Usage = sumUsage(usage)

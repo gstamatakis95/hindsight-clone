@@ -666,7 +666,7 @@ func fillAllTables(t *testing.T, s store.DB, b domain.BankRef) filledBank {
 		if err := tx.Graph().AddLinks(ctx, ls); err != nil {
 			return err
 		}
-		v := domain.ObservationVersion{Version: 1, Text: "obs", SourceIDs: f.units[:1], At: day(1)}
+		v := domain.ObservationVersion{Version: 1, Text: "obs", SourceFactIDs: f.units[:1], CreatedAt: day(1)}
 		if err := units.RecordObservationVersion(ctx, b, f.units[2], v); err != nil {
 			return err
 		}

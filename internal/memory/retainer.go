@@ -23,8 +23,8 @@ import (
 type documentResult struct {
 	// DocumentID is the processed document.
 	DocumentID domain.DocumentID
-	// UnitsCreated counts the units this run inserted.
-	UnitsCreated int
+	// MemoriesCreated counts the units this run inserted.
+	MemoriesCreated int
 	// UnitIDs are the inserted units, in chunk and extraction order.
 	UnitIDs []domain.UnitID
 	// Unchanged reports a no-op: same content and overrides hash as the last completed retain.
@@ -155,9 +155,9 @@ func (r *retainer) ProcessDocument(ctx context.Context, job *jobs.Run) (document
 		err = r.complete(ctx, rn)
 	}
 	// The scopes follow the tags the run ended with: a retag mid-run is adopted (docSuperseded).
-	res.UnitsCreated, res.Usage, res.Scopes = len(res.UnitIDs), sumUsage(res.Usage), r.scopes(rn)
+	res.MemoriesCreated, res.Usage, res.Scopes = len(res.UnitIDs), sumUsage(res.Usage), r.scopes(rn)
 	if errors.Is(err, errSuperseded) {
-		res.Superseded, res.UnitsCreated, res.UnitIDs = true, 0, nil
+		res.Superseded, res.MemoriesCreated, res.UnitIDs = true, 0, nil
 		return res, nil
 	}
 	return res, err
@@ -202,7 +202,7 @@ func (r *retainer) start(ctx context.Context, job *jobs.Run) (*run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("retain: %w", err)
 	}
-	oh, err := noopHash(j.Overrides, p.ObservationScopes)
+	oh, err := noopHash(j.Overrides, p.ObservationScopeModes)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +367,7 @@ func uncommitted(committed map[int]string, batch []domain.Chunk) []domain.Chunk 
 
 // scopes expands the document's tags under its scope mode.
 func (r *retainer) scopes(rn *run) []domain.ScopeKey {
-	s, err := domain.ExpandScopes(rn.j.Bank, rn.tags, scopeMode(rn.p.ObservationScopes, rn.cfg))
+	s, err := domain.ExpandScopes(rn.j.Bank, rn.tags, scopeMode(rn.p.ObservationScopeModes, rn.cfg))
 	if err != nil {
 		return nil
 	}
@@ -375,15 +375,15 @@ func (r *retainer) scopes(rn *run) []domain.ScopeKey {
 }
 
 // scopeMode is the item's fan-out, else the bank default, else combined.
-func scopeMode(item *domain.ObservationScopes, cfg domain.BankConfig) domain.ObservationScopes {
+func scopeMode(item *domain.ObservationScopeModes, cfg domain.BankConfig) domain.ObservationScopeModes {
 	switch {
 	case item != nil && item.Mode != domain.ScopeModeUnspecified:
 		return *item
-	case cfg.GetRetain().DefaultObservationScopes != nil &&
-		cfg.GetRetain().DefaultObservationScopes.Mode != domain.ScopeModeUnspecified:
-		return *cfg.GetRetain().DefaultObservationScopes
+	case cfg.GetRetain().DefaultObservationScopeModes != nil &&
+		cfg.GetRetain().DefaultObservationScopeModes.Mode != domain.ScopeModeUnspecified:
+		return *cfg.GetRetain().DefaultObservationScopeModes
 	default:
-		return domain.ObservationScopes{Mode: domain.ScopeModeCombined}
+		return domain.ObservationScopeModes{Mode: domain.ScopeModeCombined}
 	}
 }
 
@@ -393,7 +393,7 @@ func (r *retainer) checkpoint(ctx context.Context, rn *run, done, total int) err
 		return fmt.Errorf("%w: %w", domain.ErrCancelled, err)
 	}
 	if err := rn.job.Report(ctx, domain.Progress{
-		Stage: "retain_chunks", At: r.now(), Processed: int64(done), Total: int64(total),
+		Stage: "retain_chunks", RecordedAt: r.now(), Processed: int64(done), Total: int64(total),
 	}); err != nil {
 		return fmt.Errorf("retain: checkpoint: %w", err)
 	}

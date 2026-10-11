@@ -98,7 +98,7 @@ func (a *agentic) request(
 	facts, outputs := true, false
 	req := reflect.Request{
 		Bank: m.Bank, Query: m.Spec.SourceQuery, Tags: scope.tagFilter(), Budget: budget(m),
-		Include:   reflect.Include{Facts: &facts, ToolCalls: true, ToolOutputs: &outputs},
+		Include:   reflect.Include{BasedOn: &facts, Trace: true, ToolOutputs: &outputs},
 		Overrides: &cfg, Seq: window, Types: scope.FactTypes,
 		ExcludeMentalModels:   m.Spec.ExcludeMentalModels,
 		ExcludeMentalModelIDs: appendUnique(slices.Clone(m.Spec.ExcludeMentalModelIDs), m.Spec.ID),

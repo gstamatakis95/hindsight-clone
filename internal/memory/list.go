@@ -90,7 +90,7 @@ func unitQuery(req ListRequest) (store.UnitQuery, error) {
 		return store.UnitQuery{}, fmt.Errorf("%w: unknown memory state %q", domain.ErrInvalidArgument, req.State)
 	}
 	q := store.UnitQuery{
-		Bank: req.Bank, Types: req.FactTypes, Q: req.TextContains, DocumentID: req.DocumentID,
+		Bank: req.Bank, Types: req.FactTypes, TextContains: req.TextContains, DocumentID: req.DocumentID,
 		EntityID: req.EntityID, State: req.State, Start: req.Start, End: req.End, TimeField: req.TimeField,
 		Tags: domain.NormalizeTags(req.Tags.Tags), TagsMatch: req.Tags.Match, Limit: size,
 	}

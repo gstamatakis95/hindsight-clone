@@ -18,7 +18,7 @@ import (
 
 // Engine is memd's retrieval core: it answers the Recall RPC and serves reflect's recall, search_observations and
 // page tools and the mental-model refreshes. It compiles tag filters (CompileTags) and searches and reads mental-model
-// pages (SearchPages, ReadPages). It is read-only and safe for concurrent use; never call it inside DB.InTx.
+// pages (SearchMentalModels, ReadPages). It is read-only and safe for concurrent use; never call it inside DB.InTx.
 type Engine struct {
 	db       store.DB
 	read     store.Reader

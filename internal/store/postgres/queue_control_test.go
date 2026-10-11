@@ -93,7 +93,7 @@ func testUnknownID(t *testing.T, q queueEnv) {
 	wantErrIs(t, "Get(unknown)", err, domain.ErrNotFound)
 	wantErrIs(t, "Complete(unknown)", q.c.Complete(t.Context(), id, json.RawMessage(`{}`), nil), domain.ErrNotFound)
 	wantErrIs(t, "Fail(unknown)", q.c.Fail(t.Context(), id, errors.New("x"), nil), domain.ErrNotFound)
-	wantErrIs(t, "Progress(unknown)", q.c.Progress(t.Context(), id, domain.Progress{Stage: "x", At: day(1)}),
+	wantErrIs(t, "Progress(unknown)", q.c.Progress(t.Context(), id, domain.Progress{Stage: "x", RecordedAt: day(1)}),
 		domain.ErrNotFound)
 }
 

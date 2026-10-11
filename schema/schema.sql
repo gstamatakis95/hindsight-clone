@@ -105,7 +105,7 @@ CREATE TABLE public.documents (
     extracted_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    observation_scopes jsonb
+    observation_scope_modes jsonb
 );
 
 --
@@ -357,7 +357,7 @@ CREATE TABLE public.mental_models (
     folder_path text DEFAULT ''::text NOT NULL,
     tags text[] DEFAULT '{}'::text[] NOT NULL,
     max_tokens integer,
-    trigger jsonb DEFAULT '{}'::jsonb NOT NULL,
+    refresh_settings jsonb DEFAULT '{}'::jsonb NOT NULL,
     overrides jsonb,
     content_md text DEFAULT ''::text NOT NULL,
     structured_output_json jsonb,

@@ -50,18 +50,18 @@ type Directive struct {
 }
 
 type Document struct {
-	TenantID          string
-	BankID            string
-	ID                string
-	ContentHash       string
-	OverridesHash     string
-	Overrides         json.RawMessage
-	Tags              []string
-	BlobKey           string
-	ExtractedAt       *time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	ObservationScopes json.RawMessage
+	TenantID              string
+	BankID                string
+	ID                    string
+	ContentHash           string
+	OverridesHash         string
+	Overrides             json.RawMessage
+	Tags                  []string
+	BlobKey               string
+	ExtractedAt           *time.Time
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	ObservationScopeModes json.RawMessage
 }
 
 type Entity struct {
@@ -196,7 +196,7 @@ type MentalModel struct {
 	FolderPath           string
 	Tags                 []string
 	MaxTokens            *int32
-	Trigger              json.RawMessage
+	RefreshSettings      json.RawMessage
 	Overrides            json.RawMessage
 	ContentMd            string
 	StructuredOutputJson json.RawMessage

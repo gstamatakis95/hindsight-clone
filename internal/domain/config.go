@@ -3,7 +3,7 @@ package domain
 // ExtractionMode selects how retain turns a document into facts.
 type ExtractionMode string
 
-// Extraction modes, mirroring memory.v1.ExtractionMode.
+// Extraction modes, mirroring memory.v1.RetainConfig.ExtractionMode.
 const (
 	// ExtractionModeUnspecified is the zero value (inherit).
 	ExtractionModeUnspecified ExtractionMode = ""
@@ -22,7 +22,7 @@ const (
 // BudgetFunction picks how recall turns a Budget into a candidate limit.
 type BudgetFunction string
 
-// Budget functions, mirroring memory.v1.BudgetFunction.
+// Budget functions, mirroring memory.v1.RecallConfig.BudgetFunction.
 const (
 	// BudgetFunctionUnspecified is the zero value (inherit).
 	BudgetFunctionUnspecified BudgetFunction = ""
@@ -144,8 +144,8 @@ type RetainConfig struct {
 	EntityLabels []EntityLabel `json:"entity_labels"`
 	// EntitiesAllowFreeForm false restricts entities to labels.
 	EntitiesAllowFreeForm *bool `json:"entities_allow_free_form,omitempty"`
-	// DefaultObservationScopes is the scope mode for items that set none.
-	DefaultObservationScopes *ObservationScopes `json:"default_observation_scopes,omitempty"`
+	// DefaultObservationScopeModes is the scope mode for items that set none.
+	DefaultObservationScopeModes *ObservationScopeModes `json:"default_observation_scope_modes,omitempty"`
 	// ChunkMaxTokens is the chunk size.
 	ChunkMaxTokens *int `json:"chunk_max_tokens,omitempty"`
 	// ChunkOverlapTokens is the overlap between chunks.

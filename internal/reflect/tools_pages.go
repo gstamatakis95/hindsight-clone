@@ -20,7 +20,7 @@ type pageOut struct {
 	Tags         []string             `json:"tags,omitempty"`
 	Relevance    *float64             `json:"relevance,omitempty"`
 	UpdatedAt    *time.Time           `json:"updated_at,omitempty"`
-	IsStale      bool                 `json:"is_stale"`
+	Stale        bool                 `json:"stale"`
 }
 
 // visiblePages reads pages by id and keeps those the request may see: not excluded and inside its tag filter.
@@ -58,7 +58,7 @@ func rememberPages(st *agentState, ms []domain.MentalModel) {
 
 // fullPage returns a page with its whole content.
 func fullPage(m domain.MentalModel) pageOut {
-	p := pageOut{ID: m.Spec.ID, Name: m.Spec.Name, Content: m.ContentMD, Tags: m.Spec.Tags, IsStale: m.Stale}
+	p := pageOut{ID: m.Spec.ID, Name: m.Spec.Name, Content: m.ContentMD, Tags: m.Spec.Tags, Stale: m.Stale}
 	if !m.UpdatedAt.IsZero() {
 		updated := m.UpdatedAt
 		p.UpdatedAt = &updated
@@ -90,7 +90,10 @@ func (t *searchPagesTool) Call(ctx context.Context, st *agentState, args json.Ra
 	if a.MaxResults != nil && *a.MaxResults >= 1 {
 		limit = int(*a.MaxResults)
 	}
-	hits, err := t.pages.SearchPages(ctx, recall.SearchPagesRequest{Bank: st.Request.Bank, Query: a.Query, Limit: limit})
+	hits, err := t.pages.SearchMentalModels(ctx, recall.SearchMentalModelsRequest{
+		Bank: st.Request.Bank, Query: a.Query,
+		Limit: limit,
+	})
 	if err != nil {
 		return retrievalError(ctx, ToolSearchMentalModels, err)
 	}
@@ -120,13 +123,13 @@ func (t *searchPagesTool) Call(ctx context.Context, st *agentState, args json.Ra
 }
 
 // findHit returns the search hit for a page.
-func findHit(hits []domain.PageHit, id domain.MentalModelID) (domain.PageHit, bool) {
+func findHit(hits []domain.MentalModelHit, id domain.MentalModelID) (domain.MentalModelHit, bool) {
 	for _, h := range hits {
 		if h.MentalModelID == id {
 			return h, true
 		}
 	}
-	return domain.PageHit{}, false
+	return domain.MentalModelHit{}, false
 }
 
 // snippet returns the search snippet, else the content's first 280 characters.

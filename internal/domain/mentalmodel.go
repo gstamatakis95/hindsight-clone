@@ -279,8 +279,8 @@ type MentalModelHistoryEntry struct {
 	Version int64
 	// PreviousContent is the replaced content (version entries).
 	PreviousContent string
-	// ChangedAt is when the entry was written.
-	ChangedAt time.Time
+	// CreatedAt is when the entry was written.
+	CreatedAt time.Time
 	// Outcome is the refresh outcome.
 	Outcome RefreshOutcome
 	// FailureReason classifies a failure.
@@ -289,8 +289,8 @@ type MentalModelHistoryEntry struct {
 	ErrorMessage string
 }
 
-// PageHit is one mental-model search result (SearchMentalModels, the search_pages reflect tool).
-type PageHit struct {
+// MentalModelHit is one mental-model search result (SearchMentalModels, the search_pages reflect tool).
+type MentalModelHit struct {
 	// MentalModelID is the page.
 	MentalModelID MentalModelID
 	// FolderPath is the page's folder.

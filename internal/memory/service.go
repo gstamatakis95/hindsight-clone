@@ -134,7 +134,7 @@ func (s *Service) RestoreMemory(ctx context.Context, req RestoreRequest) (domain
 }
 
 // RunRetainJob runs a retain_document job: it processes the job's document and records the result
-// (document_id, units_created, unchanged, superseded, chunks_total, chunks_skipped) and the EXTRACT usage on
+// (document_id, memories_created, unchanged, superseded, chunks_total, chunks_skipped) and the EXTRACT usage on
 // run. The run enqueues the bank's consolidation in its completing transaction. retain_batch parents are
 // never run; SettleRetainBatches ends them.
 func (s *Service) RunRetainJob(ctx context.Context, run *jobs.Run) error {
@@ -143,7 +143,7 @@ func (s *Service) RunRetainJob(ctx context.Context, run *jobs.Run) error {
 		return fmt.Errorf("retain_document: %w", err)
 	}
 	run.SetResult(map[string]any{
-		"document_id": res.DocumentID, "units_created": res.UnitsCreated, "unchanged": res.Unchanged,
+		"document_id": res.DocumentID, "memories_created": res.MemoriesCreated, "unchanged": res.Unchanged,
 		"superseded": res.Superseded, "chunks_total": res.ChunksTotal, "chunks_skipped": res.ChunksSkipped,
 	}, res.Usage...)
 	return nil
@@ -154,7 +154,7 @@ func (s *Service) RunRetainJob(ctx context.Context, run *jobs.Run) error {
 // deleted, stops there (domain.ErrCancelled) before the embedding call. There is no report afterwards: a late
 // cancel would turn committed work into a failure.
 func (s *Service) RunRederiveJob(ctx context.Context, run *jobs.Run) error {
-	p := domain.Progress{Stage: string(run.Job.Kind), At: s.d.Clock.Now(), Total: 1}
+	p := domain.Progress{Stage: string(run.Job.Kind), RecordedAt: s.d.Clock.Now(), Total: 1}
 	if err := run.Report(ctx, p); err != nil {
 		return fmt.Errorf("%s: checkpoint: %w", run.Job.Kind, err)
 	}

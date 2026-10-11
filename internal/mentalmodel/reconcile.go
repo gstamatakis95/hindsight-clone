@@ -78,14 +78,14 @@ func (s *Service) record(ctx context.Context, f store.FailedRefresh) (bool, erro
 		at := f.FailedAt
 		m.AutoRefreshPaused, m.LastRefreshFailedAt = true, &at
 		e := domain.MentalModelHistoryEntry{
-			Kind: domain.HistoryKindRefreshFailed, ChangedAt: f.FailedAt, Outcome: domain.RefreshOutcomeFailed,
+			Kind: domain.HistoryKindRefreshFailed, CreatedAt: f.FailedAt, Outcome: domain.RefreshOutcomeFailed,
 			FailureReason: failureReason(f.Error), ErrorMessage: f.Error,
 		}
 		if err := tx.MentalModels().AppendHistory(ctx, f.Bank, f.ModelID, e, keep); err != nil {
 			return err
 		}
 		if err := tx.Events().Append(ctx, domain.LifecycleEvent{
-			Seq: seq, Type: domain.EventTypeMentalModelRefreshFailed, Bank: f.Bank, At: s.d.Clock.Now(),
+			Seq: seq, Type: domain.EventTypeMentalModelRefreshFailed, Bank: f.Bank, CreatedAt: s.d.Clock.Now(),
 			OperationID: f.OperationID, SubjectID: string(f.ModelID),
 		}); err != nil {
 			return err
@@ -126,7 +126,7 @@ func failureReason(msg string) string {
 // result. A model (or bank) deleted before the job ran is done, not failed, so a job that runs twice or after a
 // delete is harmless. A malformed payload is domain.ErrInvalidArgument.
 func (s *Service) RunRefreshJob(ctx context.Context, run *jobs.Run) error {
-	p := domain.Progress{Stage: string(run.Job.Kind), At: s.d.Clock.Now(), Total: 1}
+	p := domain.Progress{Stage: string(run.Job.Kind), RecordedAt: s.d.Clock.Now(), Total: 1}
 	if err := run.Report(ctx, p); err != nil {
 		return fmt.Errorf("%s: checkpoint: %w", run.Job.Kind, err)
 	}

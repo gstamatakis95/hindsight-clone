@@ -49,7 +49,7 @@ func (r *run) finish(ctx context.Context) error {
 			}
 		}
 		return tx.Events().Append(ctx, domain.LifecycleEvent{
-			Seq: seq, Type: domain.EventTypeConsolidationCompleted, Bank: r.job.Bank, At: now, OperationID: r.job.ID,
+			Seq: seq, Type: domain.EventTypeConsolidationCompleted, Bank: r.job.Bank, CreatedAt: now, OperationID: r.job.ID,
 		})
 	})
 	if err != nil {

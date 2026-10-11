@@ -60,7 +60,7 @@ func parse(ctx context.Context, req Request, cfg domain.BankConfig, d parseDeps)
 	}
 	text = truncateTokens(text, MaxQueryTokens, d.count)
 	q := &parsedQuery{
-		Bank: req.Bank, Text: text, Types: factTypes(req.Types), Tags: req.Tags,
+		Bank: req.Bank, Text: text, Types: factTypes(req.FactTypes), Tags: req.Tags,
 		MinScores: req.MinScores, Seq: req.Seq, Config: cfg, At: d.clock.Now(), Budget: req.Budget,
 	}
 	if req.QueryTime != nil {

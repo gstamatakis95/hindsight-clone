@@ -42,7 +42,7 @@ type ListRequest struct {
 	// End is the exclusive upper bound on TimeField; nil = unbounded.
 	End *time.Time
 	// TimeField is the timestamp Start and End filter on; unspecified = created_at.
-	TimeField domain.DocTimeField
+	TimeField domain.DocumentTimeField
 	// PageSize caps the page (domain.ListPage); 0 = the default.
 	PageSize int
 	// PageToken continues a previous listing; empty = first page.

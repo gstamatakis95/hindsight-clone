@@ -72,7 +72,7 @@ func overridesHash(o *domain.BankConfig) (string, error) {
 // noopHash is the hash stamped as the document's overrides_hash and compared by the no-op check: the
 // overrides' hash, extended with the item's observation scopes when it set any, so a retain that only changes
 // the scopes is not "unchanged".
-func noopHash(o *domain.BankConfig, scopes *domain.ObservationScopes) (string, error) {
+func noopHash(o *domain.BankConfig, scopes *domain.ObservationScopeModes) (string, error) {
 	oh, err := overridesHash(o)
 	if err != nil || scopes == nil {
 		return oh, err

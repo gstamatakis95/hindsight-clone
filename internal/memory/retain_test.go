@@ -40,7 +40,7 @@ func TestIngestUnchangedMakesNoLLMCall(t *testing.T) {
 		t.Errorf("unchanged re-retain enqueued %d jobs", len(ops))
 	}
 	after := e.document("d1")
-	if after.ExtractedAt == nil || !after.ExtractedAt.Equal(*before.ExtractedAt) || after.UnitCount != 1 {
+	if after.ExtractedAt == nil || !after.ExtractedAt.Equal(*before.ExtractedAt) || after.MemoryCount != 1 {
 		t.Errorf("document changed: %+v -> %+v", before, after)
 	}
 	if s, _ := e.store.Read().BankSeq(e.ctx, testBank); s != seq {
@@ -61,7 +61,7 @@ func TestIngestUnchangedMakesNoLLMCall(t *testing.T) {
 	if got := e.extractCalls(); got != 2 {
 		t.Errorf("%d extract calls for force + changed overrides, want 2", got)
 	}
-	if n := e.document("d1").UnitCount; n != 1 {
+	if n := e.document("d1").MemoryCount; n != 1 {
 		t.Errorf("%d units after replacements, want 1", n)
 	}
 }
@@ -79,7 +79,10 @@ func TestIngestFanOutRejectionStoresNothing(t *testing.T) {
 			{DocumentID: "ok", Content: "fine"},
 			{
 				DocumentID: "bad", Content: "too many", Tags: []string{"a", "b", "c", "d"},
-				ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeAllCombinations, MaxCombinations: &limit},
+				ObservationScopeModes: &domain.ObservationScopeModes{
+					Mode:            domain.ScopeModeAllCombinations,
+					MaxCombinations: &limit,
+				},
 			},
 		}})
 		if !errors.Is(err, domain.ErrTooManyScopes) || !errors.Is(err, domain.ErrInvalidArgument) {
@@ -106,7 +109,7 @@ func TestIngestFanOutRejectionStoresNothing(t *testing.T) {
 	// Within the cap (3 tags = 7 combinations) the same item is accepted.
 	e.ingest(RetainRequest{Items: []RetainItem{{
 		DocumentID: "bad", Content: "ok now", Tags: []string{"a", "b", "c"},
-		ObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeAllCombinations, MaxCombinations: ptr(7)},
+		ObservationScopeModes: &domain.ObservationScopeModes{Mode: domain.ScopeModeAllCombinations, MaxCombinations: ptr(7)},
 	}}})
 }
 

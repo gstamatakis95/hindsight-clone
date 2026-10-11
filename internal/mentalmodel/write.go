@@ -125,7 +125,7 @@ func writeVersion(
 	if cur.ContentMD != "" {
 		e := domain.MentalModelHistoryEntry{
 			Kind: domain.HistoryKindVersion, Version: cur.Version, PreviousContent: cur.ContentMD,
-			ChangedAt: meta.now, Outcome: domain.RefreshOutcomeContentWritten,
+			CreatedAt: meta.now, Outcome: domain.RefreshOutcomeContentWritten,
 		}
 		if err := tx.MentalModels().AppendHistory(ctx, cur.Bank, cur.Spec.ID, e, historyKeep(meta.cfg)); err != nil {
 			return 0, err
@@ -138,7 +138,7 @@ func writeVersion(
 		next.Embedding = dr.embedding
 	}
 	err := tx.Events().Append(ctx, domain.LifecycleEvent{
-		Seq: seq, Type: domain.EventTypeMentalModelRefreshed, Bank: cur.Bank, At: meta.now,
+		Seq: seq, Type: domain.EventTypeMentalModelRefreshed, Bank: cur.Bank, CreatedAt: meta.now,
 		OperationID: meta.op, SubjectID: string(cur.Spec.ID),
 	})
 	if err != nil {

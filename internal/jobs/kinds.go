@@ -71,8 +71,8 @@ type RetainPayload struct {
 	Entities []RetainHint `json:"entities,omitempty"`
 	// ResolveEntities false takes the hint names literally; nil = true.
 	ResolveEntities *bool `json:"resolve_entities,omitempty"`
-	// ObservationScopes is the item's scope fan-out; nil = the bank default.
-	ObservationScopes *domain.ObservationScopes `json:"observation_scopes,omitempty"`
+	// ObservationScopeModes is the item's scope fan-out; nil = the bank default.
+	ObservationScopeModes *domain.ObservationScopeModes `json:"observation_scope_modes,omitempty"`
 	// ForceReextract re-runs extraction even when content and overrides are unchanged.
 	ForceReextract bool `json:"force_reextract,omitempty"`
 	// SkipConsolidation suppresses the consolidate job after the retain.

@@ -40,11 +40,14 @@ func ServerDefaults(file domain.BankConfig) (domain.BankConfig, error) {
 func specDefaults() domain.BankConfig {
 	return domain.BankConfig{
 		Retain: &domain.RetainConfig{
-			ExtractionMode:           domain.ExtractionModeConcise,
-			EntitiesAllowFreeForm:    ptr(true),
-			DefaultObservationScopes: &domain.ObservationScopes{Mode: domain.ScopeModeCombined, MaxCombinations: ptr(15)},
-			TemporalLinkCap:          ptr(20),
-			EntityMatchThreshold:     ptr(0.6),
+			ExtractionMode:        domain.ExtractionModeConcise,
+			EntitiesAllowFreeForm: ptr(true),
+			DefaultObservationScopeModes: &domain.ObservationScopeModes{
+				Mode:            domain.ScopeModeCombined,
+				MaxCombinations: ptr(15),
+			},
+			TemporalLinkCap:      ptr(20),
+			EntityMatchThreshold: ptr(0.6),
 		},
 		Observations: &domain.ObservationConfig{
 			Enabled:                            ptr(true),

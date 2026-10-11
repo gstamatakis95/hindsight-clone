@@ -42,8 +42,8 @@ func TestGoldenRetainRequest(t *testing.T) {
 			Timeless:   true,
 			DocumentId: "doc-1",
 			Tags:       []string{"item-tag"},
-			ObservationScopes: &pb.ObservationScopes{
-				Mode: pb.ObservationScopes_MODE_PER_TAG, MaxCombinations: ptr[int32](7),
+			ObservationScopeModes: &pb.ObservationScopeModes{
+				Mode: pb.ObservationScopeModes_MODE_PER_TAG, MaxCombinations: ptr[int32](7),
 			},
 			Metadata:        map[string]string{"meta-k": "meta-v"},
 			Entities:        []*pb.EntityHint{{Text: "Alice", Type: "person"}},
@@ -70,7 +70,7 @@ func TestGoldenRetainRequest(t *testing.T) {
 			Timeless:   true,
 			DocumentID: "doc-1",
 			Tags:       []string{"item-tag"},
-			ObservationScopes: &domain.ObservationScopes{
+			ObservationScopeModes: &domain.ObservationScopeModes{
 				Mode: domain.ScopeModePerTag, MaxCombinations: ptr(7),
 			},
 			Metadata:        map[string]string{"meta-k": "meta-v"},
@@ -129,9 +129,9 @@ func TestGoldenRecallRequest(t *testing.T) {
 		},
 	}
 	want := recall.Request{
-		Bank:  domain.BankRef{Bank: "bank-2"},
-		Query: "what happened",
-		Types: []domain.FactType{domain.FactTypeExperience, domain.FactTypeObservation},
+		Bank:      domain.BankRef{Bank: "bank-2"},
+		Query:     "what happened",
+		FactTypes: []domain.FactType{domain.FactTypeExperience, domain.FactTypeObservation},
 		Tags: domain.TagFilter{
 			Tags: []string{"flat-tag"}, Match: domain.TagsMatchAllStrict,
 			Groups: []domain.TagGroup{{Kind: domain.TagGroupLeaf, Leaf: &domain.TagLeaf{
@@ -213,7 +213,7 @@ func TestGoldenReflectRequest(t *testing.T) {
 		ExtraDirectives: []domain.Directive{{
 			ID: "dir-1", Name: "dir-name", Rules: []string{"be brief"}, Tags: []string{"dir-tag"}, Active: true,
 		}},
-		Include:   reflecteng.Include{Facts: ptr(false), ToolCalls: true, ToolOutputs: ptr(false)},
+		Include:   reflecteng.Include{BasedOn: ptr(false), Trace: true, ToolOutputs: ptr(false)},
 		QueryTime: ptr(goldenTime(5)),
 		Arms:      []string{"text"},
 		Overrides: &domain.BankConfig{

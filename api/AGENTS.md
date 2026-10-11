@@ -30,9 +30,17 @@ Where a new type goes:
 - **Comment everything.** Give every service, rpc, message, field, oneof, enum and enum value (nested ones and
   `*_UNSPECIFIED` too) a *leading* comment that carries real information: defaults, units, what unset means, and
   which RPC reads the field. `buf lint` runs STANDARD + COMMENTS, and trailing comments don't count.
-- **Field numbers.** Until the first release, fields may be renamed and renumbered. After it, never renumber or
-  reuse a field number: when you remove a field or enum value, add `reserved` for both its number and its name,
-  and never change a field's type, label or name in place.
+- **Field numbers.** Number the fields of every message 1..N in declaration order, and the values of every enum
+  from `*_UNSPECIFIED = 0` upwards; put identifiers first, then inputs, options and overrides (responses: the main
+  result first). Until the first release nothing is on the wire, so you may rename, reorder and renumber freely
+  and keep no `reserved` statements. From the first release on, never renumber or reuse a field number: append new
+  fields at the end with the next number, when you remove a field or enum value add `reserved` for both its
+  number and its name, and never change a field's type, label or name in place.
+- **Enums.** An enum used by exactly one message is nested in that message (`ListMemoriesRequest.TimeField`); an
+  enum used by two or more messages is a top-level enum in the Shared enums section. A nested enum's values keep
+  the enum's own name as their prefix (`TIME_FIELD_CREATED_AT`).
+- **Comments are for clients.** Describe behaviour a client can observe. Never name tables, SQL, queues, locks,
+  worker timings or internal packages in a comment.
 - **New config goes in `BankConfig`,** in its phase group (`RetainConfig`, `ObservationConfig`, `RecallConfig`,
   `ReflectConfig`, `MentalModelConfig`, `ModelBindings`). Every request that does work takes its own overrides
   message (`RetainOverrides`, `RecallOverrides`, ...) holding only what that RPC may change; add the knob there
