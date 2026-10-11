@@ -132,7 +132,7 @@ func (r *bankRepo) Delete(ctx context.Context, b domain.BankRef) error {
 	return mapErr(fmt.Sprintf("delete operations of bank %s/%s", b.Tenant, b.Bank), err)
 }
 
-// bankUnkeyedTables are the bank-keyed tables with no foreign key to the bank (decision 004): the bank row's
+// bankUnkeyedTables are the bank-keyed tables with no foreign key to the bank: the bank row's
 // cascade misses them, so Delete removes their rows itself.
 var bankUnkeyedTables = map[string]bool{
 	"graph_dirty": true, "entity_maintenance": true, "observation_versions": true, "memory_audit": true,

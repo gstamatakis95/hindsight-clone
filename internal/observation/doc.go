@@ -144,6 +144,6 @@
 // and retags between scopes, cleared or invalidated co-sources, dedup merge and keep, observation caps, manual
 // scopes, document scope modes, strategy precedence, refresh triggers, the job's result keys, the clears
 // (counts, seq order, graph_maintenance, reconsolidation, a fact waiting for its rederive), scope paging, the
-// strategy preview, history paging and the reconcile sweep's config filter and grace. SPEC "Engines"
-// (consolidation), "Jobs" (consolidate) and "Model routing" (async slots).
+// strategy preview, history paging and the reconcile sweep's config filter and grace. Design:
+// docs/design/consolidation.md.
 package observation

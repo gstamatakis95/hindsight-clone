@@ -21,7 +21,7 @@ func (e *batchError) Error() string { return "consolidate call: " + e.err.Error(
 func (e *batchError) Unwrap() error { return e.err }
 
 // batch decides ids in scope i and applies the decision. A failed call halves the batch; a unit failing
-// alone is deferred, and the caller settles it once the top-level batch is done (decision 1002).
+// alone is deferred, and the caller settles it once the top-level batch is done (docs/design/consolidation.md#failure-handling).
 func (r *run) batch(ctx context.Context, i int, cfg domain.BankConfig, ids []domain.UnitID) error {
 	if len(ids) == 0 {
 		return nil
@@ -86,7 +86,7 @@ func (r *run) attempt(ctx context.Context, i int, cfg domain.BankConfig, ids []d
 }
 
 // recordCited adds scope s to the cited scopes of each of ids, the facts an observation this run wrote in s
-// cites, so later stamps re-check that s still cites them (decision 1801).
+// cites, so later stamps re-check that s still cites them.
 func (r *run) recordCited(s domain.ScopeKey, ids []domain.UnitID) {
 	for _, id := range ids {
 		if _, planned := r.units[id]; !planned {
@@ -99,7 +99,7 @@ func (r *run) recordCited(s domain.ScopeKey, ids []domain.UnitID) {
 }
 
 // settle resolves the units deferred by scope i's last top-level batch, with that scope's config and so
-// its CONSOLIDATE binding (decision 1002). A health probe (one call with no facts) must succeed first;
+// its CONSOLIDATE binding. A health probe (one call with no facts) must succeed first;
 // otherwise the run fails with UNAVAILABLE and nothing is parked. Each deferred unit is then retried
 // alone once, and only those that fail again are parked. Two top-level batches in a row in which every
 // call failed, with no success between them, trip the circuit breaker: the run fails instead.

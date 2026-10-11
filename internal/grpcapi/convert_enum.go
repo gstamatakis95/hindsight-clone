@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// Conversion conventions (decision 603):
+// Conversion conventions:
 //   - proto -> domain goes through a decoder, which records the first error (an unknown enum number or an
 //     invalid timestamp, both INVALID_ARGUMENT) and returns zero values after it, so converters stay
 //     branch-free. Top-level xFromProto functions return (value, d.err).

@@ -107,7 +107,7 @@ func (r *run) pendingScopes(
 		keys, err := domain.ExpandScopes(r.job.Bank, u.Tags, mode)
 		if err != nil {
 			// The mode changed since retain (which rejects this synchronously): fall back to the combined
-			// scope rather than strand the unit (decision 1003).
+			// scope rather than strand the unit.
 			keys = []domain.ScopeKey{domain.NewScopeKey(r.job.Bank, u.Tags)}
 		}
 		for _, k := range keys {
@@ -125,7 +125,7 @@ func (r *run) pendingScopes(
 	return pending, cited, nil
 }
 
-// unitMode returns the unit's scope fan-out (decision 1003): its document's item-level
+// unitMode returns the unit's scope fan-out (docs/design/consolidation.md#scopes): its document's item-level
 // observation_scopes, else the document's retain overrides' default_observation_scope_modes, else the run
 // config's default, else combined. modes caches documents.
 func (r *run) unitMode(

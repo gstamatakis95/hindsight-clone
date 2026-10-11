@@ -39,7 +39,7 @@ func WithTenant(ctx context.Context, tenant string) context.Context {
 }
 
 // TenantInterceptor reads the tenant from the x-tenant-id header into the context. A missing, empty,
-// repeated or malformed header fails with INVALID_ARGUMENT naming the x-tenant-id field (decision 600).
+// repeated or malformed header fails with INVALID_ARGUMENT naming the x-tenant-id field.
 // Health checks need no tenant.
 func TenantInterceptor() grpc.UnaryServerInterceptor {
 	return func(

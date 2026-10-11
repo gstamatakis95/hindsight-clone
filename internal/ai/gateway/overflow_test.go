@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// TestContextOverflowClassified checks CCR WP-11-1: a non-retryable 400 or 413 whose body carries an
+// TestContextOverflowClassified checks the overflow classification: a non-retryable 400 or 413 whose body carries an
 // overflow marker is both ErrContextOverflow and ErrUnavailable; any other 4xx is only ErrUnavailable.
 func TestContextOverflowClassified(t *testing.T) {
 	cases := []struct {

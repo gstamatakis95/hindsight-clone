@@ -1,4 +1,4 @@
--- WP-15 admin reads (decision 1500): tag counts, bank stats, observation history, mental-model listings, cron and
+-- Admin reads: tag counts, bank stats, observation history, mental-model listings, cron and
 -- failed-refresh sweeps, and document listings. Text keysets and orderings use COLLATE "C" (byte order). LIKE
 -- patterns arrive already escaped (%, _ and \ literal) from the Go side.
 

@@ -89,5 +89,5 @@
 // reading current tags, unknown documents, re-enqueue after a failed retag, label
 // tags kept, cancellation mid-transaction, listing and paging, reading with and without text, a missing blob,
 // and reprocessing (payload, scopes, overrides, a curated unit ignored, unknown document, deleting bank).
-// SPEC "Behavioural rules" (RetagDocument), "Jobs" (retag_document) and "gRPC surface" (DocumentService).
+// Design: docs/design/retain.md#retag-retagdocument and docs/design/retain.md#reprocess.
 package document

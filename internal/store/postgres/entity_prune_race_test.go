@@ -60,7 +60,7 @@ func pruneOne(t *testing.T, s *postgres.DB, b domain.BankRef, e domain.EntityID)
 // TestAttachAfterConcurrentPruneReresolves: a retain batch resolves "John" to entity E (Candidates), graph
 // maintenance prunes E (an orphan at that moment) in a concurrent transaction, and the batch then attaches
 // E. Attach must not skip E silently: it fails with ErrConflict, InTx re-runs the transaction, and the
-// re-run resolves "John" afresh, creating a new entity that the unit carries (decision 2501).
+// re-run resolves "John" afresh, creating a new entity that the unit carries.
 func TestAttachAfterConcurrentPruneReresolves(t *testing.T) {
 	t.Parallel()
 	s := pgtest.NewStore(t)

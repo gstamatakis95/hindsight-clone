@@ -27,7 +27,7 @@
 //
 // Queries the adapter must build at run time (the recall arms' variable tag predicates and the NewestSeqInScope read)
 // are not here: internal/store/postgres renders them with bind parameters and runs them on the same DBTX. The queue's
-// claim (ClaimSelect) is the SPEC "Jobs" claim SQL verbatim except for a ::text[] cast on $1.
+// claim (ClaimSelect) is the claim of docs/design/architecture.md#claim-and-serial-keys, with a ::text[] cast on $1.
 //
 // # Testing
 //

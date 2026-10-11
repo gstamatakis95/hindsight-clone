@@ -85,5 +85,5 @@ func noopHash(o *domain.BankConfig, scopes *domain.ObservationScopeModes) (strin
 }
 
 // runHash is a chunk's stored hash: its content hash salted with the run key, so Chunks.Committed tells the
-// chunks this retain committed from leftovers of an earlier one (decision 801).
+// chunks this retain committed from leftovers of an earlier one (docs/design/retain.md#ownership-and-resume).
 func runHash(runKey, hash string) string { return hashText(runKey + "\x00" + hash) }

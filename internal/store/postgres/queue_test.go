@@ -50,7 +50,7 @@ type queueCase struct {
 
 // TestQueue covers store.Queue (through Tx.Queue) and jobs.Claimer: claim order, run_at, serial keys, dedupe,
 // upgrade, reschedule, operation control (get, list, cancel, retry, prune), deleting banks, tenant isolation,
-// heartbeats, reclaim, fencing, retries and concurrent claims and enqueues (SPEC "Jobs" claim SQL and rules).
+// heartbeats, reclaim, fencing, retries and concurrent claims and enqueues (docs/design/architecture.md#job-queue).
 // Each case runs in parallel on its own empty database.
 func TestQueue(t *testing.T) {
 	t.Parallel()

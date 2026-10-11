@@ -10,12 +10,12 @@ import (
 
 // oaAfterShared continues a scope listing after the shared scope, whose key "" cannot be a cursor ("" means
 // "from the start"). Every other key starts with a tag length of at least 1, so "0" sorts after "" and
-// before every other key (decision 1560).
+// before every other key.
 const oaAfterShared = "0"
 
 // TestObservationAdmin runs the contract tests of the observation administration methods:
 // ListObservationScopes, UnitRepo.IDsByDocument, EvidenceRepo.CitingScopes, DeleteScopes and DeleteAllObservations,
-// with the semantics pinned by decision 1500.
+// with the semantics the store interface comments state.
 func TestObservationAdmin(t *testing.T) {
 	t.Parallel()
 	runStoreCases(t, []storeCase{
@@ -275,7 +275,7 @@ func newOaScopeFixture(t *testing.T, s store.DB) oaScopeFixture {
 	t.Helper()
 	ensureBanks(t, s, bankA, bankB, bankOtherTenant)
 	f1, f2, f3 := oaFact(bankA, "f1", "x"), oaFact(bankA, "f2", "x", "y"), oaFact(bankA, "f3", "y")
-	f2.Embedding = nil // waiting for rederive still awaits consolidation (decision 1500)
+	f2.Embedding = nil // waiting for rederive still awaits consolidation
 	f4, f5, f6, fz := oaFact(bankA, "f4", "x"), oaFact(bankA, "f5"), oaFact(bankA, "f6", "x"), oaFact(bankA, "fz", "z")
 	insertUnits(t, s, f1, f2, f3, f4, f5, f6, fz)
 	oaMark(t, s, []domain.UnitID{f3.ID, fz.ID}, day(5), []domain.UnitID{f4.ID}, day(6))

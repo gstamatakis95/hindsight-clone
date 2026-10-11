@@ -22,7 +22,7 @@ const (
 // within GraphBudget and re-enqueues itself (jobs.Requeue, DedupePending) when work is left. When the drain
 // reports done it re-checks both queues as its last step: a removal that committed after the drain's final
 // empty batch enqueued graph_maintenance with DedupePendingOrRunning and so joined this running row, and
-// without the re-check its rows would wait for the next removal (decision 1451). Every batch is idempotent,
+// without the re-check its rows would wait for the next removal. Every batch is idempotent,
 // so a run that repeats after a reclaim only redoes uncleared rows. A tombstoned or deleted bank stops the
 // run with domain.ErrCancelled.
 func (s *Service) RunGraphJob(ctx context.Context, run *jobs.Run) error {

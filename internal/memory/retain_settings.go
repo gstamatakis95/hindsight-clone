@@ -6,7 +6,7 @@ import (
 )
 
 // Defaults for retain tuning knobs the spec leaves open (ServerDefaults leaves them unset).
-// They follow Hindsight's defaults (decision 803).
+// They follow Hindsight's defaults.
 const (
 	// defaultChunkMaxTokens is the chunk size (Hindsight: 3000 characters, about 750 tokens).
 	defaultChunkMaxTokens = 750

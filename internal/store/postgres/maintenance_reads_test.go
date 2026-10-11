@@ -27,7 +27,7 @@ var (
 const mtCron = "0 * * * *"
 
 // TestMaintenanceReads covers the cross-bank maintenance reads CronModels, FailedRefreshes,
-// UnconsolidatedBanks and QueueStats, plus UnitRepo.Unconsolidated's embedding filter (decision 1500).
+// UnconsolidatedBanks and QueueStats, plus UnitRepo.Unconsolidated's embedding filter.
 // Refresh operations reach terminal states through the Claimer.
 func TestMaintenanceReads(t *testing.T) {
 	t.Parallel()
@@ -93,7 +93,7 @@ func (q queueEnv) mtCompleted(t *testing.T, b domain.BankRef, m domain.MentalMod
 }
 
 // mtFailed enqueues and claims a refresh of model m of bank b, then fails it for good (Fail with a nil
-// retryAt writes FAILED; the runner owns the attempt cap, decision 012 R10') with cause msg.
+// retryAt writes FAILED; the runner owns the attempt cap) with cause msg.
 func (q queueEnv) mtFailed(t *testing.T, b domain.BankRef, m domain.MentalModelID, msg string) domain.OperationID {
 	t.Helper()
 	id := q.mtRefresh(t, b, m, time.Time{})

@@ -46,7 +46,7 @@ func (s *Service) ListObservationScopes(
 }
 
 // scopeCursor is the keyset cursor after scope s: its canonical key, except that the shared scope's key ""
-// would restart the listing, so it maps to "0", which sorts before every tagged key (decision 1560).
+// would restart the listing, so it maps to "0", which sorts before every tagged key.
 func scopeCursor(b domain.BankRef, s domain.ScopeInfo) string {
 	if key := domain.NewScopeKey(b, s.Scope.Tags).String(); key != "" {
 		return key

@@ -221,8 +221,8 @@ func factTime(f domain.ExtractedFact, mentioned *time.Time) time.Time {
 // replace removes the document's old units in the first batch's transaction: observations citing them are
 // deleted and their other sources reset (EvidenceRepo.DeleteCiting, before the units go, since evidence rows
 // cascade), then the units are deleted and graph maintenance is queued for their neighbours. The units are
-// listed with UnitRepo.IDsByDocument, which writes nothing (decision 802, superseded by the CCR batch).
-// It first reopens the document (decision 2200), so a run that fails after replacing never leaves it stamped
+// listed with UnitRepo.IDsByDocument, which writes nothing.
+// It first reopens the document, so a run that fails after replacing never leaves it stamped
 // complete.
 func (r *retainer) replace(ctx context.Context, tx store.Tx, rn *run) error {
 	b, doc := rn.j.Bank, rn.p.DocumentID
@@ -244,11 +244,11 @@ func (r *retainer) replace(ctx context.Context, tx store.Tx, rn *run) error {
 }
 
 // reopen clears the document's extracted_at when another retain of the same content completed it after this
-// run started (overlapping runs, decision 807): the units this run is about to replace are that retain's, so
+// run started (overlapping runs): the units this run is about to replace are that retain's, so
 // until this run completes the document is in flight again. It re-upserts the document as read in this
 // transaction (the bank is Seq-locked), so only extracted_at changes. Without it, a run failing after its
 // first batch would leave a document stamped complete with only that batch's units, and every later retain
-// of the same content would report Unchanged (decision 2200).
+// of the same content would report Unchanged (docs/design/retain.md#replacement).
 func reopen(ctx context.Context, tx store.Tx, b domain.BankRef, id domain.DocumentID) error {
 	d, err := tx.Documents().Get(ctx, b, id)
 	if err != nil || d.ExtractedAt == nil {

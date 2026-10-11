@@ -22,7 +22,7 @@ func fuzzySpec() domain.MentalModelSpec {
 	}
 }
 
-// TestFuzzyScopeResolvesBankTags checks decision 1203: a fuzzy leaf resolves against the bank's
+// TestFuzzyScopeResolvesBankTags checks that a fuzzy leaf resolves against the bank's
 // tags (Reader.TagCounts) before the scope compiles. An off-tag unit no longer stales the model,
 // the misspelt leaf matches the real tag, an untagged unit still never stales it, and the runner's pre-check
 // lets the refresh retrieve.

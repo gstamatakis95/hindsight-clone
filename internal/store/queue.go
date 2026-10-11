@@ -10,7 +10,7 @@ import (
 )
 
 // DedupePolicy says which existing row an Enqueue joins instead of inserting a new one. Matching is on
-// (bank, kind, serial key) among joinable rows (see Job.Overrides and decision 012).
+// (bank, kind, serial key) among joinable rows (see Job.Overrides and docs/design/architecture.md#enqueue-and-dedupe).
 type DedupePolicy int
 
 // Dedupe policies.
@@ -52,7 +52,7 @@ type Job struct {
 	Payload json.RawMessage
 	// Overrides are request overrides; nil = none. A job with overrides is never deduplicated in either
 	// direction (it neither joins a queued row nor is joined later), except refresh_mental_model, which
-	// always joins its model's queued refresh and is then upgraded (decision 012, R1).
+	// always joins its model's queued refresh and is then upgraded.
 	// Self-continuations (consolidate, graph_maintenance, delete_bank re-enqueuing leftover work) use
 	// DedupePending.
 	Overrides *domain.BankConfig

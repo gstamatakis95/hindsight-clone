@@ -101,6 +101,6 @@
 // retrieval errors, empty retrieval, empty answers, models without tool calls, context overflow and
 // synthesis fallbacks, the token budget, malformed calls, done before retrieval, citation filtering, the
 // iteration cap per budget, extra directives, structured output and its failure, as-document answers, fact
-// type limits, the closing done turn and fast failure without a search tool. SPEC "Engines" (reflect),
-// "Behavioural rules" (Reflect) and "Model routing" (REFLECT, STRUCTURED_OUTPUT).
+// type limits, the closing done turn and fast failure without a search tool. Design:
+// docs/design/reflect-and-mental-models.md#reflect.
 package reflect

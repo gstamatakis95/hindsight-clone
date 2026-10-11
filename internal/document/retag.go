@@ -41,7 +41,7 @@ func (s *Service) RetagDocument(
 // the job is enqueued again. The common no-op path reads only: it bumps no change seq. A real change takes
 // the bank's change seq (which serializes concurrent retags of the bank), re-reads the tags under that lock
 // and only then writes: the document's tags and, in the same transaction, its units' document-derived tags
-// (old to new; their label tags stay, decision 1900).
+// (old to new; their label tags stay).
 func (s *Service) retag(
 	ctx context.Context, b domain.BankRef, doc domain.DocumentID, tags []string,
 ) (domain.OperationID, error) {

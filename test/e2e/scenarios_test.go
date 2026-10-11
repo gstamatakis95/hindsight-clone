@@ -26,7 +26,7 @@ const (
 		"Alice drinks a cortado every morning."
 )
 
-// TestScenarios is the WP-14b end-to-end suite.
+// TestScenarios is the end-to-end suite: one scenario per subtest, against one stack.
 func TestScenarios(t *testing.T) {
 	e := startEnv(t)
 	t.Run("RetainSync", e.retainSync)

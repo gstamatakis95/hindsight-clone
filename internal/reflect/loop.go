@@ -13,7 +13,7 @@ import (
 )
 
 // isContextOverflow reports whether a chat error is a context-window overflow: the gateway classifies
-// provider overflow replies as domain.ErrContextOverflow (CCR WP-11-1, decision 1101).
+// provider overflow replies as domain.ErrContextOverflow.
 func isContextOverflow(err error) bool {
 	return errors.Is(err, domain.ErrContextOverflow)
 }

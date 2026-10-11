@@ -2,7 +2,7 @@ package recall
 
 import "memd/internal/domain"
 
-// Defaults recall owns: the spec states no server default for these knobs (decision 900), or they are not
+// Defaults recall owns: the server level sets no default for these knobs, or they are not
 // config knobs at all.
 const (
 	// DefaultMaxTokens is the packing budget when a request leaves max_tokens at 0.

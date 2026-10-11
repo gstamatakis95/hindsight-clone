@@ -275,7 +275,7 @@ func TestRunTriggersRefreshes(t *testing.T) {
 	}
 	for _, j := range jobs {
 		// The wire shape is the refresh handler's (jobs.RefreshPayload): exactly the key
-		// mental_model_id (decision 1800). Decoded by hand so a drift in this package's type is caught.
+		// mental_model_id. Decoded by hand so a drift in this package's type is caught.
 		var keys map[string]string
 		if err := json.Unmarshal(j.Payload, &keys); err != nil {
 			t.Fatal(err)

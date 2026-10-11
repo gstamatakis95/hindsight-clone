@@ -540,7 +540,7 @@ func testEntityCooccurrence(t *testing.T, s store.DB) {
 }
 
 // testEntityAttachPruned: Attach of an entity that was pruned (resolved before graph maintenance deleted
-// it) is domain.ErrConflict and attaches nothing, not even the entities that still exist (decision 2501).
+// it) is domain.ErrConflict and attaches nothing, not even the entities that still exist.
 func testEntityAttachPruned(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA)
 	u := fact(bankA, "Ann met Ben")

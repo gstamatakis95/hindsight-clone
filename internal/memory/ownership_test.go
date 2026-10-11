@@ -183,7 +183,7 @@ func TestIngestFanOutRejectionUnknownBankCreatesNothing(t *testing.T) {
 // TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged: a sync retain of the same content completes
 // while an async job of the document is in flight; the job's first batch then replaces the sync run's units
 // and the job fails transiently on chunk 2. The replace reopens the document, so the job's retry resumes
-// instead of reporting the document unchanged with one unit (decision 2200).
+// instead of reporting the document unchanged with one unit (docs/design/retain.md#replacement).
 func TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged(t *testing.T) {
 	e := newEnv(t, 1)
 	content := paragraphs(6, "one")
@@ -215,7 +215,7 @@ func TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged(t *testing.T) 
 // TestRetainSyncVictimPartialReplaceIsNotUnchanged: an async job of the same content completes after a sync
 // run's pre-check; the sync run's first batch replaces the job's units, then the sync run fails. The document
 // is in flight again with its tags, overrides and scopes intact, so the client's retry re-extracts it instead
-// of being reported Unchanged (decision 2200).
+// of being reported Unchanged.
 func TestRetainSyncVictimPartialReplaceIsNotUnchanged(t *testing.T) {
 	e := newEnv(t, 1)
 	content := paragraphs(6, "one")

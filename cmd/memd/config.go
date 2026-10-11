@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Run modes (SPEC "Process model").
+// Run modes (docs/design/architecture.md#process-model).
 const (
 	// modeAPI serves gRPC: Recall, Reflect, sync Retain and every admin RPC.
 	modeAPI = "api"
@@ -89,7 +89,7 @@ type Config struct {
 	// S3Bucket holds the original document texts.
 	S3Bucket string
 	// S3AccessKey is the static access key. The S3 adapter signs with static credentials only (no AWS
-	// default credential chain), so it is required, together with S3SecretKey (decision 2004).
+	// default credential chain), so it is required, together with S3SecretKey.
 	S3AccessKey string
 	// S3SecretKey is the static secret key; required.
 	S3SecretKey string
@@ -99,7 +99,7 @@ type Config struct {
 	S3PathStyle bool
 	// WorkerID is the prefix of this worker's id on claimed rows; empty = the hostname. Every process appends
 	// its own uuid (effectiveWorkerID), so two workers given the same MEMD_WORKER_ID never share an id and
-	// heartbeat fencing keeps working (decision 2004).
+	// heartbeat fencing keeps working.
 	WorkerID string
 	// WorkerSlots is how many jobs the worker runs at once.
 	WorkerSlots int

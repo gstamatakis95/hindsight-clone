@@ -31,8 +31,8 @@ type documentResult struct {
 	Unchanged bool
 	// Superseded reports that a newer retain of the document took over (its blob or overrides replaced this
 	// run's, or it rewrote a chunk this run committed). The run stopped without completing the document;
-	// whatever it committed before was replaced by, or is replaced by, the newer retain (decision 807). A
-	// change of the document's tags alone never supersedes: the run adopts them (decision 1700).
+	// whatever it committed before was replaced by, or is replaced by, the newer retain. A
+	// change of the document's tags alone never supersedes: the run adopts them.
 	Superseded bool
 	// ChunksTotal is the number of chunks the document split into.
 	ChunksTotal int
@@ -120,7 +120,7 @@ type run struct {
 // ProcessDocument runs chunk -> extract -> normalize -> embed -> resolve -> link -> commit, one tx per chunk
 // batch. Unchanged content + overrides hash with extracted_at set = no-op (unless force_reextract). A changed
 // document replaces its old units in the first batch's tx, which also clears extracted_at if an overlapping
-// retain completed the document meanwhile (decision 2200); a retried job skips chunks already committed with a
+// retain completed the document meanwhile; a retried job skips chunks already committed with a
 // matching hash. job.Job.Payload is a jobs.RetainPayload and job.Job.Overrides the merged request < item
 // overrides. A claimed run resumes across retries and reports progress through job; an inline run
 // (jobs.Inline, no id) starts fresh and reports nothing.
@@ -306,7 +306,7 @@ func (rn *run) adopt(committed map[int]string, chunks []domain.Chunk) {
 // longer this run's. When only the tags differ (RetagDocument retagged the document, or a newer retain of the
 // same content and overrides changed them), the run still owns it: it adopts the document's current tags for
 // the units it writes from now on, and the retag_document job queued behind it on the same "doc:" key
-// retags the units it already wrote (decisions 807, 1700). So no run ever writes stale tags over newer ones.
+// retags the units it already wrote (docs/design/retain.md#ownership-and-resume). So no run ever writes stale tags over newer ones.
 func (r *retainer) docSuperseded(doc domain.Document, rn *run) (bool, error) {
 	if doc.BlobKey != rn.p.BlobKey {
 		return true, nil

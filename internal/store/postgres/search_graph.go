@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// graphMaxHops is the deepest expansion Expand runs; the port bounds MaxHops to 1-2 (decision 123).
+// graphMaxHops is the deepest expansion Expand runs; graph.Query bounds MaxHops to 1-2.
 const graphMaxHops = 2
 
 // clampHops bounds the hop count to [1, graphMaxHops].
@@ -15,7 +15,7 @@ func clampHops(h int) int {
 	return min(max(h, 1), graphMaxHops)
 }
 
-// graphSQL builds the graph query (decision 123): walk follows the bank's links forward (from -> to) from
+// graphSQL builds the graph query: walk follows the bank's links forward (from -> to) from
 // the seeds for up to MaxHops hops, multiplying the link weights along each path, restricted to Kinds at
 // every step. Every link is bound to the query's tenant and bank, at the anchor and at each step. A reached
 // unit scores the best (max) weight over its paths. Seeds are never hits; reached units must be live units of

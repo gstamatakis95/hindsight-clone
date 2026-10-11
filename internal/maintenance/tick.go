@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// Defaults of the operator settings (SPEC "Jobs": 60 s tick, 7-day operations, 30-day events).
+// Defaults of the operator settings: 60 s tick, 7-day operations, 30-day events.
 const (
 	// DefaultInterval is the maintenance tick period.
 	DefaultInterval = 60 * time.Second
@@ -25,7 +25,7 @@ const (
 	DefaultOperationRetention = 7 * 24 * time.Hour
 	// DefaultEventRetention is how long lifecycle events are kept before pruning.
 	DefaultEventRetention = 30 * 24 * time.Hour
-	// DefaultGraphBudget bounds one graph_maintenance run (SPEC "Jobs": 240 s); leftover work re-enqueues the
+	// DefaultGraphBudget bounds one graph_maintenance run (240 s); leftover work re-enqueues the
 	// job.
 	DefaultGraphBudget = 240 * time.Second
 )
@@ -267,7 +267,7 @@ func (s *Service) resumeBankDeletes(ctx context.Context) (int, error) {
 }
 
 // reconcileGraph enqueues graph_maintenance for every bank with graph_dirty or entity_maintenance rows
-// (decision 2002). A removal that commits while the bank's graph_maintenance is finishing joins that running
+// (docs/design/retain.md#graph-maintenance). A removal that commits while the bank's graph_maintenance is finishing joins that running
 // row, so without this step its rows would wait for the next removal.
 func (s *Service) reconcileGraph(ctx context.Context) (int, error) {
 	if s.d.Graph == nil {

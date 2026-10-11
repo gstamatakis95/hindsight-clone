@@ -13,7 +13,7 @@ import (
 const blockedFor = 150 * time.Millisecond
 
 // TestSeq runs the contract tests of Tx.Seq and Reader.BankSeq: the per-bank change sequence whose
-// row lock makes seq order commit order (SPEC "Behavioural rules", change sequence). newStore is called
+// row lock makes seq order commit order (docs/design/architecture.md#transactions-and-the-change-sequence). newStore is called
 // once per subtest and must return a store over an empty database. The store must allow two concurrent
 // transactions (a pool of at least two connections).
 func TestSeq(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Runner defaults (SPEC "Jobs").
+// Runner defaults (docs/design/architecture.md#runner).
 const (
 	// DefaultSlots is how many jobs a worker runs at once.
 	DefaultSlots = 10

@@ -210,6 +210,6 @@
 // the jobs catalogue, as the document feature commits them), partial replacement leaving the document in
 // flight, the retain_document result keys, paging, invalidate, restore (and restore after an entity prune),
 // edits, rederive skips, a retried older rederive keeping newer entities, cancellation, graph_maintenance on
-// edit and rederive, and the stranded-fact sweep. SPEC "Engines" (retain), "Curation", "Jobs"
-// (retain_document, retain_batch, rederive_memory) and "Behavioural rules" (Banks and documents).
+// edit and rederive, and the stranded-fact sweep. Design: docs/design/retain.md and
+// docs/design/curation-and-operations.md#curation.
 package memory

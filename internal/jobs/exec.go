@@ -141,7 +141,7 @@ func (r *Runner) settleLost(ctx context.Context, j store.Job, err error, run *Ru
 // retryAt applies the retry policy; nil = fail for good. An automatic consolidate that would retry fails
 // instead when another automatic consolidate is already due for its bank (that one picks up the same units
 // with the same settings). A manual one (scopes or overrides) always keeps its retry: the automatic run
-// would use bank defaults, so its overrides would never be applied (decision 2003).
+// would use bank defaults, so its overrides would never be applied.
 func (r *Runner) retryAt(ctx context.Context, j store.Job, err error) *time.Time {
 	at, ok := nextRun(j, err, r.cfg.Clock.Now())
 	if !ok {

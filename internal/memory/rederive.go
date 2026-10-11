@@ -35,7 +35,7 @@ func newRederiver(d rederiverDeps) *rederiver {
 // Rederive re-embeds the job's unit, rebuilds its temporal and semantic links and enqueues consolidation.
 // Entity changes are not its job: the curator resolves an edit's names and a restore's snapshot names in the
 // RPC's own transaction, so a rederive keeps the unit's current attachments and an older rederive retried
-// after a newer edit can never re-apply stale names (decision 1305). A unit that is gone (archived or
+// after a newer edit can never re-apply stale names. A unit that is gone (archived or
 // replaced) or whose text changed after the embedding was computed is left alone: the job succeeds and the
 // newer edit's rederive does the work. Running it twice is harmless.
 func (r *rederiver) Rederive(ctx context.Context, j store.Job) error {
@@ -73,7 +73,7 @@ func (r *rederiver) Rederive(ctx context.Context, j store.Job) error {
 // write is the job's transaction. It re-reads the unit and does nothing when the unit is gone or its text
 // changed after embedding (the newer edit's rederive re-embeds and relinks). Writing the embedding clears
 // the unit's consolidation stamps (UnitRepo.Update), so consolidation sees the unit again only once it has
-// an embedding (decision 1305). Entity attachments stay as the RPC committed them.
+// an embedding. Entity attachments stay as the RPC committed them.
 func (r *rederiver) write(
 	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.UnitID, text string, vec []float32,
 ) error {

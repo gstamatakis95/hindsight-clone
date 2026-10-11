@@ -15,7 +15,7 @@ const reprocessScanLimit = 100
 
 // reprocess re-upserts document id (its stored overrides replaced when overrides is non-nil, its item-level
 // observation scopes kept) and enqueues a forced retain_document job that re-extracts it from its stored text,
-// in one transaction, and returns the operation id. It makes no model call (decision 1600).
+// in one transaction, and returns the operation id. It makes no model call.
 func (s *Service) reprocess(
 	ctx context.Context, b domain.BankRef, id domain.DocumentID, overrides *domain.BankConfig,
 ) (domain.OperationID, error) {
@@ -56,7 +56,7 @@ func (s *Service) reprocess(
 // mention time and timeless flag are not stored on the document, so they are taken from one of its units
 // (all units of one retain share them): the newest one never curated (a curated context or timeless flag must
 // not spread to every re-extracted unit, since reprocess resets curation), live or archived, else the newest.
-// Entity hints are not stored anywhere and are lost (decision 1600).
+// Entity hints are not stored anywhere and are lost.
 func reprocessPayload(
 	ctx context.Context, tx store.Tx, b domain.BankRef, doc domain.Document,
 ) (jobs.RetainPayload, error) {

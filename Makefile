@@ -1,4 +1,4 @@
-# memd developer targets. See AGENTS.md ("Commands") and docs/SPEC.md.
+# memd developer targets. See AGENTS.md ("Commands") and README.md.
 #
 #   make gen      buf generate, sqlc, mockery
 #   make lint     golangci-lint, interface-doc check, buf lint, ruff
@@ -89,7 +89,7 @@ test: venv ## go test -race ./... (needs Docker or MEMD_TEST_DATABASE_URL)
 	go test -race ./...
 
 # Each test removes its own compose project; the sweep afterwards catches projects of this run left by a
-# panic or timeout (names memd-e2e-<run>-*, decision 1412).
+# panic or timeout (the harness names them memd-e2e-<run>-*, so parallel runs never touch each other's).
 e2e: venv ## opt-in end-to-end tests (compose stack + emulated gateway), then sweep this run's projects
 	run=$$(date +%s)$$$$; status=0; \
 	MEMD_E2E_RUN=$$run go test -race -count=1 -tags e2e -timeout $${E2E_TIMEOUT:-30m} ./test/e2e/... || status=$$?; \

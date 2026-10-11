@@ -25,7 +25,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// memd run modes (SPEC "Process model").
+// memd run modes (docs/design/architecture.md#process-model).
 const (
 	// ModeAPI is the gRPC server.
 	ModeAPI = "api"

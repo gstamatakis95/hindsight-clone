@@ -23,7 +23,7 @@
 //
 // Reads of an unknown or tombstoned bank are domain.ErrNotFound. Writes call BankRepo.Ensure, which creates an
 // unknown bank with tenant defaults, or reports domain.ErrBankDeleting (FAILED_PRECONDITION) for a tombstoned one.
-// SPEC "Behavioural rules" (Banks and documents).
+// (docs/design/curation-and-operations.md#common-rules).
 //
 // # Create
 //
@@ -55,7 +55,7 @@
 //
 // # Bank delete
 //
-// A bank is deleted in two steps (SPEC "Behavioural rules", DeleteBank):
+// A bank is deleted in two steps (docs/design/storage.md#bank-deletion):
 //
 //  1. [Service.DeleteBank] tombstones it in one transaction: read the bank (unknown = domain.ErrNotFound), set
 //     deleting_at (MarkDeleting, which locks the bank row), cancel the bank's pending jobs (Queue.CancelBank

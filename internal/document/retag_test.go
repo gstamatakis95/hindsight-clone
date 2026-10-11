@@ -210,7 +210,7 @@ func TestRetagChangeClearsObservations(t *testing.T) {
 	if len(ops) != 1 || ops[0].ID != id || ops[0].SerialKey != "doc:d1" {
 		t.Fatalf("retag jobs = %+v, want one with id %s, serial doc:d1", ops, id)
 	}
-	// RetagDocument's transaction retags the units (decision 1900); the observation stays until the job.
+	// RetagDocument's transaction retags the units; the observation stays until the job.
 	if us := f.units(t, "f1", "o1"); !slices.Equal(us["f1"].Tags, []string{"c"}) || us["o1"].ID == "" {
 		t.Fatalf("before the job: f1 tags %v, o1 present %t; want [c] and o1 kept", us["f1"].Tags, us["o1"].ID != "")
 	}

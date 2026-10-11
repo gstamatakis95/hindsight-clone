@@ -57,6 +57,6 @@
 //
 // jsonschema_test.go covers each keyword, bad schemas and the bounded $ref loop. The subset is hand-written
 // rather than a third-party validator because it is small and fully tested, and it lives outside the
-// gateway adapter so the gateway, the fake and reflect share one implementation. SPEC "Ports"
-// (ai.LLM.Structured).
+// gateway adapter so the gateway, the fake and reflect share one implementation. Design:
+// docs/design/architecture.md#model-gateway.
 package jsonschema

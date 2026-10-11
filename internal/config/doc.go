@@ -39,7 +39,7 @@
 //
 // # Server defaults
 //
-// [ServerDefaults](file) merges the server config file's defaults block over the defaults the spec states:
+// [ServerDefaults](file) merges the server config file's defaults block over the built-in defaults:
 //
 //   - retain: extraction_mode concise, entities_allow_free_form true, default_observation_scope_modes combined
 //     with max_combinations 15, temporal_link_cap 20, entity_match_threshold 0.6;
@@ -54,7 +54,7 @@
 //     min_refresh_interval_seconds 0, history_max_entries 50;
 //   - models: embed = [DefaultEmbedModel]; nothing else.
 //
-// Knobs whose default the spec leaves open stay unset; the package that reads a knob owns its default. A chat
+// Knobs without a built-in server default stay unset; the package that reads a knob owns its default. A chat
 // slot the file binds neither by name nor through models.default stays unbound, and ai.Router rejects calls
 // on it (cmd/memd refuses to start unless EXTRACT and REFLECT are bound). Without models.rerank,
 // recall.rerank defaults to false so recall skips the cross-encoder instead of failing; the file asking for

@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Placeholders stand in for the runtime content a real call carries (decision 1306).
+// Placeholders stand in for the runtime content a real call carries.
 const (
 	phChunk       = "{chunk text}"
 	phContext     = "{item context}"

@@ -105,6 +105,6 @@
 // and re-checked (arm_test.go), arm selection and name validation, rerank on and off, the seq snapshot, stale
 // observations, a failing arm, a golden fusion order and an unknown bank. internal/recall/arms tests the built-in
 // arms through the engine (tag groups, floors, trace and selection, time windows) and runs armtest for each.
-// pages_test.go covers page search and reads.
-// SPEC "Recall pipeline", "Engines" (recall) and "gRPC surface" (Request).
+// mentalmodel_search_test.go covers mental-model search and reads.
+// Design: docs/design/recall.md.
 package recall

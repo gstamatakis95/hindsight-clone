@@ -12,12 +12,12 @@ import (
 
 // defaultReconcileGrace is how old an unconsolidated unit must be before the sweep consolidates its bank when
 // its config sets no observations.reconcile_grace_seconds, so skip_consolidation followed by a manual
-// Consolidate is not pre-empted (decision 2000).
+// Consolidate is not pre-empted.
 const defaultReconcileGrace = 10 * time.Minute
 
 // ReconcileConsolidation is the maintenance sweep that enqueues an automatic consolidate for every bank with a
 // unit left unconsolidated for longer than the bank's reconcile grace, unless the bank's effective config
-// turns automatic consolidation or observations off (decision 2000). One short transaction per bank.
+// turns automatic consolidation or observations off (docs/design/consolidation.md#enqueue-sources). One short transaction per bank.
 // jobs.EnqueueAutoConsolidate joins the bank's queued or running automatic consolidate (a running one
 // re-enqueues itself while units remain), so concurrent sweeps insert at most one, and a sweep never queues a
 // job that would make a failing running consolidate skip its retry. It takes no change seq: nothing it writes

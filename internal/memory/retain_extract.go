@@ -199,7 +199,7 @@ func baseFact(r rawFact, pc parseConfig) domain.ExtractedFact {
 }
 
 // factType maps the model's fact_type: "assistant" is the agent's own experience, "world" is world; any
-// other value falls back to fact_kind, then world (Hindsight; decision 404).
+// other value falls back to fact_kind, then world (as in Hindsight).
 func factType(r rawFact) domain.FactType {
 	switch r.FactType {
 	case "assistant":

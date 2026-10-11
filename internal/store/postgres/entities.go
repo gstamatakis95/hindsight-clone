@@ -15,7 +15,7 @@ import (
 )
 
 // entityRepo is store.EntityRepo over one transaction. The store maintains mention_count: Attach and Restore
-// add one per new unit_entities row; Detach, DeleteByDocument and Archive take one off (decision 131).
+// add one per new unit_entities row; Detach, DeleteByDocument and Archive take one off.
 type entityRepo struct {
 	q  *db.Queries
 	tx *tx
@@ -24,7 +24,7 @@ type entityRepo struct {
 var _ store.EntityRepo = (*entityRepo)(nil)
 
 // errEntityGone is Attach's error for an entity pruned after the caller resolved it. InTx retries it like
-// a lost deadlock: the re-run resolves the mention afresh (decision 2501).
+// a lost deadlock: the re-run resolves the mention afresh.
 var errEntityGone = fmt.Errorf("%w: an entity to attach was pruned concurrently", domain.ErrConflict)
 
 // uuidCompare orders uuids bytewise, as Postgres orders the uuid type.
@@ -125,7 +125,7 @@ func (r *entityRepo) Upsert(ctx context.Context, e domain.Entity) (domain.Entity
 // id order first, so a concurrent PruneOrphans either sees the new rows or deletes the entities before they
 // are attached. An entity that no longer exists (graph maintenance pruned it after the caller resolved it)
 // is errEntityGone (domain.ErrConflict) and attaches nothing: InTx re-runs the transaction, whose fresh
-// entity resolution no longer finds the pruned entity (decision 2501). An unknown unit is
+// entity resolution no longer finds the pruned entity. An unknown unit is
 // domain.ErrNotFound.
 func (r *entityRepo) Attach(ctx context.Context, unit domain.UnitID, ents []domain.EntityID) error {
 	uid, err := parseID(unit)
