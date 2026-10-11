@@ -60,13 +60,11 @@ type infra struct {
 
 // deps is everything the two modes run.
 type deps struct {
-	cfg      Config
-	log      *slog.Logger
-	api      grpcapi.Handlers
-	probes   []grpcapi.ReadinessProbe
-	handlers handlers
-	// jobHandlers are the job handlers each wire_<area>.go registers by kind; runWorker adds them to the runner.
-	jobHandlers map[domain.OperationKind]jobs.Handler
+	cfg         Config
+	log         *slog.Logger
+	api         grpcapi.Handlers
+	probes      []grpcapi.ReadinessProbe
+	handlers    handlers
 	maintenance maintenance.Deps
 	claimer     jobs.Claimer
 	db          store.DB
@@ -203,7 +201,7 @@ func wireEngines(
 	c := wireCore(in, tok, serverCfg, clk)
 	d := &deps{
 		cfg: cfg, log: log, claimer: in.claimer, db: in.db, clock: clk,
-		handlers: handlers{db: in.db, clock: clk}, jobHandlers: map[domain.OperationKind]jobs.Handler{},
+		handlers: handlers{db: in.db, clock: clk},
 		probes: []grpcapi.ReadinessProbe{
 			grpcapi.PostgresProbe{Ping: in.ping}, grpcapi.NewGatewayProbe(cfg.GatewayURL, &http.Client{}),
 		},
@@ -293,10 +291,6 @@ func runWorker(ctx context.Context, d *deps) error {
 	h := d.handlers
 	h.graph = maint
 	h.register(r)
-	for kind, fn := range d.jobHandlers {
-		r.Handle(kind, fn)
-	}
-
 	var lis net.Listener
 	if d.cfg.WorkerHealthAddr != "" {
 		var err error

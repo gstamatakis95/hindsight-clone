@@ -3,7 +3,7 @@ package grpcapi
 import (
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/mentalmodel"
+	"memd/internal/mentalmodel"
 )
 
 // validate checks a request's or a stored spec's overrides with config.Validate; nil passes.

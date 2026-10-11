@@ -16,8 +16,8 @@ func TestDeltaEmptyRetryAfterAllRejectedFails(t *testing.T) {
 	e.llm.Script(domain.ModelSlotMentalModel, deltaPrompt,
 		fakeJSON(opsJSON(map[string]any{"kind": "append_block", "section_id": "nope", "blocks_md": []string{"Bob."}})),
 		fakeJSON(opsJSON()))
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
-	if !errors.Is(err, ErrAllOpsRejected) || out.Trace.Outcome != domain.RefreshOutcomeFailed {
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
+	if !errors.Is(err, errAllOpsRejected) || out.Trace.Outcome != domain.RefreshOutcomeFailed {
 		t.Fatalf("err %v outcome %s", err, out.Trace.Outcome)
 	}
 	if n := len(e.llm.CallsFor(domain.ModelSlotMentalModel, deltaPrompt)); n != 2 {
@@ -45,7 +45,7 @@ func TestDeltaRetryOnBadReferenceAfterPartialApply(t *testing.T) {
 			map[string]any{"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob joined."}},
 			map[string]any{"kind": "remove_block", "section_id": "status", "block_id": alice},
 		)))
-		out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+		out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestDeltaRetryOnBadReferenceAfterPartialApply(t *testing.T) {
 			before, _ := builtModel(e, domain.RefreshStrategySingleShot)
 			bob := e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 			e.llm.Script(domain.ModelSlotMentalModel, deltaPrompt, fakeJSON(first), fakeJSON(retry))
-			out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+			out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

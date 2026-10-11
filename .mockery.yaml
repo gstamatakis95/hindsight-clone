@@ -34,9 +34,6 @@ packages:
   memd/internal/engine/docs:
     interfaces:
       Retagger: {}
-  memd/internal/engine/mentalmodel:
-    interfaces:
-      RefreshRunner: {}
   memd/internal/jobs:
     interfaces:
       OperationControl: {}

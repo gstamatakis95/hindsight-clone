@@ -5,7 +5,7 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/engine/bank"
-	"memd/internal/engine/mentalmodel"
+	"memd/internal/mentalmodel"
 	"strings"
 
 	"google.golang.org/protobuf/proto"

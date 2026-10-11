@@ -10,25 +10,19 @@ import (
 	"strings"
 )
 
-// Reflector is the part of reflect.Agent the agentic synthesizer consumes; reflect.Agent satisfies it.
-type Reflector interface {
-	// Reflect runs one reflect loop (answering as a document for refreshes).
-	Reflect(ctx context.Context, req reflect.Request) (reflect.Result, error)
-}
-
-// agentic is the REFRESH_STRATEGY_AGENTIC Synthesizer: the reflect loop answering as a document over the
+// agentic is the REFRESH_STRATEGY_AGENTIC synthesizer: the reflect loop answering as a document over the
 // model's scope and window. A delta runs the loop over the window only and integrates the evidence it
 // cites into the current document with the delta call (the loop's own draft is not shown, as in
 // Hindsight #5272).
 type agentic struct {
-	rf      Reflector
+	rf      *reflect.Agent
 	planner deltaPlanner
 }
 
-var _ Synthesizer = (*agentic)(nil)
+var _ synthesizer = (*agentic)(nil)
 
-// NewAgenticSynthesizer returns the agentic Synthesizer; d makes the delta call.
-func NewAgenticSynthesizer(rf Reflector, d ModelDeps) Synthesizer {
+// newAgentic returns the agentic synthesizer over rf; d makes the delta call.
+func newAgentic(rf *reflect.Agent, d modelDeps) *agentic {
 	return &agentic{rf: rf, planner: deltaPlanner{d: d}}
 }
 
@@ -41,9 +35,9 @@ func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.Ban
 	if err != nil {
 		return draft{}, err
 	}
-	res, err := a.rf.Reflect(ctx, req)
+	res, err := a.reflect(ctx, req)
 	if err != nil {
-		return draft{}, fmt.Errorf("mentalmodel: reflect: %w", err)
+		return draft{}, err
 	}
 	d := draft{
 		ContentMD: strings.TrimSpace(res.Text), SourceIDs: unitIDs(res.BasedOn.Memories), Usage: res.Usage,
@@ -51,7 +45,7 @@ func (a *agentic) Full(ctx context.Context, m domain.MentalModel, cfg domain.Ban
 	}
 	switch {
 	case d.ContentMD == "" && len(res.BasedOn.Memories) == 0:
-		return d, ErrNoNewFacts
+		return d, errNoNewFacts
 	case len(res.BasedOn.Memories) == 0:
 		// An answer that cites nothing is not grounded in the scope: fail rather than write it with no
 		// sources (which would also prune source_ids and advance the watermark).
@@ -69,17 +63,29 @@ func (a *agentic) Delta(
 	if err != nil {
 		return deltaDraft{ContentMD: m.ContentMD}, err
 	}
-	res, err := a.rf.Reflect(ctx, req)
+	res, err := a.reflect(ctx, req)
 	if err != nil {
-		return deltaDraft{ContentMD: m.ContentMD}, fmt.Errorf("mentalmodel: reflect: %w", err)
+		return deltaDraft{ContentMD: m.ContentMD}, err
 	}
 	if len(res.BasedOn.Memories) == 0 {
-		return deltaDraft{ContentMD: m.ContentMD, Usage: res.Usage, ToolCalls: toolCalls(res)}, ErrNoNewFacts
+		return deltaDraft{ContentMD: m.ContentMD, Usage: res.Usage, ToolCalls: toolCalls(res)}, errNoNewFacts
 	}
 	d, err := a.planner.plan(ctx, m, cfg, observationsFirst(res.BasedOn.Memories))
 	d.Usage = append(slices.Clone(res.Usage), d.Usage...)
 	d.ToolCalls = toolCalls(res)
 	return d, err
+}
+
+// reflect runs one reflect loop; with no agent wired the agentic strategy fails.
+func (a *agentic) reflect(ctx context.Context, req reflect.Request) (reflect.Result, error) {
+	if a.rf == nil {
+		return reflect.Result{}, fmt.Errorf("%w: mentalmodel: no reflect agent wired", domain.ErrFailedPrecondition)
+	}
+	res, err := a.rf.Reflect(ctx, req)
+	if err != nil {
+		return res, fmt.Errorf("mentalmodel: reflect: %w", err)
+	}
+	return res, nil
 }
 
 // request is the reflect request of a refresh over window: the model's scope, budget and exclusions,

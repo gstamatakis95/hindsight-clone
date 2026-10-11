@@ -7,8 +7,8 @@
 // consolidation strategy matching ([MatchStrategy]), which the resolver and the strategy preview share. cmd/memd
 // builds the server level with [ServerDefaults] from the server config file and the resolver with [NewResolver];
 // engines and libraries take the concrete *[Resolver]; the server validates every
-// config it is given with [Validate] and patches stored levels with [ApplyPaths] and [ResetPaths]; retain's
-// Ingestor uses [Merge] to combine a request's and an item's overrides.
+// config it is given with [Validate] and patches stored levels with [ApplyPaths] and [ResetPaths]; memory's
+// Retain uses [Merge] to combine a request's and an item's overrides.
 //
 // # Levels and merge
 //

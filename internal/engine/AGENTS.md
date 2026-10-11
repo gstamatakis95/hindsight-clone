@@ -1,8 +1,8 @@
 # AGENTS.md — internal/engine
 
-Engines hold the business logic outside the feature packages: retain (reprocess), consolidate, mentalmodel,
-bank, curate (observation admin) and docs. They build on the libraries (recall, reflect, timex, linking).
-These rules add to the root AGENTS.md and apply to the feature packages too.
+Engines hold the business logic outside the service packages: retain (reprocess), consolidate, bank,
+curate (observation admin) and docs. They build on the libraries (recall, reflect, timex, linking). These rules
+add to the root AGENTS.md.
 
 ## Boundaries
 - Depend on the boundaries only: stdlib, `memd/internal/domain`, `memd/internal/store`, `memd/internal/ai`,
@@ -15,7 +15,7 @@ These rules add to the root AGENTS.md and apply to the feature packages too.
 - Engines never import each other in a cycle. When you need another engine, declare the small
   interface you consume in your own package (consumer-declared), e.g. docs declares the `Invalidator` subset it
   needs. Libraries are concrete (`*recall.Engine`, `*reflect.Agent`, `*timex.Normalizer`, `*linking.Linker`);
-  take them as pointers. Nothing imports mentalmodel.
+  take them as pointers. Engines never import the services (internal/mentalmodel).
 - A consumer-declared interface must use the producer's exact parameter and result types (named
   types from another package are not interchangeable), so the producer's interface is assignable to it.
 

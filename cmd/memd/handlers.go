@@ -9,7 +9,6 @@ import (
 	"memd/internal/engine/bank"
 	"memd/internal/engine/consolidate"
 	"memd/internal/engine/docs"
-	"memd/internal/engine/mentalmodel"
 	"memd/internal/jobs"
 	"memd/internal/maintenance"
 	"memd/internal/store"
@@ -19,25 +18,36 @@ import (
 // handlers adapts the engines to jobs.Handler, one method per job kind. Each engine reads its own payload
 // and re-reads its state from Postgres, so a job that runs twice after a reclaim repeats no committed work;
 // the adapter records the result and usage on the run and re-enqueues delete_bank's leftover work. Each
-// wire_<area>.go sets its engines.
+// wire_<area>.go sets its engines, or adds a service's own handler with add.
 type handlers struct {
 	consolidator consolidate.Consolidator
-	refresher    mentalmodel.RefreshRunner
 	deleter      bank.BankDeleter
 	retagger     docs.Retagger
 	graph        *maintenance.Service
 	db           store.DB    // enqueues delete_bank's continuations
 	clock        clock.Clock // dates the continuations and progress
+	// services are the handlers services run themselves (Service.RunXJob), by kind.
+	services map[domain.OperationKind]jobs.Handler
+}
+
+// add registers a service's own handler for kind.
+func (h *handlers) add(kind domain.OperationKind, fn jobs.Handler) {
+	if h.services == nil {
+		h.services = map[domain.OperationKind]jobs.Handler{}
+	}
+	h.services[kind] = fn
 }
 
 // register registers every handler on r. retain_batch is never registered: it is a parent row whose status
 // aggregates its children, not a job a worker runs.
 func (h handlers) register(r *jobs.Runner) {
 	r.Handle(domain.OperationKindConsolidate, h.consolidate)
-	r.Handle(domain.OperationKindRefreshMentalModel, h.refresh)
 	r.Handle(domain.OperationKindDeleteBank, h.deleteBank)
 	r.Handle(domain.OperationKindRetagDocument, h.retag)
 	r.Handle(domain.OperationKindGraphMaintenance, h.graph.RunGraphJob)
+	for kind, fn := range h.services {
+		r.Handle(kind, fn)
+	}
 }
 
 // consolidate runs consolidate through consolidate.Consolidator.Run. It does not re-enqueue on More: Run
@@ -50,22 +60,6 @@ func (h handlers) consolidate(ctx context.Context, run *jobs.Run) error {
 	run.SetResult(map[string]any{
 		"processed": res.Processed, "changed_scopes": len(res.Changed), "more": res.More,
 	}, res.Usage...)
-	return nil
-}
-
-// refresh runs refresh_mental_model through mentalmodel.RunJob (payload decode, then RefreshRunner.Run).
-func (h handlers) refresh(ctx context.Context, run *jobs.Run) error {
-	if err := h.started(ctx, run); err != nil {
-		return err
-	}
-	out, err := mentalmodel.RunJob(ctx, h.refresher, run.Job)
-	if err != nil {
-		return fmt.Errorf("refresh_mental_model: %w", err)
-	}
-	run.SetResult(map[string]any{
-		"outcome": out.Trace.Outcome, "version": out.VersionWritten, "effective_mode": out.Trace.EffectiveMode,
-		"effective_strategy": out.Trace.EffectiveStrategy, "facts_used": out.FactsUsed,
-	}, out.Trace.Usage...)
 	return nil
 }
 

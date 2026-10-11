@@ -19,7 +19,7 @@ func wireMemory(c core, in infra, d *deps) {
 	})
 	d.api.Memory = &grpcapi.MemoryHandler{Memory: svc}
 	d.api.MemoryUnit = &grpcapi.MemoryUnitHandler{Memory: svc, Lister: curate.NewMemoryLister(c.read)}
-	d.jobHandlers[domain.OperationKindRetainDocument] = svc.RunRetainJob
-	d.jobHandlers[domain.OperationKindRederiveMemory] = svc.RunRederiveJob
+	d.handlers.add(domain.OperationKindRetainDocument, svc.RunRetainJob)
+	d.handlers.add(domain.OperationKindRederiveMemory, svc.RunRederiveJob)
 	d.maintenance.Memory = svc
 }

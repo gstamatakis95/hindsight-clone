@@ -1,10 +1,8 @@
 package mentalmodel
 
 import (
-	"context"
 	"errors"
 	"memd/internal/domain"
-	"memd/internal/reflect"
 	"memd/internal/store"
 	"strings"
 	"testing"
@@ -29,24 +27,24 @@ func fuzzySpec() domain.MentalModelSpec {
 func TestFuzzyScopeResolvesBankTags(t *testing.T) {
 	e := newEnv(t)
 	m := e.addModel(fuzzySpec())
-	detector := NewChangeDetector(e.store.Read(), e.reads, e.tags)
 	e.addUnit(domain.FactTypeWorld, "untagged note")
-	if stale, _, err := detector.NeedsRefresh(e.ctx, m); err != nil || stale {
+	if stale, _, err := e.svc.needsRefresh(e.ctx, m, domain.BankConfig{}); err != nil || stale {
 		t.Fatalf("untagged unit staled a tag-grouped model: %v %v", stale, err)
 	}
 	e.addUnit(domain.FactTypeWorld, "Budget meeting moved", "marketing")
-	if stale, _, err := detector.NeedsRefresh(e.ctx, m); err != nil || stale {
+	if stale, _, err := e.svc.needsRefresh(e.ctx, m, domain.BankConfig{}); err != nil || stale {
 		t.Fatalf("an off-tag unit staled a fuzzy scope (tag filter dropped): %v %v", stale, err)
 	}
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "project")
-	if stale, _, err := detector.NeedsRefresh(e.ctx, m); err != nil || !stale {
+	if stale, _, err := e.svc.needsRefresh(e.ctx, m, domain.BankConfig{}); err != nil || !stale {
 		t.Fatalf("fuzzy scope missed a tagged unit: %v %v", stale, err)
 	}
-	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true}); err != nil {
+	e.scriptSynthesize("## Status\n\nAlice leads the project.")
+	if _, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.rc.reqs) != 1 {
-		t.Fatalf("pre-check short-circuited a fuzzy scope: %d retrievals", len(e.rc.reqs))
+	if e.retrievals() != 1 {
+		t.Fatalf("pre-check short-circuited a fuzzy scope: %d retrievals", e.retrievals())
 	}
 }
 
@@ -56,25 +54,26 @@ func TestAgenticRefreshSetsContext(t *testing.T) {
 	e := newEnv(t)
 	e.addModel(deltaSpec("status", domain.RefreshStrategyAgentic))
 	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "proj")
-	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true}); err != nil {
+	if _, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true}); err != nil {
 		t.Fatal(err)
 	}
 	e.addUnit(domain.FactTypeWorld, "Bob joins the project", "proj")
 	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON())
-	if _, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true}); err != nil {
+	if _, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(e.rf.reqs) != 2 {
-		t.Fatalf("%d reflect calls, want 2", len(e.rf.reqs))
+	// Each refresh is two reflect turns: recall, then done.
+	if n := e.llm.reflectCalls(); n != 4 {
+		t.Fatalf("%d reflect turns, want 4", n)
 	}
 	m := e.model("status")
 	full, _ := refreshContext(m, domain.SeqUpTo(0, 1))
 	delta, _ := refreshContext(m, domain.SeqUpTo(1, 2))
-	if got := e.rf.reqs[0].Context; got == "" || got != full {
-		t.Errorf("first build context = %q, want the full context %q", got, full)
+	if got := e.llm.reflectSystem(0); full == "" || !strings.Contains(got, full) || strings.Contains(got, delta) {
+		t.Errorf("first build prompt lacks the full context %q:\n%s", full, got)
 	}
-	if got := e.rf.reqs[1].Context; got != delta {
-		t.Errorf("delta refresh context = %q, want the delta context %q", got, delta)
+	if got := e.llm.reflectSystem(2); !strings.Contains(got, delta) || strings.Contains(got, full) {
+		t.Errorf("delta refresh prompt lacks the delta context %q:\n%s", delta, got)
 	}
 }
 
@@ -89,7 +88,7 @@ func TestDeltaPreCheckReadsUntaggedUnits(t *testing.T) {
 	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Carol reviews."},
 	}))
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,12 +106,12 @@ func TestAutomaticRunSkipsFreshOrFlooredModel(t *testing.T) {
 	builtModel(e, domain.RefreshStrategySingleShot)
 	assertSkipped := func(when string) {
 		t.Helper()
-		out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{OperationID: opID("op")})
+		out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{OperationID: opID("op")})
 		if err != nil || out.Trace.Outcome != domain.RefreshOutcomeNoNewFacts || out.VersionWritten != 0 {
 			t.Fatalf("%s: err %v outcome %s version %d", when, err, out.Trace.Outcome, out.VersionWritten)
 		}
-		if e.llmCalls() != 0 || len(e.rc.reqs)+len(e.rf.reqs) != 0 {
-			t.Fatalf("%s: %d llm calls, %d retrievals", when, e.llmCalls(), len(e.rc.reqs)+len(e.rf.reqs))
+		if e.llmCalls() != 0 || e.retrievals() != 0 {
+			t.Fatalf("%s: %d llm calls, %d retrievals", when, e.llmCalls(), e.retrievals())
 		}
 	}
 	assertSkipped("fresh")
@@ -161,14 +160,6 @@ func assertReparked(t *testing.T, e *env, end time.Time) {
 	}
 }
 
-// citelessReflector answers with text but cites no memories.
-type citelessReflector struct{}
-
-// Reflect implements Reflector.
-func (citelessReflector) Reflect(context.Context, reflect.Request) (reflect.Result, error) {
-	return reflect.Result{Text: "## Status\n\nSomething uncited."}, nil
-}
-
 // TestAgenticAnswerWithoutCitationsFails checks that an agentic full answer citing nothing fails the run
 // (no_citations) and writes nothing.
 func TestAgenticAnswerWithoutCitationsFails(t *testing.T) {
@@ -177,12 +168,8 @@ func TestAgenticAnswerWithoutCitationsFails(t *testing.T) {
 	spec := deltaSpec("status", domain.RefreshStrategyAgentic)
 	spec.Trigger.Mode = domain.RefreshModeFull
 	e.addModel(spec)
-	md := ModelDeps{LLM: e.llm, Router: routingRouter(), Clock: e.clock}
-	r := NewRefreshRunner(RefreshRunnerDeps{
-		Store: e.store, Config: e.config, Scope: e.reads, Clock: e.clock,
-		Synthesizers: []Synthesizer{NewAgenticSynthesizer(citelessReflector{}, md)},
-	})
-	out, err := r.Run(e.ctx, e.bank, "status", RefreshOptions{Manual: true})
+	e.llm.citeNothing = true
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true})
 	if !errors.Is(err, domain.ErrUnavailable) || !strings.Contains(err.Error(), "no_citations") ||
 		out.Trace.Outcome != domain.RefreshOutcomeFailed {
 		t.Fatalf("err %v outcome %s", err, out.Trace.Outcome)
@@ -228,11 +215,39 @@ func TestFloorSkewTolerance(t *testing.T) {
 	e.llm.RespondJSON(domain.ModelSlotMentalModel, deltaPrompt, opsJSON(map[string]any{
 		"kind": "append_block", "section_id": "status", "blocks_md": []string{"Bob joined."},
 	}))
-	out, err := e.runner.Run(e.ctx, e.bank, "status", RefreshOptions{})
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{})
 	if err != nil || out.VersionWritten != 2 {
 		t.Fatalf("run within the skew tolerance was floored: v%d %v", out.VersionWritten, err)
 	}
 	if _, _, ok := claimRefresh(e); ok {
 		t.Fatal("run within the skew tolerance re-parked")
+	}
+}
+
+// TestStalenessUsesBankFuzzyFloor checks that staleness resolves a fuzzy scope leaf at the bank's effective
+// recall.fuzzy_tag_min_similarity, the floor a refresh's recall uses, not recall's 0.45 default: "projct" is
+// about 0.5 similar to "project", so a floor of 0.9 keeps a "project" write out of the scope and 0.3 lets it in.
+func TestStalenessUsesBankFuzzyFloor(t *testing.T) {
+	e := newEnv(t)
+	e.addModel(fuzzySpec())
+	e.addUnit(domain.FactTypeWorld, "Alice leads the project", "project")
+	for _, tc := range []struct {
+		floor float64
+		stale bool
+	}{{0.9, false}, {0.3, true}} {
+		floor := tc.floor
+		e.tx(func(tx store.Tx) error {
+			return tx.Banks().SetConfig(e.ctx, e.bank, domain.BankConfig{
+				Recall: &domain.RecallConfig{FuzzyTagMinSimilarity: &floor},
+			})
+		})
+		m, err := e.svc.GetMentalModel(e.ctx, e.bank, "status", domain.DetailFull)
+		if err != nil || m.IsStale != tc.stale {
+			t.Fatalf("floor %v: is_stale %v, want %v (%v)", floor, m.IsStale, tc.stale, err)
+		}
+		dec, err := e.svc.decide(e.ctx, m, e.clock.Now())
+		if err != nil || (dec.Kind == decisionSkip) == tc.stale {
+			t.Fatalf("floor %v: decision %+v (%v), want stale %v", floor, dec, err, tc.stale)
+		}
 	}
 }

@@ -15,28 +15,11 @@ import (
 	"time"
 )
 
-// runner is the RefreshRunner.
-type runner struct {
-	d      RefreshRunnerDeps
-	synths map[domain.RefreshStrategy]Synthesizer
-}
-
-var _ RefreshRunner = (*runner)(nil)
-
-// NewRefreshRunner returns the RefreshRunner over d.
-func NewRefreshRunner(d RefreshRunnerDeps) RefreshRunner {
-	r := &runner{d: d, synths: map[domain.RefreshStrategy]Synthesizer{}}
-	for _, s := range d.Synthesizers {
-		r.synths[s.Strategy()] = s
-	}
-	return r
-}
-
 // refreshPlan is what one run decided before drafting.
 type refreshPlan struct {
 	m         domain.MentalModel
 	cfg       domain.BankConfig
-	synth     Synthesizer
+	synth     synthesizer
 	requested domain.RefreshMode
 	mode      domain.RefreshMode
 	reason    string
@@ -69,20 +52,23 @@ type drafted struct {
 	embedding []float32
 }
 
-// Run reads the model and BankSeq (the snapshot bound), plans the mode and strategy, drafts, and writes
-// the result in one short transaction (nothing for a dry run).
-func (r *runner) Run(
-	ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts RefreshOptions,
+// refresh is the one pipeline behind the refresh job and the preview: it reads the model and BankSeq (the
+// snapshot bound), plans the mode and strategy, drafts, and writes the result in one short transaction (nothing
+// for a dry run). A failed run writes nothing and returns the error with Trace.Outcome = failed; the document
+// stays as it was. Pausing and the REFRESH_FAILED history entry happen once the operation fails for good, in
+// ReconcileFailedRefreshes, so job retries are not recorded as failures.
+func (s *Service) refresh(
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts refreshOptions,
 ) (RefreshOutcome, error) {
-	start := r.d.Clock.Now()
-	p, err := r.plan(ctx, b, id, opts)
+	start := s.d.Clock.Now()
+	p, err := s.plan(ctx, b, id, opts)
 	if err != nil {
 		return RefreshOutcome{Trace: domain.RefreshTrace{Outcome: domain.RefreshOutcomeFailed}}, err
 	}
-	dr, err := r.draft(ctx, p)
+	dr, err := s.draft(ctx, p)
 	out := RefreshOutcome{
 		RequestedMode: p.requested, ResolvedScope: resolveScope(p.m),
-		WindowAfterSeq: p.window.After, WindowBeforeSeq: p.upTo, Trace: r.trace(p, dr, start),
+		WindowAfterSeq: p.window.After, WindowBeforeSeq: p.upTo, Trace: s.trace(p, dr, start),
 	}
 	out.FactsRetrieved, out.FactsUsed = dr.retrieved, dr.used
 	if err != nil {
@@ -99,15 +85,15 @@ func (r *runner) Run(
 		return out, nil
 	}
 	if dr.floored {
-		return out, r.repark(ctx, p)
+		return out, s.repark(ctx, p)
 	}
 	if dr.fresh {
 		return out, nil
 	}
 	if out.WouldPersist {
-		r.embed(ctx, p, &dr, &out.Trace)
+		s.embed(ctx, p, &dr, &out.Trace)
 	}
-	out.VersionWritten, err = r.write(ctx, p, dr, opts, out.Trace)
+	out.VersionWritten, err = s.write(ctx, p, dr, opts, out.Trace)
 	if err != nil {
 		out.Trace.Outcome = domain.RefreshOutcomeFailed
 		out.VersionWritten = 0
@@ -117,30 +103,30 @@ func (r *runner) Run(
 }
 
 // plan loads the model, reads BankSeq, merges the config and picks the strategy, mode and window.
-func (r *runner) plan(
-	ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts RefreshOptions,
+func (s *Service) plan(
+	ctx context.Context, b domain.BankRef, id domain.MentalModelID, opts refreshOptions,
 ) (*refreshPlan, error) {
-	m, err := loadModel(ctx, r.d.Store, b, id)
+	m, err := loadModel(ctx, s.d.DB, b, id)
 	if err != nil {
 		return nil, err
 	}
-	upTo, err := r.d.Store.Read().BankSeq(ctx, b)
+	upTo, err := s.d.DB.Read().BankSeq(ctx, b)
 	if err != nil {
 		return nil, fmt.Errorf("mentalmodel: bank seq: %w", err)
 	}
-	cfg, err := r.d.Config.Effective(ctx, b, configLevels(m, opts.Overrides)...)
+	cfg, err := s.d.Config.Effective(ctx, b, configLevels(m, opts.Overrides)...)
 	if err != nil {
 		return nil, fmt.Errorf("mentalmodel: config: %w", err)
 	}
 	p := &refreshPlan{m: m, cfg: cfg, upTo: upTo, automatic: !opts.Manual && !opts.ForceFull && !opts.DryRun}
 	strategy := effectiveStrategy(opts.Strategy, m, cfg)
-	if p.synth = r.synths[strategy]; p.synth == nil {
+	if p.synth = s.synths[strategy]; p.synth == nil {
 		return nil, fmt.Errorf("%w: no synthesizer for refresh strategy %q", domain.ErrInvalidArgument, strategy)
 	}
 	p.requested = requestedMode(m, cfg)
 	p.mode, p.reason = p.requested, ""
 	if p.requested == domain.RefreshModeDelta {
-		if p.reason, err = r.fallbackReason(ctx, m, opts); err != nil {
+		if p.reason, err = s.fallbackReason(ctx, m, opts); err != nil {
 			return nil, err
 		}
 		if p.reason != "" {
@@ -155,21 +141,21 @@ func (r *runner) plan(
 }
 
 // fallbackReason says why a requested delta must run in full; "" = it can run as a delta.
-func (r *runner) fallbackReason(ctx context.Context, m domain.MentalModel, opts RefreshOptions) (string, error) {
+func (s *Service) fallbackReason(ctx context.Context, m domain.MentalModel, opts refreshOptions) (string, error) {
 	switch {
 	case opts.ForceFull:
-		return FallbackForceFull, nil
+		return fallbackForceFull, nil
 	case strings.TrimSpace(m.ContentMD) == "":
-		return FallbackNoBaseline, nil
+		return fallbackNoBaseline, nil
 	case m.LastSeqSeen == 0:
-		return FallbackSourceQueryChanged, nil
+		return fallbackSourceQueryChanged, nil
 	}
-	retracted, err := retractedSources(ctx, r.d.Store.Read(), m)
+	retracted, err := retractedSources(ctx, s.d.DB.Read(), m)
 	if err != nil {
 		return "", err
 	}
 	if retracted {
-		return FallbackSourcesRetracted, nil
+		return fallbackSourcesRetracted, nil
 	}
 	return "", nil
 }
@@ -177,22 +163,22 @@ func (r *runner) fallbackReason(ctx context.Context, m domain.MentalModel, opts 
 // draft checks the window without a model call, then runs the synthesizer (delta, falling back to full
 // past max_delta_ratio), then projects structured output. The window check reads the model's full scope
 // (untagged units included where the scope reads them); only staleness excludes untagged units.
-func (r *runner) draft(ctx context.Context, p *refreshPlan) (drafted, error) {
-	if r.floored(p) {
+func (s *Service) draft(ctx context.Context, p *refreshPlan) (drafted, error) {
+	if s.floored(p) {
 		return drafted{content: p.m.ContentMD, noNewFacts: true, floored: true}, nil
 	}
-	fresh, err := r.freshAutomatic(ctx, p)
+	fresh, err := s.freshAutomatic(ctx, p)
 	if err != nil {
 		return drafted{content: p.m.ContentMD}, err
 	}
 	if fresh {
 		return drafted{content: p.m.ContentMD, noNewFacts: true, fresh: true}, nil
 	}
-	q, err := scopeQuery(ctx, r.d.Tags, p.m, p.window, false, recall.FuzzyTagMinSimilarity(p.cfg))
+	q, err := scopeQuery(ctx, s.d.Recall, p.m, p.window, false, recall.FuzzyTagMinSimilarity(p.cfg))
 	if err != nil {
 		return drafted{content: p.m.ContentMD}, err
 	}
-	newest, err := r.d.Scope.NewestSeqInScope(ctx, q)
+	newest, err := s.d.DB.Read().NewestSeqInScope(ctx, q)
 	if err != nil {
 		return drafted{content: p.m.ContentMD}, fmt.Errorf("mentalmodel: scope seq: %w", err)
 	}
@@ -201,15 +187,15 @@ func (r *runner) draft(ctx context.Context, p *refreshPlan) (drafted, error) {
 	}
 	var dr drafted
 	if p.mode == domain.RefreshModeDelta {
-		dr, err = r.delta(ctx, p)
+		dr, err = s.delta(ctx, p)
 		if err != nil || p.mode == domain.RefreshModeDelta {
-			return r.finish(ctx, p, dr, err)
+			return s.finish(ctx, p, dr, err)
 		}
 	}
-	full, err := r.full(ctx, p)
+	full, err := s.full(ctx, p)
 	full.usage = append(dr.usage, full.usage...)
 	full.toolCalls = append(dr.toolCalls, full.toolCalls...)
-	return r.finish(ctx, p, full, err)
+	return s.finish(ctx, p, full, err)
 }
 
 // floorSkew is the clock-skew tolerance of the interval floor: a run with at most this much of the floor
@@ -218,21 +204,21 @@ const floorSkew = 5 * time.Second
 
 // floored reports whether an automatic run started inside the model's interval floor with more than
 // floorSkew of it left.
-func (r *runner) floored(p *refreshPlan) bool {
+func (s *Service) floored(p *refreshPlan) bool {
 	floor, last := intervalFloor(p.m, p.cfg), p.m.LastRefreshedAt
-	return p.automatic && floor > 0 && last != nil && r.d.Clock.Now().Add(floorSkew).Before(last.Add(floor))
+	return p.automatic && floor > 0 && last != nil && s.d.Clock.Now().Add(floorSkew).Before(last.Add(floor))
 }
 
 // repark re-queues an automatic run that started inside the interval floor with run_at = the floor's end
 // (SPEC: the floor parks a triggered refresh), joining a pending refresh if one exists. The running job is
 // still PROCESSING, so the pending-only dedupe inserts a new row behind it. Nothing else is written.
-func (r *runner) repark(ctx context.Context, p *refreshPlan) error {
-	now := r.d.Clock.Now()
+func (s *Service) repark(ctx context.Context, p *refreshPlan) error {
+	now := s.d.Clock.Now()
 	end := p.m.LastRefreshedAt.Add(intervalFloor(p.m, p.cfg))
 	if soonest := now.Add(floorSkew); end.Before(soonest) {
 		end = soonest
 	}
-	err := r.d.Store.InTx(ctx, func(tx store.Tx) error {
+	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Seq(ctx, p.m.Bank); err != nil {
 			return err
 		}
@@ -245,14 +231,14 @@ func (r *runner) repark(ctx context.Context, p *refreshPlan) error {
 	return nil
 }
 
-// freshAutomatic reports whether an automatic run finds its model fresh (ChangeDetector: nothing in the
+// freshAutomatic reports whether an automatic run finds its model fresh (needsRefresh: nothing in the
 // staleness scope past the watermark, no retracted source), e.g. a trigger that raced with a refresh. Such
 // a run finishes as NO_NEW_FACTS without a model call and writes nothing, not even last_refreshed_at.
-func (r *runner) freshAutomatic(ctx context.Context, p *refreshPlan) (bool, error) {
+func (s *Service) freshAutomatic(ctx context.Context, p *refreshPlan) (bool, error) {
 	if !p.automatic {
 		return false, nil
 	}
-	stale, _, err := NewChangeDetector(r.d.Store.Read(), r.d.Scope, r.d.Tags).NeedsRefresh(ctx, p.m)
+	stale, _, err := s.needsRefresh(ctx, p.m, p.cfg)
 	if err != nil {
 		return false, fmt.Errorf("mentalmodel: recheck staleness: %w", err)
 	}
@@ -272,13 +258,13 @@ func intervalFloor(m domain.MentalModel, cfg domain.BankConfig) time.Duration {
 }
 
 // delta runs the synthesizer's delta; past max_delta_ratio it switches p to full.
-func (r *runner) delta(ctx context.Context, p *refreshPlan) (drafted, error) {
+func (s *Service) delta(ctx context.Context, p *refreshPlan) (drafted, error) {
 	d, err := p.synth.Delta(ctx, p.m, p.cfg, p.upTo)
 	dr := drafted{
 		content: d.ContentMD, ops: d.Ops, usage: d.Usage, toolCalls: d.ToolCalls, retrieved: d.FactsRetrieved,
 		sourceIDs: mergeIDs(p.m.SourceIDs, d.SourceIDs), used: len(d.SourceIDs),
 	}
-	if errors.Is(err, ErrNoNewFacts) {
+	if errors.Is(err, errNoNewFacts) {
 		dr.content, dr.noNewFacts = p.m.ContentMD, true
 		return dr, nil
 	}
@@ -287,20 +273,20 @@ func (r *runner) delta(ctx context.Context, p *refreshPlan) (drafted, error) {
 		return dr, fmt.Errorf("mentalmodel: delta: %w", err)
 	}
 	if limit := maxDeltaRatio(p.cfg); limit > 0 && changedFraction(p.m.ContentMD, dr.content) > limit {
-		p.mode, p.reason = domain.RefreshModeFull, FallbackMaxDeltaRatio
+		p.mode, p.reason = domain.RefreshModeFull, fallbackMaxDeltaRatio
 		p.window = domain.SeqUpTo(0, p.upTo)
 	}
 	return dr, nil
 }
 
 // full runs the synthesizer's full draft.
-func (r *runner) full(ctx context.Context, p *refreshPlan) (drafted, error) {
+func (s *Service) full(ctx context.Context, p *refreshPlan) (drafted, error) {
 	d, err := p.synth.Full(ctx, p.m, p.cfg, p.upTo)
 	dr := drafted{
 		content: d.ContentMD, sourceIDs: d.SourceIDs, structured: d.StructuredOutputJSON, usage: d.Usage,
 		toolCalls: d.ToolCalls, retrieved: d.FactsRetrieved, used: len(d.SourceIDs),
 	}
-	if errors.Is(err, ErrNoNewFacts) {
+	if errors.Is(err, errNoNewFacts) {
 		dr.content, dr.noNewFacts = p.m.ContentMD, true
 		return dr, nil
 	}
@@ -317,7 +303,7 @@ func (r *runner) full(ctx context.Context, p *refreshPlan) (drafted, error) {
 }
 
 // finish projects structured output onto the trigger's schema when the content changed.
-func (r *runner) finish(ctx context.Context, p *refreshPlan, dr drafted, err error) (drafted, error) {
+func (s *Service) finish(ctx context.Context, p *refreshPlan, dr drafted, err error) (drafted, error) {
 	schema := strings.TrimSpace(p.m.Spec.Trigger.ResponseSchemaJSON)
 	if err != nil || dr.noNewFacts || schema == "" || dr.content == p.m.ContentMD {
 		return dr, err
@@ -325,11 +311,11 @@ func (r *runner) finish(ctx context.Context, p *refreshPlan, dr drafted, err err
 	if dr.structured != nil {
 		return dr, nil
 	}
-	if r.d.Projector == nil {
-		return dr, fmt.Errorf("%w: mentalmodel: structured_output_failed: no projector wired",
+	if s.d.Reflect == nil {
+		return dr, fmt.Errorf("%w: mentalmodel: structured_output_failed: no reflect agent wired",
 			domain.ErrFailedPrecondition)
 	}
-	out, err := r.d.Projector.Project(ctx, reflect.ProjectRequest{
+	out, err := s.d.Reflect.Project(ctx, reflect.ProjectRequest{
 		Bank: p.m.Bank, Schema: json.RawMessage(schema), Document: dr.content, Overrides: &p.cfg,
 	})
 	if err != nil {
@@ -339,12 +325,12 @@ func (r *runner) finish(ctx context.Context, p *refreshPlan, dr drafted, err err
 	return dr, nil
 }
 
-// embed computes the page embedding for SearchPages; a failure is a warning, not a failed refresh.
-func (r *runner) embed(ctx context.Context, p *refreshPlan, dr *drafted, trace *domain.RefreshTrace) {
-	if r.d.Embedder == nil {
+// embed computes the page embedding for SearchMentalModels; a failure is a warning, not a failed refresh.
+func (s *Service) embed(ctx context.Context, p *refreshPlan, dr *drafted, trace *domain.RefreshTrace) {
+	if s.d.Embedder == nil {
 		return
 	}
-	vecs, err := r.d.Embedder.EmbedDocuments(ctx, []string{pageText(p.m.Spec.Name, dr.content)})
+	vecs, err := s.d.Embedder.EmbedDocuments(ctx, []string{pageText(p.m.Spec.Name, dr.content)})
 	if err != nil || len(vecs) != 1 {
 		trace.Warnings = append(trace.Warnings, fmt.Sprintf("page embedding failed: %v", err))
 		return
@@ -353,8 +339,8 @@ func (r *runner) embed(ctx context.Context, p *refreshPlan, dr *drafted, trace *
 }
 
 // trace builds the run's trace.
-func (r *runner) trace(p *refreshPlan, dr drafted, start time.Time) domain.RefreshTrace {
-	now := r.d.Clock.Now()
+func (s *Service) trace(p *refreshPlan, dr drafted, start time.Time) domain.RefreshTrace {
+	now := s.d.Clock.Now()
 	t := domain.RefreshTrace{
 		EffectiveMode: p.mode, ModeFallbackReason: p.reason, Outcome: domain.RefreshOutcomeContentWritten,
 		ToolCalls: dr.toolCalls, DeltaOperations: dr.ops, Usage: dr.usage, RecordedAt: now,
@@ -367,7 +353,7 @@ func (r *runner) trace(p *refreshPlan, dr drafted, start time.Time) domain.Refre
 	return t
 }
 
-// pageText is what SearchPages embeds: the page name and its content.
+// pageText is what SearchMentalModels embeds: the page name and its content.
 func pageText(name, content string) string {
 	return strings.TrimSpace(name + "\n\n" + content)
 }

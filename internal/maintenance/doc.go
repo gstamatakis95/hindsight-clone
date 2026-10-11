@@ -4,12 +4,12 @@
 //
 // # Where it sits
 //
-// maintenance sits above the engines, the features and jobs: it calls their sweeps (mental-model cron and
-// failure reconcile, memory's stranded-fact and retain-batch sweeps), the cross-bank scans of
-// store.Maintenance and the jobs catalogue, and never an adapter. No engine or feature imports it. cmd/memd
-// builds it and runs [Service.Run] beside the job runner in the worker and all modes. Its [Config] holds the
-// operator settings (tick interval, reclaim age, retention of terminal operations and lifecycle events, graph
-// budget); zero values take the defaults.
+// maintenance sits above the engines and jobs: it calls the services' sweeps (mentalmodel.Service's cron
+// refreshes and failed-refresh reconcile, memory.Service's stranded-fact and retain-batch sweeps), the cross-bank
+// scans of store.Maintenance and the jobs catalogue,
+// and never an adapter. No engine imports it. cmd/memd builds it and runs [Service.Run] beside the job runner
+// in the worker and all modes. Its [Config] holds the operator settings (tick interval, reclaim age, retention
+// of terminal operations and lifecycle events, graph budget); zero values take the defaults.
 //
 // # Tick
 //
@@ -20,8 +20,9 @@
 //  1. reclaim_stale: Claimer.ReclaimStale(StaleAfter) re-queues PROCESSING rows with an old heartbeat, or
 //     fails them past their attempt cap.
 //  2. resume_bank_deletes: re-enqueues delete_bank for tombstoned banks with none pending or running.
-//  3. refresh_failures: mentalmodel's reconciler pauses models whose latest refresh failed for good.
-//  4. cron_refresh: enqueues mental-model refreshes whose refresh_cron fired.
+//  3. refresh_failures: mentalmodel.Service.ReconcileFailedRefreshes pauses models whose latest refresh failed
+//     for good.
+//  4. cron_refresh: mentalmodel.Service.EnqueueDueCronRefreshes enqueues refreshes whose refresh_cron fired.
 //  5. consolidation_reconcile: enqueues the automatic consolidate for banks with a fact left unconsolidated
 //     longer than the bank's observations.reconcile_grace_seconds (default 600, so skip_consolidation followed
 //     by a manual Consolidate is not pre-empted), unless the bank turns observations.auto_consolidation or
@@ -39,8 +40,8 @@
 // concurrent ticks insert at most one row; a bank being deleted or gone is skipped. Step 7 uses
 // jobs.EnqueueRederive (DedupeNone; two workers ticking at once may queue a fact twice, which is harmless
 // because the rederive is idempotent). Steps 2, 5, 6 and 7 take no tx.Seq: nothing they write is memory
-// content, and Seq refuses a tombstoned bank, which the delete resume must still reach. Step 4 goes through
-// mentalmodel's triggers, which take tx.Seq before joining or inserting the model's refresh.
+// content, and Seq refuses a tombstoned bank, which the delete resume must still reach. Step 4 takes tx.Seq
+// before joining or inserting each model's refresh.
 //
 // # Graph maintenance
 //

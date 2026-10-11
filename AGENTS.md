@@ -24,17 +24,18 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - Libraries (one concrete type each, no RPCs): internal/recall (Engine: Recall, CompileTags, SearchPages,
   ReadPages), internal/reflect (Agent: Reflect, Project), internal/timex (Normalizer), internal/linking (Linker,
   Resolver, LabelResolver).
-- Features, one package per gRPC service, each exporting one `Service` built by `New(Deps)`, owning its RPCs, job
-  handlers (`Run*Job`) and maintenance sweeps, and never importing another feature:
+- Services, one package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC
+  logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
   - internal/memory: MemoryService (Retain, Recall, Reflect, ListMemories, GetMemory, UpdateMemory,
-    InvalidateMemory, RestoreMemory); jobs retain_document and rederive_memory; sweeps RederiveStranded and
-    SettleRetainBatches.
+    InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
+    sweeps.
+  - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
 - internal/engine/*: the remaining business logic over the boundaries and libraries.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per service (holding only the engines it
   calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes.
 - cmd/memd: wiring only. wire.go opens the infrastructure and builds the shared libraries; one wire_<area>.go per
-  area builds its engines or feature Service, its gRPC handlers and its job handlers (a feature registers its
-  Run*Job methods; handlers.go adapts the remaining engines). config.go reads
+  area builds its engines or service and gRPC handlers; handlers.go adapts the engines to job handlers and
+  registers the services' own RunXJob handlers. config.go reads
   the environment (deployment, infrastructure and secrets only), configfile.go the server config file
   (memd.example.yaml).
 - migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
@@ -43,8 +44,9 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - The boundaries (store, graph, ai, blob, clock) are interfaces; put `var _ Iface = (*impl)(nil)` next to each
   implementation. ai.Router, ai.Tokenizer, clock.System, config.Resolver and the libraries are concrete; take them
   as pointers.
-- Engines and libraries never import adapters, grpcapi, maintenance, gen, pgx, net/http or the S3 SDK; libraries
-  never import engines (depguard enforces this).
+- Engines, services and libraries never import adapters, grpcapi, maintenance, gen, pgx, net/http or the S3 SDK;
+  libraries never import engines or services, and services never import each other or the engines; cross-service
+  effects go through a jobs.Enqueue* helper (depguard enforces this).
 - Enqueue jobs only through the jobs.Enqueue* helpers (jobs/kinds.go), inside the transaction of the change. The
   helpers never call tx.Seq: call tx.Seq(bank) first yourself when the transaction changes memory content.
 - Inject clock.Clock; never call time.Now for logic. Every LLM call resolves its binding with ai.Router.

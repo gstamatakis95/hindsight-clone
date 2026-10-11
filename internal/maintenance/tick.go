@@ -8,10 +8,10 @@ import (
 	"memd/internal/clock"
 	"memd/internal/config"
 	"memd/internal/domain"
-	"memd/internal/engine/mentalmodel"
 	"memd/internal/jobs"
 	"memd/internal/linking"
 	"memd/internal/memory"
+	"memd/internal/mentalmodel"
 	"memd/internal/store"
 	"time"
 )
@@ -82,7 +82,7 @@ type Deps struct {
 	Claimer jobs.Claimer
 	// Store enqueues, prunes, and runs the graph job's batches.
 	Store store.DB
-	// Clock dates the cut-offs, cron checks and the graph budget; nil = the system clock.
+	// Clock dates the cut-offs and the graph budget; nil = the system clock.
 	Clock clock.Clock
 	// Resolver resolves each consolidation candidate's effective config: its reconcile grace, and banks with
 	// observations.auto_consolidation or observations.enabled false are skipped. nil = no filtering and the
@@ -96,10 +96,9 @@ type Deps struct {
 	Graph store.Maintenance
 	// Memory re-queues the rederives of stranded facts and settles finished retain_batch parents.
 	Memory *memory.Service
-	// CronRefresh enqueues mental-model refreshes whose refresh_cron fired.
-	CronRefresh mentalmodel.Triggers
-	// RefreshFailures pauses models whose latest refresh failed.
-	RefreshFailures mentalmodel.RefreshFailureReconciler
+	// MentalModels runs the mental-model sweeps: it pauses models whose latest refresh failed and enqueues
+	// refreshes whose refresh_cron fired.
+	MentalModels *mentalmodel.Service
 	// Linker tops up the links of graph_dirty units in the graph job (linking.Linker).
 	Linker Linker
 	// Config holds the operator settings.
@@ -200,7 +199,6 @@ func (s *Service) settleBatches(ctx context.Context) (int, error) {
 }
 
 // tick runs every step once and joins their errors.
-
 func (s *Service) tick(ctx context.Context) error {
 	var errs []error
 	for _, st := range steps {
@@ -226,10 +224,10 @@ func (s *Service) reclaimStale(ctx context.Context) (int, error) {
 
 // reconcileRefreshFailures pauses models whose latest terminal refresh failed.
 func (s *Service) reconcileRefreshFailures(ctx context.Context) (int, error) {
-	if s.d.RefreshFailures == nil {
+	if s.d.MentalModels == nil {
 		return 0, nil
 	}
-	n, err := s.d.RefreshFailures.ReconcileFailedRefreshes(ctx)
+	n, err := s.d.MentalModels.ReconcileFailedRefreshes(ctx)
 	if err != nil {
 		return n, fmt.Errorf("reconcile failed refreshes: %w", err)
 	}
@@ -238,10 +236,10 @@ func (s *Service) reconcileRefreshFailures(ctx context.Context) (int, error) {
 
 // enqueueCronRefreshes enqueues refreshes whose cron schedule fired.
 func (s *Service) enqueueCronRefreshes(ctx context.Context) (int, error) {
-	if s.d.CronRefresh == nil {
+	if s.d.MentalModels == nil {
 		return 0, nil
 	}
-	n, err := s.d.CronRefresh.EnqueueDueCronRefreshes(ctx, s.d.Clock.Now())
+	n, err := s.d.MentalModels.EnqueueDueCronRefreshes(ctx)
 	if err != nil {
 		return n, fmt.Errorf("cron refreshes: %w", err)
 	}

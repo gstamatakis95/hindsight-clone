@@ -10,7 +10,7 @@ import (
 // manual, full refresh queued with the model.
 func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
 	e := newEnv(t)
-	_, adm := newTriggers(e)
+	adm := e.svc
 	bad := []domain.MentalModelSpec{
 		{ID: "Bad_ID"},
 		{ID: "x", Trigger: domain.RefreshTrigger{RefreshAfterConsolidation: true, RefreshCron: "0 * * * *"}},
@@ -44,7 +44,7 @@ func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
 // TestAdminGetDetailAndStale checks detail trimming, is_stale (computed at full detail only) and NOT_FOUND.
 func TestAdminGetDetailAndStale(t *testing.T) {
 	e := newEnv(t)
-	_, adm := newTriggers(e)
+	adm := e.svc
 	builtModel(e, domain.RefreshStrategySingleShot)
 	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
 	full, err := adm.GetMentalModel(e.ctx, e.bank, "status", domain.DetailUnspecified)
@@ -72,7 +72,7 @@ func patchFn(f func(*domain.MentalModelSpec)) SpecPatch {
 // change resets it (the next refresh runs in full) and the id can't change.
 func TestAdminUpdateResetsWatermarkOnScopeChange(t *testing.T) {
 	e := newEnv(t)
-	_, adm := newTriggers(e)
+	adm := e.svc
 	built, _ := builtModel(e, domain.RefreshStrategySingleShot)
 	m, err := adm.UpdateMentalModel(e.ctx, e.bank, "status", patchFn(func(s *domain.MentalModelSpec) {
 		s.Name = "Renamed"
@@ -91,13 +91,13 @@ func TestAdminUpdateResetsWatermarkOnScopeChange(t *testing.T) {
 // TestAdminClearKeepsHistory checks that clear empties the model and keeps the content in history.
 func TestAdminClearKeepsHistory(t *testing.T) {
 	e := newEnv(t)
-	_, adm := newTriggers(e)
+	adm := e.svc
 	built, _ := builtModel(e, domain.RefreshStrategySingleShot)
 	cleared, err := adm.ClearMentalModel(e.ctx, e.bank, "status")
 	if err != nil || cleared.ContentMD != "" || len(cleared.SourceIDs) != 0 || cleared.LastSeqSeen != 0 {
 		t.Fatalf("clear: %v %+v", err, cleared)
 	}
-	page, err := adm.MentalModelHistory(e.ctx, HistoryRequest{Bank: e.bank, ID: "status", PageSize: 1})
+	page, err := adm.ListMentalModelHistory(e.ctx, HistoryRequest{Bank: e.bank, ID: "status", PageSize: 1})
 	if err != nil || len(page.Items) != 1 || page.Items[0].PreviousContent != built.ContentMD ||
 		page.NextPageToken != "" {
 		t.Fatalf("history %+v %v", page, err)
@@ -107,7 +107,7 @@ func TestAdminClearKeepsHistory(t *testing.T) {
 // TestFoldersListAndDelete checks folder-prefix listing and recursive folder delete.
 func TestFoldersListAndDelete(t *testing.T) {
 	e := newEnv(t)
-	_, adm := newTriggers(e)
+	adm := e.svc
 	for id, folder := range map[string]string{"a": "eng", "b": "eng/backend", "c": "engineering", "d": ""} {
 		e.addModel(domain.MentalModelSpec{ID: domain.MentalModelID(id), FolderPath: folder})
 	}
@@ -115,10 +115,10 @@ func TestFoldersListAndDelete(t *testing.T) {
 	if err != nil || len(page.Items) != 2 || page.Items[0].Spec.ID != "a" || page.Items[1].Spec.ID != "b" {
 		t.Fatalf("list eng: %+v %v", page.Items, err)
 	}
-	if _, err := adm.DeleteFolder(e.ctx, e.bank, " / "); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := adm.DeleteMentalModelFolder(e.ctx, e.bank, " / "); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("empty folder delete: %v", err)
 	}
-	n, err := adm.DeleteFolder(e.ctx, e.bank, "eng")
+	n, err := adm.DeleteMentalModelFolder(e.ctx, e.bank, "eng")
 	if err != nil || n != 2 {
 		t.Fatalf("deleted %d: %v", n, err)
 	}
