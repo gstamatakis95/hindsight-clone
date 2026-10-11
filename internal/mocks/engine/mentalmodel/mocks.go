@@ -6,6 +6,7 @@ package mockmentalmodel
 
 import (
 	"context"
+	"encoding/json"
 	"memd/internal/domain"
 	"memd/internal/engine/mentalmodel"
 	"memd/internal/engine/recall"
@@ -14,6 +15,526 @@ import (
 	"sync"
 	"time"
 )
+
+// Ensure that Admin does implement mentalmodel.Admin.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.Admin = &Admin{}
+
+// Admin is a mock implementation of mentalmodel.Admin.
+//
+//	func TestSomethingThatUsesAdmin(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.Admin
+//		mockedAdmin := &Admin{
+//			ClearMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error) {
+//				panic("mock out the ClearMentalModel method")
+//			},
+//			CreateMentalModelFunc: func(ctx context.Context, b port.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error) {
+//				panic("mock out the CreateMentalModel method")
+//			},
+//			DeleteFolderFunc: func(ctx context.Context, b port.BankRef, path string) (int, error) {
+//				panic("mock out the DeleteFolder method")
+//			},
+//			DeleteMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID) error {
+//				panic("mock out the DeleteMentalModel method")
+//			},
+//			GetMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail) (domain.MentalModel, error) {
+//				panic("mock out the GetMentalModel method")
+//			},
+//			ListMentalModelsFunc: func(ctx context.Context, req mentalmodel.ListRequest) (mentalmodel.ModelPage, error) {
+//				panic("mock out the ListMentalModels method")
+//			},
+//			MentalModelHistoryFunc: func(ctx context.Context, req mentalmodel.HistoryRequest) (mentalmodel.HistoryPage, error) {
+//				panic("mock out the MentalModelHistory method")
+//			},
+//			RefreshMentalModelFunc: func(ctx context.Context, req mentalmodel.RefreshRequest) (domain.Operation, bool, error) {
+//				panic("mock out the RefreshMentalModel method")
+//			},
+//			UpdateMentalModelFunc: func(ctx context.Context, b port.BankRef, id port.MentalModelID, patch mentalmodel.SpecPatch) (domain.MentalModel, error) {
+//				panic("mock out the UpdateMentalModel method")
+//			},
+//		}
+//
+//		// use mockedAdmin in code that requires mentalmodel.Admin
+//		// and then make assertions.
+//
+//	}
+type Admin struct {
+	// ClearMentalModelFunc mocks the ClearMentalModel method.
+	ClearMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error)
+
+	// CreateMentalModelFunc mocks the CreateMentalModel method.
+	CreateMentalModelFunc func(ctx context.Context, b port.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error)
+
+	// DeleteFolderFunc mocks the DeleteFolder method.
+	DeleteFolderFunc func(ctx context.Context, b port.BankRef, path string) (int, error)
+
+	// DeleteMentalModelFunc mocks the DeleteMentalModel method.
+	DeleteMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID) error
+
+	// GetMentalModelFunc mocks the GetMentalModel method.
+	GetMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail) (domain.MentalModel, error)
+
+	// ListMentalModelsFunc mocks the ListMentalModels method.
+	ListMentalModelsFunc func(ctx context.Context, req mentalmodel.ListRequest) (mentalmodel.ModelPage, error)
+
+	// MentalModelHistoryFunc mocks the MentalModelHistory method.
+	MentalModelHistoryFunc func(ctx context.Context, req mentalmodel.HistoryRequest) (mentalmodel.HistoryPage, error)
+
+	// RefreshMentalModelFunc mocks the RefreshMentalModel method.
+	RefreshMentalModelFunc func(ctx context.Context, req mentalmodel.RefreshRequest) (domain.Operation, bool, error)
+
+	// UpdateMentalModelFunc mocks the UpdateMentalModel method.
+	UpdateMentalModelFunc func(ctx context.Context, b port.BankRef, id port.MentalModelID, patch mentalmodel.SpecPatch) (domain.MentalModel, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// ClearMentalModel holds details about calls to the ClearMentalModel method.
+		ClearMentalModel []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.MentalModelID
+		}
+		// CreateMentalModel holds details about calls to the CreateMentalModel method.
+		CreateMentalModel []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Spec is the spec argument value.
+			Spec domain.MentalModelSpec
+		}
+		// DeleteFolder holds details about calls to the DeleteFolder method.
+		DeleteFolder []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Path is the path argument value.
+			Path string
+		}
+		// DeleteMentalModel holds details about calls to the DeleteMentalModel method.
+		DeleteMentalModel []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.MentalModelID
+		}
+		// GetMentalModel holds details about calls to the GetMentalModel method.
+		GetMentalModel []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.MentalModelID
+			// Detail is the detail argument value.
+			Detail domain.Detail
+		}
+		// ListMentalModels holds details about calls to the ListMentalModels method.
+		ListMentalModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Req is the req argument value.
+			Req mentalmodel.ListRequest
+		}
+		// MentalModelHistory holds details about calls to the MentalModelHistory method.
+		MentalModelHistory []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Req is the req argument value.
+			Req mentalmodel.HistoryRequest
+		}
+		// RefreshMentalModel holds details about calls to the RefreshMentalModel method.
+		RefreshMentalModel []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Req is the req argument value.
+			Req mentalmodel.RefreshRequest
+		}
+		// UpdateMentalModel holds details about calls to the UpdateMentalModel method.
+		UpdateMentalModel []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.MentalModelID
+			// Patch is the patch argument value.
+			Patch mentalmodel.SpecPatch
+		}
+	}
+	lockClearMentalModel   sync.RWMutex
+	lockCreateMentalModel  sync.RWMutex
+	lockDeleteFolder       sync.RWMutex
+	lockDeleteMentalModel  sync.RWMutex
+	lockGetMentalModel     sync.RWMutex
+	lockListMentalModels   sync.RWMutex
+	lockMentalModelHistory sync.RWMutex
+	lockRefreshMentalModel sync.RWMutex
+	lockUpdateMentalModel  sync.RWMutex
+}
+
+// ClearMentalModel calls ClearMentalModelFunc.
+func (mock *Admin) ClearMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID) (domain.MentalModel, error) {
+	if mock.ClearMentalModelFunc == nil {
+		panic("Admin.ClearMentalModelFunc: method is nil but Admin.ClearMentalModel was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.MentalModelID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockClearMentalModel.Lock()
+	mock.calls.ClearMentalModel = append(mock.calls.ClearMentalModel, callInfo)
+	mock.lockClearMentalModel.Unlock()
+	return mock.ClearMentalModelFunc(ctx, b, id)
+}
+
+// ClearMentalModelCalls gets all the calls that were made to ClearMentalModel.
+// Check the length with:
+//
+//	len(mockedAdmin.ClearMentalModelCalls())
+func (mock *Admin) ClearMentalModelCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.MentalModelID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.MentalModelID
+	}
+	mock.lockClearMentalModel.RLock()
+	calls = mock.calls.ClearMentalModel
+	mock.lockClearMentalModel.RUnlock()
+	return calls
+}
+
+// CreateMentalModel calls CreateMentalModelFunc.
+func (mock *Admin) CreateMentalModel(ctx context.Context, b port.BankRef, spec domain.MentalModelSpec) (domain.MentalModel, domain.Operation, error) {
+	if mock.CreateMentalModelFunc == nil {
+		panic("Admin.CreateMentalModelFunc: method is nil but Admin.CreateMentalModel was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Spec domain.MentalModelSpec
+	}{
+		Ctx:  ctx,
+		B:    b,
+		Spec: spec,
+	}
+	mock.lockCreateMentalModel.Lock()
+	mock.calls.CreateMentalModel = append(mock.calls.CreateMentalModel, callInfo)
+	mock.lockCreateMentalModel.Unlock()
+	return mock.CreateMentalModelFunc(ctx, b, spec)
+}
+
+// CreateMentalModelCalls gets all the calls that were made to CreateMentalModel.
+// Check the length with:
+//
+//	len(mockedAdmin.CreateMentalModelCalls())
+func (mock *Admin) CreateMentalModelCalls() []struct {
+	Ctx  context.Context
+	B    port.BankRef
+	Spec domain.MentalModelSpec
+} {
+	var calls []struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Spec domain.MentalModelSpec
+	}
+	mock.lockCreateMentalModel.RLock()
+	calls = mock.calls.CreateMentalModel
+	mock.lockCreateMentalModel.RUnlock()
+	return calls
+}
+
+// DeleteFolder calls DeleteFolderFunc.
+func (mock *Admin) DeleteFolder(ctx context.Context, b port.BankRef, path string) (int, error) {
+	if mock.DeleteFolderFunc == nil {
+		panic("Admin.DeleteFolderFunc: method is nil but Admin.DeleteFolder was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Path string
+	}{
+		Ctx:  ctx,
+		B:    b,
+		Path: path,
+	}
+	mock.lockDeleteFolder.Lock()
+	mock.calls.DeleteFolder = append(mock.calls.DeleteFolder, callInfo)
+	mock.lockDeleteFolder.Unlock()
+	return mock.DeleteFolderFunc(ctx, b, path)
+}
+
+// DeleteFolderCalls gets all the calls that were made to DeleteFolder.
+// Check the length with:
+//
+//	len(mockedAdmin.DeleteFolderCalls())
+func (mock *Admin) DeleteFolderCalls() []struct {
+	Ctx  context.Context
+	B    port.BankRef
+	Path string
+} {
+	var calls []struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Path string
+	}
+	mock.lockDeleteFolder.RLock()
+	calls = mock.calls.DeleteFolder
+	mock.lockDeleteFolder.RUnlock()
+	return calls
+}
+
+// DeleteMentalModel calls DeleteMentalModelFunc.
+func (mock *Admin) DeleteMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID) error {
+	if mock.DeleteMentalModelFunc == nil {
+		panic("Admin.DeleteMentalModelFunc: method is nil but Admin.DeleteMentalModel was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.MentalModelID
+	}{
+		Ctx: ctx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockDeleteMentalModel.Lock()
+	mock.calls.DeleteMentalModel = append(mock.calls.DeleteMentalModel, callInfo)
+	mock.lockDeleteMentalModel.Unlock()
+	return mock.DeleteMentalModelFunc(ctx, b, id)
+}
+
+// DeleteMentalModelCalls gets all the calls that were made to DeleteMentalModel.
+// Check the length with:
+//
+//	len(mockedAdmin.DeleteMentalModelCalls())
+func (mock *Admin) DeleteMentalModelCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	ID  port.MentalModelID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		ID  port.MentalModelID
+	}
+	mock.lockDeleteMentalModel.RLock()
+	calls = mock.calls.DeleteMentalModel
+	mock.lockDeleteMentalModel.RUnlock()
+	return calls
+}
+
+// GetMentalModel calls GetMentalModelFunc.
+func (mock *Admin) GetMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID, detail domain.Detail) (domain.MentalModel, error) {
+	if mock.GetMentalModelFunc == nil {
+		panic("Admin.GetMentalModelFunc: method is nil but Admin.GetMentalModel was just called")
+	}
+	callInfo := struct {
+		Ctx    context.Context
+		B      port.BankRef
+		ID     port.MentalModelID
+		Detail domain.Detail
+	}{
+		Ctx:    ctx,
+		B:      b,
+		ID:     id,
+		Detail: detail,
+	}
+	mock.lockGetMentalModel.Lock()
+	mock.calls.GetMentalModel = append(mock.calls.GetMentalModel, callInfo)
+	mock.lockGetMentalModel.Unlock()
+	return mock.GetMentalModelFunc(ctx, b, id, detail)
+}
+
+// GetMentalModelCalls gets all the calls that were made to GetMentalModel.
+// Check the length with:
+//
+//	len(mockedAdmin.GetMentalModelCalls())
+func (mock *Admin) GetMentalModelCalls() []struct {
+	Ctx    context.Context
+	B      port.BankRef
+	ID     port.MentalModelID
+	Detail domain.Detail
+} {
+	var calls []struct {
+		Ctx    context.Context
+		B      port.BankRef
+		ID     port.MentalModelID
+		Detail domain.Detail
+	}
+	mock.lockGetMentalModel.RLock()
+	calls = mock.calls.GetMentalModel
+	mock.lockGetMentalModel.RUnlock()
+	return calls
+}
+
+// ListMentalModels calls ListMentalModelsFunc.
+func (mock *Admin) ListMentalModels(ctx context.Context, req mentalmodel.ListRequest) (mentalmodel.ModelPage, error) {
+	if mock.ListMentalModelsFunc == nil {
+		panic("Admin.ListMentalModelsFunc: method is nil but Admin.ListMentalModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Req mentalmodel.ListRequest
+	}{
+		Ctx: ctx,
+		Req: req,
+	}
+	mock.lockListMentalModels.Lock()
+	mock.calls.ListMentalModels = append(mock.calls.ListMentalModels, callInfo)
+	mock.lockListMentalModels.Unlock()
+	return mock.ListMentalModelsFunc(ctx, req)
+}
+
+// ListMentalModelsCalls gets all the calls that were made to ListMentalModels.
+// Check the length with:
+//
+//	len(mockedAdmin.ListMentalModelsCalls())
+func (mock *Admin) ListMentalModelsCalls() []struct {
+	Ctx context.Context
+	Req mentalmodel.ListRequest
+} {
+	var calls []struct {
+		Ctx context.Context
+		Req mentalmodel.ListRequest
+	}
+	mock.lockListMentalModels.RLock()
+	calls = mock.calls.ListMentalModels
+	mock.lockListMentalModels.RUnlock()
+	return calls
+}
+
+// MentalModelHistory calls MentalModelHistoryFunc.
+func (mock *Admin) MentalModelHistory(ctx context.Context, req mentalmodel.HistoryRequest) (mentalmodel.HistoryPage, error) {
+	if mock.MentalModelHistoryFunc == nil {
+		panic("Admin.MentalModelHistoryFunc: method is nil but Admin.MentalModelHistory was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Req mentalmodel.HistoryRequest
+	}{
+		Ctx: ctx,
+		Req: req,
+	}
+	mock.lockMentalModelHistory.Lock()
+	mock.calls.MentalModelHistory = append(mock.calls.MentalModelHistory, callInfo)
+	mock.lockMentalModelHistory.Unlock()
+	return mock.MentalModelHistoryFunc(ctx, req)
+}
+
+// MentalModelHistoryCalls gets all the calls that were made to MentalModelHistory.
+// Check the length with:
+//
+//	len(mockedAdmin.MentalModelHistoryCalls())
+func (mock *Admin) MentalModelHistoryCalls() []struct {
+	Ctx context.Context
+	Req mentalmodel.HistoryRequest
+} {
+	var calls []struct {
+		Ctx context.Context
+		Req mentalmodel.HistoryRequest
+	}
+	mock.lockMentalModelHistory.RLock()
+	calls = mock.calls.MentalModelHistory
+	mock.lockMentalModelHistory.RUnlock()
+	return calls
+}
+
+// RefreshMentalModel calls RefreshMentalModelFunc.
+func (mock *Admin) RefreshMentalModel(ctx context.Context, req mentalmodel.RefreshRequest) (domain.Operation, bool, error) {
+	if mock.RefreshMentalModelFunc == nil {
+		panic("Admin.RefreshMentalModelFunc: method is nil but Admin.RefreshMentalModel was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Req mentalmodel.RefreshRequest
+	}{
+		Ctx: ctx,
+		Req: req,
+	}
+	mock.lockRefreshMentalModel.Lock()
+	mock.calls.RefreshMentalModel = append(mock.calls.RefreshMentalModel, callInfo)
+	mock.lockRefreshMentalModel.Unlock()
+	return mock.RefreshMentalModelFunc(ctx, req)
+}
+
+// RefreshMentalModelCalls gets all the calls that were made to RefreshMentalModel.
+// Check the length with:
+//
+//	len(mockedAdmin.RefreshMentalModelCalls())
+func (mock *Admin) RefreshMentalModelCalls() []struct {
+	Ctx context.Context
+	Req mentalmodel.RefreshRequest
+} {
+	var calls []struct {
+		Ctx context.Context
+		Req mentalmodel.RefreshRequest
+	}
+	mock.lockRefreshMentalModel.RLock()
+	calls = mock.calls.RefreshMentalModel
+	mock.lockRefreshMentalModel.RUnlock()
+	return calls
+}
+
+// UpdateMentalModel calls UpdateMentalModelFunc.
+func (mock *Admin) UpdateMentalModel(ctx context.Context, b port.BankRef, id port.MentalModelID, patch mentalmodel.SpecPatch) (domain.MentalModel, error) {
+	if mock.UpdateMentalModelFunc == nil {
+		panic("Admin.UpdateMentalModelFunc: method is nil but Admin.UpdateMentalModel was just called")
+	}
+	callInfo := struct {
+		Ctx   context.Context
+		B     port.BankRef
+		ID    port.MentalModelID
+		Patch mentalmodel.SpecPatch
+	}{
+		Ctx:   ctx,
+		B:     b,
+		ID:    id,
+		Patch: patch,
+	}
+	mock.lockUpdateMentalModel.Lock()
+	mock.calls.UpdateMentalModel = append(mock.calls.UpdateMentalModel, callInfo)
+	mock.lockUpdateMentalModel.Unlock()
+	return mock.UpdateMentalModelFunc(ctx, b, id, patch)
+}
+
+// UpdateMentalModelCalls gets all the calls that were made to UpdateMentalModel.
+// Check the length with:
+//
+//	len(mockedAdmin.UpdateMentalModelCalls())
+func (mock *Admin) UpdateMentalModelCalls() []struct {
+	Ctx   context.Context
+	B     port.BankRef
+	ID    port.MentalModelID
+	Patch mentalmodel.SpecPatch
+} {
+	var calls []struct {
+		Ctx   context.Context
+		B     port.BankRef
+		ID    port.MentalModelID
+		Patch mentalmodel.SpecPatch
+	}
+	mock.lockUpdateMentalModel.RLock()
+	calls = mock.calls.UpdateMentalModel
+	mock.lockUpdateMentalModel.RUnlock()
+	return calls
+}
 
 // Ensure that Reflector does implement mentalmodel.Reflector.
 // If this is not the case, regenerate this file with mockery.
@@ -231,6 +752,516 @@ func (mock *PageSearcher) SearchCalls() []struct {
 	return calls
 }
 
+// Ensure that DirectiveSelector does implement mentalmodel.DirectiveSelector.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.DirectiveSelector = &DirectiveSelector{}
+
+// DirectiveSelector is a mock implementation of mentalmodel.DirectiveSelector.
+//
+//	func TestSomethingThatUsesDirectiveSelector(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.DirectiveSelector
+//		mockedDirectiveSelector := &DirectiveSelector{
+//			SelectFunc: func(ctx context.Context, b port.BankRef, tags []string, all bool) ([]domain.Directive, error) {
+//				panic("mock out the Select method")
+//			},
+//		}
+//
+//		// use mockedDirectiveSelector in code that requires mentalmodel.DirectiveSelector
+//		// and then make assertions.
+//
+//	}
+type DirectiveSelector struct {
+	// SelectFunc mocks the Select method.
+	SelectFunc func(ctx context.Context, b port.BankRef, tags []string, all bool) ([]domain.Directive, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Select holds details about calls to the Select method.
+		Select []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Tags is the tags argument value.
+			Tags []string
+			// All is the all argument value.
+			All bool
+		}
+	}
+	lockSelect sync.RWMutex
+}
+
+// Select calls SelectFunc.
+func (mock *DirectiveSelector) Select(ctx context.Context, b port.BankRef, tags []string, all bool) ([]domain.Directive, error) {
+	if mock.SelectFunc == nil {
+		panic("DirectiveSelector.SelectFunc: method is nil but DirectiveSelector.Select was just called")
+	}
+	callInfo := struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Tags []string
+		All  bool
+	}{
+		Ctx:  ctx,
+		B:    b,
+		Tags: tags,
+		All:  all,
+	}
+	mock.lockSelect.Lock()
+	mock.calls.Select = append(mock.calls.Select, callInfo)
+	mock.lockSelect.Unlock()
+	return mock.SelectFunc(ctx, b, tags, all)
+}
+
+// SelectCalls gets all the calls that were made to Select.
+// Check the length with:
+//
+//	len(mockedDirectiveSelector.SelectCalls())
+func (mock *DirectiveSelector) SelectCalls() []struct {
+	Ctx  context.Context
+	B    port.BankRef
+	Tags []string
+	All  bool
+} {
+	var calls []struct {
+		Ctx  context.Context
+		B    port.BankRef
+		Tags []string
+		All  bool
+	}
+	mock.lockSelect.RLock()
+	calls = mock.calls.Select
+	mock.lockSelect.RUnlock()
+	return calls
+}
+
+// Ensure that RefreshQueuer does implement mentalmodel.RefreshQueuer.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.RefreshQueuer = &RefreshQueuer{}
+
+// RefreshQueuer is a mock implementation of mentalmodel.RefreshQueuer.
+//
+//	func TestSomethingThatUsesRefreshQueuer(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.RefreshQueuer
+//		mockedRefreshQueuer := &RefreshQueuer{
+//			QueueRefreshFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error) {
+//				panic("mock out the QueueRefresh method")
+//			},
+//		}
+//
+//		// use mockedRefreshQueuer in code that requires mentalmodel.RefreshQueuer
+//		// and then make assertions.
+//
+//	}
+type RefreshQueuer struct {
+	// QueueRefreshFunc mocks the QueueRefresh method.
+	QueueRefreshFunc func(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// QueueRefresh holds details about calls to the QueueRefresh method.
+		QueueRefresh []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Tx is the tx argument value.
+			Tx port.Tx
+			// B is the b argument value.
+			B port.BankRef
+			// ID is the id argument value.
+			ID port.MentalModelID
+		}
+	}
+	lockQueueRefresh sync.RWMutex
+}
+
+// QueueRefresh calls QueueRefreshFunc.
+func (mock *RefreshQueuer) QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error) {
+	if mock.QueueRefreshFunc == nil {
+		panic("RefreshQueuer.QueueRefreshFunc: method is nil but RefreshQueuer.QueueRefresh was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		ID  port.MentalModelID
+	}{
+		Ctx: ctx,
+		Tx:  tx,
+		B:   b,
+		ID:  id,
+	}
+	mock.lockQueueRefresh.Lock()
+	mock.calls.QueueRefresh = append(mock.calls.QueueRefresh, callInfo)
+	mock.lockQueueRefresh.Unlock()
+	return mock.QueueRefreshFunc(ctx, tx, b, id)
+}
+
+// QueueRefreshCalls gets all the calls that were made to QueueRefresh.
+// Check the length with:
+//
+//	len(mockedRefreshQueuer.QueueRefreshCalls())
+func (mock *RefreshQueuer) QueueRefreshCalls() []struct {
+	Ctx context.Context
+	Tx  port.Tx
+	B   port.BankRef
+	ID  port.MentalModelID
+} {
+	var calls []struct {
+		Ctx context.Context
+		Tx  port.Tx
+		B   port.BankRef
+		ID  port.MentalModelID
+	}
+	mock.lockQueueRefresh.RLock()
+	calls = mock.calls.QueueRefresh
+	mock.lockQueueRefresh.RUnlock()
+	return calls
+}
+
+// Ensure that ScopeReader does implement mentalmodel.ScopeReader.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.ScopeReader = &ScopeReader{}
+
+// ScopeReader is a mock implementation of mentalmodel.ScopeReader.
+//
+//	func TestSomethingThatUsesScopeReader(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.ScopeReader
+//		mockedScopeReader := &ScopeReader{
+//			NewestSeqFunc: func(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error) {
+//				panic("mock out the NewestSeq method")
+//			},
+//		}
+//
+//		// use mockedScopeReader in code that requires mentalmodel.ScopeReader
+//		// and then make assertions.
+//
+//	}
+type ScopeReader struct {
+	// NewestSeqFunc mocks the NewestSeq method.
+	NewestSeqFunc func(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// NewestSeq holds details about calls to the NewestSeq method.
+		NewestSeq []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q mentalmodel.ScopeQuery
+		}
+	}
+	lockNewestSeq sync.RWMutex
+}
+
+// NewestSeq calls NewestSeqFunc.
+func (mock *ScopeReader) NewestSeq(ctx context.Context, q mentalmodel.ScopeQuery) (int64, error) {
+	if mock.NewestSeqFunc == nil {
+		panic("ScopeReader.NewestSeqFunc: method is nil but ScopeReader.NewestSeq was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   mentalmodel.ScopeQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockNewestSeq.Lock()
+	mock.calls.NewestSeq = append(mock.calls.NewestSeq, callInfo)
+	mock.lockNewestSeq.Unlock()
+	return mock.NewestSeqFunc(ctx, q)
+}
+
+// NewestSeqCalls gets all the calls that were made to NewestSeq.
+// Check the length with:
+//
+//	len(mockedScopeReader.NewestSeqCalls())
+func (mock *ScopeReader) NewestSeqCalls() []struct {
+	Ctx context.Context
+	Q   mentalmodel.ScopeQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   mentalmodel.ScopeQuery
+	}
+	mock.lockNewestSeq.RLock()
+	calls = mock.calls.NewestSeq
+	mock.lockNewestSeq.RUnlock()
+	return calls
+}
+
+// Ensure that ModelLister does implement mentalmodel.ModelLister.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.ModelLister = &ModelLister{}
+
+// ModelLister is a mock implementation of mentalmodel.ModelLister.
+//
+//	func TestSomethingThatUsesModelLister(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.ModelLister
+//		mockedModelLister := &ModelLister{
+//			ListModelsFunc: func(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error) {
+//				panic("mock out the ListModels method")
+//			},
+//		}
+//
+//		// use mockedModelLister in code that requires mentalmodel.ModelLister
+//		// and then make assertions.
+//
+//	}
+type ModelLister struct {
+	// ListModelsFunc mocks the ListModels method.
+	ListModelsFunc func(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// ListModels holds details about calls to the ListModels method.
+		ListModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Q is the q argument value.
+			Q mentalmodel.ModelQuery
+		}
+	}
+	lockListModels sync.RWMutex
+}
+
+// ListModels calls ListModelsFunc.
+func (mock *ModelLister) ListModels(ctx context.Context, q mentalmodel.ModelQuery) ([]domain.MentalModel, string, error) {
+	if mock.ListModelsFunc == nil {
+		panic("ModelLister.ListModelsFunc: method is nil but ModelLister.ListModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Q   mentalmodel.ModelQuery
+	}{
+		Ctx: ctx,
+		Q:   q,
+	}
+	mock.lockListModels.Lock()
+	mock.calls.ListModels = append(mock.calls.ListModels, callInfo)
+	mock.lockListModels.Unlock()
+	return mock.ListModelsFunc(ctx, q)
+}
+
+// ListModelsCalls gets all the calls that were made to ListModels.
+// Check the length with:
+//
+//	len(mockedModelLister.ListModelsCalls())
+func (mock *ModelLister) ListModelsCalls() []struct {
+	Ctx context.Context
+	Q   mentalmodel.ModelQuery
+} {
+	var calls []struct {
+		Ctx context.Context
+		Q   mentalmodel.ModelQuery
+	}
+	mock.lockListModels.RLock()
+	calls = mock.calls.ListModels
+	mock.lockListModels.RUnlock()
+	return calls
+}
+
+// Ensure that CronSource does implement mentalmodel.CronSource.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.CronSource = &CronSource{}
+
+// CronSource is a mock implementation of mentalmodel.CronSource.
+//
+//	func TestSomethingThatUsesCronSource(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.CronSource
+//		mockedCronSource := &CronSource{
+//			CronModelsFunc: func(ctx context.Context) ([]mentalmodel.CronModel, error) {
+//				panic("mock out the CronModels method")
+//			},
+//		}
+//
+//		// use mockedCronSource in code that requires mentalmodel.CronSource
+//		// and then make assertions.
+//
+//	}
+type CronSource struct {
+	// CronModelsFunc mocks the CronModels method.
+	CronModelsFunc func(ctx context.Context) ([]mentalmodel.CronModel, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// CronModels holds details about calls to the CronModels method.
+		CronModels []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockCronModels sync.RWMutex
+}
+
+// CronModels calls CronModelsFunc.
+func (mock *CronSource) CronModels(ctx context.Context) ([]mentalmodel.CronModel, error) {
+	if mock.CronModelsFunc == nil {
+		panic("CronSource.CronModelsFunc: method is nil but CronSource.CronModels was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockCronModels.Lock()
+	mock.calls.CronModels = append(mock.calls.CronModels, callInfo)
+	mock.lockCronModels.Unlock()
+	return mock.CronModelsFunc(ctx)
+}
+
+// CronModelsCalls gets all the calls that were made to CronModels.
+// Check the length with:
+//
+//	len(mockedCronSource.CronModelsCalls())
+func (mock *CronSource) CronModelsCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockCronModels.RLock()
+	calls = mock.calls.CronModels
+	mock.lockCronModels.RUnlock()
+	return calls
+}
+
+// Ensure that FailureSource does implement mentalmodel.FailureSource.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.FailureSource = &FailureSource{}
+
+// FailureSource is a mock implementation of mentalmodel.FailureSource.
+//
+//	func TestSomethingThatUsesFailureSource(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.FailureSource
+//		mockedFailureSource := &FailureSource{
+//			FailedRefreshesFunc: func(ctx context.Context) ([]mentalmodel.FailedRefresh, error) {
+//				panic("mock out the FailedRefreshes method")
+//			},
+//		}
+//
+//		// use mockedFailureSource in code that requires mentalmodel.FailureSource
+//		// and then make assertions.
+//
+//	}
+type FailureSource struct {
+	// FailedRefreshesFunc mocks the FailedRefreshes method.
+	FailedRefreshesFunc func(ctx context.Context) ([]mentalmodel.FailedRefresh, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// FailedRefreshes holds details about calls to the FailedRefreshes method.
+		FailedRefreshes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockFailedRefreshes sync.RWMutex
+}
+
+// FailedRefreshes calls FailedRefreshesFunc.
+func (mock *FailureSource) FailedRefreshes(ctx context.Context) ([]mentalmodel.FailedRefresh, error) {
+	if mock.FailedRefreshesFunc == nil {
+		panic("FailureSource.FailedRefreshesFunc: method is nil but FailureSource.FailedRefreshes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockFailedRefreshes.Lock()
+	mock.calls.FailedRefreshes = append(mock.calls.FailedRefreshes, callInfo)
+	mock.lockFailedRefreshes.Unlock()
+	return mock.FailedRefreshesFunc(ctx)
+}
+
+// FailedRefreshesCalls gets all the calls that were made to FailedRefreshes.
+// Check the length with:
+//
+//	len(mockedFailureSource.FailedRefreshesCalls())
+func (mock *FailureSource) FailedRefreshesCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockFailedRefreshes.RLock()
+	calls = mock.calls.FailedRefreshes
+	mock.lockFailedRefreshes.RUnlock()
+	return calls
+}
+
+// Ensure that RefreshFailureReconciler does implement mentalmodel.RefreshFailureReconciler.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.RefreshFailureReconciler = &RefreshFailureReconciler{}
+
+// RefreshFailureReconciler is a mock implementation of mentalmodel.RefreshFailureReconciler.
+//
+//	func TestSomethingThatUsesRefreshFailureReconciler(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.RefreshFailureReconciler
+//		mockedRefreshFailureReconciler := &RefreshFailureReconciler{
+//			ReconcileFailedRefreshesFunc: func(ctx context.Context) (int, error) {
+//				panic("mock out the ReconcileFailedRefreshes method")
+//			},
+//		}
+//
+//		// use mockedRefreshFailureReconciler in code that requires mentalmodel.RefreshFailureReconciler
+//		// and then make assertions.
+//
+//	}
+type RefreshFailureReconciler struct {
+	// ReconcileFailedRefreshesFunc mocks the ReconcileFailedRefreshes method.
+	ReconcileFailedRefreshesFunc func(ctx context.Context) (int, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// ReconcileFailedRefreshes holds details about calls to the ReconcileFailedRefreshes method.
+		ReconcileFailedRefreshes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+		}
+	}
+	lockReconcileFailedRefreshes sync.RWMutex
+}
+
+// ReconcileFailedRefreshes calls ReconcileFailedRefreshesFunc.
+func (mock *RefreshFailureReconciler) ReconcileFailedRefreshes(ctx context.Context) (int, error) {
+	if mock.ReconcileFailedRefreshesFunc == nil {
+		panic("RefreshFailureReconciler.ReconcileFailedRefreshesFunc: method is nil but RefreshFailureReconciler.ReconcileFailedRefreshes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+	}{
+		Ctx: ctx,
+	}
+	mock.lockReconcileFailedRefreshes.Lock()
+	mock.calls.ReconcileFailedRefreshes = append(mock.calls.ReconcileFailedRefreshes, callInfo)
+	mock.lockReconcileFailedRefreshes.Unlock()
+	return mock.ReconcileFailedRefreshesFunc(ctx)
+}
+
+// ReconcileFailedRefreshesCalls gets all the calls that were made to ReconcileFailedRefreshes.
+// Check the length with:
+//
+//	len(mockedRefreshFailureReconciler.ReconcileFailedRefreshesCalls())
+func (mock *RefreshFailureReconciler) ReconcileFailedRefreshesCalls() []struct {
+	Ctx context.Context
+} {
+	var calls []struct {
+		Ctx context.Context
+	}
+	mock.lockReconcileFailedRefreshes.RLock()
+	calls = mock.calls.ReconcileFailedRefreshes
+	mock.lockReconcileFailedRefreshes.RUnlock()
+	return calls
+}
+
 // Ensure that RefreshRunner does implement mentalmodel.RefreshRunner.
 // If this is not the case, regenerate this file with mockery.
 var _ mentalmodel.RefreshRunner = &RefreshRunner{}
@@ -325,7 +1356,7 @@ var _ mentalmodel.Synthesizer = &Synthesizer{}
 //
 //		// make and configure a mocked mentalmodel.Synthesizer
 //		mockedSynthesizer := &Synthesizer{
-//			DeltaFunc: func(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) ([]mentalmodel.EditOp, error) {
+//			DeltaFunc: func(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (mentalmodel.DeltaDraft, error) {
 //				panic("mock out the Delta method")
 //			},
 //			FullFunc: func(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (mentalmodel.Draft, error) {
@@ -342,7 +1373,7 @@ var _ mentalmodel.Synthesizer = &Synthesizer{}
 //	}
 type Synthesizer struct {
 	// DeltaFunc mocks the Delta method.
-	DeltaFunc func(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) ([]mentalmodel.EditOp, error)
+	DeltaFunc func(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (mentalmodel.DeltaDraft, error)
 
 	// FullFunc mocks the Full method.
 	FullFunc func(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (mentalmodel.Draft, error)
@@ -384,7 +1415,7 @@ type Synthesizer struct {
 }
 
 // Delta calls DeltaFunc.
-func (mock *Synthesizer) Delta(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) ([]mentalmodel.EditOp, error) {
+func (mock *Synthesizer) Delta(ctx context.Context, m domain.MentalModel, cfg domain.BankConfig, upTo int64) (mentalmodel.DeltaDraft, error) {
 	if mock.DeltaFunc == nil {
 		panic("Synthesizer.DeltaFunc: method is nil but Synthesizer.Delta was just called")
 	}
@@ -495,6 +1526,78 @@ func (mock *Synthesizer) StrategyCalls() []struct {
 	mock.lockStrategy.RLock()
 	calls = mock.calls.Strategy
 	mock.lockStrategy.RUnlock()
+	return calls
+}
+
+// Ensure that Projector does implement mentalmodel.Projector.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.Projector = &Projector{}
+
+// Projector is a mock implementation of mentalmodel.Projector.
+//
+//	func TestSomethingThatUsesProjector(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.Projector
+//		mockedProjector := &Projector{
+//			ProjectFunc: func(ctx context.Context, req reflect.ProjectRequest) (json.RawMessage, error) {
+//				panic("mock out the Project method")
+//			},
+//		}
+//
+//		// use mockedProjector in code that requires mentalmodel.Projector
+//		// and then make assertions.
+//
+//	}
+type Projector struct {
+	// ProjectFunc mocks the Project method.
+	ProjectFunc func(ctx context.Context, req reflect.ProjectRequest) (json.RawMessage, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// Project holds details about calls to the Project method.
+		Project []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Req is the req argument value.
+			Req reflect.ProjectRequest
+		}
+	}
+	lockProject sync.RWMutex
+}
+
+// Project calls ProjectFunc.
+func (mock *Projector) Project(ctx context.Context, req reflect.ProjectRequest) (json.RawMessage, error) {
+	if mock.ProjectFunc == nil {
+		panic("Projector.ProjectFunc: method is nil but Projector.Project was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Req reflect.ProjectRequest
+	}{
+		Ctx: ctx,
+		Req: req,
+	}
+	mock.lockProject.Lock()
+	mock.calls.Project = append(mock.calls.Project, callInfo)
+	mock.lockProject.Unlock()
+	return mock.ProjectFunc(ctx, req)
+}
+
+// ProjectCalls gets all the calls that were made to Project.
+// Check the length with:
+//
+//	len(mockedProjector.ProjectCalls())
+func (mock *Projector) ProjectCalls() []struct {
+	Ctx context.Context
+	Req reflect.ProjectRequest
+} {
+	var calls []struct {
+		Ctx context.Context
+		Req reflect.ProjectRequest
+	}
+	mock.lockProject.RLock()
+	calls = mock.calls.Project
+	mock.lockProject.RUnlock()
 	return calls
 }
 
@@ -645,5 +1748,183 @@ func (mock *Recaller) RecallCalls() []struct {
 	mock.lockRecall.RLock()
 	calls = mock.calls.Recall
 	mock.lockRecall.RUnlock()
+	return calls
+}
+
+// Ensure that Triggers does implement mentalmodel.Triggers.
+// If this is not the case, regenerate this file with mockery.
+var _ mentalmodel.Triggers = &Triggers{}
+
+// Triggers is a mock implementation of mentalmodel.Triggers.
+//
+//	func TestSomethingThatUsesTriggers(t *testing.T) {
+//
+//		// make and configure a mocked mentalmodel.Triggers
+//		mockedTriggers := &Triggers{
+//			AfterConsolidationFunc: func(ctx context.Context, b port.BankRef) (int, error) {
+//				panic("mock out the AfterConsolidation method")
+//			},
+//			EnqueueDueCronRefreshesFunc: func(ctx context.Context, now time.Time) (int, error) {
+//				panic("mock out the EnqueueDueCronRefreshes method")
+//			},
+//			RetractedFunc: func(ctx context.Context, b port.BankRef, ids []port.UnitID) (int, error) {
+//				panic("mock out the Retracted method")
+//			},
+//		}
+//
+//		// use mockedTriggers in code that requires mentalmodel.Triggers
+//		// and then make assertions.
+//
+//	}
+type Triggers struct {
+	// AfterConsolidationFunc mocks the AfterConsolidation method.
+	AfterConsolidationFunc func(ctx context.Context, b port.BankRef) (int, error)
+
+	// EnqueueDueCronRefreshesFunc mocks the EnqueueDueCronRefreshes method.
+	EnqueueDueCronRefreshesFunc func(ctx context.Context, now time.Time) (int, error)
+
+	// RetractedFunc mocks the Retracted method.
+	RetractedFunc func(ctx context.Context, b port.BankRef, ids []port.UnitID) (int, error)
+
+	// calls tracks calls to the methods.
+	calls struct {
+		// AfterConsolidation holds details about calls to the AfterConsolidation method.
+		AfterConsolidation []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+		}
+		// EnqueueDueCronRefreshes holds details about calls to the EnqueueDueCronRefreshes method.
+		EnqueueDueCronRefreshes []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// Now is the now argument value.
+			Now time.Time
+		}
+		// Retracted holds details about calls to the Retracted method.
+		Retracted []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// B is the b argument value.
+			B port.BankRef
+			// Ids is the ids argument value.
+			Ids []port.UnitID
+		}
+	}
+	lockAfterConsolidation      sync.RWMutex
+	lockEnqueueDueCronRefreshes sync.RWMutex
+	lockRetracted               sync.RWMutex
+}
+
+// AfterConsolidation calls AfterConsolidationFunc.
+func (mock *Triggers) AfterConsolidation(ctx context.Context, b port.BankRef) (int, error) {
+	if mock.AfterConsolidationFunc == nil {
+		panic("Triggers.AfterConsolidationFunc: method is nil but Triggers.AfterConsolidation was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+	}{
+		Ctx: ctx,
+		B:   b,
+	}
+	mock.lockAfterConsolidation.Lock()
+	mock.calls.AfterConsolidation = append(mock.calls.AfterConsolidation, callInfo)
+	mock.lockAfterConsolidation.Unlock()
+	return mock.AfterConsolidationFunc(ctx, b)
+}
+
+// AfterConsolidationCalls gets all the calls that were made to AfterConsolidation.
+// Check the length with:
+//
+//	len(mockedTriggers.AfterConsolidationCalls())
+func (mock *Triggers) AfterConsolidationCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+	}
+	mock.lockAfterConsolidation.RLock()
+	calls = mock.calls.AfterConsolidation
+	mock.lockAfterConsolidation.RUnlock()
+	return calls
+}
+
+// EnqueueDueCronRefreshes calls EnqueueDueCronRefreshesFunc.
+func (mock *Triggers) EnqueueDueCronRefreshes(ctx context.Context, now time.Time) (int, error) {
+	if mock.EnqueueDueCronRefreshesFunc == nil {
+		panic("Triggers.EnqueueDueCronRefreshesFunc: method is nil but Triggers.EnqueueDueCronRefreshes was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		Now time.Time
+	}{
+		Ctx: ctx,
+		Now: now,
+	}
+	mock.lockEnqueueDueCronRefreshes.Lock()
+	mock.calls.EnqueueDueCronRefreshes = append(mock.calls.EnqueueDueCronRefreshes, callInfo)
+	mock.lockEnqueueDueCronRefreshes.Unlock()
+	return mock.EnqueueDueCronRefreshesFunc(ctx, now)
+}
+
+// EnqueueDueCronRefreshesCalls gets all the calls that were made to EnqueueDueCronRefreshes.
+// Check the length with:
+//
+//	len(mockedTriggers.EnqueueDueCronRefreshesCalls())
+func (mock *Triggers) EnqueueDueCronRefreshesCalls() []struct {
+	Ctx context.Context
+	Now time.Time
+} {
+	var calls []struct {
+		Ctx context.Context
+		Now time.Time
+	}
+	mock.lockEnqueueDueCronRefreshes.RLock()
+	calls = mock.calls.EnqueueDueCronRefreshes
+	mock.lockEnqueueDueCronRefreshes.RUnlock()
+	return calls
+}
+
+// Retracted calls RetractedFunc.
+func (mock *Triggers) Retracted(ctx context.Context, b port.BankRef, ids []port.UnitID) (int, error) {
+	if mock.RetractedFunc == nil {
+		panic("Triggers.RetractedFunc: method is nil but Triggers.Retracted was just called")
+	}
+	callInfo := struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}{
+		Ctx: ctx,
+		B:   b,
+		Ids: ids,
+	}
+	mock.lockRetracted.Lock()
+	mock.calls.Retracted = append(mock.calls.Retracted, callInfo)
+	mock.lockRetracted.Unlock()
+	return mock.RetractedFunc(ctx, b, ids)
+}
+
+// RetractedCalls gets all the calls that were made to Retracted.
+// Check the length with:
+//
+//	len(mockedTriggers.RetractedCalls())
+func (mock *Triggers) RetractedCalls() []struct {
+	Ctx context.Context
+	B   port.BankRef
+	Ids []port.UnitID
+} {
+	var calls []struct {
+		Ctx context.Context
+		B   port.BankRef
+		Ids []port.UnitID
+	}
+	mock.lockRetracted.RLock()
+	calls = mock.calls.Retracted
+	mock.lockRetracted.RUnlock()
 	return calls
 }
