@@ -10,7 +10,7 @@ The spec lives at `docs/SPEC.md` (the swarm playbook at `docs/SWARM_PROMPT.md`).
 - internal/engine/*: business logic, depends on port only.
 - internal/adapter/*: Postgres (store + job queue), S3, gateway.
 - cmd/memd/wire.go: the only place concrete types meet.
-- migrations/: Alembic owns the schema. Never write DDL in Go.
+- migrations/: Alembic owns the schema, one baseline revision until the first release. Never write DDL in Go.
 
 ## Rules
 - Every component is an interface; put `var _ Iface = (*impl)(nil)` next to each implementation.

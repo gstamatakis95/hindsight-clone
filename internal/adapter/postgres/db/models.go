@@ -201,7 +201,6 @@ type MentalModel struct {
 	ContentMd            string
 	StructuredOutputJson json.RawMessage
 	Version              int64
-	IsStale              bool
 	LastRefreshedAt      *time.Time
 	LastSeqSeen          int64
 	LastRefreshFailedAt  *time.Time
@@ -212,13 +211,6 @@ type MentalModel struct {
 	RefreshCron          *string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-}
-
-type MentalModelFolder struct {
-	TenantID  string
-	BankID    string
-	Path      string
-	CreatedAt time.Time
 }
 
 type MentalModelHistory struct {
@@ -287,17 +279,6 @@ type Operation struct {
 	UpdatedAt         time.Time
 	FinishedAt        *time.Time
 	CancelRequestedAt *time.Time
-}
-
-type ParkedLink struct {
-	TenantID       string
-	BankID         string
-	ArchivedUnitID uuid.UUID
-	OtherUnitID    uuid.UUID
-	Kind           string
-	Direction      string
-	Weight         float64
-	CreatedAt      time.Time
 }
 
 type Tenant struct {

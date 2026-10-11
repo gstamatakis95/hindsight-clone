@@ -195,3 +195,7 @@ Read [AGENTS.md](AGENTS.md) first: layout, rules and the `make gen && make lint 
 
 The API may change freely until the first release, so `make lint` runs `buf lint` only; after the first release,
 `buf breaking` runs against that tag. Proto rules are in [api/AGENTS.md](api/AGENTS.md).
+
+The schema works the same way: until the first release it is one Alembic revision,
+`migrations/versions/0001_baseline.py`, edited in place; after it, schema changes are new revisions. See
+[migrations/README.md](migrations/README.md).

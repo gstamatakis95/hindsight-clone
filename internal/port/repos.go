@@ -182,10 +182,10 @@ type BankRepo interface {
 	// DeleteBatch deletes up to limit rows of the tombstoned bank's content and returns how many it
 	// deleted; 0 means nothing is left but the bank row, its events and its operations. It covers every
 	// bank-keyed table: memory_units, memory_units_archive, documents, chunks, entities, unit_entities,
-	// entity_cooccurrences, memory_links, parked_links, graph_dirty, entity_maintenance,
-	// observation_evidence, observation_scopes, observation_versions, memory_audit, mental_models,
-	// mental_model_history, mental_model_folders and directives. A bank whose deleting_at is not set
-	// returns domain.ErrFailedPrecondition and deletes nothing.
+	// entity_cooccurrences, memory_links, graph_dirty, entity_maintenance, observation_evidence,
+	// observation_scopes, observation_versions, memory_audit, mental_models, mental_model_history and
+	// directives. A bank whose deleting_at is not set returns domain.ErrFailedPrecondition and deletes
+	// nothing.
 	DeleteBatch(ctx context.Context, b BankRef, limit int) (int, error)
 	// Delete removes the tombstoned bank's row together with its remaining lifecycle events and operations
 	// (including the running delete_bank job's own row, so its Complete then reports domain.ErrNotFound,
