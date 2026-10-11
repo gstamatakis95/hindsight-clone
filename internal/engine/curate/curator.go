@@ -45,11 +45,11 @@ type UpdateMemoryRequest struct {
 	Overrides *domain.BankConfig
 }
 
-// CitingModels finds the mental models whose source_ids cite units. It is the port.Reader method proposed
-// in CCR WP-13-1; port.Reader satisfies it once the CCR lands.
+// CitingModels finds the mental models whose source_ids cite units. It is the port.Reader method;
+// port.Reader satisfies it.
 type CitingModels interface {
-	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids or any
-	// observation that cites one of ids, ordered by id. An unknown or tombstoned bank is domain.ErrNotFound.
+	// ModelsCiting returns the ids of b's mental models whose source_ids include any of ids, ordered by id.
+	// It is id-keyed: an unknown bank has none (empty, no error).
 	ModelsCiting(ctx context.Context, b port.BankRef, ids []port.UnitID) ([]port.MentalModelID, error)
 }
 
@@ -61,8 +61,8 @@ type RefreshQueuer interface {
 	QueueRefresh(ctx context.Context, tx port.Tx, b port.BankRef, id port.MentalModelID) (port.OperationID, error)
 }
 
-// UnitGetter reads one unit, live or archived. It is UnitSource.GetUnit (the port.Reader method proposed in
-// CCR WP-13-1); for an archived unit, Entities are the names in its archive snapshot, even when the entity
+// UnitGetter reads one unit, live or archived. It is UnitSource.GetUnit (a port.Reader method); for an
+// archived unit, Entities are the names in its archive snapshot, even when the entity
 // rows were pruned since.
 type UnitGetter interface {
 	// GetUnit returns one unit of b, live or archived; unknown = domain.ErrNotFound.

@@ -103,39 +103,20 @@ func (a *observationAdmin) ListScopes(
 	page := ScopePage{Items: items}
 	if len(items) > size {
 		page.Items = items[:size]
-		last := domain.NewScopeKey(b, page.Items[size-1].Scope.Tags).String()
-		if page.NextPageToken, err = encodeToken(last); err != nil {
+		if page.NextPageToken, err = encodeToken(scopeCursor(b, page.Items[size-1])); err != nil {
 			return ScopePage{}, err
 		}
 	}
 	return page, nil
 }
 
-// countObservations sums the observations of the given scopes (every scope when keys is empty). It reads
-// before the clear's transaction, so the count is best effort under concurrent consolidation.
-func (a *observationAdmin) countObservations(ctx context.Context, b port.BankRef, keys []port.ScopeKey) (int64, error) {
-	want := map[string]bool{}
-	for _, k := range keys {
-		want[k.String()] = true
+// scopeCursor is the keyset cursor after scope s: its canonical key, except that the shared scope's key ""
+// would restart the listing, so it maps to "0", which sorts before every tagged key (decision 1560).
+func scopeCursor(b port.BankRef, s domain.ScopeInfo) string {
+	if key := domain.NewScopeKey(b, s.Scope.Tags).String(); key != "" {
+		return key
 	}
-	var total int64
-	after := ""
-	for {
-		page, err := a.d.Scopes.ListScopes(ctx, b, after, MaxPageSize)
-		if err != nil {
-			return 0, fmt.Errorf("count observations: %w", err)
-		}
-		for _, s := range page {
-			key := domain.NewScopeKey(b, s.Scope.Tags).String()
-			if len(keys) == 0 || want[key] {
-				total += s.Observations
-			}
-			after = key
-		}
-		if len(page) < MaxPageSize {
-			return total, nil
-		}
-	}
+	return "0"
 }
 
 // ClearObservations deletes the observations of scopes (all when empty), resets their sources and, when
@@ -148,23 +129,21 @@ func (a *observationAdmin) ClearObservations(
 	for i, s := range scopes {
 		keys[i] = domain.NewScopeKey(b, s.Tags)
 	}
-	deleted, err := a.countObservations(ctx, b, keys)
-	if err != nil {
-		return ClearResult{}, err
-	}
 	j, err := consolidateJob(b, scopes, nil)
 	if err != nil {
 		return ClearResult{}, err
 	}
 	var res ClearResult
 	err = a.d.Store.InTx(ctx, func(tx port.Tx) error {
-		res = ClearResult{Deleted: deleted}
+		res = ClearResult{}
 		if _, err := tx.Seq(ctx, b); err != nil {
 			return err
 		}
-		if err := a.d.Clearer.ClearScopes(ctx, tx, b, keys); err != nil {
+		deleted, err := a.d.Clearer.ClearScopes(ctx, tx, b, keys)
+		if err != nil {
 			return fmt.Errorf("clear scopes: %w", err)
 		}
+		res.Deleted = int64(len(deleted))
 		if err := enqueueGraph(ctx, tx, b); err != nil {
 			return err
 		}

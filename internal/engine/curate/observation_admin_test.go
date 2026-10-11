@@ -1,57 +1,46 @@
 package curate
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"memd/internal/domain"
+	"memd/internal/engine/consolidate"
 	"memd/internal/port"
 	"slices"
 	"testing"
 )
 
-// scopeSourceStub serves fixed scopes ordered by their canonical key.
-type scopeSourceStub struct {
-	scopes []domain.ScopeInfo
-}
-
-// ListScopes pages the scopes after the given key.
-func (s scopeSourceStub) ListScopes(
-	_ context.Context, b port.BankRef, after string, limit int,
-) ([]domain.ScopeInfo, error) {
-	var out []domain.ScopeInfo
-	for _, sc := range s.scopes {
-		if domain.NewScopeKey(b, sc.Scope.Tags).String() > after && len(out) < limit {
-			out = append(out, sc)
-		}
-	}
-	return out, nil
-}
-
-// clearerStub records the scopes it was asked to clear.
-type clearerStub struct {
-	calls [][]port.ScopeKey
-}
-
-// ClearScopes records the call.
-func (c *clearerStub) ClearScopes(_ context.Context, tx port.Tx, _ port.BankRef, scopes []port.ScopeKey) error {
-	if tx == nil {
-		return errors.New("no transaction")
-	}
-	c.calls = append(c.calls, scopes)
-	return nil
-}
-
-// adminEnv is an ObservationAdmin over the seeded env.
-func adminEnv(t *testing.T) (*env, ObservationAdmin, *clearerStub) {
+// adminEnv is an ObservationAdmin over the seeded env, with the fake's port.Reader as ScopeSource and the
+// real consolidate.Invalidator as ObservationClearer. On top of the seed (o1 in scope team) it stores 2
+// observations in scope a, 3 in b, 4 in c and 1 in the shared scope.
+func adminEnv(t *testing.T) (*env, ObservationAdmin) {
 	e := newEnv(t)
-	cl := &clearerStub{}
-	src := scopeSourceStub{scopes: []domain.ScopeInfo{
-		{Scope: domain.TagSet{Tags: []string{"a"}}, Observations: 2},
-		{Scope: domain.TagSet{Tags: []string{"b"}}, Observations: 3},
-		{Scope: domain.TagSet{Tags: []string{"c"}}, Observations: 4},
-	}}
-	return e, NewObservationAdmin(ObservationAdminDeps{Store: e.store, Scopes: src, Clearer: cl}), cl
+	e.inTx(func(tx port.Tx) error {
+		seq, err := tx.Seq(e.ctx, testBank)
+		if err != nil {
+			return err
+		}
+		for _, s := range []struct {
+			tags []string
+			n    int
+		}{{[]string{"a"}, 2}, {[]string{"b"}, 3}, {[]string{"c"}, 4}, {[]string{}, 1}} {
+			for i := range s.n {
+				text := fmt.Sprintf("observation %v %d", s.tags, i)
+				o := domain.Unit{
+					ID: port.UnitID(fmt.Sprintf("obs-%v-%d", s.tags, i)), Bank: testBank,
+					Type: domain.FactTypeObservation, Text: text, Tags: s.tags, Embedding: e.emb.Vector(text), Seq: seq,
+				}
+				if err := tx.Units().UpsertObservation(e.ctx, o); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	return e, NewObservationAdmin(ObservationAdminDeps{
+		Store: e.store, Scopes: e.fake.Read(), Clearer: consolidate.NewInvalidator(),
+	})
 }
 
 // consolidatePayload claims (and completes) consolidate jobs one at a time, as their serial key allows,
@@ -79,7 +68,7 @@ func (e *env) consolidatePayload(id port.OperationID) ConsolidatePayload {
 }
 
 func TestObservationAdminConsolidate(t *testing.T) {
-	e, a, _ := adminEnv(t)
+	e, a := adminEnv(t)
 	op1, err := a.Consolidate(e.ctx, testBank, nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -106,40 +95,83 @@ func TestObservationAdminConsolidate(t *testing.T) {
 	}
 }
 
-func TestObservationAdminListScopes(t *testing.T) {
-	e, a, _ := adminEnv(t)
-	var tags []string
+// listScopeKeys pages through ListScopes at size and returns the scopes' canonical keys; it fails after 20
+// pages (a pager that restarts at the shared scope never terminates).
+func listScopeKeys(t *testing.T, e *env, a ObservationAdmin, size int) ([]string, map[string]int64) {
+	t.Helper()
+	var keys []string
+	counts := map[string]int64{}
 	tok := ""
-	for {
-		page, err := a.ListScopes(e.ctx, testBank, 2, tok)
+	for range 20 {
+		page, err := a.ListScopes(e.ctx, testBank, size, tok)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, s := range page.Items {
-			tags = append(tags, s.Scope.Tags...)
+			k := domain.NewScopeKey(testBank, s.Scope.Tags).String()
+			keys = append(keys, k)
+			counts[k] = s.Observations
 		}
 		if tok = page.NextPageToken; tok == "" {
-			break
+			return keys, counts
 		}
 	}
-	if !slices.Equal(tags, []string{"a", "b", "c"}) {
-		t.Errorf("scopes = %v", tags)
+	t.Fatalf("ListScopes(size %d) did not terminate: %v", size, keys)
+	return nil, nil
+}
+
+// TestObservationAdminListScopes pages the fake's Reader.ListScopes at sizes 1, 2 and 10: every scope once,
+// the shared scope first and with its count.
+func TestObservationAdminListScopes(t *testing.T) {
+	e, a := adminEnv(t)
+	key := func(tags ...string) string { return domain.NewScopeKey(testBank, tags).String() }
+	want := []string{key(), key("a"), key("b"), key("c"), key("team")}
+	for _, size := range []int{1, 2, 10} {
+		keys, counts := listScopeKeys(t, e, a, size)
+		if !slices.Equal(keys, want) {
+			t.Errorf("size %d: scopes = %q, want %q", size, keys, want)
+		}
+		if counts[key()] != 1 || counts[key("c")] != 4 {
+			t.Errorf("size %d: counts = %v", size, counts)
+		}
 	}
 }
 
+// TestListScopesPageSizeOneTerminates: a page ending at the shared scope (key "") continues with the "0"
+// cursor instead of restarting the listing (decision 1560).
+func TestListScopesPageSizeOneTerminates(t *testing.T) {
+	e, a := adminEnv(t)
+	first, err := a.ListScopes(e.ctx, testBank, 1, "")
+	if err != nil || len(first.Items) != 1 || len(first.Items[0].Scope.Tags) != 0 || first.NextPageToken == "" {
+		t.Fatalf("first page = %+v, %v; want the shared scope and a next token", first, err)
+	}
+	second, err := a.ListScopes(e.ctx, testBank, 1, first.NextPageToken)
+	if err != nil || len(second.Items) != 1 || !slices.Equal(second.Items[0].Scope.Tags, []string{"a"}) {
+		t.Fatalf("second page = %+v, %v; want scope a", second, err)
+	}
+}
+
+// TestObservationAdminClears: ClearObservations deletes through the real Invalidator and reports how many
+// observations it deleted (len(deleted), not a count read beforehand); an empty list clears every scope.
 func TestObservationAdminClears(t *testing.T) {
-	e, a, cl := adminEnv(t)
+	e, a := adminEnv(t)
 	res, err := a.ClearObservations(e.ctx, testBank, []domain.TagSet{{Tags: []string{"B"}}}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Deleted != 3 || res.Operation == nil || len(cl.calls) != 1 || len(cl.calls[0]) != 1 ||
-		!slices.Equal(cl.calls[0][0].Tags, []string{"b"}) {
-		t.Errorf("clear b = %+v, calls %v", res, cl.calls)
+	if res.Deleted != 3 || res.Operation == nil {
+		t.Errorf("clear b = %+v", res)
+	}
+	_, counts := listScopeKeys(t, e, a, 10)
+	if b := domain.NewScopeKey(testBank, []string{"b"}).String(); counts[b] != 0 || len(counts) != 5 {
+		t.Errorf("after clearing b: counts %v (b listed with 0, the rest kept)", counts)
 	}
 	all, err := a.ClearObservations(e.ctx, testBank, nil, false)
-	if err != nil || all.Deleted != 9 || all.Operation != nil {
+	if err != nil || all.Deleted != 8 || all.Operation != nil { // a 2 + c 4 + shared 1 + team (o1) 1
 		t.Errorf("clear all = %+v, %v", all, err)
+	}
+	if _, ok := e.unit("o1"); ok {
+		t.Error("clear all left o1")
 	}
 	// The caller owns the consolidate enqueue (Invalidator.ClearScopes enqueues none): exactly one, from the
 	// reconsolidate=true clear, and none from the reconsolidate=false one.
@@ -149,7 +181,7 @@ func TestObservationAdminClears(t *testing.T) {
 }
 
 func TestObservationAdminClearMemory(t *testing.T) {
-	e, a, _ := adminEnv(t)
+	e, a := adminEnv(t)
 	mem, err := a.ClearMemoryObservations(e.ctx, testBank, "f1", true)
 	if err != nil {
 		t.Fatal(err)

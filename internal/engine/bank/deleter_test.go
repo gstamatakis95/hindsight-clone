@@ -113,7 +113,7 @@ func assertReadsNotFound(t *testing.T, e env, b port.BankRef) {
 	if _, err := NewDirectiveAdmin(e.store).ListDirectives(e.ctx, b, nil, false); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("ListDirectives during delete: %v", err)
 	}
-	codec := NewTemplateCodec(e.store, specStub{}, refreshStub{})
+	codec := NewTemplateCodec(e.store, refreshStub{})
 	if _, err := codec.Export(e.ctx, b); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("Export during delete: %v", err)
 	}

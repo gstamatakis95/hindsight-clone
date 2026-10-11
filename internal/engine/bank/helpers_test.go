@@ -60,13 +60,6 @@ func (e env) getOp(t *testing.T, b port.BankRef, id port.OperationID) (domain.Op
 	return op, err
 }
 
-// specStub serves MentalModelSpecs from a map.
-type specStub map[port.BankRef][]domain.MentalModelSpec
-
-func (s specStub) MentalModelSpecs(_ context.Context, b port.BankRef) ([]domain.MentalModelSpec, error) {
-	return s[b], nil
-}
-
 // refreshStub enqueues a refresh_mental_model job like WP-12 would, inside the caller's tx.
 type refreshStub struct{}
 

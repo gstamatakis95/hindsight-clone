@@ -60,11 +60,18 @@ func TestTemplateRoundTrip(t *testing.T) {
 	src := port.BankRef{Tenant: "t", Bank: "src"}
 	dst := port.BankRef{Tenant: "t", Bank: "dst"}
 	seedTemplateSource(t, e, src)
-	specs := specStub{src: {
-		{ID: "people", Name: "People", SourceQuery: "who is who?", Tags: []string{"Team"}},
-		{ID: "tea", Name: "Tea", SourceQuery: "what tea?"},
-	}}
-	codec := NewTemplateCodec(e.store, specs, refreshStub{})
+	e.tx(t, func(tx port.Tx) error { // Export lists them with the fake's Reader.ListMentalModels
+		for _, s := range []domain.MentalModelSpec{
+			{ID: "tea", Name: "Tea", SourceQuery: "what tea?"},
+			{ID: "people", Name: "People", SourceQuery: "who is who?", Tags: []string{"Team"}},
+		} {
+			if err := tx.MentalModels().Create(e.ctx, domain.MentalModel{Bank: src, Spec: s}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	codec := NewTemplateCodec(e.store, refreshStub{})
 
 	tmpl, err := codec.Export(e.ctx, src)
 	if err != nil {
@@ -116,7 +123,7 @@ func assertTemplateCopied(t *testing.T, e env, src, dst port.BankRef) {
 func TestTemplateCreateRollsBackOnBadSpec(t *testing.T) {
 	e := newEnv(t)
 	b := port.BankRef{Tenant: "t", Bank: "b"}
-	codec := NewTemplateCodec(e.store, specStub{}, refreshStub{})
+	codec := NewTemplateCodec(e.store, refreshStub{})
 	_, _, err := codec.CreateNamed(e.ctx, b, "x", domain.BankTemplate{MentalModels: []domain.MentalModelSpec{{}}})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("spec without id: %v", err)

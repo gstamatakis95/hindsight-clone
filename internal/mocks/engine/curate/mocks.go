@@ -1057,7 +1057,7 @@ var _ curate.ObservationClearer = &ObservationClearer{}
 //
 //		// make and configure a mocked curate.ObservationClearer
 //		mockedObservationClearer := &ObservationClearer{
-//			ClearScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) error {
+//			ClearScopesFunc: func(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, error) {
 //				panic("mock out the ClearScopes method")
 //			},
 //		}
@@ -1068,7 +1068,7 @@ var _ curate.ObservationClearer = &ObservationClearer{}
 //	}
 type ObservationClearer struct {
 	// ClearScopesFunc mocks the ClearScopes method.
-	ClearScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) error
+	ClearScopesFunc func(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, error)
 
 	// calls tracks calls to the methods.
 	calls struct {
@@ -1088,7 +1088,7 @@ type ObservationClearer struct {
 }
 
 // ClearScopes calls ClearScopesFunc.
-func (mock *ObservationClearer) ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) error {
+func (mock *ObservationClearer) ClearScopes(ctx context.Context, tx port.Tx, b port.BankRef, scopes []port.ScopeKey) ([]port.UnitID, error) {
 	if mock.ClearScopesFunc == nil {
 		panic("ObservationClearer.ClearScopesFunc: method is nil but ObservationClearer.ClearScopes was just called")
 	}
