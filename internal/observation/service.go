@@ -160,25 +160,35 @@ type ScopePage struct {
 func (s *Service) ListObservationScopes(
 	ctx context.Context, b domain.BankRef, size int, token string,
 ) (ScopePage, error) {
-	size, err := domain.ListPage.Size(size)
+	page, err := s.scopePage(ctx, b, size, token)
 	if err != nil {
 		return ScopePage{}, fmt.Errorf("list scopes: %w", err)
+	}
+	return page, nil
+}
+
+// scopePage reads one page of the bank's observation scopes: the paging of ListObservationScopes, which
+// PreviewConsolidationStrategies shares.
+func (s *Service) scopePage(ctx context.Context, b domain.BankRef, size int, token string) (ScopePage, error) {
+	size, err := domain.ListPage.Size(size)
+	if err != nil {
+		return ScopePage{}, fmt.Errorf("scope page: %w", err)
 	}
 	var after string
 	if token != "" {
 		if err := domain.DecodePageToken(token, &after); err != nil {
-			return ScopePage{}, fmt.Errorf("list scopes: %w", err)
+			return ScopePage{}, fmt.Errorf("scope page: %w", err)
 		}
 	}
 	items, err := s.d.DB.Read().ListObservationScopes(ctx, b, after, size+1)
 	if err != nil {
-		return ScopePage{}, fmt.Errorf("list scopes: %w", err)
+		return ScopePage{}, fmt.Errorf("scope page: %w", err)
 	}
 	page := ScopePage{Items: items}
 	if len(items) > size {
 		page.Items = items[:size]
 		if page.NextPageToken, err = domain.EncodePageToken(scopeCursor(b, page.Items[size-1])); err != nil {
-			return ScopePage{}, fmt.Errorf("list scopes: %w", err)
+			return ScopePage{}, fmt.Errorf("scope page: %w", err)
 		}
 	}
 	return page, nil
@@ -193,16 +203,12 @@ func scopeCursor(b domain.BankRef, s domain.ScopeInfo) string {
 	return "0"
 }
 
-// previewScopeLimit is how many existing scopes the strategy preview examines; beyond it the preview is
-// incomplete.
-const previewScopeLimit = 1000
-
 // StrategyPreview mirrors memory.v1.PreviewConsolidationStrategiesResponse.
 type StrategyPreview struct {
-	// Matches has one entry per draft strategy, in order.
+	// Matches has one entry per draft strategy, in order, over this page's scopes.
 	Matches []StrategyMatch
-	// Complete is false when the bank has more scopes than the preview examined.
-	Complete bool
+	// NextPageToken continues with the next page of scopes; empty = every scope has been evaluated.
+	NextPageToken string
 }
 
 // StrategyMatch mirrors memory.v1.StrategyMatch: which existing scopes one strategy would govern.
@@ -215,23 +221,22 @@ type StrategyMatch struct {
 	ShadowedScopes []domain.ScopeKey
 }
 
-// PreviewConsolidationStrategies evaluates draft strategies against the bank's existing observation scopes
-// without saving: it lists up to previewScopeLimit scopes and reports, per draft strategy, the scopes it would
-// win (config.MatchStrategy picks the first match) and those an earlier strategy shadows.
+// PreviewConsolidationStrategies evaluates draft strategies against one page of the bank's existing observation
+// scopes without saving: it pages the scopes as ListObservationScopes does (size and token follow its rules) and
+// reports, per draft strategy, the page's scopes it would win (config.MatchStrategy picks the first match) and
+// those an earlier strategy shadows. Each scope's verdict depends only on the drafts, so the pages add up.
 func (s *Service) PreviewConsolidationStrategies(
-	ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy,
+	ctx context.Context, b domain.BankRef, draft []domain.ConsolidationStrategy, size int, token string,
 ) (StrategyPreview, error) {
-	infos, err := s.d.DB.Read().ListObservationScopes(ctx, b, "", previewScopeLimit+1)
+	page, err := s.scopePage(ctx, b, size, token)
 	if err != nil {
-		return StrategyPreview{}, fmt.Errorf("consolidate: list scopes: %w", err)
+		return StrategyPreview{}, fmt.Errorf("preview strategies: %w", err)
 	}
-	complete := len(infos) <= previewScopeLimit
-	infos = infos[:min(len(infos), previewScopeLimit)]
-	scopes := make([]domain.ScopeKey, len(infos))
-	for i, in := range infos {
+	scopes := make([]domain.ScopeKey, len(page.Items))
+	for i, in := range page.Items {
 		scopes[i] = domain.NewScopeKey(b, in.Scope.Tags)
 	}
-	out := StrategyPreview{Matches: make([]StrategyMatch, len(draft)), Complete: complete}
+	out := StrategyPreview{Matches: make([]StrategyMatch, len(draft)), NextPageToken: page.NextPageToken}
 	for i := range draft {
 		out.Matches[i].Strategy = draft[i].Name
 	}

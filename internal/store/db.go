@@ -84,8 +84,9 @@ type Search interface {
 	// another bank are skipped, not an error.
 	GetChunks(ctx context.Context, b domain.BankRef, ids []domain.ChunkID) ([]domain.Chunk, error)
 	// EntityStates returns every entity of b attached to any of units, ordered by entity id. Each one's
-	// ObservationIDs are b's live observations attached to it or citing a live fact attached to it, sorted.
-	// Unknown units are skipped.
+	// ObservationCount counts b's live observations attached to it or citing a live fact attached to it, and its
+	// ObservationIDs are the domain.MaxEntityObservationIDs most recently updated of them (updated_at, then id,
+	// descending). Unknown units are skipped.
 	EntityStates(ctx context.Context, b domain.BankRef, units []domain.UnitID) ([]domain.EntityState, error)
 	// StaleScopes returns, in input order, those of scopes (all of bank b) holding a live fact with
 	// consolidated_at and consolidation_failed_at unset whose tags contain every tag of the scope (the

@@ -19,6 +19,8 @@ const (
 	failureEmptyCandidate = "empty_candidate"
 	// failureStructuredOutput: the structured-output projection failed.
 	failureStructuredOutput = "structured_output_failed"
+	// failureContentTooLarge: the drafted page passed domain.MaxMentalModelContentBytes.
+	failureContentTooLarge = "content_too_large"
 	// failureRetrieval: a retrieval or model call failed (reflect, recall, synthesize, delta).
 	failureRetrieval = "retrieval_failed"
 	// failureUnexpected: anything else.
@@ -113,6 +115,8 @@ func failureReason(msg string) string {
 		return failureEmptyCandidate
 	case strings.Contains(msg, failureStructuredOutput):
 		return failureStructuredOutput
+	case strings.Contains(msg, failureContentTooLarge):
+		return failureContentTooLarge
 	case strings.Contains(msg, domain.ErrUnavailable.Error()):
 		return failureRetrieval
 	}

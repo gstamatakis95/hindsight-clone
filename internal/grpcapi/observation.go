@@ -91,7 +91,7 @@ func (h *ObservationHandler) ClearObservations(
 	return &pb.ClearObservationsResponse{Deleted: out.Deleted, Operation: operationPtrToProto(out.Operation)}, nil
 }
 
-// PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes.
+// PreviewConsolidationStrategies evaluates draft strategies against one page of the bank's existing scopes.
 func (h *ObservationHandler) PreviewConsolidationStrategies(
 	ctx context.Context, req *pb.PreviewConsolidationStrategiesRequest,
 ) (*pb.PreviewConsolidationStrategiesResponse, error) {
@@ -103,7 +103,8 @@ func (h *ObservationHandler) PreviewConsolidationStrategies(
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	out, err := h.Observations.PreviewConsolidationStrategies(ctx, b, draft)
+	out, err := h.Observations.PreviewConsolidationStrategies(ctx, b, draft, int(req.GetPageSize()),
+		req.GetPageToken())
 	if err != nil {
 		return nil, toStatus(err)
 	}

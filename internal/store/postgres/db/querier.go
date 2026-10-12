@@ -157,7 +157,7 @@ type Querier interface {
 	EntityLockForDelete(ctx context.Context, arg EntityLockForDeleteParams) ([]uuid.UUID, error)
 	// EntityPendingMaintenance returns up to lim entity ids queued in a bank's entity_maintenance, oldest first.
 	EntityPendingMaintenance(ctx context.Context, arg EntityPendingMaintenanceParams) ([]uuid.UUID, error)
-	// EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the sorted live observations attached to it or citing a live fact attached to it.
+	// EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the count of live observations attached to it or citing a live fact attached to it, and the ids of the cap most recently updated of them (updated_at, then id, descending).
 	EntityStatesOf(ctx context.Context, arg EntityStatesOfParams) ([]EntityStatesOfRow, error)
 	// EntityUnitBank returns the tenant and bank of a live unit.
 	EntityUnitBank(ctx context.Context, id uuid.UUID) (EntityUnitBankRow, error)

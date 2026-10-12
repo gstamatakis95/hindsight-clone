@@ -49,3 +49,43 @@ func TestListMemoriesPaging(t *testing.T) {
 		t.Errorf("GetMemory missing err = %v", err)
 	}
 }
+
+// TestListMemoriesResponseBudget: a page ends early once its memories reach the response size limit, keeping at
+// least one, and its token continues right after the last memory kept, so a walk lists every memory once, in the
+// same order as an unlimited listing.
+func TestListMemoriesResponseBudget(t *testing.T) {
+	e := newCurateEnv(t)
+	s := e.service(nil)
+	all, err := s.ListMemories(e.ctx, ListRequest{Bank: testBank})
+	if err != nil || len(all.Items) != 3 || all.NextPageToken != "" {
+		t.Fatalf("unlimited listing = %+v, %v; want 3 memories on one page", all, err)
+	}
+	want := make([]domain.UnitID, len(all.Items))
+	for i, u := range all.Items {
+		want[i] = u.ID
+	}
+	for _, limit := range []int{600, 1} { // about one seeded memory's estimate; less than one
+		s.d.MaxResponseBytes = limit
+		if got := walkMemories(t, s, e); !slices.Equal(got, want) {
+			t.Errorf("limit %d: walked %v, want %v, one memory per page", limit, got, want)
+		}
+	}
+}
+
+// walkMemories lists the test bank page by page and returns the ids, failing on a page that does not hold exactly
+// one memory.
+func walkMemories(t *testing.T, s *Service, e *curateEnv) []domain.UnitID {
+	t.Helper()
+	var got []domain.UnitID
+	for tok, pages := "", 0; pages == 0 || tok != ""; pages++ {
+		page, err := s.ListMemories(e.ctx, ListRequest{Bank: testBank, PageToken: tok})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != 1 || pages > 3 {
+			t.Fatalf("page %d holds %d memories", pages, len(page.Items))
+		}
+		got, tok = append(got, page.Items[0].ID), page.NextPageToken
+	}
+	return got
+}

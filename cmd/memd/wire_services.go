@@ -113,6 +113,7 @@ func wireMemory(c core, in infra, d *deps) {
 		DB: c.db, Maintenance: in.maint, Blob: in.blob, LLM: in.gw, Embedder: in.gw, Router: c.router,
 		Tokens: c.tok, Config: c.resolver, Times: c.times, Linker: c.linker, Entities: c.entities,
 		Recall: c.recall, Agent: c.agent, Clock: c.clock, Ingest: d.cfg.File.Ingest.limits(),
+		MaxResponseBytes: d.cfg.File.API.MaxResponseBytes, MaxRecallTokens: d.cfg.File.API.MaxRecallTokens,
 	})
 	d.api.Memory = &grpcapi.MemoryHandler{Memory: svc}
 	d.handlers.add(domain.OperationKindRetainDocument, svc.RunRetainJob)
@@ -146,7 +147,7 @@ func wireObservations(c core, in infra, d *deps) {
 func wireMentalModels(c core, in infra, d *deps) {
 	svc := mentalmodel.New(mentalmodel.Deps{
 		DB: c.db, Maintenance: in.maint, Config: c.resolver, Recall: c.recall, Reflect: c.agent, LLM: in.gw,
-		Router: c.router, Embedder: in.gw, Clock: c.clock,
+		Router: c.router, Embedder: in.gw, Clock: c.clock, MaxResponseBytes: d.cfg.File.API.MaxResponseBytes,
 	})
 	d.api.MentalModel = &grpcapi.MentalModelHandler{MentalModels: svc}
 	d.handlers.add(domain.OperationKindRefreshMentalModel, svc.RunRefreshJob)

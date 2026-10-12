@@ -31,6 +31,9 @@ type Deps struct {
 	Embedder ai.Embedder
 	// Clock stamps last_refreshed_at, history, traces, enqueues and the cron sweep.
 	Clock clock.Clock
+	// MaxResponseBytes ends a ListMentalModels or ListMentalModelHistory page early (api.max_response_bytes); 0 =
+	// domain.DefaultMaxResponseBytes.
+	MaxResponseBytes int
 }
 
 // Service serves memory.v1.MentalModelService, runs the refresh_mental_model job and the mental-model
@@ -48,4 +51,12 @@ func New(d Deps) *Service {
 		s.synths[syn.Strategy()] = syn
 	}
 	return s
+}
+
+// maxResponseBytes is Deps.MaxResponseBytes, or its default.
+func (s *Service) maxResponseBytes() int {
+	if s.d.MaxResponseBytes > 0 {
+		return s.d.MaxResponseBytes
+	}
+	return domain.DefaultMaxResponseBytes
 }

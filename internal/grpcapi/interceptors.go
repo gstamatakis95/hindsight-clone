@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"fmt"
 	"memd/internal/config"
 	"memd/internal/domain"
 	"strings"
@@ -176,6 +177,48 @@ func checkPaging(m protoreflect.Message) error {
 		}
 	}
 	return nil
+}
+
+// readPrefixes are the method-name prefixes of the read-only RPCs; Recall and Reflect read too (readMethods).
+var readPrefixes = []string{"Get", "List", "Search", "Preview", "Export"}
+
+// readMethods are the read-only RPCs that no prefix of readPrefixes names.
+var readMethods = map[string]bool{"Recall": true, "Reflect": true}
+
+// isRead reports whether fullMethod ("/memory.v1.BankService/ExportBankTemplate") is a read-only RPC.
+func isRead(fullMethod string) bool {
+	name := fullMethod[strings.LastIndexByte(fullMethod, '/')+1:]
+	if readMethods[name] {
+		return true
+	}
+	for _, p := range readPrefixes {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// responseSizeInterceptor fails a read whose response encodes to more than maxBytes with RESOURCE_EXHAUSTED
+// (domain.ErrResponseTooLarge), so the client gets a clear error instead of a failed receive; maxBytes <= 0 turns it
+// off. Writes are never failed for their response size: their work is already committed. Lists stay under the limit
+// on their own (they end pages early); this guards the unpaged reads, ExportBankTemplate above all.
+func responseSizeInterceptor(maxBytes int) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler,
+	) (any, error) {
+		resp, err := handler(ctx, req)
+		if err != nil || maxBytes <= 0 || !isRead(info.FullMethod) {
+			return resp, err
+		}
+		if m, ok := resp.(proto.Message); ok {
+			if n := proto.Size(m); n > maxBytes {
+				return nil, toStatus(fmt.Errorf("%w: the response is %d bytes, over the server's limit of %d "+
+					"(api.max_response_bytes)", domain.ErrResponseTooLarge, n, maxBytes))
+			}
+		}
+		return resp, nil
+	}
 }
 
 // armNamesInterceptor rejects a request holding a RecallConfig anywhere (a config level or patch, a bank

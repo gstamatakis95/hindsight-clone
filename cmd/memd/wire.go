@@ -248,7 +248,7 @@ func runAPI(ctx context.Context, d *deps) error {
 func newGRPCServer(d *deps) *grpc.Server {
 	o := grpcapi.Options{
 		DefaultDeadline: time.Duration(*d.cfg.File.API.RPCDeadline), Probes: d.probes, RecallArms: d.recallArms,
-		MaxRecvBytes: d.cfg.File.Ingest.MaxRequestBytes,
+		MaxRecvBytes: d.cfg.File.Ingest.MaxRequestBytes, MaxResponseBytes: d.cfg.File.API.MaxResponseBytes,
 	}
 	return grpcapi.New(d.api, o, d.tel.GRPCServerOptions(grpcapi.TenantFrom)...)
 }

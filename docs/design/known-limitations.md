@@ -223,6 +223,26 @@ outside its reach.
   only; groups there are INVALID_ARGUMENT.
 - **Workaround:** use Recall (or several listings) for boolean tag logic.
 
+### Every ListTags page aggregates the whole source
+- **What:** each page groups every tag of the source (memories, mental models or documents) and then cuts the page
+  after the token, so a page costs as much as the whole listing.
+- **Impact:** slow tag listings on banks with very many tagged memories.
+- **Workaround:** narrow with `prefix`; use a large `page_size`.
+
+### Operations echo their overrides, and their responses are not cut by size
+- **What:** an Operation carries its `effective_overrides`, and ListOperations pages and RetainBatch responses (up to
+  `ingest.max_batch_items` operations) do not end early by size the way the listings of large items do.
+- **Impact:** many operations with large overrides (long missions or custom prompts) make a ListOperations page fail
+  with RESOURCE_EXHAUSTED (`RESPONSE_TOO_LARGE`) and a RetainBatch response pass the client's 4 MiB receive limit
+  (the batch is committed either way).
+- **Workaround:** ListOperations: a smaller `page_size`, or a larger `api.max_response_bytes`. RetainBatch: smaller
+  batches, or a larger client receive limit.
+
+### Mental-model history pages by offset
+- **What:** ListMentalModelHistory pages with an offset token, so a version written while a client pages can repeat
+  one entry at a page boundary (never skip one); the history is at most `history_max_entries` per kind.
+- **Workaround:** dedupe on `created_at` when paging a model that is refreshing.
+
 ### Reflect does not force a tool sequence
 - **What:** the loop requires *some* retrieval first, not Hindsight's mental models → observations → recall
   order; `directive_compliance` is not checked.

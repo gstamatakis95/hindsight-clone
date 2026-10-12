@@ -63,7 +63,9 @@
 //     applied or any named an unknown id. If every op is still rejected the refresh fails and the document
 //     stays; a document is never replaced by a partial one. A delta that changes more than
 //     mental_models.max_delta_ratio of the document (0 = no limit) is redone in full.
-//  5. With the spec's response_schema_json set and changed content, reflect.Agent.Project (STRUCTURED_OUTPUT)
+//  5. A changed draft over domain.MaxMentalModelContentBytes (1 MiB) fails the refresh for good
+//     (content_too_large; jobs.ErrPermanent) and the document stays, so one model always fits a response.
+//     With the spec's response_schema_json set and changed content, reflect.Agent.Project (STRUCTURED_OUTPUT)
 //     projects the page onto the schema; a failure fails the refresh. The page is embedded for
 //     SearchMentalModels (a failure is only a trace warning).
 //  6. Write in one short transaction: tx.Seq(bank) first (it locks the bank row and serializes every
@@ -112,7 +114,9 @@
 // [Service.CreateMentalModel] validates the id (lowercase alphanumerics and hyphens), normalizes tags and folder,
 // creates the bank on first write, and queues the first build as a manual full refresh in the same transaction.
 // [Service.GetMentalModel] computes stale in the full view. [Service.ListMentalModels] pages by id (domain.ListPage:
-// page size 100, max 1000; the tag filter is flat only). [Service.UpdateMentalModel] applies a pure [SpecPatch]; a
+// page size 100, max 1000; an opaque token; the tag filter is flat only). It and [Service.ListMentalModelHistory]
+// (newest first, an opaque offset token) end a page early once its items reach Deps.MaxResponseBytes
+// (domain.FitBytes). [Service.UpdateMentalModel] applies a pure [SpecPatch]; a
 // changed source query or scope resets last_seq_seen so the next refresh runs in full. [Service.RefreshMentalModel]
 // queues a manual refresh or joins and upgrades the queued one. [Service.ListMentalModelHistory],
 // [Service.DeleteMentalModel] and [Service.DeleteMentalModelFolder] (recursive; an empty path is rejected) complete the

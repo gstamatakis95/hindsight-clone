@@ -175,6 +175,10 @@ func (i *ingestor) Ingest(ctx context.Context, req RetainRequest) (RetainResult,
 	plans := make([]*itemPlan, len(req.Items))
 	seen := map[domain.DocumentID]bool{}
 	for k, it := range req.Items {
+		if n := i.d.Limits.MaxDocumentBytes; len(it.Content) > n {
+			return RetainResult{}, domain.InvalidField(fmt.Sprintf("items[%d].content", k),
+				"content is %d bytes, over %d (ingest.max_document_bytes)", len(it.Content), n)
+		}
 		if plans[k], err = i.plan(ctx, req, it, base, known); err != nil {
 			return RetainResult{}, fmt.Errorf("item %d: %w", k, err)
 		}

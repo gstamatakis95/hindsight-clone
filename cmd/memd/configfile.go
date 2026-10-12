@@ -121,6 +121,13 @@ type DeletionFile struct {
 type APIFile struct {
 	// RPCDeadline applies to calls that carry no deadline (default 120s; "0s" = none).
 	RPCDeadline *Duration `json:"rpc_deadline"`
+	// MaxResponseBytes bounds every response: a page of large items ends early once its items reach it, and a read
+	// whose response would pass it fails with RESPONSE_TOO_LARGE (default 3 MiB, domain.DefaultMaxResponseBytes;
+	// keep it under the clients' receive limit, 4 MiB by default in gRPC).
+	MaxResponseBytes int `json:"max_response_bytes"`
+	// MaxRecallTokens caps a Recall request's max_tokens and include budgets (default 32000,
+	// domain.DefaultMaxRecallTokens).
+	MaxRecallTokens int `json:"max_recall_tokens"`
 }
 
 // IngestFile is the ingest section of the server config file (memory.IngestLimits; unset = its default).
@@ -358,6 +365,12 @@ func (f *ServerFile) withDefaults() {
 	fill(&f.Retention.DeletionReceipts, defaultReceiptKeep)
 	fill(&f.Observability.MetricsInterval, defaultMetricsInterval)
 	f.Ingest.withDefaults()
+	if f.API.MaxResponseBytes == 0 {
+		f.API.MaxResponseBytes = domain.DefaultMaxResponseBytes
+	}
+	if f.API.MaxRecallTokens == 0 {
+		f.API.MaxRecallTokens = domain.DefaultMaxRecallTokens
+	}
 	if f.API.RPCDeadline == nil {
 		d := Duration(defaultRPCDeadline)
 		f.API.RPCDeadline = &d
@@ -425,7 +438,20 @@ func (f ServerFile) validateOperator() []error {
 		errs = append(errs, fmt.Errorf("worker.heartbeat_interval (%s) must be below 3/4 of worker.stale_after (%s)",
 			time.Duration(w.HeartbeatInterval), time.Duration(w.StaleAfter)))
 	}
-	return append(errs, f.Ingest.validate()...)
+	return append(append(errs, f.Ingest.validate()...), f.API.validate(f.Ingest)...)
+}
+
+// validate checks the api section's limits: positive, and a response limit above the largest stored document, so
+// GetDocument's text always fits.
+func (a APIFile) validate(ingest IngestFile) []error {
+	if a.MaxResponseBytes <= 0 || a.MaxRecallTokens <= 0 {
+		return []error{errors.New("api.max_response_bytes and api.max_recall_tokens must be positive")}
+	}
+	if ingest.MaxDocumentBytes+domain.ItemOverheadBytes > a.MaxResponseBytes {
+		return []error{fmt.Errorf("ingest.max_document_bytes (%d) must stay below api.max_response_bytes (%d)",
+			ingest.MaxDocumentBytes, a.MaxResponseBytes)}
+	}
+	return nil
 }
 
 // knownSlot reports whether slot is a gateway slot.

@@ -15,7 +15,8 @@ type IngestLimits struct {
 	MaxBatchItems int
 	// MaxRetainItems caps the items of one Retain call (default 100).
 	MaxRetainItems int
-	// MaxDocumentBytes caps one RetainBatch item's content; a larger item is REJECTED (default 2 MiB).
+	// MaxDocumentBytes caps one item's content: a larger Retain item fails the call with INVALID_ARGUMENT, a larger
+	// RetainBatch item is REJECTED (default 2 MiB). It keeps every stored text within one GetDocument response.
 	MaxDocumentBytes int
 	// MaxRequestBytes caps the summed content of one RetainBatch call (default 16 MiB). The gRPC server's
 	// receive limit is set from the same setting.

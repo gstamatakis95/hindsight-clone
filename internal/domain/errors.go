@@ -93,7 +93,7 @@ var (
 	// ErrRetrievalUnavailable: a reflect retrieval tool failed, so reflect (strict) fails instead of answering
 	// from partial evidence. Refines ErrUnavailable.
 	ErrRetrievalUnavailable = refine(ErrUnavailable, "RETRIEVAL_UNAVAILABLE", "retrieval failed")
-	// ErrResourceExhausted: a token budget was exceeded. gRPC RESOURCE_EXHAUSTED.
+	// ErrResourceExhausted: a token or size budget was exceeded. gRPC RESOURCE_EXHAUSTED.
 	ErrResourceExhausted = newClass("RESOURCE_EXHAUSTED", "resource exhausted")
 	// ErrMaxTotalTokens: a reflect call went over max_total_tokens. Refines ErrResourceExhausted.
 	ErrMaxTotalTokens = refine(ErrResourceExhausted, "MAX_TOTAL_TOKENS_EXCEEDED", "max_total_tokens exceeded")
@@ -101,6 +101,9 @@ var (
 	// org's pending retain backlog is over its limit; retry after the delay [RetryDelay] reports. Refines
 	// ErrResourceExhausted.
 	ErrIngestBacklog = refine(ErrResourceExhausted, "INGEST_BACKLOG", "retain backlog over its limit")
+	// ErrResponseTooLarge: a read's response would pass the server's response size limit
+	// (api.max_response_bytes). Refines ErrResourceExhausted.
+	ErrResponseTooLarge = refine(ErrResourceExhausted, "RESPONSE_TOO_LARGE", "response too large")
 	// ErrCancelled: the operation was cancelled or its bank deleted; handlers stop at the checkpoint.
 	ErrCancelled = newClass("OPERATION_CANCELLED", "operation cancelled")
 	// ErrConflict: a concurrent writer won a race (e.g. a serial-key claim); the caller may retry.

@@ -156,9 +156,10 @@ bindings (no other slots).
 - The first strategy in list order with a matching pattern wins whole (`config.MatchStrategy`). It is a config
   level between bank and request, so a request override beats the strategy. The strategy list itself is taken
   from the merged config including the request, so a Consolidate call can bring its own strategies.
-- **Preview** (`PreviewConsolidationStrategies`) evaluates draft strategies against up to 1000 existing scopes:
-  for each strategy, the scopes it wins and those an earlier strategy shadows; `complete = false` when the bank
-  has more scopes.
+- **Preview** (`PreviewConsolidationStrategies`) evaluates draft strategies against one page of the bank's existing
+  scopes (`page_size` 0 = 100, at most 1000; `page_token`; ListObservationScopes order): for each strategy, the
+  page's scopes it wins and those an earlier strategy shadows. A scope's verdict depends only on the drafts, so a
+  client collects the pages until `next_page_token` is empty to see the whole bank.
 
 ## Refresh triggers
 
@@ -236,4 +237,4 @@ counts are exact. Clears queue no mental-model refreshes; affected models go sta
 | `retain.default_observation_scope_modes` | combined, `max_combinations` 15 |
 | Related observations per fact / source facts shown | 10 / 20 (not configurable) |
 | Dedup probe | top 5 (not configurable) |
-| Strategy preview | 1000 scopes (not configurable) |
+| Strategy preview | one page of scopes per call (`page_size` 0 = 100, at most 1000) |
