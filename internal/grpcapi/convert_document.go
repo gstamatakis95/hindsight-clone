@@ -19,6 +19,7 @@ func documentToProto(x domain.Document) *pb.Document {
 		CreatedAt:          tsToProto(x.CreatedAt),
 		UpdatedAt:          tsToProto(x.UpdatedAt),
 		ExtractedAt:        tsPtrToProto(x.ExtractedAt),
+		Revision:           optCopy(x.Revision),
 	}
 }
 

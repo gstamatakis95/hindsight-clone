@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"memd/internal/blob"
@@ -61,6 +60,9 @@ type RetainItem struct {
 	Overrides *domain.BankConfig
 	// ForceReextract re-runs extraction even when content and overrides are unchanged.
 	ForceReextract bool
+	// Revision is the client's version of the content; nil = unversioned. A revision lower than the
+	// document's stored one makes the item stale: nothing is written for it.
+	Revision *int64
 }
 
 // RetainResult mirrors memory.v1.RetainResponse.
@@ -83,6 +85,8 @@ type RetainedDocument struct {
 	MemoriesCreated int
 	// Unchanged reports the same content + overrides hash; nothing re-extracted.
 	Unchanged bool
+	// Stale reports a revision lower than the document's stored one; nothing written.
+	Stale bool
 	// Operation is the retain_document operation (async, changed document), or nil for an inline run.
 	Operation *domain.Operation
 }
@@ -101,6 +105,8 @@ type ingestorDeps struct {
 	Clock clock.Clock
 	// NewID generates document ids; nil = uuid.NewString.
 	NewID func() string
+	// Limits are the request limits and the backlog gate (zero fields = the defaults).
+	Limits IngestLimits
 }
 
 // ingestor is the API side of Retain: validation, blobs and document rows, then the inline run or the
@@ -114,29 +120,53 @@ func newIngestor(d ingestorDeps) *ingestor {
 	if d.NewID == nil {
 		d.NewID = uuid.NewString
 	}
+	d.Limits = d.Limits.withDefaults()
 	return &ingestor{d: d}
 }
 
-// itemPlan is one validated item: its document, payload and hashes.
+// outcome is what the no-op and revision checks decided for an item.
+type outcome int
+
+// Item outcomes.
+const (
+	// outcomeWrite: the item changes its document; it is written.
+	outcomeWrite outcome = iota
+	// outcomeUnchanged: same content and no-op hash as the document's last completed retain; nothing written.
+	outcomeUnchanged
+	// outcomeStale: the item's revision is lower than the document's stored one; nothing written.
+	outcomeStale
+)
+
+// itemPlan is one validated item: its document, payload and hashes, and what the checks decided for it.
 type itemPlan struct {
 	doc       domain.DocumentID
 	content   string
 	overrides *domain.BankConfig
 	oh        string
 	payload   jobs.RetainPayload
-	unchanged bool
+	revision  *int64
+	pre       outcome // decided by the pre-read; final unless outcomeWrite
+	out       outcome // decided again under the write transaction's Seq lock (starts as pre)
 }
+
+// skip reports whether nothing is written for the item.
+func (p *itemPlan) skip() bool { return p.out != outcomeWrite }
 
 // Ingest validates (scope fan-out, overrides), stores blobs, then runs inline or enqueues. An ALL_COMBINATIONS
 // fan-out over max_combinations fails with domain.ErrTooManyScopes before anything is stored. An item whose
 // content and overrides hash match its document's last completed retain is a no-op (Unchanged) unless
-// ForceReextract is set: nothing is written for it and no model is called.
+// ForceReextract is set, and one whose revision is lower than the document's is Stale: nothing is written for
+// either and no model is called. Both checks run before the blob Put and again inside the write transaction.
 func (i *ingestor) Ingest(ctx context.Context, req RetainRequest) (RetainResult, error) {
 	if req.Bank.IsZero() {
 		return RetainResult{}, fmt.Errorf("%w: retain needs a bank", domain.ErrInvalidArgument)
 	}
 	if len(req.Items) == 0 {
 		return RetainResult{}, fmt.Errorf("%w: retain needs at least one item", domain.ErrInvalidArgument)
+	}
+	if n := i.d.Limits.MaxRetainItems; len(req.Items) > n {
+		return RetainResult{}, domain.InvalidField("items",
+			"retain takes at most %d items (ingest.max_retain_items); use RetainBatch for bulk ingestion", n)
 	}
 	base, known, err := i.bankConfig(ctx, req.Bank)
 	if err != nil {
@@ -154,7 +184,7 @@ func (i *ingestor) Ingest(ctx context.Context, req RetainRequest) (RetainResult,
 		}
 		seen[plans[k].doc] = true
 	}
-	if err := i.markUnchanged(ctx, req.Bank, plans); err != nil {
+	if err := i.preRead(ctx, req.Bank, plans); err != nil {
 		return RetainResult{}, err
 	}
 	if err := i.storeBlobs(ctx, plans); err != nil {
@@ -232,7 +262,7 @@ func (i *ingestor) plan(
 		}
 		p.Timestamp = &at
 	}
-	return &itemPlan{doc: doc, content: it.Content, overrides: overrides, oh: oh, payload: p}, nil
+	return &itemPlan{doc: doc, content: it.Content, overrides: overrides, oh: oh, payload: p, revision: it.Revision}, nil
 }
 
 // itemConfig is an item's effective config: the resolver's for a known bank, else the tenant level merged with
@@ -271,175 +301,4 @@ func (i *ingestor) checkFanout(b domain.BankRef, tags []string, s domain.Observa
 		return fmt.Errorf("retain: observation scopes: %w", err)
 	}
 	return nil
-}
-
-// markUnchanged flags items whose document's last completed retain had the same content and overrides
-// hash (and no force_reextract). It reads before anything is written: Upsert would clear extracted_at. It
-// also rejects a bank being deleted (domain.ErrBankDeleting) before storeBlobs, so a retain racing
-// DeleteBank leaves no blob under the bank's prefix; an unknown bank is fine (the write creates it).
-func (i *ingestor) markUnchanged(ctx context.Context, b domain.BankRef, plans []*itemPlan) error {
-	return i.d.Store.InTx(ctx, func(tx store.Tx) error {
-		bank, err := tx.Banks().Get(ctx, b)
-		switch {
-		case err == nil && bank.Deleting():
-			return fmt.Errorf("%w: bank %s", domain.ErrBankDeleting, b)
-		case err != nil && !errors.Is(err, domain.ErrNotFound):
-			return err
-		}
-		for _, p := range plans {
-			p.unchanged = false
-			if p.payload.ForceReextract {
-				continue
-			}
-			d, err := tx.Documents().Get(ctx, b, p.doc)
-			if errors.Is(err, domain.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			p.unchanged = d.ExtractedAt != nil && d.ContentHash == p.payload.ContentHash && d.OverridesHash == p.oh
-		}
-		return nil
-	})
-}
-
-// storeBlobs writes each changed item's original text under its content-addressed key, before any
-// transaction (a repeated Put of the same key is harmless).
-func (i *ingestor) storeBlobs(ctx context.Context, plans []*itemPlan) error {
-	for _, p := range plans {
-		if p.unchanged {
-			continue
-		}
-		err := i.d.Blob.Put(ctx, p.payload.BlobKey, strings.NewReader(p.content), int64(len(p.content)),
-			"text/plain; charset=utf-8")
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// write upserts the changed documents and, for an async retain, enqueues their retain_document jobs (under a
-// retain_batch parent when there are several) and reads the enqueued operations back, in one transaction.
-func (i *ingestor) write(ctx context.Context, req RetainRequest, plans []*itemPlan) (RetainResult, error) {
-	var res RetainResult
-	var ops []*domain.Operation
-	err := i.d.Store.InTx(ctx, func(tx store.Tx) error {
-		res, ops = RetainResult{}, make([]*domain.Operation, len(plans))
-		changed := 0
-		for _, p := range plans {
-			if !p.unchanged {
-				changed++
-			}
-		}
-		if changed == 0 {
-			return nil
-		}
-		if _, err := tx.Banks().Ensure(ctx, req.Bank); err != nil { // a write to an unknown bank creates it
-			return err
-		}
-		if _, err := tx.Seq(ctx, req.Bank); err != nil { // Seq before Enqueue (lock order with ReclaimStale)
-			return err
-		}
-		for _, p := range plans {
-			if p.unchanged {
-				continue
-			}
-			if err := tx.Documents().Upsert(ctx, domain.Document{
-				ID: p.doc, Bank: req.Bank, Overrides: p.overrides, Tags: p.payload.Tags, BlobKey: p.payload.BlobKey,
-				ObservationScopeModes: p.payload.ObservationScopeModes,
-			}); err != nil {
-				return err
-			}
-		}
-		if !req.RunAsync {
-			return nil
-		}
-		var err error
-		res.BatchOperation, err = i.enqueue(ctx, tx, req.Bank, plans, changed, ops)
-		return err
-	})
-	if err != nil {
-		return RetainResult{}, err
-	}
-	for k, p := range plans {
-		res.Documents = append(res.Documents, RetainedDocument{
-			DocumentID: p.doc, Unchanged: p.unchanged, Operation: ops[k],
-		})
-	}
-	return res, nil
-}
-
-// enqueue inserts the retain_document jobs of the changed plans, under a retain_batch parent when there are
-// several, reads each operation back into ops and returns the parent (nil when there is none).
-func (i *ingestor) enqueue(
-	ctx context.Context, tx store.Tx, b domain.BankRef, plans []*itemPlan, changed int, ops []*domain.Operation,
-) (*domain.Operation, error) {
-	var parentID domain.OperationID
-	if changed > 1 {
-		id, _, err := jobs.EnqueueRetainBatch(ctx, tx, b, changed)
-		if err != nil {
-			return nil, err
-		}
-		parentID = id
-	}
-	for k, p := range plans {
-		if p.unchanged {
-			continue
-		}
-		id, _, err := jobs.EnqueueRetainDocument(ctx, tx, b, p.payload, p.overrides, parentID)
-		if err != nil {
-			return nil, err
-		}
-		if ops[k], err = readOperation(ctx, tx, b, id); err != nil {
-			return nil, err
-		}
-	}
-	if parentID == "" {
-		return nil, nil
-	}
-	return readOperation(ctx, tx, b, parentID)
-}
-
-// readOperation reads operation id of bank b in tx.
-func readOperation(
-	ctx context.Context, tx store.Tx, b domain.BankRef, id domain.OperationID,
-) (*domain.Operation, error) {
-	op, err := tx.Queue().Get(ctx, b, id)
-	if err != nil {
-		return nil, err
-	}
-	return &op, nil
-}
-
-// runInline runs the Retainer for each changed document of a sync retain, in item order.
-func (i *ingestor) runInline(
-	ctx context.Context, b domain.BankRef, plans []*itemPlan, res RetainResult,
-) (RetainResult, error) {
-	var usage []domain.Usage
-	for k, p := range plans {
-		if p.unchanged {
-			continue
-		}
-		payload, err := json.Marshal(p.payload)
-		if err != nil {
-			return RetainResult{}, fmt.Errorf("retain: encode payload: %w", err)
-		}
-		out, err := i.d.Retainer.ProcessDocument(ctx, jobs.Inline(store.Job{
-			Bank: b, Kind: domain.OperationKindRetainDocument, SerialKey: jobs.DocumentSerialKey(p.doc),
-			Payload: payload, Overrides: p.overrides,
-		}))
-		usage = append(usage, out.Usage...)
-		if err == nil && out.Superseded {
-			err = ErrSuperseded
-		}
-		if err != nil {
-			return RetainResult{}, fmt.Errorf("retain document %s: %w", p.doc, err)
-		}
-		res.Documents[k].MemoriesCreated = out.MemoriesCreated
-		res.Documents[k].Unchanged = out.Unchanged
-	}
-	res.Usage = sumUsage(usage)
-	return res, nil
 }

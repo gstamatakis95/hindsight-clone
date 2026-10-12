@@ -1,12 +1,13 @@
-// Package memory is MemoryService: it turns documents into memory units (Retain), answers queries over them
-// (Recall, Reflect, ListRecallArms), lists and curates individual units without hard deletes (ListMemories,
-// GetMemory, UpdateMemory, InvalidateMemory, RestoreMemory), runs the retain_document and rederive_memory
-// jobs, and owns two steps of the maintenance tick (RederiveStranded, SettleRetainBatches).
+// Package memory is MemoryService: it turns documents into memory units (Retain, RetainBatch), answers queries
+// over them (Recall, Reflect, ListRecallArms), lists and curates individual units without hard deletes
+// (ListMemories, GetMemory, UpdateMemory, InvalidateMemory, RestoreMemory), runs the retain_document and
+// rederive_memory jobs, and owns two steps of the maintenance tick (RederiveStranded, SettleRetainBatches).
 //
 // Its one exported type, [Service], is built by [New] from [Deps]. The request and result types the gRPC
 // handlers convert to and from are [RetainRequest], [RetainItem], [RetainResult], [RetainedDocument],
-// [ListRequest], [Page], [UpdateRequest], [Edit], [EditField] and [RestoreRequest]; everything else is
-// unexported.
+// [RetainBatchRequest], [RetainBatchResult], [BatchItemResult], [BatchStatus], [ListRequest], [Page],
+// [UpdateRequest], [Edit], [EditField] and [RestoreRequest]; everything else is unexported. [IngestLimits] are
+// the operator limits cmd/memd reads from the server config file.
 //
 // # Where it sits
 //
@@ -19,14 +20,14 @@
 // job runner, and gives it to the maintenance tick.
 //
 // Internally the Service delegates to four unexported parts, each with its own dependencies: the ingestor
-// (the API side of Retain), the retainer (one document: the job and the inline run), the curator
+// (the API side of Retain and RetainBatch), the retainer (one document: the job and the inline run), the curator
 // (UpdateMemory, InvalidateMemory, RestoreMemory) and the rederiver (the rederive_memory job). Recall,
 // ListRecallArms and Reflect delegate to the recall engine and the reflect agent unchanged.
 //
 // # Retain
 //
 // [Service.Retain] takes a [RetainRequest] (items, document tags, request overrides, skip_consolidation,
-// run_async) and:
+// run_async; at most IngestLimits.MaxRetainItems items) and:
 //
 //  1. Resolves the bank's effective config. An unknown bank is not created yet: validation uses the tenant
 //     level, and the write transaction creates the bank.
@@ -37,20 +38,38 @@
 //     key, timestamp (now from clock.Clock when unset; none when timeless) and the resolved chunk sizes in a
 //     jobs.RetainPayload. A document id that appears twice in one request is domain.ErrInvalidArgument.
 //  3. In one read transaction, rejects a tombstoned bank (domain.ErrBankDeleting, so no blob is written for
-//     a deleting bank) and marks an item Unchanged when its document's last completed retain had the same
-//     content hash and no-op hash (the overrides plus the item's observation scopes) and force_reextract is
-//     not set. An unchanged item writes nothing and makes no model call.
+//     a deleting bank) and marks an item Stale when its revision is lower than its document's stored one, and
+//     Unchanged when its document's last completed retain had the same content hash and no-op hash (the
+//     overrides plus the item's observation scopes) and force_reextract is not set. Such an item writes nothing
+//     and makes no model call.
 //  4. Stores each changed item's original text in the blob store under its content-addressed key, outside
 //     any transaction (a repeated Put of the same key is harmless).
-//  5. In one write transaction: Banks().Ensure, tx.Seq(bank) (taken before Enqueue for lock order), upsert
-//     each changed document (which clears extracted_at), and for run_async enqueue one retain_document job
-//     per changed document (serial key "doc:{id}", DedupeNone, the merged overrides on the job), under a
-//     retain_batch parent when more than one document changed, and read each operation back in the same
-//     transaction, so the response carries the operations themselves.
+//  5. In one write transaction: Banks().Ensure, tx.Seq(bank) (taken before Enqueue for lock order), the stale
+//     and no-op checks again on each changed item's document as read under the lock (a retain that completed
+//     since step 3 must not have its extracted_at cleared, which would force a paid re-extraction), upsert
+//     each item still changed (which clears extracted_at and stores its revision), and for run_async enqueue
+//     one retain_document job per changed document (serial key "doc:{id}", DedupeNone, the merged overrides on
+//     the job), under a retain_batch parent when more than one document changed, and read each operation back
+//     in the same transaction, so the response carries the operations themselves.
 //  6. A sync retain then runs the retainer inline (jobs.Inline, which reports nothing) for each changed
 //     document, in item order, and returns units created and per-slot usage. If a newer retain took the
 //     document over meanwhile, the sync call fails with [ErrSuperseded] (domain.ErrConflict, ABORTED; the
 //     client may retry).
+//
+// # RetainBatch
+//
+// [Service.RetainBatch] is the bulk path the RPC and the queue consumer share: always asynchronous, a
+// [BatchItemResult] per item, no retain_batch parent. A call-level error (an empty or oversized call, the
+// backlog gate's domain.ErrIngestBacklog carrying a retry delay, an unknown org, a deleting bank) means nothing
+// was written. Otherwise each item is rejected (a decode error, no document id, content over MaxDocumentBytes,
+// invalid overrides, what Retain's validation rejects), deduplicated by document (highest revision wins, the
+// last among equals: Superseded or Stale), pre-read (Unchanged, Stale), its blob stored (eight at a time; a
+// failed Put fails the item), and written in transactions of up to 100 items: Ensure, tx.Seq, then per item
+// the stale and no-op re-check under the lock, a join of the identical retain_document in flight (the document
+// in flight with the item's blob key, tags, no-op hash and revision, and the newest active job on its "doc:"
+// key carrying the same blob key and no-op hash), or the upsert and a new retain_document. A transaction that
+// fails INVALID_ARGUMENT is replayed one item per transaction; any other failure fails its items. Blobs stored
+// for items whose org or bank is gone or going are deleted afterwards.
 //
 // # retain_document
 //
@@ -204,12 +223,12 @@
 // # Tests
 //
 // Tests run on a pgtest database, fake.Blob, fake.LLM, fake.Embedder and clock.Manual: chunking shapes and
-// budgets, extraction per mode, the no-op path (no LLM call), fan-out rejection, a deleting bank, async
-// batches, crash and resume (only remaining chunks re-extracted, no facts lost on a changed document),
-// overlapping and superseding runs, retags and reprocesses between batches (committed through the store and
-// the jobs catalogue, as the document feature commits them), partial replacement leaving the document in
-// flight, the retain_document result keys, paging, invalidate, restore (and restore after an entity prune),
-// edits, rederive skips, a retried older rederive keeping newer entities, cancellation, graph_maintenance on
-// edit and rederive, and the stranded-fact sweep. Design: docs/design/retain.md and
-// docs/design/curation-and-operations.md#curation.
+// budgets, extraction per mode, the no-op path (no LLM call), the no-op re-check under the Seq lock, RetainBatch's
+// per-item statuses, redelivery and backlog gate, fan-out rejection, a deleting bank, async batches, crash and
+// resume (only remaining chunks re-extracted, no facts lost on a changed document), overlapping and superseding
+// runs, retags and reprocesses between batches (committed through the store and the jobs catalogue, as the
+// document feature commits them), partial replacement leaving the document in flight, the retain_document
+// result keys, paging, invalidate, restore (and restore after an entity prune), edits, rederive skips, a retried
+// older rederive keeping newer entities, cancellation, graph_maintenance on edit and rederive, and the
+// stranded-fact sweep. Design: docs/design/retain.md and docs/design/curation-and-operations.md#curation.
 package memory

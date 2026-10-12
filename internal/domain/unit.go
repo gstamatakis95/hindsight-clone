@@ -133,6 +133,9 @@ type Document struct {
 	// ObservationScopeModes is the retain item's observation_scope_modes, kept across reprocess; nil = none (the
 	// stored overrides' or the bank's default applies).
 	ObservationScopeModes *ObservationScopeModes
+	// Revision is the client-chosen version of the latest accepted content (RetainItem.revision); nil = never
+	// versioned. An Upsert with a nil Revision keeps the stored one.
+	Revision *int64
 	// ExtractedAt is set when the last retain committed its last chunk; nil while in flight or failed.
 	ExtractedAt *time.Time
 	// MemoryCount is the number of live memories (filled by readers).

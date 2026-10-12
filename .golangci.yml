@@ -17,9 +17,9 @@ linters:
       # the examples' helper package wraps its own errors
       ignore-package-globs: ["memd/internal/store", "memd/internal/graph", "memd/internal/ai", "memd/internal/blob",
         "memd/internal/ingest", "memd/internal/jobs", "memd/examples/internal/*"]
-      # wrapcheck's defaults plus domain.InvalidField, the constructor of a field-naming invalid-argument error
+      # wrapcheck's defaults plus domain.InvalidField and domain.WithRetryDelay, constructors that keep the domain class
       ignore-sigs: [".Errorf(", "errors.New(", "errors.Unwrap(", "errors.Join(", ".Wrap(", ".Wrapf(", ".WithMessage(",
-        ".WithMessagef(", ".WithStack(", "domain.InvalidField("]
+        ".WithMessagef(", ".WithStack(", "domain.InvalidField(", "domain.WithRetryDelay("]
     depguard:
       rules:
         domain:

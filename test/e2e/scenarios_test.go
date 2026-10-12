@@ -7,6 +7,7 @@ import (
 	"memd/internal/domain"
 	"memd/test/e2e/gatewayemu"
 	"memd/test/e2e/harness"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ func TestScenarios(t *testing.T) {
 	e := startEnv(t)
 	t.Run("RetainSync", e.retainSync)
 	t.Run("RetainAsync", e.retainAsync)
+	t.Run("RetainBatch", e.retainBatch)
 	t.Run("ConsolidationRecallReflect", e.consolidationRecallReflect)
 	t.Run("MentalModelBothStrategies", e.mentalModels)
 	t.Run("ConsolidationTriggersRefresh", e.consolidationTriggersRefresh)
@@ -99,6 +101,71 @@ func (e *env) retainAsync(t *testing.T) {
 	e.waitOp(t, bank, parent.GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
 	if len(e.facts(t, bank, "")) < 4 {
 		t.Fatalf("async retain stored %d facts", len(e.facts(t, bank, "")))
+	}
+}
+
+// retainBatch: RetainBatch reports a status per item (an invalid item is rejected without failing the call, a
+// lower revision of the same document in the call is stale), every accepted operation completes, and a
+// redelivery of the whole batch writes nothing: the completed documents are unchanged, the old revision stale.
+func (e *env) retainBatch(t *testing.T) {
+	const bank = "sc-retain-batch"
+	rev := func(n int64) *int64 { return &n }
+	items := []*pb.RetainItem{
+		{Content: aliceText, DocumentId: aliceDoc, Revision: rev(2)},
+		{Content: "Bob plays chess on Sundays. Bob lives in Porto.", DocumentId: "doc-bob", Revision: rev(1)},
+		{Content: "No document id."},
+		{Content: "Alice lived in Madrid.", DocumentId: aliceDoc, Revision: rev(1)},
+	}
+	first := e.retainBatch1(t, bank, items)
+	e.wantStatuses(t, first, accepted, accepted, rejected, stale)
+	if ie := first.GetResults()[2].GetError(); ie.GetCode() != "INVALID_ARGUMENT" ||
+		len(ie.GetFields()) != 1 || ie.GetFields()[0] != "items[2].document_id" {
+		t.Fatalf("rejected item error: %+v", ie)
+	}
+	for _, r := range first.GetResults()[:2] {
+		if op := r.GetOperation(); op.GetParentId() != "" || op.GetKind() != pb.OperationKind_OPERATION_KIND_RETAIN_DOCUMENT {
+			t.Fatalf("document %s operation: %+v", r.GetDocumentId(), op)
+		}
+		e.waitOp(t, bank, r.GetOperation().GetId(), pb.OperationStatus_OPERATION_STATUS_COMPLETED)
+	}
+	e.idle(t, bank)
+	again := e.retainBatch1(t, bank, items)
+	e.wantStatuses(t, again, unchanged, unchanged, rejected, stale)
+	doc, err := e.c.Documents.GetDocument(e.ctx(t), &pb.GetDocumentRequest{
+		OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc,
+	})
+	if err != nil || doc.GetDocument().GetRevision() != 2 {
+		t.Fatalf("GetDocument: %v, revision %d; want 2", err, doc.GetDocument().GetRevision())
+	}
+}
+
+// Batch statuses, short.
+const (
+	accepted  = pb.RetainBatchResult_STATUS_ACCEPTED
+	unchanged = pb.RetainBatchResult_STATUS_UNCHANGED
+	stale     = pb.RetainBatchResult_STATUS_STALE
+	rejected  = pb.RetainBatchResult_STATUS_REJECTED
+)
+
+// retainBatch1 runs one RetainBatch call.
+func (e *env) retainBatch1(t *testing.T, bank string, items []*pb.RetainItem) *pb.RetainBatchResponse {
+	t.Helper()
+	resp, err := e.c.Memory.RetainBatch(e.ctx(t), &pb.RetainBatchRequest{OrgId: e.c.Org, BankId: bank, Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+// wantStatuses checks the per-item statuses of a RetainBatch response.
+func (e *env) wantStatuses(t *testing.T, resp *pb.RetainBatchResponse, want ...pb.RetainBatchResult_Status) {
+	t.Helper()
+	got := make([]pb.RetainBatchResult_Status, len(resp.GetResults()))
+	for i, r := range resp.GetResults() {
+		got[i] = r.GetStatus()
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("statuses = %v, want %v", got, want)
 	}
 }
 

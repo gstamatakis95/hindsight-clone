@@ -22,6 +22,10 @@ every service shares, then the seven services, then each service's messages. The
 **Retain** ([design](docs/design/retain.md))
 - Retain one or many documents per call (`Retain`), synchronously by default or as background jobs (`run_async`)
   with a batch parent operation.
+- Bulk ingestion for producers with at-least-once delivery (`RetainBatch`): always in the background, a status per
+  item so one bad item never fails the call, redeliveries that write nothing, per-document revisions so a late old
+  version never overwrites a newer one, and backpressure (`RESOURCE_EXHAUSTED` with a retry delay) while the bank's
+  or org's backlog is full.
 - Documents are upserted by id: re-retaining replaces a document's memories, and unchanged content with unchanged
   overrides is a no-op that makes no model call.
 - Five extraction modes: concise, verbose, verbatim, chunks (no LLM) and custom (your own prompt).
@@ -183,6 +187,9 @@ proto files. The examples below assume the quick-start server; `<id>` stands for
 **MemoryService**: retain, recall, reflect, and browse and curate memories.
 
 ```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' \
+  -d '{"org_id":"o1","bank_id":"b1","items":[{"document_id":"row-17","revision":"3","content":"Alice moved to Lyon."}]}' \
+  localhost:50051 memory.v1.MemoryService/RetainBatch
 grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","query":"Summarize what we know about Alice"}' \
   localhost:50051 memory.v1.MemoryService/Reflect
 grpcurl -plaintext -H 'x-tenant-id: acme' \
@@ -256,7 +263,8 @@ Conventions, stated once in the proto header:
   DeleteBank tombstones the bank at once (reads `NOT_FOUND`, writes `FAILED_PRECONDITION`) and deletes everything in
   the background; poll `GetOperation` with the returned operation until it is `NOT_FOUND`.
 - **Async work.** An RPC that enqueues work returns the `Operation` itself (`operation`, `operations`,
-  `batch_operation`, `mental_model_operations`). `Retain` is synchronous unless `run_async` is set.
+  `batch_operation`, `mental_model_operations`). `Retain` is synchronous unless `run_async` is set; `RetainBatch`
+  is always asynchronous.
 - **Paging.** Every List RPC takes `page_size` (0 = 100, at most 1000, negative = `INVALID_ARGUMENT`) and
   `page_token`, and returns `next_page_token`. `ListEvents` pages by sequence (`after_seq` / `next_after_seq`);
   `SearchMentalModels` takes `max_results` (0 = 10, at most 100).
@@ -266,9 +274,29 @@ Conventions, stated once in the proto header:
   clears it); reset RPCs take a required `reset_mask` (`"*"` = everything).
 - **Errors.** Every error carries a `google.rpc.ErrorInfo` (domain `memd`) whose `reason` is stable, such as
   `BANK_DELETING` or `MODEL_UNBOUND`; `INVALID_ARGUMENT` also carries a `google.rpc.BadRequest` naming the offending
-  fields.
+  fields, and `RESOURCE_EXHAUSTED` with reason `INGEST_BACKLOG` a `google.rpc.RetryInfo` with the delay to wait.
 - **Deadlines.** A call without a deadline gets the server's default (`api.rpc_deadline`, 120 s). A sync Retain whose
   extraction takes longer than its deadline never completes; use `run_async` for long documents.
+
+## Ingestion
+
+Two RPCs write documents ([design](docs/design/retain.md#retainbatch)):
+
+| | `Retain` | `RetainBatch` |
+|---|---|---|
+| For | interactive calls, a few documents | bulk producers: queue consumers, sync jobs, backfills |
+| Mode | synchronous by default, `run_async` optional | always asynchronous |
+| Errors | one invalid item fails the whole call | a status per item: `ACCEPTED`, `UNCHANGED`, `STALE`, `SUPERSEDED`, `REJECTED`, `FAILED` |
+| `document_id` | optional (generated when empty) | required: it makes a redelivery idempotent |
+| Redelivery | unchanged content is a no-op; in flight, a second job | unchanged content is `UNCHANGED`; in flight, it joins the running operation |
+| Limits | `ingest.max_retain_items` (100) | `ingest.max_batch_items` (500), `max_document_bytes`, `max_request_bytes`, the backlog gate |
+
+Both take an optional `revision` per item (an event time, a source row version, a broker offset): an item older than
+the document's stored revision changes nothing. Both re-check the no-op rule inside the write transaction, so a
+retain that completes meanwhile never causes a second, paid extraction. While the bank's or org's pending retains
+are over `ingest.max_pending_per_bank` or `ingest.max_pending_per_org`, RetainBatch answers `RESOURCE_EXHAUSTED`
+(`INGEST_BACKLOG`) with a `RetryInfo` delay, before writing anything. Queue sources sit behind `internal/ingest`
+(Kafka is the first adapter); the consumer that feeds them through RetainBatch's code path is not wired in yet.
 
 ## Configuration
 
@@ -281,7 +309,7 @@ memd has three kinds of settings ([design](docs/design/configuration.md)):
   and `MEMD_CONFIG`. Run `go run ./cmd/memd` to list them with their defaults.
 - **The server config file** (`MEMD_CONFIG`, default `./memd.yaml`) holds the models and every behaviour and operator
   setting. Its `defaults:` block is the server level of the config hierarchy, written like the API's `BankConfig`;
-  the `gateway`, `worker`, `retention`, `api` and `observability` sections hold operator settings.
+  the `gateway`, `worker`, `retention`, `api`, `ingest` and `observability` sections hold operator settings.
   [memd.example.yaml](memd.example.yaml) documents every key; unknown keys fail startup.
 - **Per-org, per-bank and per-request config** through the API: ConfigService sets the tenant, org and bank
   levels, and each RPC
@@ -539,7 +567,7 @@ handlers and maintenance sweeps)
 
 | Package | Owns |
 |---|---|
-| `internal/memory` | MemoryService: Retain (the ingestor and the retainer), Recall, Reflect and ListRecallArms (delegating to the libraries), memory listing and curation; the `retain_document` and `rederive_memory` jobs; the stranded-fact and retain-batch sweeps. |
+| `internal/memory` | MemoryService: Retain and RetainBatch (the ingestor and the retainer), Recall, Reflect and ListRecallArms (delegating to the libraries), memory listing and curation; the `retain_document` and `rederive_memory` jobs; the stranded-fact and retain-batch sweeps. |
 | `internal/document` | DocumentService: listing and reading documents, RetagDocument and ReprocessDocument; the `retag_document` job. |
 | `internal/observation` | ObservationService and consolidation: the `consolidate` job (scopes, decide, dedup, apply, stamp), clears, the strategy preview and the consolidation reconcile sweep. |
 | `internal/mentalmodel` | MentalModelService: the refresh pipeline (agentic and single-shot, full and delta), staleness, scheduling, the `refresh_mental_model` job, and the cron and failed-refresh sweeps. |
@@ -624,7 +652,7 @@ handlers and maintenance sweeps)
 | `test/e2e/harness` | Brings up the compose stack, runs memd processes and the emulator, and waits for background work. |
 | `test/e2e/gatewayemu` | The deterministic gateway emulator (chat, tools, structured output, embeddings, rerank). |
 | `test/e2e/gatewayemu/cmd/gatewayemu` | The emulator as a standalone server for local development. |
-| `examples/chat-assistant`, `examples/model-per-step`, `examples/multi-tenant`, `examples/async-ingest`, `examples/mental-models`, `examples/curation`, `examples/directives-structured`, `examples/recall-filters` | One runnable scenario each, written against the generated client only. |
+| `examples/chat-assistant`, `examples/model-per-step`, `examples/multi-tenant`, `examples/async-ingest`, `examples/batch-ingest`, `examples/mental-models`, `examples/curation`, `examples/directives-structured`, `examples/recall-filters` | One runnable scenario each, written against the generated client only. |
 | `examples/internal/exampleutil` | The examples' shared helper: flags, a tenant-stamping connection, the org every example creates first, and polling. |
 
 ## Design and limitations
@@ -636,10 +664,10 @@ handlers and maintenance sweeps)
 
 ## Examples
 
-[examples/](examples/README.md) holds eight runnable scenarios written against the generated Go client, each with the
-same calls as grpcurl commands: a chat assistant, a model per step, several tenants, asynchronous ingestion, mental
-models, curation, directives with structured output, and recall filters. They run against `memd all` with the gateway
-emulator (`make examples`) and are smoke-tested by `make e2e`.
+[examples/](examples/README.md) holds nine runnable scenarios written against the generated Go client, each with the
+same calls as grpcurl commands: a chat assistant, a model per step, several tenants, asynchronous ingestion, batch
+ingestion from an at-least-once producer, mental models, curation, directives with structured output, and recall
+filters. They run against `memd all` with the gateway emulator (`make examples`) and are smoke-tested by `make e2e`.
 
 ## Contributing
 

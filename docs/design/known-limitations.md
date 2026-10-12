@@ -17,7 +17,23 @@ says so.
   fails, items before it are committed, later items stay in flight with no memories, and the response is an error
   with no per-item result. Items sent without a `document_id` got generated ids the client never sees.
 - **Impact:** a retry of items without ids creates new documents; the earlier in-flight rows remain.
-- **Workaround:** always send `document_id`, or use `run_async` (one operation per document).
+- **Workaround:** always send `document_id`, use `run_async` (one operation per document), or RetainBatch (a status
+  per item).
+
+### A redelivery that differs only outside the no-op hash is absorbed
+- **What:** the no-op hash covers the content, the overrides and the observation scopes only. An item that repeats
+  a completed document with a new context, timestamp or metadata is unchanged, and a RetainBatch item that repeats a
+  document in flight joins the running retain, whose payload keeps the earlier values (a different tag set does not
+  join; it queues a new retain).
+- **Impact:** those fields can't be changed by re-sending the same content.
+- **Workaround:** `force_reextract`, or ReprocessDocument; RetagDocument for tags.
+
+### The RetainBatch backlog gate is approximate
+- **What:** the gate counts pending `retain_document` rows before the call writes anything, without a lock, and does
+  not count processing ones. Concurrent calls that all pass it can overshoot the limit by their own sizes.
+- **Impact:** the backlog can exceed `ingest.max_pending_per_bank` or `max_pending_per_org` by up to one batch per
+  concurrent caller.
+- **Workaround:** none needed; set the limits with that headroom in mind.
 
 ### Old content blobs are kept until the bank is deleted
 - **What:** each distinct content of a document is stored under its own key (`.../docs/{id}/{content_hash}`);
@@ -197,7 +213,8 @@ says so.
 - **What:** `internal/ingest/kafka` is built and tested, but no consumer loop drives it and cmd/memd reads none of its
   settings.
 - **Impact:** queue ingestion is not available in a deployment yet.
-- **Workaround:** retain through the API.
+- **Workaround:** a producer calls RetainBatch, the path the consumer will use (its per-item statuses map to Ack,
+  Nack and DeadLetter as [retain.md](retain.md#queue-ingestion) describes).
 
 ## Out of scope
 

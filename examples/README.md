@@ -1,6 +1,6 @@
 # Examples
 
-Eight small programs that show memd from the point of view of the application that uses it. Each one is a
+Nine small programs that show memd from the point of view of the application that uses it. Each one is a
 scenario: a goal, the calls that reach it, and output you can read. They use only the generated Go client
 (`memd/gen/memory/v1`), gRPC and the standard library, and every folder also has the same calls as
 [grpcurl](https://github.com/fullstorydev/grpcurl) commands.
@@ -11,6 +11,7 @@ scenario: a goal, the calls that reach it, and output you can read. They use onl
 | [model-per-step](model-per-step) | A cheap model for extraction and consolidation, a strong one for reflect and mental models, a reranker; bank-level routing, per-request overrides, and the usage that proves which model ran | `UpdateBankConfig`, `Retain`, `Consolidate`, `Recall`, `Reflect`, `CreateMentalModel`, `GetOperation` |
 | [multi-tenant](multi-tenant) | Tenants (`x-tenant-id`) with their own orgs and defaults, banks created from a template, a mission and disposition per bank, isolation | `CreateOrg`, `UpdateTenantConfig`, `GetTenantConfig`, `CreateBank`, `ExportBankTemplate`, `UpdateBankConfig`, `CreateDirective`, `GetBankStats` |
 | [async-ingest](async-ingest) | A batch retained with `run_async`, polled through operations, followed through the event feed, with cancel and retry | `Retain`, `GetOperation`, `ListOperations`, `ListEvents`, `CancelOperation`, `RetryOperation` |
+| [batch-ingest](batch-ingest) | Bulk ingestion from an at-least-once producer: a status per item, a redelivered batch that writes nothing, a late old version ignored, backing off from a full backlog | `RetainBatch`, `GetOperation`, `GetDocument` |
 | [mental-models](mental-models) | Pages that refresh after consolidation or on a cron schedule, agentic versus single-shot, preview, search, history | `CreateMentalModel`, `PreviewMentalModelRefresh`, `GetMentalModel`, `ListMentalModelHistory`, `SearchMentalModels`, `ListMentalModels` |
 | [curation](curation) | Fixing memory: edit a fact, invalidate and restore it, retag and reprocess a document, rebuild observations | `UpdateMemory`, `InvalidateMemory`, `RestoreMemory`, `ListMemories`, `RetagDocument`, `ReprocessDocument`, `ClearObservations` |
 | [directives-structured](directives-structured) | Standing rules that shape Reflect, a rule for one call, and JSON that matches a schema | `CreateDirective`, `UpdateDirective`, `PreviewPrompt`, `Reflect` with `response_schema_json` |

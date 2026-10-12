@@ -108,6 +108,9 @@ DOCUMENTS = [
         updated_at     timestamptz NOT NULL DEFAULT now(),
         -- The retain item's observation scope modes; NULL = the item set none.
         observation_scope_modes jsonb NULL,
+        -- Client-chosen version of the latest accepted content (RetainItem.revision); NULL = never versioned.
+        -- An item with a lower revision is stale and changes nothing.
+        revision       bigint      NULL,
         PRIMARY KEY (tenant_id, org_id, bank_id, id),
         FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES banks (tenant_id, org_id, id) ON DELETE CASCADE
     )
