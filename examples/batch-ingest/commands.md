@@ -56,3 +56,35 @@ ERROR:
   1)	{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "domain": "memd", "reason": "INGEST_BACKLOG"}
   2)	{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "10s"}
 ```
+
+## The same documents from a Kafka topic
+
+`memd ingest` retains messages from a Kafka topic through the same path as RetainBatch (see the README's Queue
+ingestion section). With a local broker and [kcat](https://github.com/edenhill/kcat), create the topic and its
+dead-letter topic (memd never creates topics), start the consumer next to `memd all`, and publish one envelope per
+document, keyed by the document id:
+
+```sh
+docker run -d --name memd-kafka -p 9092:9092 apache/kafka:4.1.1
+topics() { docker exec memd-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 "$@"; }
+until topics --list >/dev/null 2>&1; do sleep 1; done   # wait for the broker
+for t in memd-ingest memd-ingest-dlq; do topics --create --topic "$t"; done
+
+# The shared setup's S3 variables are still exported; the DSN is the one `make run` uses. No gateway is needed.
+MEMD_DSN=postgresql://memd:memd@localhost:55432/memd MEMD_CONFIG=memd.yaml \
+  MEMD_INGEST_PROVIDER=kafka MEMD_INGEST_KAFKA_BROKERS=localhost:9092 MEMD_INGEST_KAFKA_TOPIC=memd-ingest \
+  MEMD_INGEST_KAFKA_DLQ_TOPIC=memd-ingest-dlq MEMD_INGEST_TENANT=$TENANT go run ./cmd/memd ingest &
+
+for i in 301 302; do
+  printf 'ticket-%s|{"org_id": "%s", "bank_id": "%s", "item": {"document_id": "ticket-%s", "revision": "1", "content": "Ticket %s: the app logs users out after an update."}}\n' \
+    "$i" "$ORG" "$BANK" "$i" "$i"
+done | kcat -b localhost:9092 -t memd-ingest -P -K '|'
+echo 'junk|not an envelope' | kcat -b localhost:9092 -t memd-ingest -P -K '|'
+```
+
+The two tickets become documents; the junk message lands on the dead-letter topic with its reason in a header:
+
+```sh
+g DocumentService/ListDocuments '{"org_id": "ORG_ID", "bank_id": "BANK_ID"}' | jq -c '[.documents[].id]'
+kcat -b localhost:9092 -t memd-ingest-dlq -C -e -f '%k %h\n'   # junk memd-dlq-reason=UNDECODABLE: ...
+```

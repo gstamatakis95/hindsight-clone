@@ -209,3 +209,17 @@ case: Kafka has no lease).
 | An adapter without a dead-letter destination fails at construction | `kafka.TestNewRequiresDeadLetterTopic` |
 | Kafka commits a partition only past contiguously settled records | `kafka.TestCommitOnlyPastContiguousAcks` |
 | A Kafka dead letter keeps the key, value and headers and adds the reason and source position | `kafka.TestDeadLetterCarriesReason` |
+
+## Queue ingestion
+
+Design: [retain.md](retain.md#queue-ingestion).
+
+| Rule | Tests |
+|---|---|
+| Settlement by outcome: ACCEPTED, UNCHANGED, STALE, SUPERSEDED Ack; REJECTED and permanent call errors DeadLetter; FAILED and transient errors Nack with doubling backoff, DeadLetter at max attempts; the error class wins over the status (ORG_DELETING drops, BANK_DELETING and ORG_NOT_FOUND without a receipt retry) | `ingestapi.TestDecideSettlement` |
+| The backlog rejection Nacks after its RetryInfo delay, pauses receiving and never counts towards the attempts | `ingestapi.TestDecideSettlement/backlog_honours_RetryInfo_and_pauses` |
+| Envelopes decode as protojson or binary protobuf; an undecodable body, a tenant other than the pinned one and an envelope the RPC would refuse are dead-lettered with their reason | `ingestapi.TestConsumerSettlesByEnvelope`, `e2e.TestScenarios/QueueIngestKafka` |
+| A message for a deleted org (not live, with a deletion receipt) is acked and dropped, never retained or dead-lettered; one for an org not created yet is retried | `ingestapi.TestConsumerDropsDeletedOrg` |
+| A message delivered twice (a lost Ack, a producer retry) yields one document, one retain_document and one extraction | `memd.TestIngestRedeliveryRetainsOnce`, `e2e.TestScenarios/QueueIngestKafka` |
+| Shutdown stops receiving, finishes the in-flight RetainBatch, settles its messages, then closes the source | `ingestapi.TestConsumerShutdownSettlesInFlight` |
+| memd ingest needs a provider, and kafka its brokers, topic, group and dead-letter topic; the consumer batch fits max_batch_items | `memd.TestValidateRejects` |

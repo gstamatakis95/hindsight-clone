@@ -552,5 +552,28 @@ linters:
               desc: handlers never run the maintenance tick
             - pkg: "github.com/jackc/pgx"
               desc: handlers call services; the Postgres probe takes the pool's Ping
+        ingestapi:
+          files: ["**/internal/ingestapi/**", "!$test"]   # tests run on memq and pgtest
+          deny:
+            - pkg: "memd/internal/store/postgres"
+              desc: the consumer calls services
+            - pkg: "memd/internal/ai/gateway"
+              desc: the consumer calls services
+            - pkg: "memd/internal/blob/s3"
+              desc: the consumer calls services
+            - pkg: "memd/internal/ingest/kafka"
+              desc: the consumer drives ingest.Source; cmd/memd picks the adapter
+            - pkg: "memd/internal/ingest/memq"
+              desc: the consumer drives ingest.Source; cmd/memd picks the adapter
+            - pkg: "memd/internal/jobs"
+              desc: the consumer never enqueues; services do
+            - pkg: "memd/internal/maintenance"
+              desc: the consumer never runs the maintenance tick
+            - pkg: "github.com/jackc/pgx"
+              desc: the consumer calls services
+            - pkg: "github.com/twmb/franz-go"
+              desc: only ingest/kafka uses the Kafka client
+            - pkg: "github.com/DataDog"
+              desc: observability comes in through Hooks
 formatters:
   enable: [gofumpt, goimports]

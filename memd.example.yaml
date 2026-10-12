@@ -120,7 +120,7 @@ api:
   max_response_bytes: 3145728           # 3 MiB
   max_recall_tokens: 32000              # cap on a Recall request's max_tokens and include budgets
 
-# Request limits of Retain and RetainBatch, and RetainBatch's backlog gate.
+# Request limits of Retain and RetainBatch, RetainBatch's backlog gate, and the queue consumer (memd ingest).
 ingest:
   max_batch_items: 500                  # items per RetainBatch call
   max_retain_items: 100                 # items per Retain call (bulk ingestion belongs in RetainBatch)
@@ -129,6 +129,18 @@ ingest:
   max_pending_per_bank: 5000            # pending retains of a bank over which RetainBatch answers INGEST_BACKLOG
   max_pending_per_org: 50000            # the same across an org's banks
   retry_after: 10s                      # the RetryInfo delay of an INGEST_BACKLOG rejection
+  # How memd ingest batches, retries and polls. Where it connects (MEMD_INGEST_PROVIDER, the broker, topic, group,
+  # dead-letter topic and credentials) and the tenant pinning are environment settings.
+  consumer:
+    batch_size: 100                     # messages per poll and items per RetainBatch call (at most max_batch_items)
+    flush_interval: 500ms               # how long to keep polling to fill a batch; an idle poll flushes at once
+    concurrency: 4                      # RetainBatch calls at once
+    max_attempts: 10                    # deliveries after which a still-failing message is dead-lettered
+    backoff_initial: 1s                 # redelivery delay after a first failure, doubled per delivery
+    backoff_max: 5m                     # cap of the redelivery delay
+    shutdown_grace: 20s                 # on stop, time to retain and settle the messages already received
+    poll_wait: 1s                       # Kafka: how long one poll waits for a record
+    max_buffered: 10000                 # Kafka: records of one partition held before fetching it pauses
 
 # Datadog metrics, used only when MEMD_DATADOG_ENABLED is set (and MEMD_DATADOG_METRICS is not false).
 observability:

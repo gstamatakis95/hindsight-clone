@@ -4,28 +4,29 @@ direction: down
 **.style.font-size: 20
 (** -> **)[*].style.font-size: 18
 
-producers: "Producers\none document per message, key = document_id" {class: planned}
-broker: "Message broker\nat-least-once delivery, a dead-letter destination" {class: planned}
+producers: "Producers\none IngestEnvelope per message, key = document_id" {class: ext}
+broker: "Kafka topic\nconsumer group, dead-letter topic" {class: ext}
 
 source: "ingest.Source\nReceive, Ack, Nack, DeadLetter" {class: boundary}
 
-consumer: "memd ingest: the consumer loop" {
-  decode: "Decode the envelope\nprotojson or binary proto" {class: planned}
-  group: "Group by tenant and bank" {class: planned}
-  retain: "Retain a batch\nthe same code path as the RetainBatch RPC" {class: planned}
+consumer: "memd ingest: the consumer loop (ingestapi)" {
+  decode: "Decode the envelope\nprotojson or binary proto; tenant pinning" {class: step}
+  group: "Group by bank and request-level fields\nbatch size, flush interval, request bytes" {class: step}
+  retain: "RetainBatch\nthe same code path as the RPC" {class: svc}
   decode -> group -> retain
 }
 
 stores: "Commit point: the Postgres write transaction\ndocument row and retain_document job, plus the blob Put" {class: store}
 worker: "memd worker\nretain_document job: extract, embed, link" {class: svc}
 
-outcomes: "Outcome of each message" {
+outcomes: "Settlement of each message" {
   grid-columns: 2
   grid-gap: 10
-  ack: "Ack, only after the commit\naccepted, unchanged, stale, superseded" {class: planned}
-  dead: "DeadLetter\nrejected or undecodable" {class: planned}
-  nack: "Nack with backoff\nfailed, unavailable, aborted;\nDeadLetter after max attempts" {class: planned}
-  pause: "Nack all, pause Receive\nbacklog gate: RESOURCE_EXHAUSTED" {class: planned}
+  ack: "Ack, only after the commit\naccepted, unchanged, stale, superseded" {class: step}
+  drop: "Ack and drop\norg deleted or being deleted" {class: step}
+  dead: "DeadLetter\nrejected, undecodable, tenant mismatch,\nmax attempts reached" {class: step}
+  nack: "Nack with backoff\nfailed, unavailable, bank deleting,\norg not created yet" {class: step}
+  pause: "Nack, pause receiving\nbacklog gate: INGEST_BACKLOG + RetryInfo" {class: step}
 }
 outcomes.*.width: 430
 outcomes.*.height: 100
@@ -42,9 +43,9 @@ legend: Legend {
   near: bottom-center
   grid-columns: 5
   grid-gap: 12
-  a: "Boundary (built)" {class: boundary; width: 200; height: 50}
+  a: Boundary {class: boundary; width: 150; height: 50}
   b: Datastore {class: store; width: 130; height: 60}
   c: "memd process" {class: svc; width: 150; height: 50}
-  d: "Planned" {class: planned; width: 110; height: 50}
+  d: External {class: ext; width: 130; height: 50}
   e: "dashed edge: async" {shape: text; width: 220; height: 50}
 }

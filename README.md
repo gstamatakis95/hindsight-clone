@@ -26,6 +26,9 @@ every service shares, then the seven services, then each service's messages. The
   item so one bad item never fails the call, redeliveries that write nothing, per-document revisions so a late old
   version never overwrites a newer one, and backpressure (`RESOURCE_EXHAUSTED` with a retry delay) while the bank's
   or org's backlog is full.
+- Queue ingestion from Kafka (`memd ingest`): one document per message, retained through RetainBatch's path and
+  acked only after the commit; bad messages go to a dead-letter topic, transient failures are retried with backoff,
+  and a redelivered message never queues a second extraction.
 - Documents are upserted by id: re-retaining replaces a document's memories, and unchanged content with unchanged
   overrides is a no-op that makes no model call.
 - Five extraction modes: concise, verbose, verbatim, chunks (no LLM) and custom (your own prompt).
@@ -181,7 +184,8 @@ defaults:
 
 Then `make run`. memd refuses to start when the extract or reflect step has no model, the embedding model doesn't
 return 768 dimensions, or the file has an unknown key. In production, run `memd api` and `memd worker` as two
-deployments over the same Postgres, bucket and config file.
+deployments over the same Postgres, bucket and config file (and `memd ingest` as a third to consume a Kafka topic, see
+[Queue ingestion](#queue-ingestion)).
 
 ## API overview
 
@@ -307,8 +311,39 @@ Both take an optional `revision` per item (an event time, a source row version, 
 the document's stored revision changes nothing. Both re-check the no-op rule inside the write transaction, so a
 retain that completes meanwhile never causes a second, paid extraction. While the bank's or org's pending retains
 are over `ingest.max_pending_per_bank` or `ingest.max_pending_per_org`, RetainBatch answers `RESOURCE_EXHAUSTED`
-(`INGEST_BACKLOG`) with a `RetryInfo` delay, before writing anything. Queue sources sit behind `internal/ingest`
-(Kafka is the first adapter); the consumer that feeds them through RetainBatch's code path is not wired in yet.
+(`INGEST_BACKLOG`) with a `RetryInfo` delay, before writing anything.
+
+### Queue ingestion
+
+`memd ingest` consumes a Kafka topic and retains each message through RetainBatch's code path
+([design](docs/design/retain.md#queue-ingestion)). Each message is one `IngestEnvelope` from the proto (protojson, or
+binary protobuf with the header `content-type: application/x-protobuf`), keyed by its document id:
+
+```json
+{"tenant_id": "acme", "org_id": "support", "bank_id": "tickets",
+ "item": {"document_id": "ticket-4711", "revision": "17", "content": "Customer reports the export fails since v2.3."},
+ "document_tags": ["source:zendesk"]}
+```
+
+```bash
+# the topic and its dead-letter topic must exist; memd never creates topics
+MEMD_INGEST_PROVIDER=kafka \
+MEMD_INGEST_KAFKA_BROKERS=kafka-1:9092,kafka-2:9092 \
+MEMD_INGEST_KAFKA_TOPIC=memd-ingest MEMD_INGEST_KAFKA_DLQ_TOPIC=memd-ingest-dlq \
+MEMD_INGEST_TENANT=acme \
+memd ingest      # plus MEMD_DSN, MEMD_CONFIG and the MEMD_S3_* settings; no gateway needed
+```
+
+A message is acked only after its document and job are committed; one that can't be decoded or is invalid goes to the
+dead-letter topic with the reason in the `memd-dlq-reason` header; a transient failure is retried with exponential
+backoff and dead-lettered after `ingest.consumer.max_attempts` (10); a backlog rejection pauses the consumer for its
+retry delay; and a message for a deleted org is dropped. `MEMD_INGEST_TENANT` (and `MEMD_INGEST_ORG`) pin the topic
+to one tenant: an envelope may then omit `tenant_id`, and one naming another tenant is dead-lettered. Run as many
+`memd ingest` replicas as the topic has partitions (they share the consumer group `MEMD_INGEST_KAFKA_GROUP`, default
+`memd-ingest`); `memd all` runs the consumer too when `MEMD_INGEST_PROVIDER` is set. TLS and SASL settings, and the
+`ingest.consumer` section (batch size, flush interval, concurrency, attempts, backoff, poll settings), are in
+[configuration.md](docs/design/configuration.md). The `memd.ingest.*` metrics count received, acked, nacked,
+dead-lettered and dropped messages.
 
 ## Configuration
 
@@ -318,7 +353,8 @@ memd has three kinds of settings ([design](docs/design/configuration.md)):
   infrastructure and secrets: `MEMD_DSN`, `MEMD_GRPC_ADDR`, `MEMD_GATEWAY_URL`, `MEMD_GATEWAY_API_KEY`,
   `MEMD_BLOB_PROVIDER` and the `MEMD_S3_*` settings, `MEMD_WORKER_ID`, `MEMD_WORKER_SLOTS`,
   `MEMD_WORKER_HEALTH_ADDR`, `MEMD_DB_MAX_CONNS`, `MEMD_LOG_LEVEL`, `MEMD_LOG_FORMAT`, the `MEMD_DATADOG_*` switches,
-  and `MEMD_CONFIG`. Run `go run ./cmd/memd` to list them with their defaults.
+  the queue consumer's `MEMD_INGEST_*` settings (provider, Kafka connection and credentials, tenant pinning, health
+  address), and `MEMD_CONFIG`. Run `go run ./cmd/memd` to list them with their defaults.
 - **The server config file** (`MEMD_CONFIG`, default `./memd.yaml`) holds the models and every behaviour and operator
   setting. Its `defaults:` block is the server level of the config hierarchy, written like the API's `BankConfig`;
   the `gateway`, `worker`, `retention`, `api`, `ingest` and `observability` sections hold operator settings.
@@ -441,6 +477,8 @@ are fire-and-forget UDP datagrams. If a client can't start, memd logs it and run
 - **AI gateway:** one `memd.gateway.call` span per call, tagged with model slot and name, with `http.request` spans
   under it.
 - **S3:** one `S3.request` span per call.
+- **Queue ingestion:** one `memd.ingest.batch` span per RetainBatch call of `memd ingest`, tagged `memd.tenant`,
+  `memd.org`, `memd.bank` and the message count.
 
 ### Metrics
 
@@ -458,6 +496,9 @@ computes percentiles across hosts. Sampled values are gauges.
 | `memd.gateway.latency` | distribution (ms) | `slot`, `model`, `route` | Call duration, including retries. |
 | `memd.gateway.errors` | count | `slot`, `model`, `route`, `error` | Failed calls. `error` is the class: `unavailable`, `deadline_exceeded`, `resource_exhausted`, `invalid_argument`, `canceled`, ..., or `other`. |
 | `memd.gateway.tokens.input`, `memd.gateway.tokens.output` | count | `slot`, `model` | Tokens the gateway reported for each successful HTTP call. |
+| `memd.ingest.received`, `.acked` | count | | Messages `memd ingest` received, and acked after their commit (or found unchanged, stale or superseded). |
+| `memd.ingest.nacked`, `.dead_lettered`, `.dropped` | count | `reason` | Messages handed back for redelivery, moved to the dead-letter topic, or dropped because their org is deleted. `reason` is an error reason (`INVALID_ARGUMENT`, `BANK_DELETING`, `INGEST_BACKLOG`, ...) or the consumer's own (`UNDECODABLE`, `TENANT_MISMATCH`, `ORG_MISMATCH`, `MAX_ATTEMPTS`, `ORG_DELETED`). |
+| `memd.ingest.batch.latency` | distribution (ms) | `error` | One RetainBatch call of the consumer; `error` is the class, `none` on success. |
 | `memd.queue.depth` | gauge | `kind`, `status` | Pending and processing jobs. `retain_batch` parents are excluded. |
 | `memd.queue.oldest_pending_age_seconds` | gauge | `kind` | How long the oldest due pending job has waited past its run time. Parked retries don't count. |
 | `memd.postgres.pool.acquired`, `.idle`, `.total`, `.max` | gauge | | Postgres pool connections. |
@@ -613,10 +654,10 @@ handlers and maintenance sweeps)
 | `internal/ai/gateway` | `Client`, the OpenAI-compatible gateway adapter: structured and tool calls, embeddings, rerank, retries, concurrency caps. |
 | `internal/blob` | The object-storage boundary: `Store` (Put, Get, List, DeletePrefix) and the key layout (`Key`, `BankPrefix`, `OrgPrefix`: `{tenant}/{org}/{bank}/...`). |
 | `internal/blob/s3` | `Store` on S3-compatible storage (AWS S3, MinIO). |
-| `internal/ingest` | The message-queue boundary: `Source` (Receive, Ack, Nack, DeadLetter) with at-least-once delivery, and the `Message` it delivers. No consumer drives a source yet. |
+| `internal/ingest` | The message-queue boundary: `Source` (Receive, Ack, Nack, DeadLetter) with at-least-once delivery, and the `Message` it delivers. |
 | `internal/ingest/ingesttest` | The contract suite every ingest source runs. |
 | `internal/ingest/memq` | An in-memory `Source` for tests and the suite's self-test. |
-| `internal/ingest/kafka` | `Source` on a Kafka topic through a consumer group (franz-go): per-key order, local Nack, commits past contiguously settled offsets, a dead-letter topic. Not wired into cmd/memd yet. |
+| `internal/ingest/kafka` | `Source` on a Kafka topic through a consumer group (franz-go): per-key order, local Nack, commits past contiguously settled offsets, a dead-letter topic. Chosen by `MEMD_INGEST_PROVIDER=kafka`. |
 | `internal/blob/blobtest` | The contract suite every blob adapter runs. |
 | `internal/clock` | `Clock`, with `System` and the test clock `Manual`. |
 
@@ -628,12 +669,13 @@ handlers and maintenance sweeps)
 | `internal/config` | `Resolver` (the effective config of a bank, scope or request), `Merge`, `ServerDefaults`, `Validate` and the FieldMask patch helpers. |
 | `internal/jobs` | `Runner` (claim, heartbeat, retry, settle), the `Run` handle a handler works through, and `kinds.go`, the catalogue of every job kind's payload, serial key and Enqueue helper. |
 | `internal/maintenance` | `Service`: the 60 s maintenance tick and the `graph_maintenance` job. |
+| `internal/ingestapi` | `Consumer`: the queue consumer `memd ingest` runs. It decodes each `IngestEnvelope`, retains batches through `memory.Service.RetainBatch` and settles every message (Ack, Nack with backoff, DeadLetter, drop). |
 | `internal/grpcapi` | The gRPC surface: one handler type per service, interceptors, proto <-> domain conversion, FieldMask patches, error mapping with details, health and readiness probes. |
 | `internal/prompts` | Every prompt template, schema and tool list, embedded and rendered by name (`Render`, `Schema`). |
 | `internal/jsonschema` | The JSON Schema subset that validates structured model output. |
 | `internal/observability` | `Telemetry`: the optional Datadog traces, metrics and JSON logs. |
 | `internal/fake` | Test support: scripted, deterministic LLM, embedder, reranker and blob fakes. |
-| `cmd/memd` | The `memd` binary: configuration (environment, flags, the server config file) and the wiring of every package; modes api, worker and all. |
+| `cmd/memd` | The `memd` binary: configuration (environment, flags, the server config file) and the wiring of every package; modes api, worker, ingest and all. |
 
 **Tools**
 

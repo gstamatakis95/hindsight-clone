@@ -268,6 +268,21 @@ func TestValidateRejects(t *testing.T) {
 			return []string{"api"}
 		},
 		"zero slots": func(env map[string]string) []string { env[envWorkerSlots] = "0"; return []string{"all"} },
+		"ingest without a provider": func(map[string]string) []string {
+			return []string{"ingest"}
+		},
+		"unknown ingest provider": func(env map[string]string) []string {
+			env[envIngestProvider] = "sqs"
+			return []string{"api"}
+		},
+		"kafka without a dead-letter topic": func(env map[string]string) []string {
+			env[envIngestProvider], env[envKafkaBrokers], env[envKafkaTopic] = "kafka", "localhost:9092", "docs"
+			return []string{"all"}
+		},
+		"consumer batch over max_batch_items": func(env map[string]string) []string {
+			env[envConfig] = writeConfig(t, baseFile+"ingest: {max_batch_items: 10, consumer: {batch_size: 11}}\n")
+			return []string{"worker"}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

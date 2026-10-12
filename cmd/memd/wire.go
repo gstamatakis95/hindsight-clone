@@ -14,6 +14,7 @@ import (
 	"memd/internal/domain"
 	"memd/internal/graph"
 	"memd/internal/grpcapi"
+	"memd/internal/ingestapi"
 	"memd/internal/jobs"
 	"memd/internal/maintenance"
 	"memd/internal/observability"
@@ -82,6 +83,11 @@ type deps struct {
 	tel *observability.Telemetry
 	// samples are what tel's metrics sampler reads: the pool in every mode, the job queue in worker and all.
 	samples observability.Sources
+	// ingest collects the queue consumer's services (memory for RetainBatch, org for deletion receipts); runIngest
+	// adds the source, the clock, the logger and the hooks.
+	ingest ingestapi.Deps
+	// ping checks the Postgres pool: the queue consumer's readiness probe.
+	ping func(ctx context.Context) error
 }
 
 // buildDeps connects the adapters, checks the gateway's embedding dimension and builds every service. The
@@ -97,7 +103,8 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observabi
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := checkEmbedding(ctx, in.gw); err != nil {
+	// memd ingest makes no model call, so it needs no gateway and skips the check.
+	if err := checkEmbeddingFor(ctx, cfg.Mode, in.gw); err != nil {
 		closer()
 		return nil, nil, err
 	}
@@ -108,9 +115,10 @@ func buildDeps(ctx context.Context, cfg Config, log *slog.Logger, tel *observabi
 	}
 	d := wireServices(cfg, in, tok, serverCfg, clock.System{}, log, tel)
 	d.samples.Pool = in.poolStat
-	if cfg.Mode != modeAPI {
+	if cfg.Mode == modeWorker || cfg.Mode == modeAll {
 		d.samples.Queue = in.maint
 	}
+	d.ping = in.ping
 	if err := config.CheckArms(serverCfg, d.recallArms); err != nil {
 		closer()
 		return nil, nil, fmt.Errorf("memd: config file: defaults: %w", err)
@@ -181,6 +189,14 @@ func poolSize(cfg Config) int {
 		return cfg.DBMaxConns
 	}
 	return max(2*cfg.WorkerSlots+16, 32)
+}
+
+// checkEmbeddingFor runs checkEmbedding in every mode but ingest, which makes no model call.
+func checkEmbeddingFor(ctx context.Context, mode string, emb ai.Embedder) error {
+	if mode == modeIngest {
+		return nil
+	}
+	return checkEmbedding(ctx, emb)
 }
 
 // checkEmbedding fails startup unless the gateway's embedding model returns domain.EmbeddingDim (768)

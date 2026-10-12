@@ -119,6 +119,7 @@ func wireMemory(c core, in infra, d *deps) {
 	d.handlers.add(domain.OperationKindRetainDocument, svc.RunRetainJob)
 	d.handlers.add(domain.OperationKindRederiveMemory, svc.RunRederiveJob)
 	d.maintenance.Memory = svc
+	d.ingest.Memory = svc
 }
 
 // wireDocuments builds document.Service: it serves DocumentService (the document reads, retag and reprocess)
@@ -164,6 +165,7 @@ func wireOrg(cfg Config, c core, in infra, d *deps) {
 	d.api.Org = &grpcapi.OrgHandler{Orgs: svc}
 	d.handlers.add(domain.OperationKindDeleteOrg, svc.RunDeleteJob)
 	d.maintenance.Orgs = svc
+	d.ingest.Orgs = svc
 }
 
 // serverVersion is the version deletion receipts record: the main module's version, or its VCS revision for a

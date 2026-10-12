@@ -1680,7 +1680,7 @@ func (x RetainConfig_ExtractionMode) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use RetainConfig_ExtractionMode.Descriptor instead.
 func (RetainConfig_ExtractionMode) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{175, 0}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{176, 0}
 }
 
 // Type is the shape of a label's value.
@@ -1745,7 +1745,7 @@ func (x EntityLabel_Type) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EntityLabel_Type.Descriptor instead.
 func (EntityLabel_Type) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{178, 0}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{179, 0}
 }
 
 // BudgetFunction picks how a recall Budget becomes the per-arm candidate cap.
@@ -1798,7 +1798,7 @@ func (x RecallConfig_BudgetFunction) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use RecallConfig_BudgetFunction.Descriptor instead.
 func (RecallConfig_BudgetFunction) EnumDescriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{181, 0}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{182, 0}
 }
 
 // RetainRequest retains a batch of documents into one bank.
@@ -14394,6 +14394,112 @@ func (x *ReflectTrace) GetDurationMs() int64 {
 	return 0
 }
 
+// IngestEnvelope is one message on an ingest queue (a Kafka topic that memd ingest consumes): a single document
+// to retain, through the same path as RetainBatch. No RPC takes it; producers encode it as protojson (the
+// default) or as binary protobuf with the message attribute content-type: application/x-protobuf, and set the
+// message key to the document id so the versions of one document stay in order. A message that can't be decoded
+// or is invalid goes to the queue's dead-letter destination.
+type IngestEnvelope struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Tenant the document belongs to. A consumer pinned to a tenant uses its own tenant when this is empty and
+	// dead-letters a message naming another one; an unpinned consumer requires it.
+	TenantId string `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	// Org of the bank. Required (unless the consumer is pinned to an org); the org must exist.
+	OrgId string `protobuf:"bytes,2,opt,name=org_id,json=orgId,proto3" json:"org_id,omitempty"`
+	// Target bank; created in its org if unknown, as with RetainBatch.
+	BankId string `protobuf:"bytes,3,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
+	// The document. document_id is required; set revision (for example the source row version) so a redelivered
+	// older version never overwrites a newer one.
+	Item *RetainItem `protobuf:"bytes,4,opt,name=item,proto3" json:"item,omitempty"`
+	// Tags added to the document's memories, as RetainBatchRequest.document_tags.
+	DocumentTags []string `protobuf:"bytes,5,rep,name=document_tags,json=documentTags,proto3" json:"document_tags,omitempty"`
+	// Request-level overrides, as RetainBatchRequest.overrides.
+	Overrides *RetainOverrides `protobuf:"bytes,6,opt,name=overrides,proto3" json:"overrides,omitempty"`
+	// Do not enqueue consolidation after this retain.
+	SkipConsolidation bool `protobuf:"varint,7,opt,name=skip_consolidation,json=skipConsolidation,proto3" json:"skip_consolidation,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *IngestEnvelope) Reset() {
+	*x = IngestEnvelope{}
+	mi := &file_memory_v1_memory_proto_msgTypes[174]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IngestEnvelope) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IngestEnvelope) ProtoMessage() {}
+
+func (x *IngestEnvelope) ProtoReflect() protoreflect.Message {
+	mi := &file_memory_v1_memory_proto_msgTypes[174]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IngestEnvelope.ProtoReflect.Descriptor instead.
+func (*IngestEnvelope) Descriptor() ([]byte, []int) {
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{174}
+}
+
+func (x *IngestEnvelope) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *IngestEnvelope) GetOrgId() string {
+	if x != nil {
+		return x.OrgId
+	}
+	return ""
+}
+
+func (x *IngestEnvelope) GetBankId() string {
+	if x != nil {
+		return x.BankId
+	}
+	return ""
+}
+
+func (x *IngestEnvelope) GetItem() *RetainItem {
+	if x != nil {
+		return x.Item
+	}
+	return nil
+}
+
+func (x *IngestEnvelope) GetDocumentTags() []string {
+	if x != nil {
+		return x.DocumentTags
+	}
+	return nil
+}
+
+func (x *IngestEnvelope) GetOverrides() *RetainOverrides {
+	if x != nil {
+		return x.Overrides
+	}
+	return nil
+}
+
+func (x *IngestEnvelope) GetSkipConsolidation() bool {
+	if x != nil {
+		return x.SkipConsolidation
+	}
+	return false
+}
+
 // BankConfig is the full set of behaviour knobs, grouped by phase and identical at every config level. Unset
 // fields inherit from the next less specific level.
 type BankConfig struct {
@@ -14416,7 +14522,7 @@ type BankConfig struct {
 
 func (x *BankConfig) Reset() {
 	*x = BankConfig{}
-	mi := &file_memory_v1_memory_proto_msgTypes[174]
+	mi := &file_memory_v1_memory_proto_msgTypes[175]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14428,7 +14534,7 @@ func (x *BankConfig) String() string {
 func (*BankConfig) ProtoMessage() {}
 
 func (x *BankConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[174]
+	mi := &file_memory_v1_memory_proto_msgTypes[175]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14441,7 +14547,7 @@ func (x *BankConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BankConfig.ProtoReflect.Descriptor instead.
 func (*BankConfig) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{174}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{175}
 }
 
 func (x *BankConfig) GetRetain() *RetainConfig {
@@ -14525,7 +14631,7 @@ type RetainConfig struct {
 
 func (x *RetainConfig) Reset() {
 	*x = RetainConfig{}
-	mi := &file_memory_v1_memory_proto_msgTypes[175]
+	mi := &file_memory_v1_memory_proto_msgTypes[176]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14537,7 +14643,7 @@ func (x *RetainConfig) String() string {
 func (*RetainConfig) ProtoMessage() {}
 
 func (x *RetainConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[175]
+	mi := &file_memory_v1_memory_proto_msgTypes[176]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14550,7 +14656,7 @@ func (x *RetainConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetainConfig.ProtoReflect.Descriptor instead.
 func (*RetainConfig) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{175}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{176}
 }
 
 func (x *RetainConfig) GetChunkMaxTokens() int32 {
@@ -14691,7 +14797,7 @@ type ObservationConfig struct {
 
 func (x *ObservationConfig) Reset() {
 	*x = ObservationConfig{}
-	mi := &file_memory_v1_memory_proto_msgTypes[176]
+	mi := &file_memory_v1_memory_proto_msgTypes[177]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14703,7 +14809,7 @@ func (x *ObservationConfig) String() string {
 func (*ObservationConfig) ProtoMessage() {}
 
 func (x *ObservationConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[176]
+	mi := &file_memory_v1_memory_proto_msgTypes[177]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14716,7 +14822,7 @@ func (x *ObservationConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ObservationConfig.ProtoReflect.Descriptor instead.
 func (*ObservationConfig) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{176}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{177}
 }
 
 func (x *ObservationConfig) GetEnabled() bool {
@@ -14812,7 +14918,7 @@ type Disposition struct {
 
 func (x *Disposition) Reset() {
 	*x = Disposition{}
-	mi := &file_memory_v1_memory_proto_msgTypes[177]
+	mi := &file_memory_v1_memory_proto_msgTypes[178]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14824,7 +14930,7 @@ func (x *Disposition) String() string {
 func (*Disposition) ProtoMessage() {}
 
 func (x *Disposition) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[177]
+	mi := &file_memory_v1_memory_proto_msgTypes[178]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14837,7 +14943,7 @@ func (x *Disposition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Disposition.ProtoReflect.Descriptor instead.
 func (*Disposition) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{177}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{178}
 }
 
 func (x *Disposition) GetSkepticism() int32 {
@@ -14884,7 +14990,7 @@ type EntityLabel struct {
 
 func (x *EntityLabel) Reset() {
 	*x = EntityLabel{}
-	mi := &file_memory_v1_memory_proto_msgTypes[178]
+	mi := &file_memory_v1_memory_proto_msgTypes[179]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14896,7 +15002,7 @@ func (x *EntityLabel) String() string {
 func (*EntityLabel) ProtoMessage() {}
 
 func (x *EntityLabel) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[178]
+	mi := &file_memory_v1_memory_proto_msgTypes[179]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14909,7 +15015,7 @@ func (x *EntityLabel) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EntityLabel.ProtoReflect.Descriptor instead.
 func (*EntityLabel) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{178}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{179}
 }
 
 func (x *EntityLabel) GetKey() string {
@@ -14974,7 +15080,7 @@ type LabelValue struct {
 
 func (x *LabelValue) Reset() {
 	*x = LabelValue{}
-	mi := &file_memory_v1_memory_proto_msgTypes[179]
+	mi := &file_memory_v1_memory_proto_msgTypes[180]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -14986,7 +15092,7 @@ func (x *LabelValue) String() string {
 func (*LabelValue) ProtoMessage() {}
 
 func (x *LabelValue) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[179]
+	mi := &file_memory_v1_memory_proto_msgTypes[180]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -14999,7 +15105,7 @@ func (x *LabelValue) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LabelValue.ProtoReflect.Descriptor instead.
 func (*LabelValue) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{179}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{180}
 }
 
 func (x *LabelValue) GetValue() string {
@@ -15046,7 +15152,7 @@ type ConsolidationStrategy struct {
 
 func (x *ConsolidationStrategy) Reset() {
 	*x = ConsolidationStrategy{}
-	mi := &file_memory_v1_memory_proto_msgTypes[180]
+	mi := &file_memory_v1_memory_proto_msgTypes[181]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15058,7 +15164,7 @@ func (x *ConsolidationStrategy) String() string {
 func (*ConsolidationStrategy) ProtoMessage() {}
 
 func (x *ConsolidationStrategy) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[180]
+	mi := &file_memory_v1_memory_proto_msgTypes[181]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15071,7 +15177,7 @@ func (x *ConsolidationStrategy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConsolidationStrategy.ProtoReflect.Descriptor instead.
 func (*ConsolidationStrategy) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{180}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{181}
 }
 
 func (x *ConsolidationStrategy) GetName() string {
@@ -15177,7 +15283,7 @@ type RecallConfig struct {
 
 func (x *RecallConfig) Reset() {
 	*x = RecallConfig{}
-	mi := &file_memory_v1_memory_proto_msgTypes[181]
+	mi := &file_memory_v1_memory_proto_msgTypes[182]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15189,7 +15295,7 @@ func (x *RecallConfig) String() string {
 func (*RecallConfig) ProtoMessage() {}
 
 func (x *RecallConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[181]
+	mi := &file_memory_v1_memory_proto_msgTypes[182]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15202,7 +15308,7 @@ func (x *RecallConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecallConfig.ProtoReflect.Descriptor instead.
 func (*RecallConfig) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{181}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{182}
 }
 
 func (x *RecallConfig) GetBudgetFunction() RecallConfig_BudgetFunction {
@@ -15362,7 +15468,7 @@ type ReflectConfig struct {
 
 func (x *ReflectConfig) Reset() {
 	*x = ReflectConfig{}
-	mi := &file_memory_v1_memory_proto_msgTypes[182]
+	mi := &file_memory_v1_memory_proto_msgTypes[183]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15374,7 +15480,7 @@ func (x *ReflectConfig) String() string {
 func (*ReflectConfig) ProtoMessage() {}
 
 func (x *ReflectConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[182]
+	mi := &file_memory_v1_memory_proto_msgTypes[183]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15387,7 +15493,7 @@ func (x *ReflectConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReflectConfig.ProtoReflect.Descriptor instead.
 func (*ReflectConfig) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{182}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{183}
 }
 
 func (x *ReflectConfig) GetMaxIterations() int32 {
@@ -15491,7 +15597,7 @@ type MentalModelConfig struct {
 
 func (x *MentalModelConfig) Reset() {
 	*x = MentalModelConfig{}
-	mi := &file_memory_v1_memory_proto_msgTypes[183]
+	mi := &file_memory_v1_memory_proto_msgTypes[184]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15503,7 +15609,7 @@ func (x *MentalModelConfig) String() string {
 func (*MentalModelConfig) ProtoMessage() {}
 
 func (x *MentalModelConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[183]
+	mi := &file_memory_v1_memory_proto_msgTypes[184]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15516,7 +15622,7 @@ func (x *MentalModelConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MentalModelConfig.ProtoReflect.Descriptor instead.
 func (*MentalModelConfig) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{183}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{184}
 }
 
 func (x *MentalModelConfig) GetDefaultMode() RefreshMode {
@@ -15600,7 +15706,7 @@ type ModelBindings struct {
 
 func (x *ModelBindings) Reset() {
 	*x = ModelBindings{}
-	mi := &file_memory_v1_memory_proto_msgTypes[184]
+	mi := &file_memory_v1_memory_proto_msgTypes[185]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15612,7 +15718,7 @@ func (x *ModelBindings) String() string {
 func (*ModelBindings) ProtoMessage() {}
 
 func (x *ModelBindings) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[184]
+	mi := &file_memory_v1_memory_proto_msgTypes[185]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15625,7 +15731,7 @@ func (x *ModelBindings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelBindings.ProtoReflect.Descriptor instead.
 func (*ModelBindings) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{184}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{185}
 }
 
 func (x *ModelBindings) GetDefault() *ModelBinding {
@@ -15726,7 +15832,7 @@ type ModelBinding struct {
 
 func (x *ModelBinding) Reset() {
 	*x = ModelBinding{}
-	mi := &file_memory_v1_memory_proto_msgTypes[185]
+	mi := &file_memory_v1_memory_proto_msgTypes[186]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15738,7 +15844,7 @@ func (x *ModelBinding) String() string {
 func (*ModelBinding) ProtoMessage() {}
 
 func (x *ModelBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[185]
+	mi := &file_memory_v1_memory_proto_msgTypes[186]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15751,7 +15857,7 @@ func (x *ModelBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ModelBinding.ProtoReflect.Descriptor instead.
 func (*ModelBinding) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{185}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{186}
 }
 
 func (x *ModelBinding) GetModel() string {
@@ -15826,7 +15932,7 @@ type RetainOverrides struct {
 
 func (x *RetainOverrides) Reset() {
 	*x = RetainOverrides{}
-	mi := &file_memory_v1_memory_proto_msgTypes[186]
+	mi := &file_memory_v1_memory_proto_msgTypes[187]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15838,7 +15944,7 @@ func (x *RetainOverrides) String() string {
 func (*RetainOverrides) ProtoMessage() {}
 
 func (x *RetainOverrides) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[186]
+	mi := &file_memory_v1_memory_proto_msgTypes[187]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15851,7 +15957,7 @@ func (x *RetainOverrides) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RetainOverrides.ProtoReflect.Descriptor instead.
 func (*RetainOverrides) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{186}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{187}
 }
 
 func (x *RetainOverrides) GetRetain() *RetainConfig {
@@ -15891,7 +15997,7 @@ type RecallOverrides struct {
 
 func (x *RecallOverrides) Reset() {
 	*x = RecallOverrides{}
-	mi := &file_memory_v1_memory_proto_msgTypes[187]
+	mi := &file_memory_v1_memory_proto_msgTypes[188]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15903,7 +16009,7 @@ func (x *RecallOverrides) String() string {
 func (*RecallOverrides) ProtoMessage() {}
 
 func (x *RecallOverrides) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[187]
+	mi := &file_memory_v1_memory_proto_msgTypes[188]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15916,7 +16022,7 @@ func (x *RecallOverrides) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RecallOverrides.ProtoReflect.Descriptor instead.
 func (*RecallOverrides) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{187}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{188}
 }
 
 func (x *RecallOverrides) GetRecall() *RecallConfig {
@@ -15961,7 +16067,7 @@ type ReflectOverrides struct {
 
 func (x *ReflectOverrides) Reset() {
 	*x = ReflectOverrides{}
-	mi := &file_memory_v1_memory_proto_msgTypes[188]
+	mi := &file_memory_v1_memory_proto_msgTypes[189]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -15973,7 +16079,7 @@ func (x *ReflectOverrides) String() string {
 func (*ReflectOverrides) ProtoMessage() {}
 
 func (x *ReflectOverrides) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[188]
+	mi := &file_memory_v1_memory_proto_msgTypes[189]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -15986,7 +16092,7 @@ func (x *ReflectOverrides) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReflectOverrides.ProtoReflect.Descriptor instead.
 func (*ReflectOverrides) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{188}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{189}
 }
 
 func (x *ReflectOverrides) GetReflect() *ReflectConfig {
@@ -16054,7 +16160,7 @@ type ConsolidateOverrides struct {
 
 func (x *ConsolidateOverrides) Reset() {
 	*x = ConsolidateOverrides{}
-	mi := &file_memory_v1_memory_proto_msgTypes[189]
+	mi := &file_memory_v1_memory_proto_msgTypes[190]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16066,7 +16172,7 @@ func (x *ConsolidateOverrides) String() string {
 func (*ConsolidateOverrides) ProtoMessage() {}
 
 func (x *ConsolidateOverrides) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[189]
+	mi := &file_memory_v1_memory_proto_msgTypes[190]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16079,7 +16185,7 @@ func (x *ConsolidateOverrides) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConsolidateOverrides.ProtoReflect.Descriptor instead.
 func (*ConsolidateOverrides) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{189}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{190}
 }
 
 func (x *ConsolidateOverrides) GetMission() string {
@@ -16168,7 +16274,7 @@ type RederiveOverrides struct {
 
 func (x *RederiveOverrides) Reset() {
 	*x = RederiveOverrides{}
-	mi := &file_memory_v1_memory_proto_msgTypes[190]
+	mi := &file_memory_v1_memory_proto_msgTypes[191]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16180,7 +16286,7 @@ func (x *RederiveOverrides) String() string {
 func (*RederiveOverrides) ProtoMessage() {}
 
 func (x *RederiveOverrides) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[190]
+	mi := &file_memory_v1_memory_proto_msgTypes[191]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16193,7 +16299,7 @@ func (x *RederiveOverrides) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RederiveOverrides.ProtoReflect.Descriptor instead.
 func (*RederiveOverrides) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{190}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{191}
 }
 
 func (x *RederiveOverrides) GetEntityMatchThreshold() float64 {
@@ -16238,7 +16344,7 @@ type RefreshOverrides struct {
 
 func (x *RefreshOverrides) Reset() {
 	*x = RefreshOverrides{}
-	mi := &file_memory_v1_memory_proto_msgTypes[191]
+	mi := &file_memory_v1_memory_proto_msgTypes[192]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -16250,7 +16356,7 @@ func (x *RefreshOverrides) String() string {
 func (*RefreshOverrides) ProtoMessage() {}
 
 func (x *RefreshOverrides) ProtoReflect() protoreflect.Message {
-	mi := &file_memory_v1_memory_proto_msgTypes[191]
+	mi := &file_memory_v1_memory_proto_msgTypes[192]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -16263,7 +16369,7 @@ func (x *RefreshOverrides) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefreshOverrides.ProtoReflect.Descriptor instead.
 func (*RefreshOverrides) Descriptor() ([]byte, []int) {
-	return file_memory_v1_memory_proto_rawDescGZIP(), []int{191}
+	return file_memory_v1_memory_proto_rawDescGZIP(), []int{192}
 }
 
 func (x *RefreshOverrides) GetReflect() *ReflectConfig {
@@ -17367,7 +17473,15 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"stopReason\x12#\n" +
 	"\rdirective_ids\x18\x04 \x03(\tR\fdirectiveIds\x12\x1f\n" +
 	"\vduration_ms\x18\x05 \x01(\x03R\n" +
-	"durationMs\"\xd9\x02\n" +
+	"durationMs\"\x96\x02\n" +
+	"\x0eIngestEnvelope\x12\x1b\n" +
+	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x15\n" +
+	"\x06org_id\x18\x02 \x01(\tR\x05orgId\x12\x17\n" +
+	"\abank_id\x18\x03 \x01(\tR\x06bankId\x12)\n" +
+	"\x04item\x18\x04 \x01(\v2\x15.memory.v1.RetainItemR\x04item\x12#\n" +
+	"\rdocument_tags\x18\x05 \x03(\tR\fdocumentTags\x128\n" +
+	"\toverrides\x18\x06 \x01(\v2\x1a.memory.v1.RetainOverridesR\toverrides\x12-\n" +
+	"\x12skip_consolidation\x18\a \x01(\bR\x11skipConsolidation\"\xd9\x02\n" +
 	"\n" +
 	"BankConfig\x12/\n" +
 	"\x06retain\x18\x01 \x01(\v2\x17.memory.v1.RetainConfigR\x06retain\x12@\n" +
@@ -17792,7 +17906,7 @@ func file_memory_v1_memory_proto_rawDescGZIP() []byte {
 }
 
 var file_memory_v1_memory_proto_enumTypes = make([]protoimpl.EnumInfo, 27)
-var file_memory_v1_memory_proto_msgTypes = make([]protoimpl.MessageInfo, 204)
+var file_memory_v1_memory_proto_msgTypes = make([]protoimpl.MessageInfo, 205)
 var file_memory_v1_memory_proto_goTypes = []any{
 	(MemoryState)(0),                               // 0: memory.v1.MemoryState
 	(MentalModelView)(0),                           // 1: memory.v1.MentalModelView
@@ -17995,54 +18109,55 @@ var file_memory_v1_memory_proto_goTypes = []any{
 	(*ArmTrace)(nil),                               // 198: memory.v1.ArmTrace
 	(*ToolCallTrace)(nil),                          // 199: memory.v1.ToolCallTrace
 	(*ReflectTrace)(nil),                           // 200: memory.v1.ReflectTrace
-	(*BankConfig)(nil),                             // 201: memory.v1.BankConfig
-	(*RetainConfig)(nil),                           // 202: memory.v1.RetainConfig
-	(*ObservationConfig)(nil),                      // 203: memory.v1.ObservationConfig
-	(*Disposition)(nil),                            // 204: memory.v1.Disposition
-	(*EntityLabel)(nil),                            // 205: memory.v1.EntityLabel
-	(*LabelValue)(nil),                             // 206: memory.v1.LabelValue
-	(*ConsolidationStrategy)(nil),                  // 207: memory.v1.ConsolidationStrategy
-	(*RecallConfig)(nil),                           // 208: memory.v1.RecallConfig
-	(*ReflectConfig)(nil),                          // 209: memory.v1.ReflectConfig
-	(*MentalModelConfig)(nil),                      // 210: memory.v1.MentalModelConfig
-	(*ModelBindings)(nil),                          // 211: memory.v1.ModelBindings
-	(*ModelBinding)(nil),                           // 212: memory.v1.ModelBinding
-	(*RetainOverrides)(nil),                        // 213: memory.v1.RetainOverrides
-	(*RecallOverrides)(nil),                        // 214: memory.v1.RecallOverrides
-	(*ReflectOverrides)(nil),                       // 215: memory.v1.ReflectOverrides
-	(*ConsolidateOverrides)(nil),                   // 216: memory.v1.ConsolidateOverrides
-	(*RederiveOverrides)(nil),                      // 217: memory.v1.RederiveOverrides
-	(*RefreshOverrides)(nil),                       // 218: memory.v1.RefreshOverrides
-	nil,                                            // 219: memory.v1.RetainItem.MetadataEntry
-	nil,                                            // 220: memory.v1.RecallResponse.SourceFactsEntry
-	nil,                                            // 221: memory.v1.RecallResponse.ChunksEntry
-	nil,                                            // 222: memory.v1.RecallResponse.EntitiesEntry
-	nil,                                            // 223: memory.v1.Memory.MetadataEntry
-	nil,                                            // 224: memory.v1.Document.MemoriesByFactTypeEntry
-	nil,                                            // 225: memory.v1.BankStats.MemoriesByFactTypeEntry
-	nil,                                            // 226: memory.v1.BankStats.PendingOperationsByKindEntry
-	nil,                                            // 227: memory.v1.Scores.ArmsEntry
-	nil,                                            // 228: memory.v1.MinScores.ArmsEntry
-	nil,                                            // 229: memory.v1.EntityLabel.FieldsEntry
-	nil,                                            // 230: memory.v1.RecallConfig.ArmBoostsEntry
-	(*timestamppb.Timestamp)(nil),                  // 231: google.protobuf.Timestamp
-	(*fieldmaskpb.FieldMask)(nil),                  // 232: google.protobuf.FieldMask
-	(*structpb.Struct)(nil),                        // 233: google.protobuf.Struct
+	(*IngestEnvelope)(nil),                         // 201: memory.v1.IngestEnvelope
+	(*BankConfig)(nil),                             // 202: memory.v1.BankConfig
+	(*RetainConfig)(nil),                           // 203: memory.v1.RetainConfig
+	(*ObservationConfig)(nil),                      // 204: memory.v1.ObservationConfig
+	(*Disposition)(nil),                            // 205: memory.v1.Disposition
+	(*EntityLabel)(nil),                            // 206: memory.v1.EntityLabel
+	(*LabelValue)(nil),                             // 207: memory.v1.LabelValue
+	(*ConsolidationStrategy)(nil),                  // 208: memory.v1.ConsolidationStrategy
+	(*RecallConfig)(nil),                           // 209: memory.v1.RecallConfig
+	(*ReflectConfig)(nil),                          // 210: memory.v1.ReflectConfig
+	(*MentalModelConfig)(nil),                      // 211: memory.v1.MentalModelConfig
+	(*ModelBindings)(nil),                          // 212: memory.v1.ModelBindings
+	(*ModelBinding)(nil),                           // 213: memory.v1.ModelBinding
+	(*RetainOverrides)(nil),                        // 214: memory.v1.RetainOverrides
+	(*RecallOverrides)(nil),                        // 215: memory.v1.RecallOverrides
+	(*ReflectOverrides)(nil),                       // 216: memory.v1.ReflectOverrides
+	(*ConsolidateOverrides)(nil),                   // 217: memory.v1.ConsolidateOverrides
+	(*RederiveOverrides)(nil),                      // 218: memory.v1.RederiveOverrides
+	(*RefreshOverrides)(nil),                       // 219: memory.v1.RefreshOverrides
+	nil,                                            // 220: memory.v1.RetainItem.MetadataEntry
+	nil,                                            // 221: memory.v1.RecallResponse.SourceFactsEntry
+	nil,                                            // 222: memory.v1.RecallResponse.ChunksEntry
+	nil,                                            // 223: memory.v1.RecallResponse.EntitiesEntry
+	nil,                                            // 224: memory.v1.Memory.MetadataEntry
+	nil,                                            // 225: memory.v1.Document.MemoriesByFactTypeEntry
+	nil,                                            // 226: memory.v1.BankStats.MemoriesByFactTypeEntry
+	nil,                                            // 227: memory.v1.BankStats.PendingOperationsByKindEntry
+	nil,                                            // 228: memory.v1.Scores.ArmsEntry
+	nil,                                            // 229: memory.v1.MinScores.ArmsEntry
+	nil,                                            // 230: memory.v1.EntityLabel.FieldsEntry
+	nil,                                            // 231: memory.v1.RecallConfig.ArmBoostsEntry
+	(*timestamppb.Timestamp)(nil),                  // 232: google.protobuf.Timestamp
+	(*fieldmaskpb.FieldMask)(nil),                  // 233: google.protobuf.FieldMask
+	(*structpb.Struct)(nil),                        // 234: google.protobuf.Struct
 }
 var file_memory_v1_memory_proto_depIdxs = []int32{
 	29,  // 0: memory.v1.RetainRequest.items:type_name -> memory.v1.RetainItem
-	213, // 1: memory.v1.RetainRequest.overrides:type_name -> memory.v1.RetainOverrides
+	214, // 1: memory.v1.RetainRequest.overrides:type_name -> memory.v1.RetainOverrides
 	31,  // 2: memory.v1.RetainResponse.documents:type_name -> memory.v1.RetainedDocument
 	185, // 3: memory.v1.RetainResponse.batch_operation:type_name -> memory.v1.Operation
 	196, // 4: memory.v1.RetainResponse.usage:type_name -> memory.v1.SlotUsage
-	231, // 5: memory.v1.RetainItem.timestamp:type_name -> google.protobuf.Timestamp
+	232, // 5: memory.v1.RetainItem.timestamp:type_name -> google.protobuf.Timestamp
 	188, // 6: memory.v1.RetainItem.observation_scope_modes:type_name -> memory.v1.ObservationScopeModes
-	219, // 7: memory.v1.RetainItem.metadata:type_name -> memory.v1.RetainItem.MetadataEntry
+	220, // 7: memory.v1.RetainItem.metadata:type_name -> memory.v1.RetainItem.MetadataEntry
 	30,  // 8: memory.v1.RetainItem.entities:type_name -> memory.v1.EntityHint
-	213, // 9: memory.v1.RetainItem.overrides:type_name -> memory.v1.RetainOverrides
+	214, // 9: memory.v1.RetainItem.overrides:type_name -> memory.v1.RetainOverrides
 	185, // 10: memory.v1.RetainedDocument.operation:type_name -> memory.v1.Operation
 	29,  // 11: memory.v1.RetainBatchRequest.items:type_name -> memory.v1.RetainItem
-	213, // 12: memory.v1.RetainBatchRequest.overrides:type_name -> memory.v1.RetainOverrides
+	214, // 12: memory.v1.RetainBatchRequest.overrides:type_name -> memory.v1.RetainOverrides
 	34,  // 13: memory.v1.RetainBatchResponse.results:type_name -> memory.v1.RetainBatchResult
 	11,  // 14: memory.v1.RetainBatchResult.status:type_name -> memory.v1.RetainBatchResult.Status
 	185, // 15: memory.v1.RetainBatchResult.operation:type_name -> memory.v1.Operation
@@ -18050,23 +18165,23 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	3,   // 17: memory.v1.RecallRequest.fact_types:type_name -> memory.v1.FactType
 	189, // 18: memory.v1.RecallRequest.tags:type_name -> memory.v1.TagFilter
 	4,   // 19: memory.v1.RecallRequest.budget:type_name -> memory.v1.Budget
-	231, // 20: memory.v1.RecallRequest.query_time:type_name -> google.protobuf.Timestamp
-	231, // 21: memory.v1.RecallRequest.time_window_start:type_name -> google.protobuf.Timestamp
-	231, // 22: memory.v1.RecallRequest.time_window_end:type_name -> google.protobuf.Timestamp
+	232, // 20: memory.v1.RecallRequest.query_time:type_name -> google.protobuf.Timestamp
+	232, // 21: memory.v1.RecallRequest.time_window_start:type_name -> google.protobuf.Timestamp
+	232, // 22: memory.v1.RecallRequest.time_window_end:type_name -> google.protobuf.Timestamp
 	194, // 23: memory.v1.RecallRequest.min_scores:type_name -> memory.v1.MinScores
 	38,  // 24: memory.v1.RecallRequest.include:type_name -> memory.v1.RecallInclude
-	214, // 25: memory.v1.RecallRequest.overrides:type_name -> memory.v1.RecallOverrides
+	215, // 25: memory.v1.RecallRequest.overrides:type_name -> memory.v1.RecallOverrides
 	58,  // 26: memory.v1.RecallResponse.results:type_name -> memory.v1.Memory
-	220, // 27: memory.v1.RecallResponse.source_facts:type_name -> memory.v1.RecallResponse.SourceFactsEntry
-	221, // 28: memory.v1.RecallResponse.chunks:type_name -> memory.v1.RecallResponse.ChunksEntry
-	222, // 29: memory.v1.RecallResponse.entities:type_name -> memory.v1.RecallResponse.EntitiesEntry
+	221, // 27: memory.v1.RecallResponse.source_facts:type_name -> memory.v1.RecallResponse.SourceFactsEntry
+	222, // 28: memory.v1.RecallResponse.chunks:type_name -> memory.v1.RecallResponse.ChunksEntry
+	223, // 29: memory.v1.RecallResponse.entities:type_name -> memory.v1.RecallResponse.EntitiesEntry
 	197, // 30: memory.v1.RecallResponse.trace:type_name -> memory.v1.RecallTrace
 	189, // 31: memory.v1.ReflectRequest.tags:type_name -> memory.v1.TagFilter
 	4,   // 32: memory.v1.ReflectRequest.budget:type_name -> memory.v1.Budget
 	173, // 33: memory.v1.ReflectRequest.extra_directives:type_name -> memory.v1.Directive
 	42,  // 34: memory.v1.ReflectRequest.include:type_name -> memory.v1.ReflectInclude
-	231, // 35: memory.v1.ReflectRequest.query_time:type_name -> google.protobuf.Timestamp
-	215, // 36: memory.v1.ReflectRequest.overrides:type_name -> memory.v1.ReflectOverrides
+	232, // 35: memory.v1.ReflectRequest.query_time:type_name -> google.protobuf.Timestamp
+	216, // 36: memory.v1.ReflectRequest.overrides:type_name -> memory.v1.ReflectOverrides
 	43,  // 37: memory.v1.ReflectResponse.based_on:type_name -> memory.v1.BasedOn
 	200, // 38: memory.v1.ReflectResponse.trace:type_name -> memory.v1.ReflectTrace
 	196, // 39: memory.v1.ReflectResponse.usage:type_name -> memory.v1.SlotUsage
@@ -18074,58 +18189,58 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	46,  // 41: memory.v1.ListRecallArmsResponse.arms:type_name -> memory.v1.RecallArm
 	3,   // 42: memory.v1.ListMemoriesRequest.fact_types:type_name -> memory.v1.FactType
 	0,   // 43: memory.v1.ListMemoriesRequest.state:type_name -> memory.v1.MemoryState
-	231, // 44: memory.v1.ListMemoriesRequest.start:type_name -> google.protobuf.Timestamp
-	231, // 45: memory.v1.ListMemoriesRequest.end:type_name -> google.protobuf.Timestamp
+	232, // 44: memory.v1.ListMemoriesRequest.start:type_name -> google.protobuf.Timestamp
+	232, // 45: memory.v1.ListMemoriesRequest.end:type_name -> google.protobuf.Timestamp
 	12,  // 46: memory.v1.ListMemoriesRequest.time_field:type_name -> memory.v1.ListMemoriesRequest.TimeField
 	189, // 47: memory.v1.ListMemoriesRequest.tags:type_name -> memory.v1.TagFilter
 	58,  // 48: memory.v1.ListMemoriesResponse.memories:type_name -> memory.v1.Memory
 	58,  // 49: memory.v1.GetMemoryResponse.memory:type_name -> memory.v1.Memory
 	53,  // 50: memory.v1.UpdateMemoryRequest.memory:type_name -> memory.v1.MemoryEdit
-	232, // 51: memory.v1.UpdateMemoryRequest.update_mask:type_name -> google.protobuf.FieldMask
-	217, // 52: memory.v1.UpdateMemoryRequest.overrides:type_name -> memory.v1.RederiveOverrides
+	233, // 51: memory.v1.UpdateMemoryRequest.update_mask:type_name -> google.protobuf.FieldMask
+	218, // 52: memory.v1.UpdateMemoryRequest.overrides:type_name -> memory.v1.RederiveOverrides
 	58,  // 53: memory.v1.UpdateMemoryResponse.memory:type_name -> memory.v1.Memory
 	185, // 54: memory.v1.UpdateMemoryResponse.operation:type_name -> memory.v1.Operation
-	231, // 55: memory.v1.MemoryEdit.occurred_start:type_name -> google.protobuf.Timestamp
-	231, // 56: memory.v1.MemoryEdit.occurred_end:type_name -> google.protobuf.Timestamp
+	232, // 55: memory.v1.MemoryEdit.occurred_start:type_name -> google.protobuf.Timestamp
+	232, // 56: memory.v1.MemoryEdit.occurred_end:type_name -> google.protobuf.Timestamp
 	3,   // 57: memory.v1.MemoryEdit.fact_type:type_name -> memory.v1.FactType
 	58,  // 58: memory.v1.InvalidateMemoryResponse.memory:type_name -> memory.v1.Memory
-	217, // 59: memory.v1.RestoreMemoryRequest.overrides:type_name -> memory.v1.RederiveOverrides
+	218, // 59: memory.v1.RestoreMemoryRequest.overrides:type_name -> memory.v1.RederiveOverrides
 	58,  // 60: memory.v1.RestoreMemoryResponse.memory:type_name -> memory.v1.Memory
 	185, // 61: memory.v1.RestoreMemoryResponse.operation:type_name -> memory.v1.Operation
 	3,   // 62: memory.v1.Memory.fact_type:type_name -> memory.v1.FactType
-	223, // 63: memory.v1.Memory.metadata:type_name -> memory.v1.Memory.MetadataEntry
-	231, // 64: memory.v1.Memory.occurred_start:type_name -> google.protobuf.Timestamp
-	231, // 65: memory.v1.Memory.occurred_end:type_name -> google.protobuf.Timestamp
-	231, // 66: memory.v1.Memory.mentioned_at:type_name -> google.protobuf.Timestamp
+	224, // 63: memory.v1.Memory.metadata:type_name -> memory.v1.Memory.MetadataEntry
+	232, // 64: memory.v1.Memory.occurred_start:type_name -> google.protobuf.Timestamp
+	232, // 65: memory.v1.Memory.occurred_end:type_name -> google.protobuf.Timestamp
+	232, // 66: memory.v1.Memory.mentioned_at:type_name -> google.protobuf.Timestamp
 	193, // 67: memory.v1.Memory.scores:type_name -> memory.v1.Scores
 	0,   // 68: memory.v1.Memory.state:type_name -> memory.v1.MemoryState
-	231, // 69: memory.v1.Memory.edited_at:type_name -> google.protobuf.Timestamp
+	232, // 69: memory.v1.Memory.edited_at:type_name -> google.protobuf.Timestamp
 	189, // 70: memory.v1.ListDocumentsRequest.tags:type_name -> memory.v1.TagFilter
-	231, // 71: memory.v1.ListDocumentsRequest.start:type_name -> google.protobuf.Timestamp
-	231, // 72: memory.v1.ListDocumentsRequest.end:type_name -> google.protobuf.Timestamp
+	232, // 71: memory.v1.ListDocumentsRequest.start:type_name -> google.protobuf.Timestamp
+	232, // 72: memory.v1.ListDocumentsRequest.end:type_name -> google.protobuf.Timestamp
 	13,  // 73: memory.v1.ListDocumentsRequest.time_field:type_name -> memory.v1.ListDocumentsRequest.TimeField
 	67,  // 74: memory.v1.ListDocumentsResponse.documents:type_name -> memory.v1.Document
 	67,  // 75: memory.v1.GetDocumentResponse.document:type_name -> memory.v1.Document
 	187, // 76: memory.v1.RetagDocumentRequest.tags:type_name -> memory.v1.TagSet
 	185, // 77: memory.v1.RetagDocumentResponse.operation:type_name -> memory.v1.Operation
-	213, // 78: memory.v1.ReprocessDocumentRequest.overrides:type_name -> memory.v1.RetainOverrides
+	214, // 78: memory.v1.ReprocessDocumentRequest.overrides:type_name -> memory.v1.RetainOverrides
 	185, // 79: memory.v1.ReprocessDocumentResponse.operation:type_name -> memory.v1.Operation
-	224, // 80: memory.v1.Document.memories_by_fact_type:type_name -> memory.v1.Document.MemoriesByFactTypeEntry
-	213, // 81: memory.v1.Document.retain_overrides:type_name -> memory.v1.RetainOverrides
-	231, // 82: memory.v1.Document.created_at:type_name -> google.protobuf.Timestamp
-	231, // 83: memory.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
-	231, // 84: memory.v1.Document.extracted_at:type_name -> google.protobuf.Timestamp
+	225, // 80: memory.v1.Document.memories_by_fact_type:type_name -> memory.v1.Document.MemoriesByFactTypeEntry
+	214, // 81: memory.v1.Document.retain_overrides:type_name -> memory.v1.RetainOverrides
+	232, // 82: memory.v1.Document.created_at:type_name -> google.protobuf.Timestamp
+	232, // 83: memory.v1.Document.updated_at:type_name -> google.protobuf.Timestamp
+	232, // 84: memory.v1.Document.extracted_at:type_name -> google.protobuf.Timestamp
 	187, // 85: memory.v1.ConsolidateRequest.scopes:type_name -> memory.v1.TagSet
-	216, // 86: memory.v1.ConsolidateRequest.overrides:type_name -> memory.v1.ConsolidateOverrides
+	217, // 86: memory.v1.ConsolidateRequest.overrides:type_name -> memory.v1.ConsolidateOverrides
 	185, // 87: memory.v1.ConsolidateResponse.operation:type_name -> memory.v1.Operation
 	72,  // 88: memory.v1.ListObservationScopesResponse.scopes:type_name -> memory.v1.ObservationScope
 	187, // 89: memory.v1.ObservationScope.scope:type_name -> memory.v1.TagSet
 	75,  // 90: memory.v1.ListObservationHistoryResponse.versions:type_name -> memory.v1.ObservationVersion
-	231, // 91: memory.v1.ObservationVersion.created_at:type_name -> google.protobuf.Timestamp
+	232, // 91: memory.v1.ObservationVersion.created_at:type_name -> google.protobuf.Timestamp
 	77,  // 92: memory.v1.ClearObservationsRequest.scopes:type_name -> memory.v1.TagSetList
 	187, // 93: memory.v1.TagSetList.tag_sets:type_name -> memory.v1.TagSet
 	185, // 94: memory.v1.ClearObservationsResponse.operation:type_name -> memory.v1.Operation
-	207, // 95: memory.v1.PreviewConsolidationStrategiesRequest.strategies:type_name -> memory.v1.ConsolidationStrategy
+	208, // 95: memory.v1.PreviewConsolidationStrategiesRequest.strategies:type_name -> memory.v1.ConsolidationStrategy
 	81,  // 96: memory.v1.PreviewConsolidationStrategiesResponse.matches:type_name -> memory.v1.StrategyMatch
 	106, // 97: memory.v1.CreateMentalModelRequest.spec:type_name -> memory.v1.MentalModelSpec
 	105, // 98: memory.v1.CreateMentalModelResponse.mental_model:type_name -> memory.v1.MentalModel
@@ -18136,9 +18251,9 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	189, // 103: memory.v1.ListMentalModelsRequest.tags:type_name -> memory.v1.TagFilter
 	105, // 104: memory.v1.ListMentalModelsResponse.mental_models:type_name -> memory.v1.MentalModel
 	106, // 105: memory.v1.UpdateMentalModelRequest.spec:type_name -> memory.v1.MentalModelSpec
-	232, // 106: memory.v1.UpdateMentalModelRequest.update_mask:type_name -> google.protobuf.FieldMask
+	233, // 106: memory.v1.UpdateMentalModelRequest.update_mask:type_name -> google.protobuf.FieldMask
 	105, // 107: memory.v1.UpdateMentalModelResponse.mental_model:type_name -> memory.v1.MentalModel
-	218, // 108: memory.v1.RefreshMentalModelRequest.overrides:type_name -> memory.v1.RefreshOverrides
+	219, // 108: memory.v1.RefreshMentalModelRequest.overrides:type_name -> memory.v1.RefreshOverrides
 	7,   // 109: memory.v1.RefreshMentalModelRequest.strategy:type_name -> memory.v1.RefreshStrategy
 	185, // 110: memory.v1.RefreshMentalModelResponse.operation:type_name -> memory.v1.Operation
 	7,   // 111: memory.v1.PreviewMentalModelRefreshRequest.strategy:type_name -> memory.v1.RefreshStrategy
@@ -18150,20 +18265,20 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	14,  // 117: memory.v1.ListMentalModelHistoryRequest.kind:type_name -> memory.v1.MentalModelHistoryEntry.Kind
 	97,  // 118: memory.v1.ListMentalModelHistoryResponse.entries:type_name -> memory.v1.MentalModelHistoryEntry
 	14,  // 119: memory.v1.MentalModelHistoryEntry.kind:type_name -> memory.v1.MentalModelHistoryEntry.Kind
-	231, // 120: memory.v1.MentalModelHistoryEntry.created_at:type_name -> google.protobuf.Timestamp
+	232, // 120: memory.v1.MentalModelHistoryEntry.created_at:type_name -> google.protobuf.Timestamp
 	2,   // 121: memory.v1.MentalModelHistoryEntry.outcome:type_name -> memory.v1.RefreshOutcome
 	104, // 122: memory.v1.SearchMentalModelsResponse.hits:type_name -> memory.v1.MentalModelHit
 	106, // 123: memory.v1.MentalModel.spec:type_name -> memory.v1.MentalModelSpec
-	231, // 124: memory.v1.MentalModel.last_refreshed_at:type_name -> google.protobuf.Timestamp
-	231, // 125: memory.v1.MentalModel.last_refresh_failed_at:type_name -> google.protobuf.Timestamp
+	232, // 124: memory.v1.MentalModel.last_refreshed_at:type_name -> google.protobuf.Timestamp
+	232, // 125: memory.v1.MentalModel.last_refresh_failed_at:type_name -> google.protobuf.Timestamp
 	109, // 126: memory.v1.MentalModel.last_trace:type_name -> memory.v1.RefreshTrace
-	231, // 127: memory.v1.MentalModel.created_at:type_name -> google.protobuf.Timestamp
+	232, // 127: memory.v1.MentalModel.created_at:type_name -> google.protobuf.Timestamp
 	107, // 128: memory.v1.MentalModelSpec.schedule:type_name -> memory.v1.RefreshSchedule
 	108, // 129: memory.v1.MentalModelSpec.scope:type_name -> memory.v1.MentalModelScope
 	6,   // 130: memory.v1.MentalModelSpec.mode:type_name -> memory.v1.RefreshMode
 	7,   // 131: memory.v1.MentalModelSpec.strategy:type_name -> memory.v1.RefreshStrategy
 	4,   // 132: memory.v1.MentalModelSpec.budget:type_name -> memory.v1.Budget
-	218, // 133: memory.v1.MentalModelSpec.overrides:type_name -> memory.v1.RefreshOverrides
+	219, // 133: memory.v1.MentalModelSpec.overrides:type_name -> memory.v1.RefreshOverrides
 	189, // 134: memory.v1.MentalModelScope.tags:type_name -> memory.v1.TagFilter
 	3,   // 135: memory.v1.MentalModelScope.fact_types:type_name -> memory.v1.FactType
 	6,   // 136: memory.v1.RefreshTrace.effective_mode:type_name -> memory.v1.RefreshMode
@@ -18171,10 +18286,10 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	199, // 138: memory.v1.RefreshTrace.tool_calls:type_name -> memory.v1.ToolCallTrace
 	110, // 139: memory.v1.RefreshTrace.delta_operations:type_name -> memory.v1.DeltaOp
 	196, // 140: memory.v1.RefreshTrace.usage:type_name -> memory.v1.SlotUsage
-	231, // 141: memory.v1.RefreshTrace.recorded_at:type_name -> google.protobuf.Timestamp
+	232, // 141: memory.v1.RefreshTrace.recorded_at:type_name -> google.protobuf.Timestamp
 	7,   // 142: memory.v1.RefreshTrace.effective_strategy:type_name -> memory.v1.RefreshStrategy
 	15,  // 143: memory.v1.DeltaOp.kind:type_name -> memory.v1.DeltaOp.Kind
-	201, // 144: memory.v1.CreateOrgRequest.config:type_name -> memory.v1.BankConfig
+	202, // 144: memory.v1.CreateOrgRequest.config:type_name -> memory.v1.BankConfig
 	122, // 145: memory.v1.CreateOrgResponse.org:type_name -> memory.v1.Org
 	122, // 146: memory.v1.GetOrgResponse.org:type_name -> memory.v1.Org
 	122, // 147: memory.v1.ListOrgsResponse.orgs:type_name -> memory.v1.Org
@@ -18182,51 +18297,51 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	121, // 149: memory.v1.DeleteOrgResponse.receipt:type_name -> memory.v1.DeletionReceipt
 	121, // 150: memory.v1.GetDeletionReceiptResponse.receipt:type_name -> memory.v1.DeletionReceipt
 	16,  // 151: memory.v1.DeletionReceipt.state:type_name -> memory.v1.DeletionReceipt.State
-	231, // 152: memory.v1.DeletionReceipt.requested_at:type_name -> google.protobuf.Timestamp
-	231, // 153: memory.v1.DeletionReceipt.completed_at:type_name -> google.protobuf.Timestamp
-	231, // 154: memory.v1.DeletionReceipt.verified_at:type_name -> google.protobuf.Timestamp
-	231, // 155: memory.v1.Org.created_at:type_name -> google.protobuf.Timestamp
-	201, // 156: memory.v1.CreateBankRequest.config:type_name -> memory.v1.BankConfig
+	232, // 152: memory.v1.DeletionReceipt.requested_at:type_name -> google.protobuf.Timestamp
+	232, // 153: memory.v1.DeletionReceipt.completed_at:type_name -> google.protobuf.Timestamp
+	232, // 154: memory.v1.DeletionReceipt.verified_at:type_name -> google.protobuf.Timestamp
+	232, // 155: memory.v1.Org.created_at:type_name -> google.protobuf.Timestamp
+	202, // 156: memory.v1.CreateBankRequest.config:type_name -> memory.v1.BankConfig
 	125, // 157: memory.v1.CreateBankRequest.template:type_name -> memory.v1.BankTemplate
 	140, // 158: memory.v1.CreateBankResponse.bank:type_name -> memory.v1.Bank
 	185, // 159: memory.v1.CreateBankResponse.mental_model_operations:type_name -> memory.v1.Operation
-	201, // 160: memory.v1.BankTemplate.config:type_name -> memory.v1.BankConfig
+	202, // 160: memory.v1.BankTemplate.config:type_name -> memory.v1.BankConfig
 	173, // 161: memory.v1.BankTemplate.directives:type_name -> memory.v1.Directive
 	106, // 162: memory.v1.BankTemplate.mental_models:type_name -> memory.v1.MentalModelSpec
 	140, // 163: memory.v1.GetBankResponse.bank:type_name -> memory.v1.Bank
 	140, // 164: memory.v1.ListBanksResponse.banks:type_name -> memory.v1.Bank
 	185, // 165: memory.v1.DeleteBankResponse.operation:type_name -> memory.v1.Operation
 	134, // 166: memory.v1.GetBankStatsResponse.stats:type_name -> memory.v1.BankStats
-	225, // 167: memory.v1.BankStats.memories_by_fact_type:type_name -> memory.v1.BankStats.MemoriesByFactTypeEntry
-	226, // 168: memory.v1.BankStats.pending_operations_by_kind:type_name -> memory.v1.BankStats.PendingOperationsByKindEntry
-	231, // 169: memory.v1.BankStats.last_memory_write_at:type_name -> google.protobuf.Timestamp
+	226, // 167: memory.v1.BankStats.memories_by_fact_type:type_name -> memory.v1.BankStats.MemoriesByFactTypeEntry
+	227, // 168: memory.v1.BankStats.pending_operations_by_kind:type_name -> memory.v1.BankStats.PendingOperationsByKindEntry
+	232, // 169: memory.v1.BankStats.last_memory_write_at:type_name -> google.protobuf.Timestamp
 	17,  // 170: memory.v1.ListTagsRequest.source:type_name -> memory.v1.ListTagsRequest.TagSource
 	137, // 171: memory.v1.ListTagsResponse.tags:type_name -> memory.v1.TagCount
 	125, // 172: memory.v1.ExportBankTemplateResponse.template:type_name -> memory.v1.BankTemplate
-	231, // 173: memory.v1.Bank.created_at:type_name -> google.protobuf.Timestamp
+	232, // 173: memory.v1.Bank.created_at:type_name -> google.protobuf.Timestamp
 	172, // 174: memory.v1.GetTenantConfigResponse.config:type_name -> memory.v1.ConfigView
-	201, // 175: memory.v1.UpdateTenantConfigRequest.config:type_name -> memory.v1.BankConfig
-	232, // 176: memory.v1.UpdateTenantConfigRequest.update_mask:type_name -> google.protobuf.FieldMask
+	202, // 175: memory.v1.UpdateTenantConfigRequest.config:type_name -> memory.v1.BankConfig
+	233, // 176: memory.v1.UpdateTenantConfigRequest.update_mask:type_name -> google.protobuf.FieldMask
 	172, // 177: memory.v1.UpdateTenantConfigResponse.config:type_name -> memory.v1.ConfigView
-	232, // 178: memory.v1.ResetTenantConfigRequest.reset_mask:type_name -> google.protobuf.FieldMask
+	233, // 178: memory.v1.ResetTenantConfigRequest.reset_mask:type_name -> google.protobuf.FieldMask
 	172, // 179: memory.v1.ResetTenantConfigResponse.config:type_name -> memory.v1.ConfigView
 	172, // 180: memory.v1.GetOrgConfigResponse.config:type_name -> memory.v1.ConfigView
-	201, // 181: memory.v1.UpdateOrgConfigRequest.config:type_name -> memory.v1.BankConfig
-	232, // 182: memory.v1.UpdateOrgConfigRequest.update_mask:type_name -> google.protobuf.FieldMask
+	202, // 181: memory.v1.UpdateOrgConfigRequest.config:type_name -> memory.v1.BankConfig
+	233, // 182: memory.v1.UpdateOrgConfigRequest.update_mask:type_name -> google.protobuf.FieldMask
 	172, // 183: memory.v1.UpdateOrgConfigResponse.config:type_name -> memory.v1.ConfigView
-	232, // 184: memory.v1.ResetOrgConfigRequest.reset_mask:type_name -> google.protobuf.FieldMask
+	233, // 184: memory.v1.ResetOrgConfigRequest.reset_mask:type_name -> google.protobuf.FieldMask
 	172, // 185: memory.v1.ResetOrgConfigResponse.config:type_name -> memory.v1.ConfigView
 	172, // 186: memory.v1.GetBankConfigResponse.config:type_name -> memory.v1.ConfigView
-	201, // 187: memory.v1.UpdateBankConfigRequest.config:type_name -> memory.v1.BankConfig
-	232, // 188: memory.v1.UpdateBankConfigRequest.update_mask:type_name -> google.protobuf.FieldMask
+	202, // 187: memory.v1.UpdateBankConfigRequest.config:type_name -> memory.v1.BankConfig
+	233, // 188: memory.v1.UpdateBankConfigRequest.update_mask:type_name -> google.protobuf.FieldMask
 	172, // 189: memory.v1.UpdateBankConfigResponse.config:type_name -> memory.v1.ConfigView
-	232, // 190: memory.v1.ResetBankConfigRequest.reset_mask:type_name -> google.protobuf.FieldMask
+	233, // 190: memory.v1.ResetBankConfigRequest.reset_mask:type_name -> google.protobuf.FieldMask
 	172, // 191: memory.v1.ResetBankConfigResponse.config:type_name -> memory.v1.ConfigView
 	18,  // 192: memory.v1.PreviewPromptRequest.operation:type_name -> memory.v1.PreviewPromptRequest.PromptOperation
-	213, // 193: memory.v1.PreviewPromptRequest.retain:type_name -> memory.v1.RetainOverrides
-	216, // 194: memory.v1.PreviewPromptRequest.consolidation:type_name -> memory.v1.ConsolidateOverrides
-	215, // 195: memory.v1.PreviewPromptRequest.reflect:type_name -> memory.v1.ReflectOverrides
-	218, // 196: memory.v1.PreviewPromptRequest.mental_model:type_name -> memory.v1.RefreshOverrides
+	214, // 193: memory.v1.PreviewPromptRequest.retain:type_name -> memory.v1.RetainOverrides
+	217, // 194: memory.v1.PreviewPromptRequest.consolidation:type_name -> memory.v1.ConsolidateOverrides
+	216, // 195: memory.v1.PreviewPromptRequest.reflect:type_name -> memory.v1.ReflectOverrides
+	219, // 196: memory.v1.PreviewPromptRequest.mental_model:type_name -> memory.v1.RefreshOverrides
 	161, // 197: memory.v1.PreviewPromptResponse.preview:type_name -> memory.v1.PromptPreview
 	162, // 198: memory.v1.PromptPreview.messages:type_name -> memory.v1.PromptMessage
 	19,  // 199: memory.v1.PromptMessage.role:type_name -> memory.v1.PromptMessage.PromptRole
@@ -18235,12 +18350,12 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	173, // 202: memory.v1.CreateDirectiveRequest.directive:type_name -> memory.v1.Directive
 	173, // 203: memory.v1.CreateDirectiveResponse.directive:type_name -> memory.v1.Directive
 	173, // 204: memory.v1.UpdateDirectiveRequest.directive:type_name -> memory.v1.Directive
-	232, // 205: memory.v1.UpdateDirectiveRequest.update_mask:type_name -> google.protobuf.FieldMask
+	233, // 205: memory.v1.UpdateDirectiveRequest.update_mask:type_name -> google.protobuf.FieldMask
 	173, // 206: memory.v1.UpdateDirectiveResponse.directive:type_name -> memory.v1.Directive
 	189, // 207: memory.v1.ListDirectivesRequest.tags:type_name -> memory.v1.TagFilter
 	173, // 208: memory.v1.ListDirectivesResponse.directives:type_name -> memory.v1.Directive
-	201, // 209: memory.v1.ConfigView.own:type_name -> memory.v1.BankConfig
-	201, // 210: memory.v1.ConfigView.effective:type_name -> memory.v1.BankConfig
+	202, // 209: memory.v1.ConfigView.own:type_name -> memory.v1.BankConfig
+	202, // 210: memory.v1.ConfigView.effective:type_name -> memory.v1.BankConfig
 	185, // 211: memory.v1.GetOperationResponse.operation:type_name -> memory.v1.Operation
 	9,   // 212: memory.v1.ListOperationsRequest.status:type_name -> memory.v1.OperationStatus
 	8,   // 213: memory.v1.ListOperationsRequest.kind:type_name -> memory.v1.OperationKind
@@ -18250,17 +18365,17 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	10,  // 217: memory.v1.ListEventsRequest.types:type_name -> memory.v1.EventType
 	184, // 218: memory.v1.ListEventsResponse.events:type_name -> memory.v1.LifecycleEvent
 	10,  // 219: memory.v1.LifecycleEvent.type:type_name -> memory.v1.EventType
-	231, // 220: memory.v1.LifecycleEvent.created_at:type_name -> google.protobuf.Timestamp
+	232, // 220: memory.v1.LifecycleEvent.created_at:type_name -> google.protobuf.Timestamp
 	8,   // 221: memory.v1.Operation.kind:type_name -> memory.v1.OperationKind
 	9,   // 222: memory.v1.Operation.status:type_name -> memory.v1.OperationStatus
 	196, // 223: memory.v1.Operation.usage:type_name -> memory.v1.SlotUsage
-	201, // 224: memory.v1.Operation.effective_overrides:type_name -> memory.v1.BankConfig
+	202, // 224: memory.v1.Operation.effective_overrides:type_name -> memory.v1.BankConfig
 	186, // 225: memory.v1.Operation.progress:type_name -> memory.v1.Progress
-	231, // 226: memory.v1.Operation.created_at:type_name -> google.protobuf.Timestamp
-	231, // 227: memory.v1.Operation.updated_at:type_name -> google.protobuf.Timestamp
-	231, // 228: memory.v1.Operation.next_run_at:type_name -> google.protobuf.Timestamp
-	231, // 229: memory.v1.Operation.heartbeat_at:type_name -> google.protobuf.Timestamp
-	231, // 230: memory.v1.Progress.recorded_at:type_name -> google.protobuf.Timestamp
+	232, // 226: memory.v1.Operation.created_at:type_name -> google.protobuf.Timestamp
+	232, // 227: memory.v1.Operation.updated_at:type_name -> google.protobuf.Timestamp
+	232, // 228: memory.v1.Operation.next_run_at:type_name -> google.protobuf.Timestamp
+	232, // 229: memory.v1.Operation.heartbeat_at:type_name -> google.protobuf.Timestamp
+	232, // 230: memory.v1.Progress.recorded_at:type_name -> google.protobuf.Timestamp
 	21,  // 231: memory.v1.ObservationScopeModes.mode:type_name -> memory.v1.ObservationScopeModes.Mode
 	187, // 232: memory.v1.ObservationScopeModes.custom:type_name -> memory.v1.TagSet
 	5,   // 233: memory.v1.TagFilter.match:type_name -> memory.v1.TagsMatch
@@ -18272,195 +18387,197 @@ var file_memory_v1_memory_proto_depIdxs = []int32{
 	190, // 239: memory.v1.TagGroupList.groups:type_name -> memory.v1.TagGroup
 	5,   // 240: memory.v1.TagLeaf.match:type_name -> memory.v1.TagsMatch
 	22,  // 241: memory.v1.TagLeaf.resolve:type_name -> memory.v1.TagLeaf.Resolve
-	227, // 242: memory.v1.Scores.arms:type_name -> memory.v1.Scores.ArmsEntry
-	228, // 243: memory.v1.MinScores.arms:type_name -> memory.v1.MinScores.ArmsEntry
+	228, // 242: memory.v1.Scores.arms:type_name -> memory.v1.Scores.ArmsEntry
+	229, // 243: memory.v1.MinScores.arms:type_name -> memory.v1.MinScores.ArmsEntry
 	23,  // 244: memory.v1.SlotUsage.slot:type_name -> memory.v1.SlotUsage.ModelSlot
 	198, // 245: memory.v1.RecallTrace.arms:type_name -> memory.v1.ArmTrace
-	231, // 246: memory.v1.RecallTrace.time_window_start:type_name -> google.protobuf.Timestamp
-	231, // 247: memory.v1.RecallTrace.time_window_end:type_name -> google.protobuf.Timestamp
+	232, // 246: memory.v1.RecallTrace.time_window_start:type_name -> google.protobuf.Timestamp
+	232, // 247: memory.v1.RecallTrace.time_window_end:type_name -> google.protobuf.Timestamp
 	199, // 248: memory.v1.ReflectTrace.tool_calls:type_name -> memory.v1.ToolCallTrace
-	202, // 249: memory.v1.BankConfig.retain:type_name -> memory.v1.RetainConfig
-	203, // 250: memory.v1.BankConfig.observations:type_name -> memory.v1.ObservationConfig
-	208, // 251: memory.v1.BankConfig.recall:type_name -> memory.v1.RecallConfig
-	209, // 252: memory.v1.BankConfig.reflect:type_name -> memory.v1.ReflectConfig
-	210, // 253: memory.v1.BankConfig.mental_models:type_name -> memory.v1.MentalModelConfig
-	211, // 254: memory.v1.BankConfig.models:type_name -> memory.v1.ModelBindings
-	24,  // 255: memory.v1.RetainConfig.extraction_mode:type_name -> memory.v1.RetainConfig.ExtractionMode
-	205, // 256: memory.v1.RetainConfig.entity_labels:type_name -> memory.v1.EntityLabel
-	188, // 257: memory.v1.RetainConfig.default_observation_scope_modes:type_name -> memory.v1.ObservationScopeModes
-	207, // 258: memory.v1.ObservationConfig.strategies:type_name -> memory.v1.ConsolidationStrategy
-	25,  // 259: memory.v1.EntityLabel.type:type_name -> memory.v1.EntityLabel.Type
-	206, // 260: memory.v1.EntityLabel.values:type_name -> memory.v1.LabelValue
-	229, // 261: memory.v1.EntityLabel.fields:type_name -> memory.v1.EntityLabel.FieldsEntry
-	189, // 262: memory.v1.ConsolidationStrategy.scopes:type_name -> memory.v1.TagFilter
-	212, // 263: memory.v1.ConsolidationStrategy.consolidate_model:type_name -> memory.v1.ModelBinding
-	212, // 264: memory.v1.ConsolidationStrategy.dedup_check_model:type_name -> memory.v1.ModelBinding
-	26,  // 265: memory.v1.RecallConfig.budget_function:type_name -> memory.v1.RecallConfig.BudgetFunction
-	230, // 266: memory.v1.RecallConfig.arm_boosts:type_name -> memory.v1.RecallConfig.ArmBoostsEntry
-	4,   // 267: memory.v1.ReflectConfig.recall_budget:type_name -> memory.v1.Budget
-	204, // 268: memory.v1.ReflectConfig.disposition:type_name -> memory.v1.Disposition
-	6,   // 269: memory.v1.MentalModelConfig.default_mode:type_name -> memory.v1.RefreshMode
-	7,   // 270: memory.v1.MentalModelConfig.default_strategy:type_name -> memory.v1.RefreshStrategy
-	212, // 271: memory.v1.ModelBindings.default:type_name -> memory.v1.ModelBinding
-	212, // 272: memory.v1.ModelBindings.extract:type_name -> memory.v1.ModelBinding
-	212, // 273: memory.v1.ModelBindings.time_parse:type_name -> memory.v1.ModelBinding
-	212, // 274: memory.v1.ModelBindings.consolidate:type_name -> memory.v1.ModelBinding
-	212, // 275: memory.v1.ModelBindings.dedup_check:type_name -> memory.v1.ModelBinding
-	212, // 276: memory.v1.ModelBindings.reflect:type_name -> memory.v1.ModelBinding
-	212, // 277: memory.v1.ModelBindings.structured_output:type_name -> memory.v1.ModelBinding
-	212, // 278: memory.v1.ModelBindings.mental_model:type_name -> memory.v1.ModelBinding
-	212, // 279: memory.v1.ModelBindings.rerank:type_name -> memory.v1.ModelBinding
-	212, // 280: memory.v1.ModelBindings.embed:type_name -> memory.v1.ModelBinding
-	233, // 281: memory.v1.ModelBinding.extra:type_name -> google.protobuf.Struct
-	202, // 282: memory.v1.RetainOverrides.retain:type_name -> memory.v1.RetainConfig
-	212, // 283: memory.v1.RetainOverrides.extract_model:type_name -> memory.v1.ModelBinding
-	212, // 284: memory.v1.RetainOverrides.time_parse_model:type_name -> memory.v1.ModelBinding
-	208, // 285: memory.v1.RecallOverrides.recall:type_name -> memory.v1.RecallConfig
-	212, // 286: memory.v1.RecallOverrides.time_parse_model:type_name -> memory.v1.ModelBinding
-	212, // 287: memory.v1.RecallOverrides.rerank_model:type_name -> memory.v1.ModelBinding
-	209, // 288: memory.v1.ReflectOverrides.reflect:type_name -> memory.v1.ReflectConfig
-	208, // 289: memory.v1.ReflectOverrides.recall:type_name -> memory.v1.RecallConfig
-	212, // 290: memory.v1.ReflectOverrides.reflect_model:type_name -> memory.v1.ModelBinding
-	212, // 291: memory.v1.ReflectOverrides.structured_output_model:type_name -> memory.v1.ModelBinding
-	212, // 292: memory.v1.ReflectOverrides.rerank_model:type_name -> memory.v1.ModelBinding
-	207, // 293: memory.v1.ConsolidateOverrides.strategies:type_name -> memory.v1.ConsolidationStrategy
-	212, // 294: memory.v1.ConsolidateOverrides.consolidate_model:type_name -> memory.v1.ModelBinding
-	212, // 295: memory.v1.ConsolidateOverrides.dedup_check_model:type_name -> memory.v1.ModelBinding
-	212, // 296: memory.v1.RederiveOverrides.extract_model:type_name -> memory.v1.ModelBinding
-	212, // 297: memory.v1.RederiveOverrides.time_parse_model:type_name -> memory.v1.ModelBinding
-	209, // 298: memory.v1.RefreshOverrides.reflect:type_name -> memory.v1.ReflectConfig
-	212, // 299: memory.v1.RefreshOverrides.reflect_model:type_name -> memory.v1.ModelBinding
-	212, // 300: memory.v1.RefreshOverrides.mental_model_model:type_name -> memory.v1.ModelBinding
-	212, // 301: memory.v1.RefreshOverrides.structured_output_model:type_name -> memory.v1.ModelBinding
-	58,  // 302: memory.v1.RecallResponse.SourceFactsEntry.value:type_name -> memory.v1.Memory
-	195, // 303: memory.v1.RecallResponse.ChunksEntry.value:type_name -> memory.v1.Chunk
-	39,  // 304: memory.v1.RecallResponse.EntitiesEntry.value:type_name -> memory.v1.EntityState
-	205, // 305: memory.v1.EntityLabel.FieldsEntry.value:type_name -> memory.v1.EntityLabel
-	27,  // 306: memory.v1.MemoryService.Retain:input_type -> memory.v1.RetainRequest
-	32,  // 307: memory.v1.MemoryService.RetainBatch:input_type -> memory.v1.RetainBatchRequest
-	36,  // 308: memory.v1.MemoryService.Recall:input_type -> memory.v1.RecallRequest
-	40,  // 309: memory.v1.MemoryService.Reflect:input_type -> memory.v1.ReflectRequest
-	44,  // 310: memory.v1.MemoryService.ListRecallArms:input_type -> memory.v1.ListRecallArmsRequest
-	47,  // 311: memory.v1.MemoryService.ListMemories:input_type -> memory.v1.ListMemoriesRequest
-	49,  // 312: memory.v1.MemoryService.GetMemory:input_type -> memory.v1.GetMemoryRequest
-	51,  // 313: memory.v1.MemoryService.UpdateMemory:input_type -> memory.v1.UpdateMemoryRequest
-	54,  // 314: memory.v1.MemoryService.InvalidateMemory:input_type -> memory.v1.InvalidateMemoryRequest
-	56,  // 315: memory.v1.MemoryService.RestoreMemory:input_type -> memory.v1.RestoreMemoryRequest
-	59,  // 316: memory.v1.DocumentService.ListDocuments:input_type -> memory.v1.ListDocumentsRequest
-	61,  // 317: memory.v1.DocumentService.GetDocument:input_type -> memory.v1.GetDocumentRequest
-	63,  // 318: memory.v1.DocumentService.RetagDocument:input_type -> memory.v1.RetagDocumentRequest
-	65,  // 319: memory.v1.DocumentService.ReprocessDocument:input_type -> memory.v1.ReprocessDocumentRequest
-	68,  // 320: memory.v1.ObservationService.Consolidate:input_type -> memory.v1.ConsolidateRequest
-	70,  // 321: memory.v1.ObservationService.ListObservationScopes:input_type -> memory.v1.ListObservationScopesRequest
-	73,  // 322: memory.v1.ObservationService.ListObservationHistory:input_type -> memory.v1.ListObservationHistoryRequest
-	76,  // 323: memory.v1.ObservationService.ClearObservations:input_type -> memory.v1.ClearObservationsRequest
-	79,  // 324: memory.v1.ObservationService.PreviewConsolidationStrategies:input_type -> memory.v1.PreviewConsolidationStrategiesRequest
-	82,  // 325: memory.v1.MentalModelService.CreateMentalModel:input_type -> memory.v1.CreateMentalModelRequest
-	84,  // 326: memory.v1.MentalModelService.GetMentalModel:input_type -> memory.v1.GetMentalModelRequest
-	86,  // 327: memory.v1.MentalModelService.ListMentalModels:input_type -> memory.v1.ListMentalModelsRequest
-	88,  // 328: memory.v1.MentalModelService.UpdateMentalModel:input_type -> memory.v1.UpdateMentalModelRequest
-	90,  // 329: memory.v1.MentalModelService.RefreshMentalModel:input_type -> memory.v1.RefreshMentalModelRequest
-	92,  // 330: memory.v1.MentalModelService.PreviewMentalModelRefresh:input_type -> memory.v1.PreviewMentalModelRefreshRequest
-	95,  // 331: memory.v1.MentalModelService.ListMentalModelHistory:input_type -> memory.v1.ListMentalModelHistoryRequest
-	98,  // 332: memory.v1.MentalModelService.DeleteMentalModel:input_type -> memory.v1.DeleteMentalModelRequest
-	100, // 333: memory.v1.MentalModelService.DeleteMentalModelFolder:input_type -> memory.v1.DeleteMentalModelFolderRequest
-	102, // 334: memory.v1.MentalModelService.SearchMentalModels:input_type -> memory.v1.SearchMentalModelsRequest
-	111, // 335: memory.v1.OrgService.CreateOrg:input_type -> memory.v1.CreateOrgRequest
-	113, // 336: memory.v1.OrgService.GetOrg:input_type -> memory.v1.GetOrgRequest
-	115, // 337: memory.v1.OrgService.ListOrgs:input_type -> memory.v1.ListOrgsRequest
-	117, // 338: memory.v1.OrgService.DeleteOrg:input_type -> memory.v1.DeleteOrgRequest
-	119, // 339: memory.v1.OrgService.GetDeletionReceipt:input_type -> memory.v1.GetDeletionReceiptRequest
-	123, // 340: memory.v1.BankService.CreateBank:input_type -> memory.v1.CreateBankRequest
-	126, // 341: memory.v1.BankService.GetBank:input_type -> memory.v1.GetBankRequest
-	128, // 342: memory.v1.BankService.ListBanks:input_type -> memory.v1.ListBanksRequest
-	130, // 343: memory.v1.BankService.DeleteBank:input_type -> memory.v1.DeleteBankRequest
-	132, // 344: memory.v1.BankService.GetBankStats:input_type -> memory.v1.GetBankStatsRequest
-	135, // 345: memory.v1.BankService.ListTags:input_type -> memory.v1.ListTagsRequest
-	138, // 346: memory.v1.BankService.ExportBankTemplate:input_type -> memory.v1.ExportBankTemplateRequest
-	141, // 347: memory.v1.ConfigService.GetTenantConfig:input_type -> memory.v1.GetTenantConfigRequest
-	143, // 348: memory.v1.ConfigService.UpdateTenantConfig:input_type -> memory.v1.UpdateTenantConfigRequest
-	145, // 349: memory.v1.ConfigService.ResetTenantConfig:input_type -> memory.v1.ResetTenantConfigRequest
-	147, // 350: memory.v1.ConfigService.GetOrgConfig:input_type -> memory.v1.GetOrgConfigRequest
-	149, // 351: memory.v1.ConfigService.UpdateOrgConfig:input_type -> memory.v1.UpdateOrgConfigRequest
-	151, // 352: memory.v1.ConfigService.ResetOrgConfig:input_type -> memory.v1.ResetOrgConfigRequest
-	153, // 353: memory.v1.ConfigService.GetBankConfig:input_type -> memory.v1.GetBankConfigRequest
-	155, // 354: memory.v1.ConfigService.UpdateBankConfig:input_type -> memory.v1.UpdateBankConfigRequest
-	157, // 355: memory.v1.ConfigService.ResetBankConfig:input_type -> memory.v1.ResetBankConfigRequest
-	159, // 356: memory.v1.ConfigService.PreviewPrompt:input_type -> memory.v1.PreviewPromptRequest
-	164, // 357: memory.v1.ConfigService.CreateDirective:input_type -> memory.v1.CreateDirectiveRequest
-	166, // 358: memory.v1.ConfigService.UpdateDirective:input_type -> memory.v1.UpdateDirectiveRequest
-	168, // 359: memory.v1.ConfigService.ListDirectives:input_type -> memory.v1.ListDirectivesRequest
-	170, // 360: memory.v1.ConfigService.DeleteDirective:input_type -> memory.v1.DeleteDirectiveRequest
-	174, // 361: memory.v1.OperationService.GetOperation:input_type -> memory.v1.GetOperationRequest
-	176, // 362: memory.v1.OperationService.ListOperations:input_type -> memory.v1.ListOperationsRequest
-	178, // 363: memory.v1.OperationService.CancelOperation:input_type -> memory.v1.CancelOperationRequest
-	180, // 364: memory.v1.OperationService.RetryOperation:input_type -> memory.v1.RetryOperationRequest
-	182, // 365: memory.v1.OperationService.ListEvents:input_type -> memory.v1.ListEventsRequest
-	28,  // 366: memory.v1.MemoryService.Retain:output_type -> memory.v1.RetainResponse
-	33,  // 367: memory.v1.MemoryService.RetainBatch:output_type -> memory.v1.RetainBatchResponse
-	37,  // 368: memory.v1.MemoryService.Recall:output_type -> memory.v1.RecallResponse
-	41,  // 369: memory.v1.MemoryService.Reflect:output_type -> memory.v1.ReflectResponse
-	45,  // 370: memory.v1.MemoryService.ListRecallArms:output_type -> memory.v1.ListRecallArmsResponse
-	48,  // 371: memory.v1.MemoryService.ListMemories:output_type -> memory.v1.ListMemoriesResponse
-	50,  // 372: memory.v1.MemoryService.GetMemory:output_type -> memory.v1.GetMemoryResponse
-	52,  // 373: memory.v1.MemoryService.UpdateMemory:output_type -> memory.v1.UpdateMemoryResponse
-	55,  // 374: memory.v1.MemoryService.InvalidateMemory:output_type -> memory.v1.InvalidateMemoryResponse
-	57,  // 375: memory.v1.MemoryService.RestoreMemory:output_type -> memory.v1.RestoreMemoryResponse
-	60,  // 376: memory.v1.DocumentService.ListDocuments:output_type -> memory.v1.ListDocumentsResponse
-	62,  // 377: memory.v1.DocumentService.GetDocument:output_type -> memory.v1.GetDocumentResponse
-	64,  // 378: memory.v1.DocumentService.RetagDocument:output_type -> memory.v1.RetagDocumentResponse
-	66,  // 379: memory.v1.DocumentService.ReprocessDocument:output_type -> memory.v1.ReprocessDocumentResponse
-	69,  // 380: memory.v1.ObservationService.Consolidate:output_type -> memory.v1.ConsolidateResponse
-	71,  // 381: memory.v1.ObservationService.ListObservationScopes:output_type -> memory.v1.ListObservationScopesResponse
-	74,  // 382: memory.v1.ObservationService.ListObservationHistory:output_type -> memory.v1.ListObservationHistoryResponse
-	78,  // 383: memory.v1.ObservationService.ClearObservations:output_type -> memory.v1.ClearObservationsResponse
-	80,  // 384: memory.v1.ObservationService.PreviewConsolidationStrategies:output_type -> memory.v1.PreviewConsolidationStrategiesResponse
-	83,  // 385: memory.v1.MentalModelService.CreateMentalModel:output_type -> memory.v1.CreateMentalModelResponse
-	85,  // 386: memory.v1.MentalModelService.GetMentalModel:output_type -> memory.v1.GetMentalModelResponse
-	87,  // 387: memory.v1.MentalModelService.ListMentalModels:output_type -> memory.v1.ListMentalModelsResponse
-	89,  // 388: memory.v1.MentalModelService.UpdateMentalModel:output_type -> memory.v1.UpdateMentalModelResponse
-	91,  // 389: memory.v1.MentalModelService.RefreshMentalModel:output_type -> memory.v1.RefreshMentalModelResponse
-	93,  // 390: memory.v1.MentalModelService.PreviewMentalModelRefresh:output_type -> memory.v1.PreviewMentalModelRefreshResponse
-	96,  // 391: memory.v1.MentalModelService.ListMentalModelHistory:output_type -> memory.v1.ListMentalModelHistoryResponse
-	99,  // 392: memory.v1.MentalModelService.DeleteMentalModel:output_type -> memory.v1.DeleteMentalModelResponse
-	101, // 393: memory.v1.MentalModelService.DeleteMentalModelFolder:output_type -> memory.v1.DeleteMentalModelFolderResponse
-	103, // 394: memory.v1.MentalModelService.SearchMentalModels:output_type -> memory.v1.SearchMentalModelsResponse
-	112, // 395: memory.v1.OrgService.CreateOrg:output_type -> memory.v1.CreateOrgResponse
-	114, // 396: memory.v1.OrgService.GetOrg:output_type -> memory.v1.GetOrgResponse
-	116, // 397: memory.v1.OrgService.ListOrgs:output_type -> memory.v1.ListOrgsResponse
-	118, // 398: memory.v1.OrgService.DeleteOrg:output_type -> memory.v1.DeleteOrgResponse
-	120, // 399: memory.v1.OrgService.GetDeletionReceipt:output_type -> memory.v1.GetDeletionReceiptResponse
-	124, // 400: memory.v1.BankService.CreateBank:output_type -> memory.v1.CreateBankResponse
-	127, // 401: memory.v1.BankService.GetBank:output_type -> memory.v1.GetBankResponse
-	129, // 402: memory.v1.BankService.ListBanks:output_type -> memory.v1.ListBanksResponse
-	131, // 403: memory.v1.BankService.DeleteBank:output_type -> memory.v1.DeleteBankResponse
-	133, // 404: memory.v1.BankService.GetBankStats:output_type -> memory.v1.GetBankStatsResponse
-	136, // 405: memory.v1.BankService.ListTags:output_type -> memory.v1.ListTagsResponse
-	139, // 406: memory.v1.BankService.ExportBankTemplate:output_type -> memory.v1.ExportBankTemplateResponse
-	142, // 407: memory.v1.ConfigService.GetTenantConfig:output_type -> memory.v1.GetTenantConfigResponse
-	144, // 408: memory.v1.ConfigService.UpdateTenantConfig:output_type -> memory.v1.UpdateTenantConfigResponse
-	146, // 409: memory.v1.ConfigService.ResetTenantConfig:output_type -> memory.v1.ResetTenantConfigResponse
-	148, // 410: memory.v1.ConfigService.GetOrgConfig:output_type -> memory.v1.GetOrgConfigResponse
-	150, // 411: memory.v1.ConfigService.UpdateOrgConfig:output_type -> memory.v1.UpdateOrgConfigResponse
-	152, // 412: memory.v1.ConfigService.ResetOrgConfig:output_type -> memory.v1.ResetOrgConfigResponse
-	154, // 413: memory.v1.ConfigService.GetBankConfig:output_type -> memory.v1.GetBankConfigResponse
-	156, // 414: memory.v1.ConfigService.UpdateBankConfig:output_type -> memory.v1.UpdateBankConfigResponse
-	158, // 415: memory.v1.ConfigService.ResetBankConfig:output_type -> memory.v1.ResetBankConfigResponse
-	160, // 416: memory.v1.ConfigService.PreviewPrompt:output_type -> memory.v1.PreviewPromptResponse
-	165, // 417: memory.v1.ConfigService.CreateDirective:output_type -> memory.v1.CreateDirectiveResponse
-	167, // 418: memory.v1.ConfigService.UpdateDirective:output_type -> memory.v1.UpdateDirectiveResponse
-	169, // 419: memory.v1.ConfigService.ListDirectives:output_type -> memory.v1.ListDirectivesResponse
-	171, // 420: memory.v1.ConfigService.DeleteDirective:output_type -> memory.v1.DeleteDirectiveResponse
-	175, // 421: memory.v1.OperationService.GetOperation:output_type -> memory.v1.GetOperationResponse
-	177, // 422: memory.v1.OperationService.ListOperations:output_type -> memory.v1.ListOperationsResponse
-	179, // 423: memory.v1.OperationService.CancelOperation:output_type -> memory.v1.CancelOperationResponse
-	181, // 424: memory.v1.OperationService.RetryOperation:output_type -> memory.v1.RetryOperationResponse
-	183, // 425: memory.v1.OperationService.ListEvents:output_type -> memory.v1.ListEventsResponse
-	366, // [366:426] is the sub-list for method output_type
-	306, // [306:366] is the sub-list for method input_type
-	306, // [306:306] is the sub-list for extension type_name
-	306, // [306:306] is the sub-list for extension extendee
-	0,   // [0:306] is the sub-list for field type_name
+	29,  // 249: memory.v1.IngestEnvelope.item:type_name -> memory.v1.RetainItem
+	214, // 250: memory.v1.IngestEnvelope.overrides:type_name -> memory.v1.RetainOverrides
+	203, // 251: memory.v1.BankConfig.retain:type_name -> memory.v1.RetainConfig
+	204, // 252: memory.v1.BankConfig.observations:type_name -> memory.v1.ObservationConfig
+	209, // 253: memory.v1.BankConfig.recall:type_name -> memory.v1.RecallConfig
+	210, // 254: memory.v1.BankConfig.reflect:type_name -> memory.v1.ReflectConfig
+	211, // 255: memory.v1.BankConfig.mental_models:type_name -> memory.v1.MentalModelConfig
+	212, // 256: memory.v1.BankConfig.models:type_name -> memory.v1.ModelBindings
+	24,  // 257: memory.v1.RetainConfig.extraction_mode:type_name -> memory.v1.RetainConfig.ExtractionMode
+	206, // 258: memory.v1.RetainConfig.entity_labels:type_name -> memory.v1.EntityLabel
+	188, // 259: memory.v1.RetainConfig.default_observation_scope_modes:type_name -> memory.v1.ObservationScopeModes
+	208, // 260: memory.v1.ObservationConfig.strategies:type_name -> memory.v1.ConsolidationStrategy
+	25,  // 261: memory.v1.EntityLabel.type:type_name -> memory.v1.EntityLabel.Type
+	207, // 262: memory.v1.EntityLabel.values:type_name -> memory.v1.LabelValue
+	230, // 263: memory.v1.EntityLabel.fields:type_name -> memory.v1.EntityLabel.FieldsEntry
+	189, // 264: memory.v1.ConsolidationStrategy.scopes:type_name -> memory.v1.TagFilter
+	213, // 265: memory.v1.ConsolidationStrategy.consolidate_model:type_name -> memory.v1.ModelBinding
+	213, // 266: memory.v1.ConsolidationStrategy.dedup_check_model:type_name -> memory.v1.ModelBinding
+	26,  // 267: memory.v1.RecallConfig.budget_function:type_name -> memory.v1.RecallConfig.BudgetFunction
+	231, // 268: memory.v1.RecallConfig.arm_boosts:type_name -> memory.v1.RecallConfig.ArmBoostsEntry
+	4,   // 269: memory.v1.ReflectConfig.recall_budget:type_name -> memory.v1.Budget
+	205, // 270: memory.v1.ReflectConfig.disposition:type_name -> memory.v1.Disposition
+	6,   // 271: memory.v1.MentalModelConfig.default_mode:type_name -> memory.v1.RefreshMode
+	7,   // 272: memory.v1.MentalModelConfig.default_strategy:type_name -> memory.v1.RefreshStrategy
+	213, // 273: memory.v1.ModelBindings.default:type_name -> memory.v1.ModelBinding
+	213, // 274: memory.v1.ModelBindings.extract:type_name -> memory.v1.ModelBinding
+	213, // 275: memory.v1.ModelBindings.time_parse:type_name -> memory.v1.ModelBinding
+	213, // 276: memory.v1.ModelBindings.consolidate:type_name -> memory.v1.ModelBinding
+	213, // 277: memory.v1.ModelBindings.dedup_check:type_name -> memory.v1.ModelBinding
+	213, // 278: memory.v1.ModelBindings.reflect:type_name -> memory.v1.ModelBinding
+	213, // 279: memory.v1.ModelBindings.structured_output:type_name -> memory.v1.ModelBinding
+	213, // 280: memory.v1.ModelBindings.mental_model:type_name -> memory.v1.ModelBinding
+	213, // 281: memory.v1.ModelBindings.rerank:type_name -> memory.v1.ModelBinding
+	213, // 282: memory.v1.ModelBindings.embed:type_name -> memory.v1.ModelBinding
+	234, // 283: memory.v1.ModelBinding.extra:type_name -> google.protobuf.Struct
+	203, // 284: memory.v1.RetainOverrides.retain:type_name -> memory.v1.RetainConfig
+	213, // 285: memory.v1.RetainOverrides.extract_model:type_name -> memory.v1.ModelBinding
+	213, // 286: memory.v1.RetainOverrides.time_parse_model:type_name -> memory.v1.ModelBinding
+	209, // 287: memory.v1.RecallOverrides.recall:type_name -> memory.v1.RecallConfig
+	213, // 288: memory.v1.RecallOverrides.time_parse_model:type_name -> memory.v1.ModelBinding
+	213, // 289: memory.v1.RecallOverrides.rerank_model:type_name -> memory.v1.ModelBinding
+	210, // 290: memory.v1.ReflectOverrides.reflect:type_name -> memory.v1.ReflectConfig
+	209, // 291: memory.v1.ReflectOverrides.recall:type_name -> memory.v1.RecallConfig
+	213, // 292: memory.v1.ReflectOverrides.reflect_model:type_name -> memory.v1.ModelBinding
+	213, // 293: memory.v1.ReflectOverrides.structured_output_model:type_name -> memory.v1.ModelBinding
+	213, // 294: memory.v1.ReflectOverrides.rerank_model:type_name -> memory.v1.ModelBinding
+	208, // 295: memory.v1.ConsolidateOverrides.strategies:type_name -> memory.v1.ConsolidationStrategy
+	213, // 296: memory.v1.ConsolidateOverrides.consolidate_model:type_name -> memory.v1.ModelBinding
+	213, // 297: memory.v1.ConsolidateOverrides.dedup_check_model:type_name -> memory.v1.ModelBinding
+	213, // 298: memory.v1.RederiveOverrides.extract_model:type_name -> memory.v1.ModelBinding
+	213, // 299: memory.v1.RederiveOverrides.time_parse_model:type_name -> memory.v1.ModelBinding
+	210, // 300: memory.v1.RefreshOverrides.reflect:type_name -> memory.v1.ReflectConfig
+	213, // 301: memory.v1.RefreshOverrides.reflect_model:type_name -> memory.v1.ModelBinding
+	213, // 302: memory.v1.RefreshOverrides.mental_model_model:type_name -> memory.v1.ModelBinding
+	213, // 303: memory.v1.RefreshOverrides.structured_output_model:type_name -> memory.v1.ModelBinding
+	58,  // 304: memory.v1.RecallResponse.SourceFactsEntry.value:type_name -> memory.v1.Memory
+	195, // 305: memory.v1.RecallResponse.ChunksEntry.value:type_name -> memory.v1.Chunk
+	39,  // 306: memory.v1.RecallResponse.EntitiesEntry.value:type_name -> memory.v1.EntityState
+	206, // 307: memory.v1.EntityLabel.FieldsEntry.value:type_name -> memory.v1.EntityLabel
+	27,  // 308: memory.v1.MemoryService.Retain:input_type -> memory.v1.RetainRequest
+	32,  // 309: memory.v1.MemoryService.RetainBatch:input_type -> memory.v1.RetainBatchRequest
+	36,  // 310: memory.v1.MemoryService.Recall:input_type -> memory.v1.RecallRequest
+	40,  // 311: memory.v1.MemoryService.Reflect:input_type -> memory.v1.ReflectRequest
+	44,  // 312: memory.v1.MemoryService.ListRecallArms:input_type -> memory.v1.ListRecallArmsRequest
+	47,  // 313: memory.v1.MemoryService.ListMemories:input_type -> memory.v1.ListMemoriesRequest
+	49,  // 314: memory.v1.MemoryService.GetMemory:input_type -> memory.v1.GetMemoryRequest
+	51,  // 315: memory.v1.MemoryService.UpdateMemory:input_type -> memory.v1.UpdateMemoryRequest
+	54,  // 316: memory.v1.MemoryService.InvalidateMemory:input_type -> memory.v1.InvalidateMemoryRequest
+	56,  // 317: memory.v1.MemoryService.RestoreMemory:input_type -> memory.v1.RestoreMemoryRequest
+	59,  // 318: memory.v1.DocumentService.ListDocuments:input_type -> memory.v1.ListDocumentsRequest
+	61,  // 319: memory.v1.DocumentService.GetDocument:input_type -> memory.v1.GetDocumentRequest
+	63,  // 320: memory.v1.DocumentService.RetagDocument:input_type -> memory.v1.RetagDocumentRequest
+	65,  // 321: memory.v1.DocumentService.ReprocessDocument:input_type -> memory.v1.ReprocessDocumentRequest
+	68,  // 322: memory.v1.ObservationService.Consolidate:input_type -> memory.v1.ConsolidateRequest
+	70,  // 323: memory.v1.ObservationService.ListObservationScopes:input_type -> memory.v1.ListObservationScopesRequest
+	73,  // 324: memory.v1.ObservationService.ListObservationHistory:input_type -> memory.v1.ListObservationHistoryRequest
+	76,  // 325: memory.v1.ObservationService.ClearObservations:input_type -> memory.v1.ClearObservationsRequest
+	79,  // 326: memory.v1.ObservationService.PreviewConsolidationStrategies:input_type -> memory.v1.PreviewConsolidationStrategiesRequest
+	82,  // 327: memory.v1.MentalModelService.CreateMentalModel:input_type -> memory.v1.CreateMentalModelRequest
+	84,  // 328: memory.v1.MentalModelService.GetMentalModel:input_type -> memory.v1.GetMentalModelRequest
+	86,  // 329: memory.v1.MentalModelService.ListMentalModels:input_type -> memory.v1.ListMentalModelsRequest
+	88,  // 330: memory.v1.MentalModelService.UpdateMentalModel:input_type -> memory.v1.UpdateMentalModelRequest
+	90,  // 331: memory.v1.MentalModelService.RefreshMentalModel:input_type -> memory.v1.RefreshMentalModelRequest
+	92,  // 332: memory.v1.MentalModelService.PreviewMentalModelRefresh:input_type -> memory.v1.PreviewMentalModelRefreshRequest
+	95,  // 333: memory.v1.MentalModelService.ListMentalModelHistory:input_type -> memory.v1.ListMentalModelHistoryRequest
+	98,  // 334: memory.v1.MentalModelService.DeleteMentalModel:input_type -> memory.v1.DeleteMentalModelRequest
+	100, // 335: memory.v1.MentalModelService.DeleteMentalModelFolder:input_type -> memory.v1.DeleteMentalModelFolderRequest
+	102, // 336: memory.v1.MentalModelService.SearchMentalModels:input_type -> memory.v1.SearchMentalModelsRequest
+	111, // 337: memory.v1.OrgService.CreateOrg:input_type -> memory.v1.CreateOrgRequest
+	113, // 338: memory.v1.OrgService.GetOrg:input_type -> memory.v1.GetOrgRequest
+	115, // 339: memory.v1.OrgService.ListOrgs:input_type -> memory.v1.ListOrgsRequest
+	117, // 340: memory.v1.OrgService.DeleteOrg:input_type -> memory.v1.DeleteOrgRequest
+	119, // 341: memory.v1.OrgService.GetDeletionReceipt:input_type -> memory.v1.GetDeletionReceiptRequest
+	123, // 342: memory.v1.BankService.CreateBank:input_type -> memory.v1.CreateBankRequest
+	126, // 343: memory.v1.BankService.GetBank:input_type -> memory.v1.GetBankRequest
+	128, // 344: memory.v1.BankService.ListBanks:input_type -> memory.v1.ListBanksRequest
+	130, // 345: memory.v1.BankService.DeleteBank:input_type -> memory.v1.DeleteBankRequest
+	132, // 346: memory.v1.BankService.GetBankStats:input_type -> memory.v1.GetBankStatsRequest
+	135, // 347: memory.v1.BankService.ListTags:input_type -> memory.v1.ListTagsRequest
+	138, // 348: memory.v1.BankService.ExportBankTemplate:input_type -> memory.v1.ExportBankTemplateRequest
+	141, // 349: memory.v1.ConfigService.GetTenantConfig:input_type -> memory.v1.GetTenantConfigRequest
+	143, // 350: memory.v1.ConfigService.UpdateTenantConfig:input_type -> memory.v1.UpdateTenantConfigRequest
+	145, // 351: memory.v1.ConfigService.ResetTenantConfig:input_type -> memory.v1.ResetTenantConfigRequest
+	147, // 352: memory.v1.ConfigService.GetOrgConfig:input_type -> memory.v1.GetOrgConfigRequest
+	149, // 353: memory.v1.ConfigService.UpdateOrgConfig:input_type -> memory.v1.UpdateOrgConfigRequest
+	151, // 354: memory.v1.ConfigService.ResetOrgConfig:input_type -> memory.v1.ResetOrgConfigRequest
+	153, // 355: memory.v1.ConfigService.GetBankConfig:input_type -> memory.v1.GetBankConfigRequest
+	155, // 356: memory.v1.ConfigService.UpdateBankConfig:input_type -> memory.v1.UpdateBankConfigRequest
+	157, // 357: memory.v1.ConfigService.ResetBankConfig:input_type -> memory.v1.ResetBankConfigRequest
+	159, // 358: memory.v1.ConfigService.PreviewPrompt:input_type -> memory.v1.PreviewPromptRequest
+	164, // 359: memory.v1.ConfigService.CreateDirective:input_type -> memory.v1.CreateDirectiveRequest
+	166, // 360: memory.v1.ConfigService.UpdateDirective:input_type -> memory.v1.UpdateDirectiveRequest
+	168, // 361: memory.v1.ConfigService.ListDirectives:input_type -> memory.v1.ListDirectivesRequest
+	170, // 362: memory.v1.ConfigService.DeleteDirective:input_type -> memory.v1.DeleteDirectiveRequest
+	174, // 363: memory.v1.OperationService.GetOperation:input_type -> memory.v1.GetOperationRequest
+	176, // 364: memory.v1.OperationService.ListOperations:input_type -> memory.v1.ListOperationsRequest
+	178, // 365: memory.v1.OperationService.CancelOperation:input_type -> memory.v1.CancelOperationRequest
+	180, // 366: memory.v1.OperationService.RetryOperation:input_type -> memory.v1.RetryOperationRequest
+	182, // 367: memory.v1.OperationService.ListEvents:input_type -> memory.v1.ListEventsRequest
+	28,  // 368: memory.v1.MemoryService.Retain:output_type -> memory.v1.RetainResponse
+	33,  // 369: memory.v1.MemoryService.RetainBatch:output_type -> memory.v1.RetainBatchResponse
+	37,  // 370: memory.v1.MemoryService.Recall:output_type -> memory.v1.RecallResponse
+	41,  // 371: memory.v1.MemoryService.Reflect:output_type -> memory.v1.ReflectResponse
+	45,  // 372: memory.v1.MemoryService.ListRecallArms:output_type -> memory.v1.ListRecallArmsResponse
+	48,  // 373: memory.v1.MemoryService.ListMemories:output_type -> memory.v1.ListMemoriesResponse
+	50,  // 374: memory.v1.MemoryService.GetMemory:output_type -> memory.v1.GetMemoryResponse
+	52,  // 375: memory.v1.MemoryService.UpdateMemory:output_type -> memory.v1.UpdateMemoryResponse
+	55,  // 376: memory.v1.MemoryService.InvalidateMemory:output_type -> memory.v1.InvalidateMemoryResponse
+	57,  // 377: memory.v1.MemoryService.RestoreMemory:output_type -> memory.v1.RestoreMemoryResponse
+	60,  // 378: memory.v1.DocumentService.ListDocuments:output_type -> memory.v1.ListDocumentsResponse
+	62,  // 379: memory.v1.DocumentService.GetDocument:output_type -> memory.v1.GetDocumentResponse
+	64,  // 380: memory.v1.DocumentService.RetagDocument:output_type -> memory.v1.RetagDocumentResponse
+	66,  // 381: memory.v1.DocumentService.ReprocessDocument:output_type -> memory.v1.ReprocessDocumentResponse
+	69,  // 382: memory.v1.ObservationService.Consolidate:output_type -> memory.v1.ConsolidateResponse
+	71,  // 383: memory.v1.ObservationService.ListObservationScopes:output_type -> memory.v1.ListObservationScopesResponse
+	74,  // 384: memory.v1.ObservationService.ListObservationHistory:output_type -> memory.v1.ListObservationHistoryResponse
+	78,  // 385: memory.v1.ObservationService.ClearObservations:output_type -> memory.v1.ClearObservationsResponse
+	80,  // 386: memory.v1.ObservationService.PreviewConsolidationStrategies:output_type -> memory.v1.PreviewConsolidationStrategiesResponse
+	83,  // 387: memory.v1.MentalModelService.CreateMentalModel:output_type -> memory.v1.CreateMentalModelResponse
+	85,  // 388: memory.v1.MentalModelService.GetMentalModel:output_type -> memory.v1.GetMentalModelResponse
+	87,  // 389: memory.v1.MentalModelService.ListMentalModels:output_type -> memory.v1.ListMentalModelsResponse
+	89,  // 390: memory.v1.MentalModelService.UpdateMentalModel:output_type -> memory.v1.UpdateMentalModelResponse
+	91,  // 391: memory.v1.MentalModelService.RefreshMentalModel:output_type -> memory.v1.RefreshMentalModelResponse
+	93,  // 392: memory.v1.MentalModelService.PreviewMentalModelRefresh:output_type -> memory.v1.PreviewMentalModelRefreshResponse
+	96,  // 393: memory.v1.MentalModelService.ListMentalModelHistory:output_type -> memory.v1.ListMentalModelHistoryResponse
+	99,  // 394: memory.v1.MentalModelService.DeleteMentalModel:output_type -> memory.v1.DeleteMentalModelResponse
+	101, // 395: memory.v1.MentalModelService.DeleteMentalModelFolder:output_type -> memory.v1.DeleteMentalModelFolderResponse
+	103, // 396: memory.v1.MentalModelService.SearchMentalModels:output_type -> memory.v1.SearchMentalModelsResponse
+	112, // 397: memory.v1.OrgService.CreateOrg:output_type -> memory.v1.CreateOrgResponse
+	114, // 398: memory.v1.OrgService.GetOrg:output_type -> memory.v1.GetOrgResponse
+	116, // 399: memory.v1.OrgService.ListOrgs:output_type -> memory.v1.ListOrgsResponse
+	118, // 400: memory.v1.OrgService.DeleteOrg:output_type -> memory.v1.DeleteOrgResponse
+	120, // 401: memory.v1.OrgService.GetDeletionReceipt:output_type -> memory.v1.GetDeletionReceiptResponse
+	124, // 402: memory.v1.BankService.CreateBank:output_type -> memory.v1.CreateBankResponse
+	127, // 403: memory.v1.BankService.GetBank:output_type -> memory.v1.GetBankResponse
+	129, // 404: memory.v1.BankService.ListBanks:output_type -> memory.v1.ListBanksResponse
+	131, // 405: memory.v1.BankService.DeleteBank:output_type -> memory.v1.DeleteBankResponse
+	133, // 406: memory.v1.BankService.GetBankStats:output_type -> memory.v1.GetBankStatsResponse
+	136, // 407: memory.v1.BankService.ListTags:output_type -> memory.v1.ListTagsResponse
+	139, // 408: memory.v1.BankService.ExportBankTemplate:output_type -> memory.v1.ExportBankTemplateResponse
+	142, // 409: memory.v1.ConfigService.GetTenantConfig:output_type -> memory.v1.GetTenantConfigResponse
+	144, // 410: memory.v1.ConfigService.UpdateTenantConfig:output_type -> memory.v1.UpdateTenantConfigResponse
+	146, // 411: memory.v1.ConfigService.ResetTenantConfig:output_type -> memory.v1.ResetTenantConfigResponse
+	148, // 412: memory.v1.ConfigService.GetOrgConfig:output_type -> memory.v1.GetOrgConfigResponse
+	150, // 413: memory.v1.ConfigService.UpdateOrgConfig:output_type -> memory.v1.UpdateOrgConfigResponse
+	152, // 414: memory.v1.ConfigService.ResetOrgConfig:output_type -> memory.v1.ResetOrgConfigResponse
+	154, // 415: memory.v1.ConfigService.GetBankConfig:output_type -> memory.v1.GetBankConfigResponse
+	156, // 416: memory.v1.ConfigService.UpdateBankConfig:output_type -> memory.v1.UpdateBankConfigResponse
+	158, // 417: memory.v1.ConfigService.ResetBankConfig:output_type -> memory.v1.ResetBankConfigResponse
+	160, // 418: memory.v1.ConfigService.PreviewPrompt:output_type -> memory.v1.PreviewPromptResponse
+	165, // 419: memory.v1.ConfigService.CreateDirective:output_type -> memory.v1.CreateDirectiveResponse
+	167, // 420: memory.v1.ConfigService.UpdateDirective:output_type -> memory.v1.UpdateDirectiveResponse
+	169, // 421: memory.v1.ConfigService.ListDirectives:output_type -> memory.v1.ListDirectivesResponse
+	171, // 422: memory.v1.ConfigService.DeleteDirective:output_type -> memory.v1.DeleteDirectiveResponse
+	175, // 423: memory.v1.OperationService.GetOperation:output_type -> memory.v1.GetOperationResponse
+	177, // 424: memory.v1.OperationService.ListOperations:output_type -> memory.v1.ListOperationsResponse
+	179, // 425: memory.v1.OperationService.CancelOperation:output_type -> memory.v1.CancelOperationResponse
+	181, // 426: memory.v1.OperationService.RetryOperation:output_type -> memory.v1.RetryOperationResponse
+	183, // 427: memory.v1.OperationService.ListEvents:output_type -> memory.v1.ListEventsResponse
+	368, // [368:428] is the sub-list for method output_type
+	308, // [308:368] is the sub-list for method input_type
+	308, // [308:308] is the sub-list for extension type_name
+	308, // [308:308] is the sub-list for extension extendee
+	0,   // [0:308] is the sub-list for field type_name
 }
 
 func init() { file_memory_v1_memory_proto_init() }
@@ -18504,24 +18621,24 @@ func file_memory_v1_memory_proto_init() {
 	}
 	file_memory_v1_memory_proto_msgTypes[166].OneofWrappers = []any{}
 	file_memory_v1_memory_proto_msgTypes[167].OneofWrappers = []any{}
-	file_memory_v1_memory_proto_msgTypes[175].OneofWrappers = []any{}
 	file_memory_v1_memory_proto_msgTypes[176].OneofWrappers = []any{}
-	file_memory_v1_memory_proto_msgTypes[178].OneofWrappers = []any{}
-	file_memory_v1_memory_proto_msgTypes[180].OneofWrappers = []any{}
+	file_memory_v1_memory_proto_msgTypes[177].OneofWrappers = []any{}
+	file_memory_v1_memory_proto_msgTypes[179].OneofWrappers = []any{}
 	file_memory_v1_memory_proto_msgTypes[181].OneofWrappers = []any{}
 	file_memory_v1_memory_proto_msgTypes[182].OneofWrappers = []any{}
 	file_memory_v1_memory_proto_msgTypes[183].OneofWrappers = []any{}
-	file_memory_v1_memory_proto_msgTypes[185].OneofWrappers = []any{}
-	file_memory_v1_memory_proto_msgTypes[189].OneofWrappers = []any{}
+	file_memory_v1_memory_proto_msgTypes[184].OneofWrappers = []any{}
+	file_memory_v1_memory_proto_msgTypes[186].OneofWrappers = []any{}
 	file_memory_v1_memory_proto_msgTypes[190].OneofWrappers = []any{}
 	file_memory_v1_memory_proto_msgTypes[191].OneofWrappers = []any{}
+	file_memory_v1_memory_proto_msgTypes[192].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_memory_v1_memory_proto_rawDesc), len(file_memory_v1_memory_proto_rawDesc)),
 			NumEnums:      27,
-			NumMessages:   204,
+			NumMessages:   205,
 			NumExtensions: 0,
 			NumServices:   8,
 		},

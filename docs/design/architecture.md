@@ -7,21 +7,24 @@ and observability. Feature behaviour lives in the other design documents (see [R
 
 ## Process model
 
-![Deployment: clients, the memd processes, Postgres, object storage, the AI gateway and the planned ingest queue](diagrams/deployment.svg)
+![Deployment: clients, the memd processes, Postgres, object storage, the AI gateway and the optional ingest queue](diagrams/deployment.svg)
 
-One Go binary, `memd`, runs in one of three modes. Every mode is stateless: all state, jobs included, lives in
+One Go binary, `memd`, runs in one of four modes. Every mode is stateless: all state, jobs included, lives in
 Postgres and object storage, so processes are disposable and scale by replica count.
 
 | Mode | Runs |
 |---|---|
 | `memd api` | The gRPC server: Recall, Reflect, sync Retain (extraction inline) and every admin, curation and mental-model RPC. It writes state and the jobs that state causes in one transaction. |
 | `memd worker` | The job runner over the `operations` table, its heartbeats, and the maintenance tick. |
-| `memd all` | Both in one process, under one error group: if either fails, both stop. |
+| `memd ingest` | The queue consumer (`internal/ingestapi`): it reads the broker `MEMD_INGEST_PROVIDER` names (Kafka) and retains each message through RetainBatch's path. It makes no model call and takes no worker slot. See [retain.md](retain.md#queue-ingestion). |
+| `memd all` | The api and the worker in one process, plus the queue consumer when `MEMD_INGEST_PROVIDER` is set (not `none`), under one error group: if one fails, all stop. |
 
 In production `memd api` and `memd worker` run as separate deployments over the same Postgres, bucket and
 server config file. Only the api talks to clients and only the worker runs the LLM-heavy background jobs, so the
 two scale on different signals: the api on CPU or in-flight RPCs, the worker on pending jobs (the
-`memd.queue.depth` metric). Schema migrations are a separate step (`alembic upgrade head`, see
+`memd.queue.depth` metric). `memd ingest` is a third deployment when a broker feeds documents in; it scales with
+the topic's partitions (one consumer-group member reads a partition) and needs Postgres and object storage but no
+gateway. Schema migrations are a separate step (`alembic upgrade head`, see
 [storage.md](storage.md#migrations)) that runs before memd; memd never runs DDL.
 
 - **Startup.** memd reads its environment and flags (deployment, infrastructure and secrets only) and the server
@@ -32,10 +35,12 @@ two scale on different signals: the api on CPU or in-flight RPCs, the worker on 
   GET of the gateway base URL where any HTTP status counts as up, cached for 10 s) and ignores the service name.
   `Watch` and `List` are grpc-go's standard implementation and run no probe: `Watch("")` streams SERVING once, a
   liveness signal. Health probes never spend tokens. A worker serves the same health service only when
-  `MEMD_WORKER_HEALTH_ADDR` is set. gRPC server reflection is registered, so grpcurl works without proto files.
+  `MEMD_WORKER_HEALTH_ADDR` is set, and `memd ingest` (probing Postgres only) when `MEMD_INGEST_HEALTH_ADDR` is set. gRPC server reflection is registered, so grpcurl works without proto files.
 - **Shutdown.** SIGINT or SIGTERM stops the api with a 20 s grace for in-flight RPCs. The worker stops claiming,
   gives running handlers 20 s to finish, then cancels the rest and settles them (up to 30 s more). A Kubernetes
-  worker therefore needs `terminationGracePeriodSeconds` of at least 50 s (60 s recommended).
+  worker therefore needs `terminationGracePeriodSeconds` of at least 50 s (60 s recommended). `memd ingest` stops
+  receiving, retains and settles the messages it already holds within `ingest.consumer.shutdown_grace` (20 s), then
+  closes the source; anything still unsettled is redelivered.
 
 ## Design decisions
 
@@ -75,7 +80,7 @@ tiers, and depguard (in `.golangci.yml`) enforces it.
 | Infrastructure | `config`, `jobs` | Config resolution, merge, defaults, validation and patches; the job runner and the job catalogue. |
 | Libraries | `timex`, `linking`, `recall` (with `recall/arms`), `reflect` | One concrete main type each and no RPCs: `timex.Normalizer`, `linking.Linker` / `Resolver` / `LabelResolver`, `recall.Engine`, `reflect.Agent`. |
 | Services | `memory`, `document`, `observation`, `mentalmodel`, `org`, `bank`, `configsvc`, `operation` | One package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC logic, its job handlers (`RunXJob`) and its maintenance sweeps. |
-| Top | `maintenance`, `grpcapi` | The 60 s tick and the graph_maintenance job; the thin gRPC handlers, interceptors, conversion and error mapping. |
+| Top | `maintenance`, `grpcapi`, `ingestapi` | The 60 s tick and the graph_maintenance job; the thin gRPC handlers, interceptors, conversion and error mapping; the queue consumer (decode the envelope, call RetainBatch, settle each message). |
 | Adapters | `store/postgres`, `ai/gateway`, `blob/s3`, `ingest/memq`, `ingest/kafka`, `observability` | The concrete Postgres, gateway, S3, Kafka and Datadog code. |
 | Composition root | `cmd/memd` | Wiring only: the one place concrete types meet. |
 
@@ -105,21 +110,21 @@ Rules that keep the tiers honest:
 | `ai` | `LLM`, `Embedder`, `Reranker`; `Router` and `Tokenizer` are concrete | `ai/gateway` (one client implements all three) | See [Model gateway](#model-gateway). |
 | `blob` | `Store` (Put, Get, List, DeletePrefix), `Key`, `BankPrefix` | `blob/s3`, chosen by `MEMD_BLOB_PROVIDER` (`s3`, the only value today) | See [storage.md](storage.md#blob-storage). |
 | `clock` | `Clock`; `System` and `Manual` | — | Tests use `clock.Manual`. |
-| `ingest` | `Source` (Receive, Ack, Nack, DeadLetter), `Message` | `ingest/memq` (in memory, for tests), `ingest/kafka` (a Kafka consumer group; not wired yet) | See [Ingest boundary](#ingest-boundary). |
+| `ingest` | `Source` (Receive, Ack, Nack, DeadLetter), `Message` | `ingest/memq` (in memory, for tests), `ingest/kafka` (a Kafka consumer group), chosen by `MEMD_INGEST_PROVIDER` | See [Ingest boundary](#ingest-boundary). |
 
 Errors crossing a boundary are already domain error classes (`domain.ErrNotFound`, `ErrUnavailable`, ...), so
 callers test them with `errors.Is`.
 
 ### Ingest boundary
 
-`internal/ingest` is the boundary to a message queue that will carry documents to retain. A `Source` is one consumer's
+`internal/ingest` is the boundary to a message queue that carries documents to retain. A `Source` is one consumer's
 subscription with at-least-once delivery: `Receive` hands out messages, and each ends in an `Ack`, a `Nack` (redelivery
 no sooner than a delay) or a `DeadLetter`. An unsettled message comes back, so consumers must be idempotent, and
 memd's retain is: a redelivered document is unchanged, joins the retain in flight, or is stale. Messages with the same
 key arrive in publish order. `internal/ingest/ingesttest` is the contract suite every adapter runs and
 `internal/ingest/memq` the in-memory source that tests it; `internal/ingest/doc.go` has the contract and the recipe for
-an SQS, Pub/Sub or NATS adapter. The consumer that feeds these messages into retain is not built yet; it will call
-RetainBatch's path ([retain.md](retain.md#queue-ingestion), with the diagram).
+an SQS, Pub/Sub or NATS adapter. `internal/ingestapi` is the consumer that feeds these messages into retain through
+RetainBatch's path; `memd ingest` runs it ([retain.md](retain.md#queue-ingestion), with the diagram).
 
 `internal/ingest/kafka` is the first broker adapter: a consumer group on a topic, with the pure-Go franz-go client.
 Kafka commits one offset per partition, so the adapter commits only past records that are settled contiguously; a
@@ -128,7 +133,7 @@ is local: the record is redelivered by the same consumer after the delay, and on
 for it; the other keys of the partition keep flowing. The price is the head of line: a record that keeps failing
 holds back its partition's commit (a crash or rebalance meanwhile redelivers the later, already acked records), and
 once the partition buffers too many records behind it, fetching that partition pauses. The consumer bounds this by
-dead-lettering after its maximum attempts. DeadLetter produces the record to a dead-letter topic with failure
+dead-lettering after its maximum attempts (`ingest.consumer.max_attempts`, 10). DeadLetter produces the record to a dead-letter topic with failure
 headers (reason, source position, attempt) and settles it once the produce is acknowledged. The package comment has
 the full semantics and the operational notes (partitioning by document id, dead-letter retention, lag).
 
@@ -459,8 +464,9 @@ operator guide; this section is the design.
 - **Failure isolation.** Observability never fails startup or requests: tracer, profiler and DogStatsD start
   errors are logged and memd runs without that part. When disabled, every hook is nil and behaviour is identical.
 - **One importer.** Only `internal/observability` imports the Datadog SDK, and only `cmd/memd` imports it. The job
-  runner (`jobs.Config.TraceJob`), the tick (`maintenance.Deps.TraceTick`), the gateway (`TraceCall`, `OnUsage`)
-  and the S3 adapter (`APIOptions`) expose vendor-free hooks that the composition root fills.
+  runner (`jobs.Config.TraceJob`), the tick (`maintenance.Deps.TraceTick`), the gateway (`TraceCall`, `OnUsage`),
+  the S3 adapter (`APIOptions`) and the queue consumer (`ingestapi.Hooks`) expose vendor-free hooks that the
+  composition root fills.
 
 ### Traces
 
@@ -471,6 +477,7 @@ operator guide; this section is the design.
 | `memd.maintenance.tick` | `maintenance` | — |
 | `postgres.query` | SQL text | `db.system`, row count; only under an existing span (claim polls and heartbeats are not traced) |
 | `memd.gateway.call` (with `http.request` per attempt) | route | model slot, model name |
+| `memd.ingest.batch` | `retain_batch` | tenant, org, bank, message count (one span per consumer RetainBatch call) |
 | `S3.request` | `S3.<Operation>` | bucket |
 
 ### Metrics
@@ -478,7 +485,9 @@ operator guide; this section is the design.
 Every metric starts with `memd.`: `grpc.requests` and `grpc.latency` (method, code); `job.started`,
 `job.completed` / `retried` / `failed` / `released` / `lost` and `job.duration` (kind, outcome);
 `gateway.calls`, `gateway.latency` and `gateway.errors` (slot, model, route, error class);
-`gateway.tokens.input` / `output` (slot, model); the gauges `queue.depth` (kind, status) and
+`gateway.tokens.input` / `output` (slot, model); the queue consumer's `ingest.received`, `ingest.acked`,
+`ingest.nacked`, `ingest.dead_lettered` and `ingest.dropped` (reason: a domain reason code or one of the consumer's
+own, such as `UNDECODABLE` or `MAX_ATTEMPTS`) and `ingest.batch.latency` (error class); the gauges `queue.depth` (kind, status) and
 `queue.oldest_pending_age_seconds` (kind), sampled in worker and all modes only; and the Postgres pool gauges and
 acquire counters. Tags are bounded on purpose: a metric never carries a tenant, bank, document or operation id,
 query text or content; spans carry the ids instead. The README lists every metric.
