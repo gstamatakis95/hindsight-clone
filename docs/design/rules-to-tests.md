@@ -173,15 +173,19 @@ Design: [curation-and-operations.md](curation-and-operations.md).
 
 ## Ingest boundary
 
-Design: [architecture.md](architecture.md#ingest-boundary). Every adapter runs `ingesttest.Run`; `memq` is the
-in-memory adapter (`memq.TestContract`).
+Design: [architecture.md](architecture.md#ingest-boundary). Every adapter runs `ingesttest.Run`: `memq`, the
+in-memory adapter (`memq.TestContract`), and `kafka` on a real broker (`kafka.TestContract`, which skips the lease
+case: Kafka has no lease).
 
 | Rule | Tests |
 |---|---|
-| An unsettled message is redelivered after Close, and after the lease runs out | `memq.TestContract/UnsettledRedeliveredAfterClose`, `memq.TestContract/UnsettledRedeliveredAfterLease` |
-| Ack settles for good, and is idempotent | `memq.TestContract/AckSettlesForGood` |
-| A stale settlement (after Close or a redelivery) neither fails nor settles the redelivered message | `memq.TestContract/StaleSettlementIsHarmless` |
-| Nack redelivers no sooner than its delay | `memq.TestContract/NackDelaysRedelivery`, `memq.TestNackKeepsKeyOrder` |
-| A dead-lettered message never returns on the main subscription | `memq.TestContract/DeadLetterNeverReturns` |
-| Messages with one key arrive in publish order | `memq.TestContract/SameKeyKeepsPublishOrder` |
-| Receive honours max, returns empty when idle, the context's error when cancelled and ErrClosed after Close | `memq.TestContract/ReceiveIdle`, `memq.TestContract/ReceiveHonoursMax`, `memq.TestContract/ReceiveContextCancelled`, `memq.TestContract/ReceiveAfterClose` |
+| An unsettled message is redelivered after Close, and after the lease runs out | `memq.TestContract/UnsettledRedeliveredAfterClose`, `memq.TestContract/UnsettledRedeliveredAfterLease`, `kafka.TestContract/UnsettledRedeliveredAfterClose` |
+| Ack settles for good, and is idempotent | `memq.TestContract/AckSettlesForGood`, `kafka.TestContract/AckSettlesForGood` |
+| A stale settlement (after Close or a redelivery) neither fails nor settles the redelivered message | `memq.TestContract/StaleSettlementIsHarmless`, `kafka.TestContract/StaleSettlementIsHarmless` |
+| Nack redelivers no sooner than its delay | `memq.TestContract/NackDelaysRedelivery`, `memq.TestNackKeepsKeyOrder`, `kafka.TestContract/NackDelaysRedelivery` |
+| A dead-lettered message never returns on the main subscription | `memq.TestContract/DeadLetterNeverReturns`, `kafka.TestContract/DeadLetterNeverReturns` |
+| Messages with one key arrive in publish order | `memq.TestContract/SameKeyKeepsPublishOrder`, `kafka.TestContract/SameKeyKeepsPublishOrder` |
+| Receive honours max, returns empty when idle, the context's error when cancelled and ErrClosed after Close | `memq.TestContract/ReceiveIdle`, `memq.TestContract/ReceiveHonoursMax`, `memq.TestContract/ReceiveContextCancelled`, `memq.TestContract/ReceiveAfterClose`, `kafka.TestContract/ReceiveIdle`, `kafka.TestContract/ReceiveHonoursMax`, `kafka.TestContract/ReceiveContextCancelled`, `kafka.TestContract/ReceiveAfterClose` |
+| An adapter without a dead-letter destination fails at construction | `kafka.TestNewRequiresDeadLetterTopic` |
+| Kafka commits a partition only past contiguously settled records | `kafka.TestCommitOnlyPastContiguousAcks` |
+| A Kafka dead letter keeps the key, value and headers and adds the reason and source position | `kafka.TestDeadLetterCarriesReason` |

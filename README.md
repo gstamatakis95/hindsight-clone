@@ -515,8 +515,8 @@ Environment:
   `MEMD_TEST_DATABASE_URL=postgres://memd:memd@localhost:55432/memd make test` after `make up`. The user must be
   allowed to create databases. Templates are named `memd_tpl_<migrations hash>` and test databases `memd_t_<random>`;
   each test drops its database when it ends.
-- `MEMD_REQUIRE_DOCKER=1`: fail, rather than skip, the database and MinIO tests when Docker (or, for the database, a
-  URL) is not available.
+- `MEMD_REQUIRE_DOCKER=1`: fail, rather than skip, the database, MinIO and Kafka tests when Docker (or, for the
+  database, a URL) is not available.
 - `MEMD_ALEMBIC`: the alembic binary that migrates the template (default `.venv/bin/alembic`, built by
   `make tools`).
 
@@ -573,9 +573,10 @@ handlers and maintenance sweeps)
 | `internal/ai/gateway` | `Client`, the OpenAI-compatible gateway adapter: structured and tool calls, embeddings, rerank, retries, concurrency caps. |
 | `internal/blob` | The object-storage boundary: `Store` (Put, Get, List, DeletePrefix) and the key layout (`Key`, `BankPrefix`, `OrgPrefix`: `{tenant}/{org}/{bank}/...`). |
 | `internal/blob/s3` | `Store` on S3-compatible storage (AWS S3, MinIO). |
-| `internal/ingest` | The message-queue boundary: `Source` (Receive, Ack, Nack, DeadLetter) with at-least-once delivery, and the `Message` it delivers. No consumer or broker adapter exists yet. |
+| `internal/ingest` | The message-queue boundary: `Source` (Receive, Ack, Nack, DeadLetter) with at-least-once delivery, and the `Message` it delivers. No consumer drives a source yet. |
 | `internal/ingest/ingesttest` | The contract suite every ingest source runs. |
 | `internal/ingest/memq` | An in-memory `Source` for tests and the suite's self-test. |
+| `internal/ingest/kafka` | `Source` on a Kafka topic through a consumer group (franz-go): per-key order, local Nack, commits past contiguously settled offsets, a dead-letter topic. Not wired into cmd/memd yet. |
 | `internal/blob/blobtest` | The contract suite every blob adapter runs. |
 | `internal/clock` | `Clock`, with `System` and the test clock `Manual`. |
 
