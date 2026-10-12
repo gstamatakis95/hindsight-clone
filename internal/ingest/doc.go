@@ -32,7 +32,8 @@
 //
 // internal/ingest/memq is the in-memory source used by tests. internal/ingest/kafka is the Kafka source (a
 // consumer group, with the pure-Go franz-go client); its package comment has the commit model and the operational
-// notes. No consumer drives a source yet.
+// notes. internal/ingestapi is the consumer that drives a source; cmd/memd builds the source MEMD_INGEST_PROVIDER
+// names (wire_ingest.go).
 //
 // Adding a provider (SQS, Pub/Sub, NATS):
 //
@@ -48,6 +49,7 @@
 //  3. Run the shared contract suite from the adapter's tests: ingesttest.Run(t, func(t *testing.T)
 //     ingesttest.Harness { ... }), giving every call a fresh subscription so tests never share messages.
 //  4. Add the provider's settings to cmd/memd's Config (environment: endpoints, names and credentials are
-//     infrastructure; behaviour such as poll waits goes in the server config file) and a case to the provider
-//     switch in wire.go, and document the settings in the README.
+//     infrastructure; behaviour such as poll waits goes in the server config file's ingest.consumer section), a
+//     value to MEMD_INGEST_PROVIDER and a case to openSource in wire_ingest.go, and document the settings in the
+//     README and docs/design/configuration.md.
 package ingest

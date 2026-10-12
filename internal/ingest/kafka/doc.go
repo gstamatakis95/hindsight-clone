@@ -5,9 +5,8 @@
 // # Where it sits
 //
 // The package is the Kafka adapter of internal/ingest. It imports internal/ingest, internal/domain and franz-go,
-// and nothing else of memd; nothing outside it imports franz-go. cmd/memd does not wire this source yet: the
-// consumer loop that drives a Source (decode the envelope, retain, settle) is what will build it from the
-// settings below.
+// and nothing else of memd; nothing outside it imports franz-go. cmd/memd builds it when MEMD_INGEST_PROVIDER is
+// kafka (wire_ingest.go), and internal/ingestapi's consumer drives it.
 //
 // # Usage
 //
@@ -28,14 +27,14 @@
 //
 // # Configuration
 //
-// Every Config field is a plain value; the package reads no environment and no files. Once cmd/memd wires the
-// source, the settings split the way memd's configuration does:
+// Every Config field is a plain value; the package reads no environment and no files. cmd/memd fills it the way
+// memd's configuration splits:
 //
-//   - Environment (deployment, infrastructure and secrets): Brokers, Topic, Group and DeadLetterTopic, the TLS
-//     material (CA, client certificate and key, built into Config.TLS) and the SASL mechanism, user and password.
-//     These name the infrastructure and carry its credentials, like the S3 and database settings.
-//   - The server config file (behaviour): PollWait and MaxBuffered, next to the consumer's batch size, concurrency,
-//     attempts and backoff.
+//   - Environment (deployment, infrastructure and secrets): Brokers, Topic, Group, DeadLetterTopic and ClientID
+//     (MEMD_INGEST_KAFKA_BROKERS, _TOPIC, _GROUP, _DLQ_TOPIC, _CLIENT_ID), the TLS material (_TLS, _TLS_CA_FILE,
+//     _TLS_CERT_FILE, _TLS_KEY_FILE, built into Config.TLS) and the SASL mechanism, user and password (_SASL_*).
+//   - The server config file (behaviour): PollWait and MaxBuffered (ingest.consumer.poll_wait and max_buffered),
+//     next to the consumer's batch size, concurrency, attempts and backoff.
 //
 // # Delivery
 //
@@ -126,7 +125,7 @@
 //   - Errors: a broker or transport failure is domain.ErrUnavailable with the franz-go error in the chain;
 //     retriable fetch errors are retried by the client and never surface.
 //   - Lag: consumer-group lag (the end offset minus the committed offset per partition) is the backlog measure.
-//     memd exports no lag metric yet; read it from the brokers' tooling (kafka-consumer-groups, rpk) meanwhile.
+//     memd exports no lag metric; read it from the brokers' tooling (kafka-consumer-groups, rpk).
 //
 // # Testing
 //

@@ -215,18 +215,20 @@ database.
 | `deletion` | `blob_grace` (`api.rpc_deadline`, at least 10m; `0s` = none): the least time between DeleteOrg and the org's blob sweep, so requests that passed their org check before the delete have written their blobs ([storage.md](storage.md#deleting-an-org)) |
 | `api` | `rpc_deadline` (120s): the deadline of calls that carry none; `0s` = none |
 | `ingest` | `max_batch_items` (500): items per RetainBatch call; `max_retain_items` (100): items per Retain call; `max_document_bytes` (2 MiB): one RetainBatch item's content; `max_request_bytes` (16 MiB): the gRPC receive limit for every request, and RetainBatch's summed content; `max_pending_per_bank` (5000) and `max_pending_per_org` (50000): the pending `retain_document` backlog over which RetainBatch is rejected (`INGEST_BACKLOG`); `retry_after` (10s): the delay that rejection's RetryInfo carries ([retain.md](retain.md#retainbatch)) |
+| `ingest.consumer` | How `memd ingest` behaves ([retain.md](retain.md#queue-ingestion)): `batch_size` (100; at most `max_batch_items`): messages per poll and items per RetainBatch call; `flush_interval` (500ms): how long to keep polling to fill a batch; `concurrency` (4): RetainBatch calls at once; `max_attempts` (10): deliveries before a still-failing message is dead-lettered; `backoff_initial` (1s, doubled per delivery) and `backoff_max` (5m): the redelivery delay; `shutdown_grace` (20s): time to retain and settle what the consumer holds when it stops; `poll_wait` (1s) and `max_buffered` (10000): the Kafka source's poll wait and per-partition buffer |
 | `observability` | `metrics_interval` (15s): how often the Postgres pool and job queue gauges are sampled (Datadog only) |
 
 Startup validation of the file: `config.ServerDefaults` over the `defaults` block must validate; EXTRACT and
 REFLECT must be bound; every `recall.arms` and `arm_boosts` name must be registered; `slot_concurrency` keys must
 be known slots with positive caps; every duration must be positive (`rpc_deadline` and `blob_grace` may be 0); `max_concurrent`
 must be positive; the heartbeat must be below 3/4 of `stale_after`; and every `ingest` setting must be positive,
-with `max_document_bytes` at most `max_request_bytes`.
+with `max_document_bytes` at most `max_request_bytes`, `consumer.batch_size` at most `max_batch_items` and
+`consumer.backoff_initial` at most `consumer.backoff_max`.
 
 ## Process settings
 
 Every environment variable has a flag of the same name (lower case, no `MEMD_` prefix, dashes for underscores:
-`MEMD_GRPC_ADDR` = `-grpc-addr`). A flag wins over the environment. Usage: `memd <api|worker|all> [flags]`; `memd`
+`MEMD_GRPC_ADDR` = `-grpc-addr`). A flag wins over the environment. Usage: `memd <api|worker|ingest|all> [flags]`; `memd`
 with no mode prints the list.
 
 | Variable | Default | Meaning |
@@ -234,7 +236,7 @@ with no mode prints the list.
 | `MEMD_DSN` | required | Postgres URL. A SQLAlchemy driver suffix (`postgresql+psycopg://`) is dropped, so one DSN serves Alembic and memd. |
 | `MEMD_CONFIG` | `./memd.yaml` if present | The server config file |
 | `MEMD_GRPC_ADDR` | `:50051` | gRPC listen address (api, all) |
-| `MEMD_GATEWAY_URL` | required | AI gateway base URL including `/v1` |
+| `MEMD_GATEWAY_URL` | required (not in ingest) | AI gateway base URL including `/v1` |
 | `MEMD_GATEWAY_API_KEY` | empty | Bearer key |
 | `MEMD_BLOB_PROVIDER` | `s3` | Blob storage provider; `s3` is the only one |
 | `MEMD_S3_ENDPOINT` | empty (AWS) | S3 API URL |
@@ -251,10 +253,24 @@ with no mode prints the list.
 | `MEMD_DATADOG_ENABLED` | false | Datadog tracing, metrics, runtime metrics and log correlation |
 | `MEMD_DATADOG_METRICS` | true | memd's own metrics (only with Datadog enabled) |
 | `MEMD_DATADOG_PROFILER` | false | Datadog profiler (only with Datadog enabled) |
+| `MEMD_INGEST_PROVIDER` | `none` | The queue consumer's source: `none` or `kafka`. `memd ingest` needs one; `memd all` runs the consumer when one is set |
+| `MEMD_INGEST_TENANT`, `MEMD_INGEST_ORG` | empty | Pin the source to one tenant (and org): an envelope may omit it, and one naming another is dead-lettered. Unpinned, every envelope names its tenant and org |
+| `MEMD_INGEST_HEALTH_ADDR` | empty (none) | Where `memd ingest` serves `grpc.health.v1` (ready while Postgres answers) |
+| `MEMD_INGEST_KAFKA_BROKERS` | required with kafka | Seed brokers, comma-separated `host:port` |
+| `MEMD_INGEST_KAFKA_TOPIC` | required with kafka | The topic to consume |
+| `MEMD_INGEST_KAFKA_GROUP` | `memd-ingest` | The consumer group every `memd ingest` process of the deployment shares |
+| `MEMD_INGEST_KAFKA_DLQ_TOPIC` | required with kafka | The dead-letter topic; it must exist (memd never creates topics) |
+| `MEMD_INGEST_KAFKA_CLIENT_ID` | `memd` | Client id the brokers see |
+| `MEMD_INGEST_KAFKA_TLS` | false | Dial the brokers over TLS (implied by a TLS file) |
+| `MEMD_INGEST_KAFKA_TLS_CA_FILE`, `_TLS_CERT_FILE`, `_TLS_KEY_FILE` | empty | PEM CA bundle (empty = the system pool), and the client certificate and key for mutual TLS |
+| `MEMD_INGEST_KAFKA_SASL_MECHANISM`, `_SASL_USERNAME`, `_SASL_PASSWORD` | empty (no SASL) | `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512` with its credentials |
 
-Startup validation: a known mode; DSN, gateway URL, a known blob provider, the bucket and both S3 keys present; a
-listen address for api and all; a non-negative pool size; positive worker slots; then the server config file
-(above) and the embedding-dimension check against the gateway.
+Startup validation: a known mode; DSN, gateway URL (except in ingest), a known blob provider, the bucket and both S3
+keys present; a listen address for api and all; a known ingest provider, one for ingest, and with kafka the brokers,
+topic, group and dead-letter topic (a TLS certificate and key together); a non-negative pool size; positive worker slots; then the server config file
+(above) and, except in ingest (which makes no model call), the embedding-dimension check against the gateway.
+The split: where the consumer connects, its credentials and its tenant pinning are deployment settings
+(environment); how it batches, retries and polls is behaviour (`ingest.consumer` in the server config file).
 
 With Datadog enabled, the standard `DD_*` variables (agent address, `DD_ENV`, `DD_VERSION`, `DD_TAGS`, sampling,
 DogStatsD) are read by the Datadog libraries; `DD_SERVICE` defaults to `memd`.

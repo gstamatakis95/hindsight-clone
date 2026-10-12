@@ -25,10 +25,10 @@ layout to SVGs that follow the viewer's light or dark colour scheme. `make diagr
 
 | Diagram | Shows | Embedded in |
 |---|---|---|
-| [deployment](diagrams/deployment.svg) | The memd processes, Postgres, object storage, the AI gateway, the migration step and the planned broker | [README](../../README.md), [architecture.md](architecture.md) |
+| [deployment](diagrams/deployment.svg) | The memd processes, Postgres, object storage, the AI gateway, the migration step and the optional broker | [README](../../README.md), [architecture.md](architecture.md) |
 | [layering](diagrams/layering.svg) | The package tiers and the allowed import direction | [architecture.md](architecture.md) |
 | [job-pipeline](diagrams/job-pipeline.svg) | Enqueue, claim, run, settle, the status moves and the maintenance tick | [architecture.md](architecture.md) |
-| [ingest-queue](diagrams/ingest-queue.svg) | The ingest boundary and the planned consumer: broker, Receive, retain, Ack, Nack, DeadLetter | [retain.md](retain.md#queue-ingestion) |
+| [ingest-queue](diagrams/ingest-queue.svg) | Queue ingestion: Kafka, the ingest boundary, memd ingest (decode, group, RetainBatch) and the settlements | [retain.md](retain.md#queue-ingestion) |
 | [retain-flow](diagrams/retain-flow.svg) | The Retain RPC, the write transaction, the retain run and its batches | [retain.md](retain.md) |
 | [recall-flow](diagrams/recall-flow.svg) | Parse, the arms, fusion, rerank, boosts, packing and includes | [recall.md](recall.md) |
 | [reflect-loop](diagrams/reflect-loop.svg) | The tool loop, the evidence guard, closing and overflow, citations | [reflect-and-mental-models.md](reflect-and-mental-models.md) |

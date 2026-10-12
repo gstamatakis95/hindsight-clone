@@ -44,6 +44,7 @@ func TestScenarios(t *testing.T) {
 	t.Run("WorkerCrashReclaim", e.crashReclaim)
 	t.Run("BankDelete", e.bankDelete)
 	t.Run("OrgDelete", e.orgDelete)
+	t.Run("QueueIngestKafka", e.queueIngestKafka)
 }
 
 // retainSync: a sync retain returns once units commit, reports EXTRACT usage, and an identical retain is a

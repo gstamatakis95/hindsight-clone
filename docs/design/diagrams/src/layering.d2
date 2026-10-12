@@ -28,7 +28,7 @@ tiers: "" {
     grid-columns: 3
     grpcapi: grpcapi {class: step}
     maintenance: maintenance {class: step}
-    ingestapi: "ingestapi\nqueue consumer" {class: planned}
+    ingestapi: "ingestapi\nqueue consumer" {class: step}
   }
   services: "Services: one Service per gRPC service, never import each other" {
     grid-columns: 8
@@ -88,11 +88,10 @@ tiers.domain.*.width: 940
 
 legend: Legend {
   near: bottom-center
-  grid-columns: 5
+  grid-columns: 4
   grid-gap: 12
   a: Service {class: svc; width: 120; height: 50}
   b: Boundary {class: boundary; width: 120; height: 50}
   c: Adapter {class: adapter; width: 120; height: 50}
-  d: Planned {class: planned; width: 120; height: 50}
-  e: "a tier imports only tiers below it" {shape: text; width: 340; height: 50}
+  d: "a tier imports only tiers below it" {shape: text; width: 340; height: 50}
 }

@@ -247,12 +247,29 @@ outside its reach.
 - **Workaround:** none needed for correctness; deduplicate dead letters by their `memd-dlq-topic`,
   `memd-dlq-partition` and `memd-dlq-offset` headers.
 
-### The Kafka source is not wired yet
-- **What:** `internal/ingest/kafka` is built and tested, but no consumer loop drives it and cmd/memd reads none of its
-  settings.
-- **Impact:** queue ingestion is not available in a deployment yet.
-- **Workaround:** a producer calls RetainBatch, the path the consumer will use (its per-item statuses map to Ack,
-  Nack and DeadLetter as [retain.md](retain.md#queue-ingestion) describes).
+### No consumer lag metric
+- **What:** memd exports no consumer-group lag (the end offset minus the committed offset per partition).
+- **Workaround:** read it from the brokers' tooling (kafka-consumer-groups, rpk) or the broker's own metrics; the
+  `memd.ingest.received` and `memd.ingest.acked` rates show the consumer's throughput.
+
+### A queued message re-creates a deleted bank
+- **What:** a message for a bank being deleted is retried (`BANK_DELETING` is nacked with backoff), so once the
+  delete finishes, its retry creates the bank afresh, as a write over the API does.
+- **Workaround:** stop producing for a bank before deleting it, or delete the whole org (an org delete drops its
+  messages).
+
+### Messages for a re-used org id can be dropped
+- **What:** a message for an org that is not live and has a deletion receipt is acked and dropped. A producer that
+  starts publishing for a re-used org id before the org is created again loses those messages.
+- **Workaround:** create the org (OrgService.CreateOrg) before producing for it.
+
+### An unpinned source trusts the envelope's tenant
+- **What:** without `MEMD_INGEST_TENANT`, every envelope names its own tenant and the consumer believes it.
+- **Workaround:** pin the source, or make the broker's publish permissions the tenant boundary (a topic per tenant).
+
+### A source without a delivery count never dead-letters for attempts
+- **What:** `ingest.consumer.max_attempts` relies on `Message.Attempt`; a source that reports 0 (unknown) retries a
+  failing message forever, with the backoff capped at `backoff_max`. Both built-in sources report it.
 
 ## Out of scope
 

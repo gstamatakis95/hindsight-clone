@@ -14,7 +14,8 @@ import (
 const MetricNamespace = "memd."
 
 // memd's metrics (sent as MetricNamespace + name). Tags are bounded: method, code, kind, outcome, status,
-// slot, model, route and error class. Never a tenant, bank, document or operation id, query text or content.
+// slot, model, route, error class and ingest reason. Never a tenant, bank, document or operation id, query text or
+// content.
 const (
 	// MetricGRPCRequests counts finished RPCs; tags method (the full method) and code (the status code).
 	MetricGRPCRequests = "grpc.requests"
@@ -45,6 +46,20 @@ const (
 	MetricGatewayTokensIn = "gateway.tokens.input"
 	// MetricGatewayTokensOut counts completion tokens the gateway reported; tags slot and model.
 	MetricGatewayTokensOut = "gateway.tokens.output"
+	// MetricIngestReceived counts the messages the queue consumer received.
+	MetricIngestReceived = "ingest.received"
+	// MetricIngestAcked counts messages acked after their retain was committed (or found unchanged, stale or
+	// superseded).
+	MetricIngestAcked = "ingest.acked"
+	// MetricIngestNacked counts messages handed back for redelivery; tag reason.
+	MetricIngestNacked = "ingest.nacked"
+	// MetricIngestDeadLettered counts messages moved to the dead-letter destination; tag reason.
+	MetricIngestDeadLettered = "ingest.dead_lettered"
+	// MetricIngestDropped counts messages acked without a retain because their org is deleted; tag reason.
+	MetricIngestDropped = "ingest.dropped"
+	// MetricIngestBatchLatency is one consumer RetainBatch call's duration in ms (distribution); tag error (the
+	// error class, "none" on success).
+	MetricIngestBatchLatency = "ingest.batch.latency"
 	// MetricQueueDepth is the number of pending or processing jobs (gauge); tags kind and status.
 	MetricQueueDepth = "queue.depth"
 	// MetricQueueOldestAge is how long the oldest due pending job has waited past its run time, in seconds

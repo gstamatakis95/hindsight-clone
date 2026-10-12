@@ -15,7 +15,7 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   - internal/blob (Store, Key; contract suite in blob/blobtest) — internal/blob/s3, chosen by MEMD_BLOB_PROVIDER
   - internal/ingest (Source: Receive, Ack, Nack, DeadLetter; the message-queue boundary with at-least-once delivery;
     contract suite in ingest/ingesttest, in-memory source ingest/memq; doc.go has the recipe for a broker adapter) —
-    internal/ingest/kafka (a consumer group on franz-go; not wired into cmd/memd yet)
+    internal/ingest/kafka (a consumer group on franz-go; chosen by MEMD_INGEST_PROVIDER=kafka)
   - internal/graph (Reader, Writer, Tx: the memory links; contract suite in graph/graphtest) — served by
     internal/store/postgres through store.Tx.Graph (writes, in the caller's transaction) and postgres.DB.Graph
     (the recall graph arm's Reader); graph/doc.go explains how a graph database would plug in
@@ -33,7 +33,7 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
   - internal/memory: MemoryService (Retain, RetainBatch, Recall, Reflect, ListRecallArms, ListMemories, GetMemory,
     UpdateMemory, InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and
-    retain-batch sweeps. RetainBatch is the bulk path the queue consumer will share.
+    retain-batch sweeps. RetainBatch is the bulk path the queue consumer shares.
   - internal/observation: ObservationService (Consolidate, ListObservationScopes, ListObservationHistory,
     ClearObservations, PreviewConsolidationStrategies); consolidate; the consolidation reconcile sweep.
   - internal/document: DocumentService (ListDocuments, GetDocument, RetagDocument, ReprocessDocument);
@@ -46,11 +46,15 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
     delete_bank; the stalled-delete sweep.
   - internal/configsvc: ConfigService (tenant, org and bank config views, reset, prompt preview, directives).
   - internal/operation: OperationService (operation and event reads, cancel, retry).
+- internal/ingestapi: the queue consumer `memd ingest` runs (a transport like grpcapi): decode the IngestEnvelope,
+  group messages into memory.Service.RetainBatch calls, settle each message from its result (decide in settle.go is
+  the status-to-settlement table). Vendor-free observability hooks; tests run on memq and pgtest.
 - internal/maintenance: the 60 s tick (ordered steps calling the services' sweeps) and the graph_maintenance job.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per proto service (holding only the services it
   calls), proto <-> domain conversion, interceptors, status mapping, health and the readiness probes. No logic.
 - internal/observability: the optional Datadog traces, metrics and JSON logs, wired in cmd/memd only.
-- cmd/memd: wiring only. wire.go opens the infrastructure and runs the modes; wire_services.go builds the shared
+- cmd/memd: wiring only. wire.go opens the infrastructure and runs the modes (wire_ingest.go the queue consumer and
+  its source); wire_services.go builds the shared
   libraries, then one wire<Area> function per service builds it, hands it to its gRPC handlers, registers its job
   handlers and sets its tick steps (wireMaintenance runs last). config.go reads the environment (deployment,
   infrastructure and secrets only), configfile.go the server config file (memd.example.yaml).

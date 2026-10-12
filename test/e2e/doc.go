@@ -24,7 +24,8 @@
 //     crashed worker's job is reclaimed in seconds) through these scenarios, each on its own bank and one after another
 //     because emulator faults are global: RetainSync, RetainAsync, RetainBatch, ConsolidationRecallReflect,
 //     MentalModelBothStrategies, ConsolidationTriggersRefresh, InvalidateRestore, RetagReprocess, CancelRetry,
-//     WorkerCrashReclaim, BankDelete and OrgDelete (the config file's deletion.blob_grace is 1s there).
+//     WorkerCrashReclaim, BankDelete, OrgDelete (the config file's deletion.blob_grace is 1s there) and
+//     QueueIngestKafka (a Kafka container and a memd ingest process pinned to the e2e tenant).
 //   - TestGoldenAgainstMemdAll runs every eval/golden fixture through the eval harness against `memd all`; every check
 //     must pass.
 //   - TestExamples builds every program under examples/ and runs each against `memd all` and the emulated gateway; an

@@ -86,6 +86,12 @@ func checkName(what, v string) error {
 	if what == "tenant" {
 		field = TenantHeader
 	}
+	return checkNameAt(field, what, v)
+}
+
+// checkNameAt is checkName with the field the error names given explicitly (an envelope names the tenant
+// tenant_id).
+func checkNameAt(field, what, v string) error {
 	switch {
 	case v == "":
 		return domain.InvalidField(field, "%s is required", what)

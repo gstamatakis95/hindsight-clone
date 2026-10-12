@@ -25,17 +25,21 @@ const (
 	// SpanPostgresQuery is one Postgres statement; resource = the SQL text (bind parameters are never
 	// recorded).
 	SpanPostgresQuery = "postgres.query"
+	// SpanIngestBatch is one RetainBatch call of the queue consumer (memd ingest); resource = "retain_batch".
+	SpanIngestBatch = "memd.ingest.batch"
 )
 
 // Tags memd sets on its spans. Ids and names only: never request bodies, prompts, model output or memory
 // content.
 const (
-	// TagTenant is the tenant id (gRPC and job spans).
+	// TagTenant is the tenant id (gRPC, job and ingest spans).
 	TagTenant = "memd.tenant"
-	// TagOrg is the org id (gRPC and job spans).
+	// TagOrg is the org id (gRPC, job and ingest spans).
 	TagOrg = "memd.org"
-	// TagBank is the bank id (gRPC and job spans).
+	// TagBank is the bank id (gRPC, job and ingest spans).
 	TagBank = "memd.bank"
+	// TagIngestItems is the number of messages an ingest batch carries.
+	TagIngestItems = "memd.ingest.items"
 	// TagOperationID is the job's operation id.
 	TagOperationID = "memd.operation_id"
 	// TagAttempt is the job's attempt number (0 on the first run).

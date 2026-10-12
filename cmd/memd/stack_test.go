@@ -90,6 +90,7 @@ type wiredStack struct {
 	deps  *deps
 	db    *postgres.DB
 	blob  *fake.Blob
+	emu   *gatewayemu.Server
 }
 
 // startWired builds the stack and runs the worker until the test ends.
@@ -108,7 +109,7 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 // startWiredFile is startWiredWith with edit (nil = none) applied to the server config file before its defaults.
 func startWiredFile(t *testing.T, tel *observability.Telemetry, edit func(*ServerFile)) *wiredStack {
 	t.Helper()
-	_, ts := gatewayemu.Start(gatewayemu.Options{})
+	emu, ts := gatewayemu.Start(gatewayemu.Options{})
 	t.Cleanup(ts.Close)
 	g := &txGuard{}
 	db := pgtest.NewStore(t)
@@ -157,7 +158,7 @@ func startWiredFile(t *testing.T, tel *observability.Telemetry, edit func(*Serve
 	done := make(chan struct{})
 	go func() { _ = runWorker(ctx, d); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
-	return &wiredStack{guard: g, conn: conn, srv: srv, deps: d, db: db, blob: blobs}
+	return &wiredStack{guard: g, conn: conn, srv: srv, deps: d, db: db, blob: blobs, emu: emu}
 }
 
 // ctx is a context for tenant "t" with a deadline.
