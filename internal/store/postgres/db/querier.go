@@ -127,7 +127,8 @@ type Querier interface {
 	// DocumentUnitCounts counts a document's live units per fact type.
 	DocumentUnitCounts(ctx context.Context, arg DocumentUnitCountsParams) ([]DocumentUnitCountsRow, error)
 	// DocumentUpsert inserts a document or replaces its tags, overrides, observation scopes and blob key; either
-	// way extracted_at is cleared and the hashes of the last completed retain are kept.
+	// way extracted_at is cleared and the hashes of the last completed retain are kept. A NULL revision keeps the
+	// stored one.
 	DocumentUpsert(ctx context.Context, arg DocumentUpsertParams) error
 	// EntityAttach links a unit to entities, skipping existing rows, and returns the newly linked entity ids.
 	EntityAttach(ctx context.Context, arg EntityAttachParams) ([]uuid.UUID, error)
@@ -241,10 +242,18 @@ type Querier interface {
 	OrgLockLive(ctx context.Context, arg OrgLockLiveParams) (*time.Time, error)
 	// OrgSetConfig replaces a live org's config; a tombstoned or unknown org matches nothing.
 	OrgSetConfig(ctx context.Context, arg OrgSetConfigParams) (int64, error)
+	// Reads of batch ingestion (RetainBatch): the in-flight join and the backlog gate.
+	// QueueActiveBySerialKey returns a bank's active jobs of one kind and serial key (pending or processing, no
+	// cancel requested), newest first.
+	QueueActiveBySerialKey(ctx context.Context, arg QueueActiveBySerialKeyParams) ([]Operation, error)
 	// QueueCancel cancels a pending job at once or records the cancel request of a processing one.
 	QueueCancel(ctx context.Context, arg QueueCancelParams) (Operation, error)
 	// QueueCancelBank cancels every pending job of a bank except its delete_bank job.
 	QueueCancelBank(ctx context.Context, arg QueueCancelBankParams) (int64, error)
+	// QueueCountPendingInBank counts a bank's pending jobs of one kind, up to lim.
+	QueueCountPendingInBank(ctx context.Context, arg QueueCountPendingInBankParams) (int64, error)
+	// QueueCountPendingInOrg counts an org's pending jobs of one kind, across its banks, up to lim.
+	QueueCountPendingInOrg(ctx context.Context, arg QueueCountPendingInOrgParams) (int64, error)
 	// QueueDedupeLock serializes dedupe enqueues of one (tenant, org, bank, kind, serial key) until the tx ends.
 	QueueDedupeLock(ctx context.Context, arg QueueDedupeLockParams) error
 	// QueueFindJoinable locks and returns the oldest joinable row an enqueue may join.

@@ -70,7 +70,7 @@ type DocumentRepo interface {
 	// Get returns the document; an unknown id returns domain.ErrNotFound.
 	Get(ctx context.Context, b domain.BankRef, id domain.DocumentID) (domain.Document, error)
 	// Upsert inserts or replaces the document's tags, overrides, observation scopes and blob key, and clears
-	// extracted_at.
+	// extracted_at. A non-nil Revision replaces the stored revision; nil keeps it.
 	// The hashes of the last completed retain are kept until Complete.
 	Upsert(ctx context.Context, d domain.Document) error
 	// Complete stamps content_hash, overrides_hash and extracted_at after the last chunk commits.

@@ -118,8 +118,8 @@ no sooner than a delay) or a `DeadLetter`. An unsettled message comes back, so c
 memd's retain is: a redelivered document is unchanged, joins the retain in flight, or is stale. Messages with the same
 key arrive in publish order. `internal/ingest/ingesttest` is the contract suite every adapter runs and
 `internal/ingest/memq` the in-memory source that tests it; `internal/ingest/doc.go` has the contract and the recipe for
-an SQS, Pub/Sub or NATS adapter. The consumer that feeds these messages into retain is not built yet, so the
-diagram shows it dashed.
+an SQS, Pub/Sub or NATS adapter. The consumer that feeds these messages into retain is not built yet; it will call
+RetainBatch's path ([retain.md](retain.md#queue-ingestion), with the diagram).
 
 `internal/ingest/kafka` is the first broker adapter: a consumer group on a topic, with the pure-Go franz-go client.
 Kafka commits one offset per partition, so the adapter commits only past records that are settled contiguously; a
@@ -131,8 +131,6 @@ once the partition buffers too many records behind it, fetching that partition p
 dead-lettering after its maximum attempts. DeadLetter produces the record to a dead-letter topic with failure
 headers (reason, source position, attempt) and settles it once the produce is acknowledged. The package comment has
 the full semantics and the operational notes (partitioning by document id, dead-letter retention, lag).
-
-![Queue ingestion: broker, ingest.Source, the consumer loop, the commit point and the settlements](diagrams/ingest-queue.svg)
 
 ### Graph boundary
 

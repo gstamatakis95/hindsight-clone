@@ -31,9 +31,9 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   each), and their contract suite in internal/recall/armtest.
 - Services, one package per gRPC service area, each exporting one `Service` built by `New(Deps)`; each owns its RPC
   logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
-  - internal/memory: MemoryService (Retain, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory,
-    InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
-    sweeps.
+  - internal/memory: MemoryService (Retain, RetainBatch, Recall, Reflect, ListRecallArms, ListMemories, GetMemory,
+    UpdateMemory, InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and
+    retain-batch sweeps. RetainBatch is the bulk path the queue consumer will share.
   - internal/observation: ObservationService (Consolidate, ListObservationScopes, ListObservationHistory,
     ClearObservations, PreviewConsolidationStrategies); consolidate; the consolidation reconcile sweep.
   - internal/document: DocumentService (ListDocuments, GetDocument, RetagDocument, ReprocessDocument);

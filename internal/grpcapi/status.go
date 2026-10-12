@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/protoadapt"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // ErrorDomain is the google.rpc.ErrorInfo domain of every memd error.
@@ -44,8 +45,9 @@ var codeReasons = map[codes.Code]string{
 
 // toStatus maps a domain error to a gRPC status error. nil stays nil; an error that already carries a gRPC
 // status passes through unchanged; anything unclassified is INTERNAL. Every status carries a
-// google.rpc.ErrorInfo (domain "memd", reason = the most specific domain class's reason, domain.ReasonOf), and
-// one whose error names request fields (domain.FieldViolations) also a google.rpc.BadRequest.
+// google.rpc.ErrorInfo (domain "memd", reason = the most specific domain class's reason, domain.ReasonOf), one
+// whose error names request fields (domain.FieldViolations) also a google.rpc.BadRequest, and one that carries a
+// retry delay (domain.RetryDelay) also a google.rpc.RetryInfo.
 func toStatus(err error) error {
 	if err == nil {
 		return nil
@@ -63,14 +65,10 @@ func toStatus(err error) error {
 	return withDetails(status.New(code, err.Error()), err).Err() //nolint:wrapcheck // the status goes to the client as is
 }
 
-// withDetails attaches err's ErrorInfo and, when it names fields, its BadRequest to st. A detail that fails to
-// marshal (never for these message types) leaves st without details.
+// withDetails attaches err's ErrorInfo and, when it names fields or carries a retry delay, its BadRequest and
+// RetryInfo to st. A detail that fails to marshal (never for these message types) leaves st without details.
 func withDetails(st *status.Status, err error) *status.Status {
-	reason := domain.ReasonOf(err)
-	if reason == "" || st.Code() == codes.DeadlineExceeded || st.Code() == codes.Canceled {
-		reason = codeReasons[st.Code()]
-	}
-	details := []protoadapt.MessageV1{&errdetails.ErrorInfo{Reason: reason, Domain: ErrorDomain}}
+	details := []protoadapt.MessageV1{&errdetails.ErrorInfo{Reason: reasonFor(st.Code(), err), Domain: ErrorDomain}}
 	if vs := domain.FieldViolations(err); len(vs) > 0 {
 		br := &errdetails.BadRequest{FieldViolations: make([]*errdetails.BadRequest_FieldViolation, len(vs))}
 		for i, v := range vs {
@@ -78,9 +76,22 @@ func withDetails(st *status.Status, err error) *status.Status {
 		}
 		details = append(details, br)
 	}
+	if after, ok := domain.RetryDelay(err); ok {
+		details = append(details, &errdetails.RetryInfo{RetryDelay: durationpb.New(after)})
+	}
 	out, derr := st.WithDetails(details...)
 	if derr != nil {
 		return st
 	}
 	return out
+}
+
+// reasonFor is the ErrorInfo reason of err sent with code c: the most specific domain class's reason, or the
+// code's own reason for the context errors and for an error that carries no domain class.
+func reasonFor(c codes.Code, err error) string {
+	reason := domain.ReasonOf(err)
+	if reason == "" || c == codes.DeadlineExceeded || c == codes.Canceled {
+		reason = codeReasons[c]
+	}
+	return reason
 }

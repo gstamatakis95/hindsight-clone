@@ -66,6 +66,7 @@ type Document struct {
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
 	ObservationScopeModes json.RawMessage
+	Revision              *int64
 }
 
 type Entity struct {

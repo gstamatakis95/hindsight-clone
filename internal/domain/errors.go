@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Error is a domain error class: a sentinel with a stable machine-readable reason (UPPER_SNAKE), which the
@@ -96,6 +97,10 @@ var (
 	ErrResourceExhausted = newClass("RESOURCE_EXHAUSTED", "resource exhausted")
 	// ErrMaxTotalTokens: a reflect call went over max_total_tokens. Refines ErrResourceExhausted.
 	ErrMaxTotalTokens = refine(ErrResourceExhausted, "MAX_TOTAL_TOKENS_EXCEEDED", "max_total_tokens exceeded")
+	// ErrIngestBacklog: RetainBatch was rejected whole, before anything was written, because the bank's or the
+	// org's pending retain backlog is over its limit; retry after the delay [RetryDelay] reports. Refines
+	// ErrResourceExhausted.
+	ErrIngestBacklog = refine(ErrResourceExhausted, "INGEST_BACKLOG", "retain backlog over its limit")
 	// ErrCancelled: the operation was cancelled or its bank deleted; handlers stop at the checkpoint.
 	ErrCancelled = newClass("OPERATION_CANCELLED", "operation cancelled")
 	// ErrConflict: a concurrent writer won a race (e.g. a serial-key claim); the caller may retry.
@@ -161,4 +166,31 @@ func FieldViolations(err error) []FieldViolation {
 	}
 	walk(err)
 	return out
+}
+
+// retryError carries the delay after which a client should retry; its Unwrap is the wrapped error.
+type retryError struct {
+	// err is the wrapped error.
+	err error
+	// after is the retry delay.
+	after time.Duration
+}
+
+// Error returns the wrapped error's message.
+func (e *retryError) Error() string { return e.err.Error() }
+
+// Unwrap returns the wrapped error.
+func (e *retryError) Unwrap() error { return e.err }
+
+// WithRetryDelay returns err carrying a retry delay, which the API sends as google.rpc.RetryInfo; errors.Is and
+// [ReasonOf] still see err's classes.
+func WithRetryDelay(err error, after time.Duration) error { return &retryError{err: err, after: after} }
+
+// RetryDelay returns the retry delay err carries ([WithRetryDelay]), and false when it carries none.
+func RetryDelay(err error) (time.Duration, bool) {
+	var r *retryError
+	if errors.As(err, &r) {
+		return r.after, true
+	}
+	return 0, false
 }

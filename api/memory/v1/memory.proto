@@ -42,7 +42,7 @@
 // mental_model_operations), never a bare id; OperationService reports its status and progress. Follow-up jobs
 // an RPC triggers on its own (such as consolidation after a retain) are not returned. Retain is synchronous by
 // default, returning once the memories are committed; run_async=true makes it return the enqueued operations instead.
-// Recall and Reflect are synchronous.
+// RetainBatch is always asynchronous. Recall and Reflect are synchronous.
 //
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
 // poll OperationService.ListEvents with after_seq, passing the previous response's next_after_seq.
@@ -74,7 +74,9 @@
 //                        OPERATION_NOT_RETRYABLE (the operation's status or kind forbids it)
 //   UNAVAILABLE          UNAVAILABLE (a dependency failed; retry with backoff), RETRIEVAL_UNAVAILABLE (a
 //                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
-//   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens)
+//   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens),
+//                        INGEST_BACKLOG (RetainBatch while the retain backlog is over its limit; it also carries a
+//                        google.rpc.RetryInfo with the delay to wait)
 //   ABORTED              OPERATION_CANCELLED (the operation was cancelled or its bank deleted), CONFLICT (a
 //                        concurrent writer won; retry)
 //   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
@@ -101,6 +103,16 @@ service MemoryService {
   // commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
   // bank of an existing org creates it.
   rpc Retain(RetainRequest) returns (RetainResponse);
+  // RetainBatch accepts documents for background retain and reports one result per item, in request order:
+  // an invalid item is REJECTED and never fails the call. Always asynchronous, with no batch parent operation:
+  // each accepted item's retain_document operation is its tracking. Every item needs a document_id, which makes
+  // a redelivered item idempotent (UNCHANGED, or ACCEPTED joining the identical retain in flight), and an
+  // optional revision keeps an older version from overwriting a newer one (STALE). The server limits the items
+  // per call, the bytes per item and the bytes per call (a call over a call limit = INVALID_ARGUMENT). While the
+  // bank's or the org's pending retain backlog is over its limit, the whole call fails with RESOURCE_EXHAUSTED
+  // (reason INGEST_BACKLOG, with a google.rpc.RetryInfo) before anything is written. A write to an unknown bank
+  // of an existing org creates it.
+  rpc RetainBatch(RetainBatchRequest) returns (RetainBatchResponse);
   // Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
   // rerank, boosts and token packing. Unknown bank = NOT_FOUND.
   rpc Recall(RecallRequest) returns (RecallResponse);
@@ -351,6 +363,12 @@ message RetainItem {
   RetainOverrides overrides = 11;
   // Re-extract even when the content hash and overrides hash are unchanged.
   bool force_reextract = 12;
+  // Client-chosen version of this document's content, increasing per document: an event time in
+  // milliseconds, a source row version, a broker offset. An item whose revision is lower than the document's
+  // stored revision is stale and changes nothing (RetainBatch: STALE; Retain: stale = true). Equal or higher
+  // proceeds to the usual no-op check and is stored when accepted. Unset = unversioned: the item always
+  // proceeds and leaves the stored revision as it is.
+  optional int64 revision = 13;
 }
 
 // EntityHint names an entity the extractor should link, in addition to the ones it finds.
@@ -371,6 +389,79 @@ message RetainedDocument {
   bool unchanged = 3;
   // The retain_document operation; set when run_async and the document changed.
   Operation operation = 4;
+  // The item's revision is lower than the document's stored revision: nothing was written for it.
+  bool stale = 5;
+}
+
+// ---- RetainBatch ----
+
+// RetainBatchRequest accepts documents for background retain into one bank.
+message RetainBatchRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
+  // Target bank; created in its org if unknown.
+  string bank_id = 2;
+  // Documents to retain: at least one, at most the server's ingest.max_batch_items (default 500). Every item
+  // needs a document_id. When several items share a document_id, the one with the highest revision wins (the
+  // last one among equals, or when they carry none); the earlier ones are SUPERSEDED, a later lower revision is
+  // STALE.
+  repeated RetainItem items = 3;
+  // Tags added to every item's memories.
+  repeated string document_tags = 4;
+  // Request-level overrides, as in RetainRequest.overrides.
+  RetainOverrides overrides = 5;
+  // Do not enqueue consolidation after these retains.
+  bool skip_consolidation = 6;
+}
+
+// RetainBatchResponse reports one result per item.
+message RetainBatchResponse {
+  // One result per item, in request order.
+  repeated RetainBatchResult results = 1;
+}
+
+// RetainBatchResult is the outcome of one RetainBatch item.
+message RetainBatchResult {
+  // Status says what happened to the item.
+  enum Status {
+    // Not used.
+    STATUS_UNSPECIFIED = 0;
+    // Committed: operation is the item's new retain_document, or the identical one already in flight that it
+    // joined.
+    STATUS_ACCEPTED = 1;
+    // Same content and no-op hash as the document's last completed retain: nothing written, no operation.
+    STATUS_UNCHANGED = 2;
+    // The item's revision is lower than the document's stored revision (or than another item of the call for
+    // the same document): nothing written.
+    STATUS_STALE = 3;
+    // A later item of this call has the same document_id and wins: nothing written for this one.
+    STATUS_SUPERSEDED = 4;
+    // Permanent: the item is invalid (error says why); retrying it unchanged fails the same way.
+    STATUS_REJECTED = 5;
+    // Transient: nothing was committed for the item (error says why); retry it with backoff.
+    STATUS_FAILED = 6;
+  }
+  // The item's document id.
+  string document_id = 1;
+  // What happened to the item.
+  Status status = 2;
+  // The retain_document operation; set when ACCEPTED.
+  Operation operation = 3;
+  // Why the item was REJECTED or FAILED; unset otherwise.
+  ItemError error = 4;
+}
+
+// ItemError is the error of one item of a batch call: what a unary call would carry in its status.
+message ItemError {
+  // Canonical gRPC code name, for example INVALID_ARGUMENT or UNAVAILABLE.
+  string code = 1;
+  // ErrorInfo reason, for example TOO_MANY_SCOPES (see the reasons table at the top of this file).
+  string reason = 2;
+  // Human-readable message.
+  string message = 3;
+  // Offending request field paths, for example items[3].document_id (the BadRequest field violations).
+  repeated string fields = 4;
 }
 
 // ---- Recall ----
@@ -928,6 +1019,8 @@ message Document {
   string original_text = 9;
   // When the last retain completed; unset while a retain is in flight or after it failed.
   google.protobuf.Timestamp extracted_at = 10;
+  // Revision of the latest accepted content (RetainItem.revision); unset when no retain carried one.
+  optional int64 revision = 11;
 }
 
 // ======================= ObservationService =======================

@@ -43,6 +43,7 @@ func (d *decoder) retainItem(it *pb.RetainItem) memory.RetainItem {
 		ResolveEntities:       optCopy(it.ResolveEntities),
 		Overrides:             d.retainOverrides(it.GetOverrides()),
 		ForceReextract:        it.GetForceReextract(),
+		Revision:              optCopy(it.Revision),
 	}
 }
 
@@ -62,7 +63,7 @@ func (d *decoder) retainItems(in []*pb.RetainItem) []memory.RetainItem {
 func retainedDocToProto(x memory.RetainedDocument) *pb.RetainedDocument {
 	return &pb.RetainedDocument{
 		DocumentId: string(x.DocumentID), MemoriesCreated: i32(x.MemoriesCreated), Unchanged: x.Unchanged,
-		Operation: operationPtrToProto(x.Operation),
+		Stale: x.Stale, Operation: operationPtrToProto(x.Operation),
 	}
 }
 

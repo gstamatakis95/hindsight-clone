@@ -9,6 +9,7 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/grpcapi"
+	"memd/internal/memory"
 	"os"
 	"strings"
 	"time"
@@ -56,6 +57,8 @@ type ServerFile struct {
 	Retention RetentionFile `json:"retention"`
 	// API sets the gRPC server's behaviour.
 	API APIFile `json:"api"`
+	// Ingest sets the request limits of Retain and RetainBatch and RetainBatch's backlog gate.
+	Ingest IngestFile `json:"ingest"`
 	// Observability tunes the optional Datadog metrics (MEMD_DATADOG_ENABLED switches them on).
 	Observability ObservabilityFile `json:"observability"`
 }
@@ -101,6 +104,71 @@ type RetentionFile struct {
 type APIFile struct {
 	// RPCDeadline applies to calls that carry no deadline (default 120s; "0s" = none).
 	RPCDeadline *Duration `json:"rpc_deadline"`
+}
+
+// IngestFile is the ingest section of the server config file (memory.IngestLimits; unset = its default).
+type IngestFile struct {
+	// MaxBatchItems caps the items of one RetainBatch call (default 500).
+	MaxBatchItems int `json:"max_batch_items"`
+	// MaxRetainItems caps the items of one Retain call (default 100).
+	MaxRetainItems int `json:"max_retain_items"`
+	// MaxDocumentBytes caps one RetainBatch item's content (default 2 MiB).
+	MaxDocumentBytes int `json:"max_document_bytes"`
+	// MaxRequestBytes caps every request message (the gRPC receive limit) and RetainBatch's summed content
+	// (default 16 MiB).
+	MaxRequestBytes int `json:"max_request_bytes"`
+	// MaxPendingPerBank is the bank's pending retain backlog over which RetainBatch is rejected (default 5000).
+	MaxPendingPerBank int `json:"max_pending_per_bank"`
+	// MaxPendingPerOrg is the org's pending retain backlog over which RetainBatch is rejected (default 50000).
+	MaxPendingPerOrg int `json:"max_pending_per_org"`
+	// RetryAfter is the retry delay a backlog rejection carries (default 10s).
+	RetryAfter Duration `json:"retry_after"`
+}
+
+// limits returns the section as memory.IngestLimits.
+func (f IngestFile) limits() memory.IngestLimits {
+	return memory.IngestLimits{
+		MaxBatchItems: f.MaxBatchItems, MaxRetainItems: f.MaxRetainItems, MaxDocumentBytes: f.MaxDocumentBytes,
+		MaxRequestBytes: f.MaxRequestBytes, MaxPendingPerBank: f.MaxPendingPerBank,
+		MaxPendingPerOrg: f.MaxPendingPerOrg, RetryAfter: time.Duration(f.RetryAfter),
+	}
+}
+
+// withDefaults fills the unset (zero) settings; negative ones are left for validate to reject.
+func (f *IngestFile) withDefaults() {
+	fill := func(v *int, def int) {
+		if *v == 0 {
+			*v = def
+		}
+	}
+	fill(&f.MaxBatchItems, memory.DefaultMaxBatchItems)
+	fill(&f.MaxRetainItems, memory.DefaultMaxRetainItems)
+	fill(&f.MaxDocumentBytes, memory.DefaultMaxDocumentBytes)
+	fill(&f.MaxRequestBytes, memory.DefaultMaxRequestBytes)
+	fill(&f.MaxPendingPerBank, memory.DefaultMaxPendingPerBank)
+	fill(&f.MaxPendingPerOrg, memory.DefaultMaxPendingPerOrg)
+	if f.RetryAfter == 0 {
+		f.RetryAfter = Duration(memory.DefaultIngestRetryAfter)
+	}
+}
+
+// validate checks the section: positive settings, and an item limit within the request limit.
+func (f IngestFile) validate() []error {
+	var errs []error
+	for _, v := range []int{
+		f.MaxBatchItems, f.MaxRetainItems, f.MaxDocumentBytes, f.MaxRequestBytes, f.MaxPendingPerBank,
+		f.MaxPendingPerOrg, int(f.RetryAfter),
+	} {
+		if v <= 0 {
+			errs = append(errs, errors.New("every ingest setting must be positive"))
+			break
+		}
+	}
+	if f.MaxDocumentBytes > f.MaxRequestBytes {
+		errs = append(errs, fmt.Errorf("ingest.max_document_bytes (%d) must not exceed ingest.max_request_bytes (%d)",
+			f.MaxDocumentBytes, f.MaxRequestBytes))
+	}
+	return errs
 }
 
 // Duration is a time.Duration written as a Go duration string ("90s", "2m", "168h").
@@ -196,6 +264,7 @@ func (f *ServerFile) withDefaults() {
 	fill(&f.Retention.Operations, defaultOperationKeep)
 	fill(&f.Retention.Events, defaultEventKeep)
 	fill(&f.Observability.MetricsInterval, defaultMetricsInterval)
+	f.Ingest.withDefaults()
 	if f.API.RPCDeadline == nil {
 		d := Duration(defaultRPCDeadline)
 		f.API.RPCDeadline = &d
@@ -258,7 +327,7 @@ func (f ServerFile) validateOperator() []error {
 		errs = append(errs, fmt.Errorf("worker.heartbeat_interval (%s) must be below 3/4 of worker.stale_after (%s)",
 			time.Duration(w.HeartbeatInterval), time.Duration(w.StaleAfter)))
 	}
-	return errs
+	return append(errs, f.Ingest.validate()...)
 }
 
 // knownSlot reports whether slot is a gateway slot.

@@ -69,6 +69,9 @@ Where a new type goes:
 - **Errors.** Codes are canonical; every status carries `google.rpc.ErrorInfo` (domain `memd`, reason from the domain
   error class). A new reason is a new refined class in `internal/domain/errors.go` plus a row in the header's error
   table. Validation errors name their field with `domain.InvalidField`, which becomes a `BadRequest` field violation.
+  A batch RPC whose items succeed or fail independently (`RetainBatch`) returns one result per item, in request
+  order, with an `ItemError` carrying what a unary status would (code name, reason, message, fields under
+  `items[k]`); only call-level problems fail the call.
 - **Keep lines to 120 columns or fewer** and the file `buf format` clean. If `buf format` joins a line that ends
   up too long, keep the break with a trailing comment (see `PreviewConsolidationStrategies`).
 

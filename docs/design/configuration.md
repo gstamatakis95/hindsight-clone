@@ -213,12 +213,14 @@ database.
 | `worker` | `poll_interval` (500ms), `heartbeat_interval` (15s; must be below 3/4 of `stale_after`), `stale_after` (2m: the reclaim threshold, and the runner's self-fence at 3/4 of it), `maintenance_interval` (60s) |
 | `retention` | `operations` (168h): finished operations; `events` (720h): lifecycle events |
 | `api` | `rpc_deadline` (120s): the deadline of calls that carry none; `0s` = none |
+| `ingest` | `max_batch_items` (500): items per RetainBatch call; `max_retain_items` (100): items per Retain call; `max_document_bytes` (2 MiB): one RetainBatch item's content; `max_request_bytes` (16 MiB): the gRPC receive limit for every request, and RetainBatch's summed content; `max_pending_per_bank` (5000) and `max_pending_per_org` (50000): the pending `retain_document` backlog over which RetainBatch is rejected (`INGEST_BACKLOG`); `retry_after` (10s): the delay that rejection's RetryInfo carries ([retain.md](retain.md#retainbatch)) |
 | `observability` | `metrics_interval` (15s): how often the Postgres pool and job queue gauges are sampled (Datadog only) |
 
 Startup validation of the file: `config.ServerDefaults` over the `defaults` block must validate; EXTRACT and
 REFLECT must be bound; every `recall.arms` and `arm_boosts` name must be registered; `slot_concurrency` keys must
 be known slots with positive caps; every duration must be positive (`rpc_deadline` may be 0); `max_concurrent`
-must be positive; and the heartbeat must be below 3/4 of `stale_after`.
+must be positive; the heartbeat must be below 3/4 of `stale_after`; and every `ingest` setting must be positive,
+with `max_document_bytes` at most `max_request_bytes`.
 
 ## Process settings
 
@@ -271,6 +273,7 @@ DogStatsD) are read by the Datadog libraries; `DD_SERVICE` defaults to `memd`.
 | Gateway retry backoff | 500 ms doubling, max 8 s; adapter default 2 retries |
 | Readiness gateway probe cache | 10 s |
 | Retain chunks per transaction | 4 |
+| RetainBatch items per write transaction / concurrent blob writes | 100 / 8 |
 | Cron grace | 5 min |
 | Transaction attempts / claim attempts | 3 / 5 |
 

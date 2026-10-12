@@ -10,13 +10,20 @@ WHERE tenant_id = @tenant_id AND org_id = @org_id AND bank_id = @bank_id AND doc
 GROUP BY fact_type;
 
 -- DocumentUpsert inserts a document or replaces its tags, overrides, observation scopes and blob key; either
--- way extracted_at is cleared and the hashes of the last completed retain are kept.
+-- way extracted_at is cleared and the hashes of the last completed retain are kept. A NULL revision keeps the
+-- stored one.
 -- name: DocumentUpsert :exec
-INSERT INTO documents AS d (tenant_id, org_id, bank_id, id, overrides, tags, blob_key, observation_scope_modes, extracted_at)
-VALUES (@tenant_id, @org_id, @bank_id, @id, @overrides, @tags, @blob_key, @observation_scope_modes, NULL)
+INSERT INTO documents AS d (
+    tenant_id, org_id, bank_id, id, overrides, tags, blob_key, observation_scope_modes, revision, extracted_at
+)
+VALUES (
+    @tenant_id, @org_id, @bank_id, @id, @overrides, @tags, @blob_key, @observation_scope_modes, sqlc.narg(revision),
+    NULL
+)
 ON CONFLICT (tenant_id, org_id, bank_id, id) DO UPDATE
 SET overrides = EXCLUDED.overrides, tags = EXCLUDED.tags, blob_key = EXCLUDED.blob_key,
-    observation_scope_modes = EXCLUDED.observation_scope_modes, extracted_at = NULL, updated_at = now();
+    observation_scope_modes = EXCLUDED.observation_scope_modes, revision = COALESCE(EXCLUDED.revision, d.revision),
+    extracted_at = NULL, updated_at = now();
 
 -- DocumentComplete stamps the hashes and extracted_at of a finished retain.
 -- name: DocumentComplete :execrows

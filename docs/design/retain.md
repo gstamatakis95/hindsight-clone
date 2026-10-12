@@ -2,7 +2,8 @@
 
 Retain turns text into memories: it stores the original text, chunks it, extracts facts with an LLM, normalizes
 their dates, embeds them, resolves their entities, links them, and commits them in short transactions. Documents
-are the upsert unit: re-retaining a document id replaces its memories. The code is `internal/memory` (the
+are the upsert unit: re-retaining a document id replaces its memories. Two RPCs write documents: Retain, for
+interactive calls, and [RetainBatch](#retainbatch), for bulk producers. The code is `internal/memory` (the
 ingestor and the retainer), with `internal/timex` and `internal/linking` as libraries; ReprocessDocument and
 RetagDocument are `internal/document`.
 
@@ -12,7 +13,8 @@ RetagDocument are `internal/document`.
 
 ## Ingest
 
-1. **Validate every item first.** A document id that appears twice in one request, custom extraction mode
+1. **Validate every item first.** More than `ingest.max_retain_items` items (100; RetainBatch takes bulk), a
+   document id that appears twice in one request, custom extraction mode
    without a `custom_extraction_prompt`, and an `ALL_COMBINATIONS` scope fan-out over `max_combinations` (see
    [consolidation.md](consolidation.md#scopes); reason `TOO_MANY_SCOPES`) are INVALID_ARGUMENT, and nothing is
    stored. For an unknown bank, validation uses the tenant level merged with the overrides, so a rejected retain
@@ -20,21 +22,31 @@ RetagDocument are `internal/document`.
 2. **Overrides** merge request < item (`RetainOverrides` on both), and the item's tags are added to the request's
    `document_tags`. An empty `document_id` gets a generated UUID; an unset timestamp is "now" at ingest;
    `timeless` wins over the timestamp.
-3. **No-op check, before any write.** A document whose content hash and no-op hash both match its last
-   *completed* retain (`extracted_at` set) is unchanged, unless `force_reextract` is set. An unchanged item writes
-   nothing (no blob, no upsert, no job, no seq bump, no model call) and is reported `unchanged` with no
-   operation.
+3. **No-op and revision check, before any write.** A document whose content hash and no-op hash both match its
+   last *completed* retain (`extracted_at` set) is unchanged, unless `force_reextract` is set. An item whose
+   `revision` is lower than the document's stored revision is stale (this check comes first, and
+   `force_reextract` does not override it). An unchanged or stale item writes nothing (no blob, no upsert, no job,
+   no seq bump, no model call) and is reported `unchanged` or `stale` with no operation.
    - Content hash: hex SHA-256 of the original text.
    - No-op hash: SHA-256 of the JSON of the merged request < item overrides (`""` when none), extended with the
      item's `observation_scope_modes` when set. Tags, context, timestamp and metadata are part of neither hash,
      so a tag-only change on unchanged content is a no-op (RetagDocument changes tags).
+   - Revision: a client-chosen version per document (an event time, a source row version, a broker offset).
+     Equal or higher proceeds to the no-op check; either side unset means unversioned and always proceeds. The
+     upsert stores the item's revision; an item without one, and ReprocessDocument, leave the stored revision as
+     it is.
 4. **Bank check.** The pre-write read rejects a tombstoned bank (FAILED_PRECONDITION, `BANK_DELETING`) before the
    blob is written. An unknown bank is fine; the write creates it.
 5. **Blob Put** at `blob.Key(...)` = `{tenant}/{org}/{bank}/docs/{document}/{content_hash}`, outside any transaction
    (a repeated Put of the same key is harmless).
-6. **Write transaction.** `Banks().Ensure`, `tx.Seq`, then upsert each changed document with its stored
-   overrides, tags, blob key and item observation scopes. Upsert clears `extracted_at`, so the document is "in
-   flight".
+6. **Write transaction.** `Banks().Ensure`, `tx.Seq`, then, per changed item, the no-op and revision check
+   again on the document as read under the Seq lock, and the upsert of each item still changed, with its stored
+   overrides, tags, blob key, item observation scopes and revision. Upsert clears `extracted_at`, so the document
+   is "in flight". The re-check closes a race: a retain that completes between step 3 and this transaction would
+   otherwise have its fresh `extracted_at` cleared by the upsert, forcing a second, paid extraction of the same
+   content; a newer revision stored meanwhile would be overwritten. An item it turns unchanged or stale keeps its
+   blob (the key is content-addressed and already the document's). When nothing is left to write, the transaction
+   rolls back, so the call bumps no seq and creates no bank.
 7. **Sync** (default): run each changed document inline, in item order, and return the memories created and the
    summed per-slot usage of the extraction calls. No operation rows are created. **Async** (`run_async`): the
    write transaction also enqueues one `retain_document` per changed document (serial key `doc:{id}`, no dedupe,
@@ -47,6 +59,69 @@ doesn't store it: content hash and blob key; tags, context, timestamp or timeles
 (`chunk_max_tokens`, `chunk_overlap_tokens`, `structured_chunk_max_tokens`) as resolved at ingest, so a config
 change between attempts can't move chunk boundaries under a resuming job. The run always reads the blob at the
 pinned key, never at the document's current key.
+
+## RetainBatch
+
+RetainBatch is bulk ingestion for producers with at-least-once delivery: queue consumers, sync jobs, backfills. It
+is always asynchronous, every item needs a `document_id`, and it returns one result per item, so one bad item never
+fails the call. `memory.Service.RetainBatch` is the one path: the RPC calls it, and so will the queue consumer.
+
+| Status | Meaning | Written |
+|---|---|---|
+| `ACCEPTED` | the document's `retain_document` is queued; `operation` is it, or the identical one already in flight | the document row and the job, or nothing when joined |
+| `UNCHANGED` | same content and no-op hash as the last completed retain | nothing |
+| `STALE` | `revision` lower than the document's stored one, or than another item of the call for the same document | nothing |
+| `SUPERSEDED` | a later item of the call has the same `document_id` and wins | nothing |
+| `REJECTED` | permanent: the item is invalid; `error` has the code, reason, message and fields (`items[k].document_id`) | nothing |
+| `FAILED` | transient: a dependency failed (blob store, database); retry the item with backoff | nothing |
+
+There is no `retain_batch` parent operation: the per-item operations are the tracking. A parent spanning several
+write transactions could be settled by the tick before the later ones commit, and a joined operation can't be
+re-parented.
+
+1. **Call checks.** 1 to `ingest.max_batch_items` (500) items and at most `ingest.max_request_bytes` (16 MiB) of
+   content, else INVALID_ARGUMENT for the call. `max_request_bytes` is also the gRPC server's receive limit.
+2. **Backlog gate.** The bank's and the org's pending `retain_document` rows are counted, each count stopping one
+   past its limit (`ingest.max_pending_per_bank`, 5000; `ingest.max_pending_per_org`, 50000). Over either limit
+   the whole call fails with RESOURCE_EXHAUSTED, reason `INGEST_BACKLOG`, and a `google.rpc.RetryInfo` of
+   `ingest.retry_after` (10 s), before anything is written. The gate never rejects single items, so a consumer can
+   pause and redeliver the whole poll.
+3. **Bank config** as for Retain (an unknown org is NOT_FOUND for the call).
+4. **Per item.** A decode error, a missing `document_id`, content over `ingest.max_document_bytes` (2 MiB),
+   invalid item overrides, and what Retain's validation rejects (custom mode without a prompt, too many scopes)
+   make the item REJECTED; a transient error while planning makes it FAILED.
+5. **Same document twice.** The item with the highest `revision` wins, the last one among equals (or when
+   revisions are unset). An earlier item it replaces is SUPERSEDED; a later item with a lower revision is STALE.
+6. **Pre-read** as Retain's step 3 and 4: a bank being deleted fails the call (nothing was written); items are
+   settled UNCHANGED or STALE.
+7. **Blob Put** of the remaining items, eight at a time, outside any transaction. A failed Put fails its item.
+8. **Write transactions of up to 100 items.** Each takes `Banks().Ensure` and `tx.Seq` (so a 500-item batch holds
+   the bank's lock five times, briefly), then per item re-reads the document under the lock: UNCHANGED or STALE as
+   in Retain's step 6; else it **joins** the retain in flight when the document is in flight with exactly what the
+   item would write (blob key, tags, no-op hash, and a revision the item would not raise) and the newest active
+   `retain_document` on `doc:{id}` (pending or processing, no cancel requested) carries the same blob key and no-op
+   hash; else it upserts the document (storing its revision) and enqueues a `retain_document` (no parent). A
+   document in flight because its last run FAILED has no active job, so the item enqueues a new one. A transaction
+   that fails with INVALID_ARGUMENT is replayed one item per transaction, so only the bad item is REJECTED; any
+   other failure FAILS its items, which committed nothing.
+9. **Compensation.** When an item's write failed because its org is unknown or being deleted or its bank is being
+   deleted, the blob the call stored for it is deleted, so nothing is left under a deleted prefix. Other failures
+   keep the blob: its content-addressed key may belong to a retain in flight.
+
+Under at-least-once delivery the commit point is the write transaction: a redelivered item is UNCHANGED (completed),
+ACCEPTED joining the identical operation (in flight) or STALE (an older revision), so it never queues a second paid
+extraction. Ordering per document comes from the `doc:{id}` serial key (one run at a time, oldest first) and
+`revision`; there is no ordering across documents.
+
+### Queue ingestion
+
+Queue sources sit behind `internal/ingest` ([architecture.md](architecture.md#ingest-boundary)). The consumer
+that will drive them decodes each message into one document, groups them by bank, calls RetainBatch's path, and
+settles each message from its item's status: Ack after the commit for ACCEPTED, UNCHANGED, STALE and SUPERSEDED,
+DeadLetter for REJECTED, Nack with backoff for FAILED, and Nack of the whole poll for the RetainBatch backlog
+rejection. It is not wired in yet, so the diagram shows it dashed.
+
+![Queue ingestion: broker, ingest.Source, the consumer loop, the commit point and the settlements](diagrams/ingest-queue.svg)
 
 ## The retain run
 

@@ -149,4 +149,11 @@ type Queue interface {
 	// Prune deletes terminal, finished operations whose finished_at is before before and returns how many.
 	// Pending and processing operations are never pruned.
 	Prune(ctx context.Context, before time.Time) (int, error)
+	// ActiveBySerialKey returns b's active jobs of kind with serial key key: pending or processing, with no
+	// cancel requested. Newest first; none is an empty slice.
+	ActiveBySerialKey(ctx context.Context, b domain.BankRef, kind domain.OperationKind, key string) ([]Job, error)
+	// CountPending counts b's pending jobs of kind, stopping at limit: limit means "limit or more".
+	CountPending(ctx context.Context, b domain.BankRef, kind domain.OperationKind, limit int) (int, error)
+	// CountPendingInOrg counts the pending jobs of kind across every bank of o, stopping at limit.
+	CountPendingInOrg(ctx context.Context, o domain.OrgRef, kind domain.OperationKind, limit int) (int, error)
 }

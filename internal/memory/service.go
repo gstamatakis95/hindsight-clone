@@ -51,6 +51,9 @@ type Deps struct {
 	// Clock stamps events, audit rows and progress, and dates items without a timestamp; nil = the system
 	// clock.
 	Clock clock.Clock
+	// Ingest are the request limits of Retain and RetainBatch and RetainBatch's backlog gate; zero fields take
+	// their defaults.
+	Ingest IngestLimits
 }
 
 // Service is MemoryService: Retain, Recall and Reflect, the memory listing and curation, the retain_document
@@ -80,9 +83,11 @@ func New(d Deps) *Service {
 	}
 	r := newRetainer(rd)
 	return &Service{
-		d:        d,
-		retain:   r,
-		ingest:   newIngestor(ingestorDeps{Store: d.DB, Blob: d.Blob, Config: d.Config, Retainer: r, Clock: d.Clock}),
+		d:      d,
+		retain: r,
+		ingest: newIngestor(ingestorDeps{
+			Store: d.DB, Blob: d.Blob, Config: d.Config, Retainer: r, Clock: d.Clock, Limits: d.Ingest,
+		}),
 		curate:   newCurator(curatorDeps{Store: d.DB, Clock: d.Clock, Resolver: d.Entities, Config: d.Config}),
 		rederive: newRederiver(rederiverDeps{Store: d.DB, Embedder: d.Embedder, Linker: d.Linker}),
 	}
@@ -93,6 +98,14 @@ func New(d Deps) *Service {
 // the package doc for the steps and the no-op rule.
 func (s *Service) Retain(ctx context.Context, req RetainRequest) (RetainResult, error) {
 	return s.ingest.Ingest(ctx, req)
+}
+
+// RetainBatch accepts documents for background retain and reports one result per item, so one bad item never
+// fails the call: the path the RetainBatch RPC and the queue consumer share. A call-level error (an invalid call,
+// domain.ErrIngestBacklog with a retry delay, an unknown org, a bank being deleted) means nothing was written. See
+// the package doc for the steps.
+func (s *Service) RetainBatch(ctx context.Context, req RetainBatchRequest) (RetainBatchResult, error) {
+	return s.ingest.IngestBatch(ctx, req)
 }
 
 // Recall retrieves memories for a query through the recall engine.
