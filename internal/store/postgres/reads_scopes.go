@@ -18,14 +18,14 @@ func (r *reader) GetChunks(ctx context.Context, b domain.BankRef, ids []domain.C
 	if len(uuids) == 0 {
 		return []domain.Chunk{}, nil
 	}
-	rows, err := r.queries().ChunkGetMany(ctx, db.ChunkGetManyParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	rows, err := r.queries().ChunkGetMany(ctx, db.ChunkGetManyParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
 	if err != nil {
 		return nil, mapErr("get chunks", err)
 	}
 	byID := make(map[domain.ChunkID]domain.Chunk, len(rows))
 	for _, row := range rows {
 		c := domain.Chunk{
-			ID: idOf[domain.ChunkID](row.ID), Bank: domain.BankRef{Tenant: row.TenantID, Bank: row.BankID},
+			ID: idOf[domain.ChunkID](row.ID), Bank: domain.NewBankRef(row.TenantID, row.OrgID, row.BankID),
 			DocumentID: domain.DocumentID(row.DocumentID), Index: int(row.ChunkIndex), Text: row.Text,
 			ContentHash: row.ContentHash, TokenCount: int(row.TokenCount), CreatedAt: row.CreatedAt,
 		}
@@ -50,7 +50,7 @@ func (r *reader) EntityStates(
 	if len(uuids) == 0 {
 		return []domain.EntityState{}, nil
 	}
-	rows, err := r.queries().EntityStatesOf(ctx, db.EntityStatesOfParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	rows, err := r.queries().EntityStatesOf(ctx, db.EntityStatesOfParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
 	if err != nil {
 		return nil, mapErr("entity states", err)
 	}
@@ -80,7 +80,7 @@ func (r *reader) unconsolidatedCounts(ctx context.Context, b domain.BankRef, sco
 		return nil, err
 	}
 	rows, err := r.queries().ScopeUnconsolidated(ctx, db.ScopeUnconsolidatedParams{
-		TenantID: b.Tenant, BankID: b.Bank, Scopes: raw,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Scopes: raw,
 	})
 	if err != nil {
 		return nil, mapErr("unconsolidated units in scopes", err)
@@ -119,7 +119,7 @@ func (r *reader) StaleScopes(
 // unknown scope or bank.
 func (r *reader) CountObservations(ctx context.Context, s domain.ScopeKey) (int, error) {
 	n, err := r.queries().ScopeObservationCount(ctx, db.ScopeObservationCountParams{
-		TenantID: s.Tenant, BankID: s.Bank, ScopeKey: domain.NewScopeKey(s.BankRef, s.Tags).String(),
+		TenantID: s.Tenant, OrgID: s.Org, BankID: s.Bank, ScopeKey: domain.NewScopeKey(s.BankRef, s.Tags).String(),
 	})
 	if err != nil {
 		return 0, mapErr("count observations", err)
@@ -140,7 +140,7 @@ func (r *reader) ListObservationScopes(
 		return nil, err
 	}
 	rows, err := r.queries().ScopeListPage(ctx, db.ScopeListPageParams{
-		TenantID: b.Tenant, BankID: b.Bank, After: after, Lim: toInt32Sat(limit),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, After: after, Lim: toInt32Sat(limit),
 	})
 	if err != nil {
 		return nil, mapErr("list scopes", err)
@@ -164,12 +164,12 @@ func (r *reader) ListObservationScopes(
 
 // scopesBankListable returns domain.ErrNotFound for an unknown or tombstoned bank.
 func (r *reader) scopesBankListable(ctx context.Context, b domain.BankRef) error {
-	bank, err := r.queries().GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
+	bank, err := r.queries().GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
 		return bankErr(b, err)
 	}
 	if bank.DeletingAt != nil {
-		return fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b)
 	}
 	return nil
 }
@@ -198,7 +198,7 @@ func (r *reader) ModelsCiting(
 		return []domain.MentalModelID{}, nil
 	}
 	rows, err := r.queries().ModelsCitingUnits(ctx, db.ModelsCitingUnitsParams{
-		TenantID: b.Tenant, BankID: b.Bank, Ids: uuids,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
 	})
 	if err != nil {
 		return nil, mapErr("models citing units", err)

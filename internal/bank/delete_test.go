@@ -142,8 +142,8 @@ func runUntilDone(t *testing.T, e env, d *Service, j store.Job) int {
 // afterwards creates a fresh bank.
 func TestBankDeleteLifecycle(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "doomed"}
-	other := domain.BankRef{Tenant: "t", Bank: "keep"}
+	b := domain.NewBankRef("t", "org", "doomed")
+	other := domain.NewBankRef("t", "org", "keep")
 	e.ensure(t, other)
 	if err := e.blob.Put(e.ctx, blob.Key(other, "d", "h"), strings.NewReader("x"), 1, ""); err != nil {
 		t.Fatal(err)
@@ -298,7 +298,7 @@ func assertFreshBank(t *testing.T, e env, b domain.BankRef, oldOps ...domain.Ope
 
 func TestTombstoneIdempotent(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	d := e.svcOver(e.store, e.blob, DeleteConfig{})
 	if _, err := d.DeleteBank(e.ctx, b); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown bank: %v, want NotFound", err)
@@ -324,7 +324,7 @@ func TestTombstoneIdempotent(t *testing.T) {
 
 func TestDeleteRunSkipsPrefixWhenBankGone(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	seedBank(t, e, b)
 	d := e.svcOver(e.store, e.blob, DeleteConfig{})
 	if _, err := d.DeleteBank(e.ctx, b); err != nil {
@@ -352,7 +352,7 @@ func TestDeleteRunSkipsPrefixWhenBankGone(t *testing.T) {
 
 func TestDeleteRunStopsWhenCancelled(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	e.ensure(t, b)
 	key := blob.Key(b, "d", "h")
 	if err := e.blob.Put(e.ctx, key, strings.NewReader("x"), 1, ""); err != nil {
@@ -428,7 +428,7 @@ func (u unhideBlob) DeletePrefix(ctx context.Context, prefix string) (int, error
 // tombstoned, a delayed continuation is queued and the run reports done=false.
 func TestDeleteFinalTxRechecksProcessingJobs(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	_, claimed := seedBank(t, e, b)
 	hide := &atomic.Bool{}
 	hide.Store(true)

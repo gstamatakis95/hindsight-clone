@@ -107,7 +107,10 @@ func (t *tx) Seq(ctx context.Context, b domain.BankRef) (int64, error) {
 	if seq, ok := t.seqs[b]; ok {
 		return seq, nil
 	}
-	seq, err := t.q.BumpBankSeq(ctx, db.BumpBankSeqParams{TenantID: b.Tenant, ID: b.Bank})
+	if err := checkRef(b); err != nil {
+		return 0, err
+	}
+	seq, err := t.q.BumpBankSeq(ctx, db.BumpBankSeqParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, t.missingOrDeleting(ctx, b)
 	}
@@ -121,15 +124,18 @@ func (t *tx) Seq(ctx context.Context, b domain.BankRef) (int64, error) {
 // missingOrDeleting explains why a live-bank update matched no row: domain.ErrBankDeleting for a
 // tombstoned bank, domain.ErrNotFound for an unknown one.
 func (t *tx) missingOrDeleting(ctx context.Context, b domain.BankRef) error {
-	bank, err := t.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
+	bank, err := t.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
 		return bankErr(b, err)
 	}
 	if bank.DeletingAt != nil {
-		return fmt.Errorf("%w: %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: %s", domain.ErrBankDeleting, b)
 	}
-	return fmt.Errorf("%w: bank %s/%s", domain.ErrConflict, b.Tenant, b.Bank)
+	return fmt.Errorf("%w: bank %s", domain.ErrConflict, b)
 }
+
+// Orgs returns the org repository bound to this transaction.
+func (t *tx) Orgs() store.OrgRepo { return &orgRepo{q: t.q} }
 
 // Banks returns the bank repository bound to this transaction.
 func (t *tx) Banks() store.BankRepo { return &bankRepo{q: t.q, tx: t} }

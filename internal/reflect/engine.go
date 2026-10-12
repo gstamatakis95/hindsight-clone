@@ -136,7 +136,7 @@ func (r *Agent) readBank(ctx context.Context, b domain.BankRef) (string, []domai
 		return err
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("reflect: read bank %s/%s: %w", b.Tenant, b.Bank, err)
+		return "", nil, fmt.Errorf("reflect: read bank %s: %w", b, err)
 	}
 	return name, ds, nil
 }

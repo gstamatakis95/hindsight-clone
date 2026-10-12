@@ -11,11 +11,18 @@
 //
 // Tenant. The tenant comes from the x-tenant-id metadata header, never from the request body.
 //
-// Banks. A bank is an isolated memory store within a tenant. A write to an unknown bank creates it with
-// tenant defaults, and every read of an unknown bank returns NOT_FOUND.
+// Orgs. An org groups a tenant's banks; every bank belongs to exactly one, and bank ids are unique within
+// their org. Every bank-scoped request names both org_id and bank_id. Orgs are created explicitly
+// (OrgService.CreateOrg) and never on first use: any request under an unknown org returns NOT_FOUND
+// (ORG_NOT_FOUND).
+//
+// Banks. A bank is an isolated memory store within an org. A write to an unknown bank of an existing org creates
+// it with no config of its own (it inherits the org's, the tenant's and the server's), and every read of an
+// unknown bank returns NOT_FOUND.
 //
 // Configuration. BankConfig is the one config shape used at every stored level: server (the defaults block of
-// the server config file) < tenant < bank, then a consolidation strategy and the request (< item, for retain).
+// the server config file) < tenant < org < bank, then a consolidation strategy and the request (< item, for
+// retain).
 // It is grouped by phase: retain, observations, recall, reflect, mental_models, models. Scalars: a set value
 // replaces an unset one. Groups merge field by field. A ModelBinding is atomic. Lists: a set list replaces the
 // inherited one (no append). Patch RPCs take a FieldMask, which is also how a list is cleared. Each request
@@ -57,13 +64,14 @@
 // reasons, by code:
 //   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
 //                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
-//   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
-//                        read of a bank being deleted except GetOperation of its delete_bank operations)
+//   NOT_FOUND            NOT_FOUND (the named object does not exist), ORG_NOT_FOUND (unknown org, or an org
+//                        being deleted), BANK_NOT_FOUND (unknown bank, or any read of a bank being deleted
+//                        except GetOperation of its delete_bank operations)
 //   ALREADY_EXISTS       ALREADY_EXISTS (a create collided with an existing id)
-//   FAILED_PRECONDITION  FAILED_PRECONDITION (the state forbids the call), BANK_DELETING (a write to a bank
-//                        being deleted), MODEL_UNBOUND (a model slot the call needs has no binding),
-//                        OPERATION_NOT_CANCELLABLE, OPERATION_NOT_RETRYABLE (the operation's status or kind
-//                        forbids it)
+//   FAILED_PRECONDITION  FAILED_PRECONDITION (the state forbids the call), ORG_DELETING (a write under an org
+//                        being deleted), BANK_DELETING (a write to a bank being deleted), MODEL_UNBOUND (a
+//                        model slot the call needs has no binding), OPERATION_NOT_CANCELLABLE,
+//                        OPERATION_NOT_RETRYABLE (the operation's status or kind forbids it)
 //   UNAVAILABLE          UNAVAILABLE (a dependency failed; retry with backoff), RETRIEVAL_UNAVAILABLE (a
 //                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
 //   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens)
@@ -71,6 +79,7 @@
 //                        concurrent writer won; retry)
 //   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
 //   CANCELLED            CANCELLED (the client cancelled the call)
+//   UNIMPLEMENTED        UNIMPLEMENTED (the RPC is not available in this server version)
 //   INTERNAL             INTERNAL (a server bug)
 // The x-tenant-id header is checked first: missing or invalid = INVALID_ARGUMENT with field x-tenant-id.
 //
@@ -117,7 +126,7 @@ const (
 type MemoryServiceClient interface {
 	// Retain stores content and extracts memories from it. Synchronous by default (returns after the memories
 	// commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
-	// bank creates it with tenant defaults.
+	// bank of an existing org creates it.
 	Retain(ctx context.Context, in *RetainRequest, opts ...grpc.CallOption) (*RetainResponse, error)
 	// Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
 	// rerank, boosts and token packing. Unknown bank = NOT_FOUND.
@@ -251,7 +260,7 @@ func (c *memoryServiceClient) RestoreMemory(ctx context.Context, in *RestoreMemo
 type MemoryServiceServer interface {
 	// Retain stores content and extracts memories from it. Synchronous by default (returns after the memories
 	// commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
-	// bank creates it with tenant defaults.
+	// bank of an existing org creates it.
 	Retain(context.Context, *RetainRequest) (*RetainResponse, error)
 	// Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
 	// rerank, boosts and token packing. Unknown bank = NOT_FOUND.
@@ -1526,6 +1535,240 @@ var MentalModelService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	OrgService_CreateOrg_FullMethodName = "/memory.v1.OrgService/CreateOrg"
+	OrgService_GetOrg_FullMethodName    = "/memory.v1.OrgService/GetOrg"
+	OrgService_ListOrgs_FullMethodName  = "/memory.v1.OrgService/ListOrgs"
+	OrgService_DeleteOrg_FullMethodName = "/memory.v1.OrgService/DeleteOrg"
+)
+
+// OrgServiceClient is the client API for OrgService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// OrgService manages the calling tenant's orgs. Every bank belongs to exactly one org, and an org must exist
+// before anything can be written under it.
+type OrgServiceClient interface {
+	// CreateOrg creates an org, optionally with its own config level. An existing org = ALREADY_EXISTS; an org
+	// being deleted = FAILED_PRECONDITION (ORG_DELETING).
+	CreateOrg(ctx context.Context, in *CreateOrgRequest, opts ...grpc.CallOption) (*CreateOrgResponse, error)
+	// GetOrg returns one org. Unknown, or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+	GetOrg(ctx context.Context, in *GetOrgRequest, opts ...grpc.CallOption) (*GetOrgResponse, error)
+	// ListOrgs pages through the tenant's orgs in id order; orgs being deleted are left out.
+	ListOrgs(ctx context.Context, in *ListOrgsRequest, opts ...grpc.CallOption) (*ListOrgsResponse, error)
+	// DeleteOrg deletes an org with every bank in it. Not available in this server version: it returns
+	// UNIMPLEMENTED.
+	DeleteOrg(ctx context.Context, in *DeleteOrgRequest, opts ...grpc.CallOption) (*DeleteOrgResponse, error)
+}
+
+type orgServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewOrgServiceClient(cc grpc.ClientConnInterface) OrgServiceClient {
+	return &orgServiceClient{cc}
+}
+
+func (c *orgServiceClient) CreateOrg(ctx context.Context, in *CreateOrgRequest, opts ...grpc.CallOption) (*CreateOrgResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateOrgResponse)
+	err := c.cc.Invoke(ctx, OrgService_CreateOrg_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orgServiceClient) GetOrg(ctx context.Context, in *GetOrgRequest, opts ...grpc.CallOption) (*GetOrgResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOrgResponse)
+	err := c.cc.Invoke(ctx, OrgService_GetOrg_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orgServiceClient) ListOrgs(ctx context.Context, in *ListOrgsRequest, opts ...grpc.CallOption) (*ListOrgsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListOrgsResponse)
+	err := c.cc.Invoke(ctx, OrgService_ListOrgs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *orgServiceClient) DeleteOrg(ctx context.Context, in *DeleteOrgRequest, opts ...grpc.CallOption) (*DeleteOrgResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteOrgResponse)
+	err := c.cc.Invoke(ctx, OrgService_DeleteOrg_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// OrgServiceServer is the server API for OrgService service.
+// All implementations must embed UnimplementedOrgServiceServer
+// for forward compatibility.
+//
+// OrgService manages the calling tenant's orgs. Every bank belongs to exactly one org, and an org must exist
+// before anything can be written under it.
+type OrgServiceServer interface {
+	// CreateOrg creates an org, optionally with its own config level. An existing org = ALREADY_EXISTS; an org
+	// being deleted = FAILED_PRECONDITION (ORG_DELETING).
+	CreateOrg(context.Context, *CreateOrgRequest) (*CreateOrgResponse, error)
+	// GetOrg returns one org. Unknown, or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+	GetOrg(context.Context, *GetOrgRequest) (*GetOrgResponse, error)
+	// ListOrgs pages through the tenant's orgs in id order; orgs being deleted are left out.
+	ListOrgs(context.Context, *ListOrgsRequest) (*ListOrgsResponse, error)
+	// DeleteOrg deletes an org with every bank in it. Not available in this server version: it returns
+	// UNIMPLEMENTED.
+	DeleteOrg(context.Context, *DeleteOrgRequest) (*DeleteOrgResponse, error)
+	mustEmbedUnimplementedOrgServiceServer()
+}
+
+// UnimplementedOrgServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedOrgServiceServer struct{}
+
+func (UnimplementedOrgServiceServer) CreateOrg(context.Context, *CreateOrgRequest) (*CreateOrgResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateOrg not implemented")
+}
+func (UnimplementedOrgServiceServer) GetOrg(context.Context, *GetOrgRequest) (*GetOrgResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOrg not implemented")
+}
+func (UnimplementedOrgServiceServer) ListOrgs(context.Context, *ListOrgsRequest) (*ListOrgsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListOrgs not implemented")
+}
+func (UnimplementedOrgServiceServer) DeleteOrg(context.Context, *DeleteOrgRequest) (*DeleteOrgResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteOrg not implemented")
+}
+func (UnimplementedOrgServiceServer) mustEmbedUnimplementedOrgServiceServer() {}
+func (UnimplementedOrgServiceServer) testEmbeddedByValue()                    {}
+
+// UnsafeOrgServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to OrgServiceServer will
+// result in compilation errors.
+type UnsafeOrgServiceServer interface {
+	mustEmbedUnimplementedOrgServiceServer()
+}
+
+func RegisterOrgServiceServer(s grpc.ServiceRegistrar, srv OrgServiceServer) {
+	// If the following call panics, it indicates UnimplementedOrgServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&OrgService_ServiceDesc, srv)
+}
+
+func _OrgService_CreateOrg_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateOrgRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServiceServer).CreateOrg(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrgService_CreateOrg_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServiceServer).CreateOrg(ctx, req.(*CreateOrgRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrgService_GetOrg_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOrgRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServiceServer).GetOrg(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrgService_GetOrg_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServiceServer).GetOrg(ctx, req.(*GetOrgRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrgService_ListOrgs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListOrgsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServiceServer).ListOrgs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrgService_ListOrgs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServiceServer).ListOrgs(ctx, req.(*ListOrgsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OrgService_DeleteOrg_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteOrgRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServiceServer).DeleteOrg(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrgService_DeleteOrg_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServiceServer).DeleteOrg(ctx, req.(*DeleteOrgRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// OrgService_ServiceDesc is the grpc.ServiceDesc for OrgService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var OrgService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "memory.v1.OrgService",
+	HandlerType: (*OrgServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateOrg",
+			Handler:    _OrgService_CreateOrg_Handler,
+		},
+		{
+			MethodName: "GetOrg",
+			Handler:    _OrgService_GetOrg_Handler,
+		},
+		{
+			MethodName: "ListOrgs",
+			Handler:    _OrgService_ListOrgs_Handler,
+		},
+		{
+			MethodName: "DeleteOrg",
+			Handler:    _OrgService_DeleteOrg_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "memory/v1/memory.proto",
+}
+
+const (
 	BankService_CreateBank_FullMethodName         = "/memory.v1.BankService/CreateBank"
 	BankService_GetBank_FullMethodName            = "/memory.v1.BankService/GetBank"
 	BankService_ListBanks_FullMethodName          = "/memory.v1.BankService/ListBanks"
@@ -1548,7 +1791,7 @@ type BankServiceClient interface {
 	CreateBank(ctx context.Context, in *CreateBankRequest, opts ...grpc.CallOption) (*CreateBankResponse, error)
 	// GetBank returns one bank. Unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
 	GetBank(ctx context.Context, in *GetBankRequest, opts ...grpc.CallOption) (*GetBankResponse, error)
-	// ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
+	// ListBanks pages through an org's banks in id order; banks being deleted are left out.
 	ListBanks(ctx context.Context, in *ListBanksRequest, opts ...grpc.CallOption) (*ListBanksResponse, error)
 	// DeleteBank marks the bank as being deleted, cancels its pending operations and enqueues delete_bank, all
 	// at once, and returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
@@ -1658,7 +1901,7 @@ type BankServiceServer interface {
 	CreateBank(context.Context, *CreateBankRequest) (*CreateBankResponse, error)
 	// GetBank returns one bank. Unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
 	GetBank(context.Context, *GetBankRequest) (*GetBankResponse, error)
-	// ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
+	// ListBanks pages through an org's banks in id order; banks being deleted are left out.
 	ListBanks(context.Context, *ListBanksRequest) (*ListBanksResponse, error)
 	// DeleteBank marks the bank as being deleted, cancels its pending operations and enqueues delete_bank, all
 	// at once, and returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
@@ -1897,6 +2140,9 @@ const (
 	ConfigService_GetTenantConfig_FullMethodName    = "/memory.v1.ConfigService/GetTenantConfig"
 	ConfigService_UpdateTenantConfig_FullMethodName = "/memory.v1.ConfigService/UpdateTenantConfig"
 	ConfigService_ResetTenantConfig_FullMethodName  = "/memory.v1.ConfigService/ResetTenantConfig"
+	ConfigService_GetOrgConfig_FullMethodName       = "/memory.v1.ConfigService/GetOrgConfig"
+	ConfigService_UpdateOrgConfig_FullMethodName    = "/memory.v1.ConfigService/UpdateOrgConfig"
+	ConfigService_ResetOrgConfig_FullMethodName     = "/memory.v1.ConfigService/ResetOrgConfig"
 	ConfigService_GetBankConfig_FullMethodName      = "/memory.v1.ConfigService/GetBankConfig"
 	ConfigService_UpdateBankConfig_FullMethodName   = "/memory.v1.ConfigService/UpdateBankConfig"
 	ConfigService_ResetBankConfig_FullMethodName    = "/memory.v1.ConfigService/ResetBankConfig"
@@ -1911,8 +2157,8 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// ConfigService reads and writes how the tenant's banks behave: the tenant and bank config levels, the prompt
-// preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
+// ConfigService reads and writes how the tenant's banks behave: the tenant, org and bank config levels, the
+// prompt preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
 // the effective config they resolve to.
 type ConfigServiceClient interface {
 	// GetTenantConfig returns the tenant's own config and the effective tenant defaults (server < tenant).
@@ -1922,7 +2168,15 @@ type ConfigServiceClient interface {
 	// ResetTenantConfig removes the tenant's own config at the given paths, so they inherit the server defaults
 	// again.
 	ResetTenantConfig(ctx context.Context, in *ResetTenantConfigRequest, opts ...grpc.CallOption) (*ResetTenantConfigResponse, error)
-	// GetBankConfig returns the bank's own overrides and its effective config (server < tenant < bank).
+	// GetOrgConfig returns the org's own config and its effective config (server < tenant < org). Unknown, or
+	// being deleted = NOT_FOUND (ORG_NOT_FOUND).
+	GetOrgConfig(ctx context.Context, in *GetOrgConfigRequest, opts ...grpc.CallOption) (*GetOrgConfigResponse, error)
+	// UpdateOrgConfig patches the org's own config with a FieldMask. It never creates an org.
+	UpdateOrgConfig(ctx context.Context, in *UpdateOrgConfigRequest, opts ...grpc.CallOption) (*UpdateOrgConfigResponse, error)
+	// ResetOrgConfig removes the org's own config at the given paths, so they inherit the tenant and server
+	// levels again.
+	ResetOrgConfig(ctx context.Context, in *ResetOrgConfigRequest, opts ...grpc.CallOption) (*ResetOrgConfigResponse, error)
+	// GetBankConfig returns the bank's own overrides and its effective config (server < tenant < org < bank).
 	GetBankConfig(ctx context.Context, in *GetBankConfigRequest, opts ...grpc.CallOption) (*GetBankConfigResponse, error)
 	// UpdateBankConfig patches the bank's own overrides with a FieldMask.
 	UpdateBankConfig(ctx context.Context, in *UpdateBankConfigRequest, opts ...grpc.CallOption) (*UpdateBankConfigResponse, error)
@@ -1972,6 +2226,36 @@ func (c *configServiceClient) ResetTenantConfig(ctx context.Context, in *ResetTe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ResetTenantConfigResponse)
 	err := c.cc.Invoke(ctx, ConfigService_ResetTenantConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) GetOrgConfig(ctx context.Context, in *GetOrgConfigRequest, opts ...grpc.CallOption) (*GetOrgConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetOrgConfigResponse)
+	err := c.cc.Invoke(ctx, ConfigService_GetOrgConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) UpdateOrgConfig(ctx context.Context, in *UpdateOrgConfigRequest, opts ...grpc.CallOption) (*UpdateOrgConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateOrgConfigResponse)
+	err := c.cc.Invoke(ctx, ConfigService_UpdateOrgConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *configServiceClient) ResetOrgConfig(ctx context.Context, in *ResetOrgConfigRequest, opts ...grpc.CallOption) (*ResetOrgConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResetOrgConfigResponse)
+	err := c.cc.Invoke(ctx, ConfigService_ResetOrgConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -2062,8 +2346,8 @@ func (c *configServiceClient) DeleteDirective(ctx context.Context, in *DeleteDir
 // All implementations must embed UnimplementedConfigServiceServer
 // for forward compatibility.
 //
-// ConfigService reads and writes how the tenant's banks behave: the tenant and bank config levels, the prompt
-// preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
+// ConfigService reads and writes how the tenant's banks behave: the tenant, org and bank config levels, the
+// prompt preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
 // the effective config they resolve to.
 type ConfigServiceServer interface {
 	// GetTenantConfig returns the tenant's own config and the effective tenant defaults (server < tenant).
@@ -2073,7 +2357,15 @@ type ConfigServiceServer interface {
 	// ResetTenantConfig removes the tenant's own config at the given paths, so they inherit the server defaults
 	// again.
 	ResetTenantConfig(context.Context, *ResetTenantConfigRequest) (*ResetTenantConfigResponse, error)
-	// GetBankConfig returns the bank's own overrides and its effective config (server < tenant < bank).
+	// GetOrgConfig returns the org's own config and its effective config (server < tenant < org). Unknown, or
+	// being deleted = NOT_FOUND (ORG_NOT_FOUND).
+	GetOrgConfig(context.Context, *GetOrgConfigRequest) (*GetOrgConfigResponse, error)
+	// UpdateOrgConfig patches the org's own config with a FieldMask. It never creates an org.
+	UpdateOrgConfig(context.Context, *UpdateOrgConfigRequest) (*UpdateOrgConfigResponse, error)
+	// ResetOrgConfig removes the org's own config at the given paths, so they inherit the tenant and server
+	// levels again.
+	ResetOrgConfig(context.Context, *ResetOrgConfigRequest) (*ResetOrgConfigResponse, error)
+	// GetBankConfig returns the bank's own overrides and its effective config (server < tenant < org < bank).
 	GetBankConfig(context.Context, *GetBankConfigRequest) (*GetBankConfigResponse, error)
 	// UpdateBankConfig patches the bank's own overrides with a FieldMask.
 	UpdateBankConfig(context.Context, *UpdateBankConfigRequest) (*UpdateBankConfigResponse, error)
@@ -2107,6 +2399,15 @@ func (UnimplementedConfigServiceServer) UpdateTenantConfig(context.Context, *Upd
 }
 func (UnimplementedConfigServiceServer) ResetTenantConfig(context.Context, *ResetTenantConfigRequest) (*ResetTenantConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResetTenantConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) GetOrgConfig(context.Context, *GetOrgConfigRequest) (*GetOrgConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetOrgConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) UpdateOrgConfig(context.Context, *UpdateOrgConfigRequest) (*UpdateOrgConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateOrgConfig not implemented")
+}
+func (UnimplementedConfigServiceServer) ResetOrgConfig(context.Context, *ResetOrgConfigRequest) (*ResetOrgConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResetOrgConfig not implemented")
 }
 func (UnimplementedConfigServiceServer) GetBankConfig(context.Context, *GetBankConfigRequest) (*GetBankConfigResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetBankConfig not implemented")
@@ -2203,6 +2504,60 @@ func _ConfigService_ResetTenantConfig_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConfigServiceServer).ResetTenantConfig(ctx, req.(*ResetTenantConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_GetOrgConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetOrgConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).GetOrgConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_GetOrgConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).GetOrgConfig(ctx, req.(*GetOrgConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_UpdateOrgConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateOrgConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).UpdateOrgConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_UpdateOrgConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).UpdateOrgConfig(ctx, req.(*UpdateOrgConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConfigService_ResetOrgConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetOrgConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConfigServiceServer).ResetOrgConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConfigService_ResetOrgConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConfigServiceServer).ResetOrgConfig(ctx, req.(*ResetOrgConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2369,6 +2724,18 @@ var ConfigService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ResetTenantConfig",
 			Handler:    _ConfigService_ResetTenantConfig_Handler,
+		},
+		{
+			MethodName: "GetOrgConfig",
+			Handler:    _ConfigService_GetOrgConfig_Handler,
+		},
+		{
+			MethodName: "UpdateOrgConfig",
+			Handler:    _ConfigService_UpdateOrgConfig_Handler,
+		},
+		{
+			MethodName: "ResetOrgConfig",
+			Handler:    _ConfigService_ResetOrgConfig_Handler,
 		},
 		{
 			MethodName: "GetBankConfig",

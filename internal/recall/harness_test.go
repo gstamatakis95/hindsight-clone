@@ -19,7 +19,7 @@ import (
 )
 
 // testBank is the bank every test recalls from.
-var testBank = domain.BankRef{Tenant: "t1", Bank: "b1"}
+var testBank = domain.NewBankRef("t1", "org", "b1")
 
 // testNow is the frozen clock time of every test.
 var testNow = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -108,6 +108,7 @@ func newEnv(t *testing.T, o envOpts) *env {
 		llm: fake.NewLLM(),
 	}
 	e.store = pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, e.store, domain.NewBankRef("t", "org", ""), domain.NewBankRef("t1", "org", ""))
 	models := &domain.ModelBindings{Default: &domain.ModelBinding{Model: "llm-1"}}
 	if o.rerank {
 		models.Rerank = &domain.ModelBinding{Model: "rerank-1"}

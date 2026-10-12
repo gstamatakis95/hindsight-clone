@@ -68,8 +68,8 @@ func checkBuilds(t *testing.T, ops []domain.Operation, b domain.BankRef, n int) 
 func TestTemplateRoundTrip(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc(DeleteConfig{})
-	src := domain.BankRef{Tenant: "t", Bank: "src"}
-	dst := domain.BankRef{Tenant: "t", Bank: "dst"}
+	src := domain.NewBankRef("t", "org", "src")
+	dst := domain.NewBankRef("t", "org", "dst")
 	seedTemplateSource(t, e, src)
 
 	tmpl, err := s.ExportBankTemplate(e.ctx, src)
@@ -121,7 +121,7 @@ func assertTemplateCopied(t *testing.T, e env, src, dst domain.BankRef) {
 func TestTemplateCreateRollsBackOnBadSpec(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc(DeleteConfig{})
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	create := func(specs ...domain.MentalModelSpec) error {
 		_, _, err := s.CreateBank(e.ctx, CreateRequest{
 			Bank: domain.Bank{Ref: b, Name: "x"}, Template: &domain.BankTemplate{MentalModels: specs},

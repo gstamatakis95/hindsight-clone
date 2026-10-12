@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	pb "memd/gen/memory/v1"
@@ -22,6 +24,11 @@ import (
 type Client struct {
 	// Tenant is the tenant id every call sends.
 	Tenant string
+	// Org is the org the example's banks live in; every bank-scoped request sends it as org_id. Orgs are never
+	// created on first use, so Run creates it (EnsureOrg) before the scenario starts.
+	Org string
+	// Orgs is OrgService.
+	Orgs pb.OrgServiceClient
 	// Memory is MemoryService: retain, recall, reflect and memory curation.
 	Memory pb.MemoryServiceClient
 	// Documents is DocumentService.
@@ -32,7 +39,7 @@ type Client struct {
 	MentalModels pb.MentalModelServiceClient
 	// Banks is BankService.
 	Banks pb.BankServiceClient
-	// Config is ConfigService: tenant and bank config and directives.
+	// Config is ConfigService: tenant, org and bank config and directives.
 	Config pb.ConfigServiceClient
 	// Operations is OperationService: background work and the event feed.
 	Operations pb.OperationServiceClient
@@ -40,17 +47,31 @@ type Client struct {
 	conn *grpc.ClientConn
 }
 
-// Dial connects to a memd at addr (plaintext) on behalf of tenant.
-func Dial(addr, tenant string) (*Client, error) {
+// Dial connects to a memd at addr (plaintext) on behalf of tenant, for the banks of org.
+func Dial(addr, tenant, org string) (*Client, error) {
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
-	return newClient(conn, tenant), nil
+	return newClient(conn, tenant, org), nil
 }
 
-// As returns a client over the same connection that acts for another tenant.
-func (c *Client) As(tenant string) *Client { return newClient(c.conn, tenant) }
+// As returns a client over the same connection that acts for another tenant, in an org of the same id. The org
+// may not exist yet in that tenant: call EnsureOrg before writing.
+func (c *Client) As(tenant string) *Client { return newClient(c.conn, tenant, c.Org) }
+
+// EnsureOrg creates the client's org in its tenant. An org that already exists (ALREADY_EXISTS) is fine, so an
+// example can run again against the same server.
+func (c *Client) EnsureOrg(ctx context.Context) error {
+	_, err := c.Orgs.CreateOrg(ctx, &pb.CreateOrgRequest{OrgId: c.Org})
+	if status.Code(err) == codes.AlreadyExists {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create org %s: %w", c.Org, err)
+	}
+	return nil
+}
 
 // Close closes the connection.
 func (c *Client) Close() error {
@@ -60,10 +81,10 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func newClient(conn *grpc.ClientConn, tenant string) *Client {
+func newClient(conn *grpc.ClientConn, tenant, org string) *Client {
 	cc := tenantConn{conn: conn, tenant: tenant}
 	return &Client{
-		Tenant: tenant, conn: conn,
+		Tenant: tenant, Org: org, conn: conn, Orgs: pb.NewOrgServiceClient(cc),
 		Memory: pb.NewMemoryServiceClient(cc), Documents: pb.NewDocumentServiceClient(cc),
 		Observations: pb.NewObservationServiceClient(cc), MentalModels: pb.NewMentalModelServiceClient(cc),
 		Banks: pb.NewBankServiceClient(cc), Config: pb.NewConfigServiceClient(cc),
@@ -92,28 +113,33 @@ func (t tenantConn) out(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, "x-tenant-id", t.tenant)
 }
 
-// Run is the whole main of an example: it reads the -addr, -tenant and -timeout flags (defaults come from the
-// MEMD_ADDR and MEMD_TENANT environment variables, then localhost:50051 and "examples"), connects, runs
-// scenario and exits 1 with the error on failure. Flags an example defines itself must be registered before Run.
+// Run is the whole main of an example: it reads the -addr, -tenant, -org and -timeout flags (defaults come from
+// the MEMD_ADDR, MEMD_TENANT and MEMD_ORG environment variables, then localhost:50051, "examples" and "examples"),
+// connects, creates the org (EnsureOrg: orgs must exist before anything is written under them), runs scenario and
+// exits 1 with the error on failure. Flags an example defines itself must be registered before Run.
 func Run(scenario func(ctx context.Context, c *Client) error) {
 	addr := flag.String("addr", env("MEMD_ADDR", "localhost:50051"), "memd gRPC address")
 	tenant := flag.String("tenant", env("MEMD_TENANT", "examples"), "tenant id sent as x-tenant-id")
+	org := flag.String("org", env("MEMD_ORG", "examples"), "org id the example's banks live in")
 	timeout := flag.Duration("timeout", 5*time.Minute, "give up after this long")
 	flag.Parse()
-	if err := run(*addr, *tenant, *timeout, scenario); err != nil {
+	if err := run(*addr, *tenant, *org, *timeout, scenario); err != nil {
 		fmt.Fprintln(os.Stderr, "FAILED:", err)
 		os.Exit(1)
 	}
 }
 
-func run(addr, tenant string, timeout time.Duration, scenario func(ctx context.Context, c *Client) error) error {
+func run(addr, tenant, org string, timeout time.Duration, scenario func(ctx context.Context, c *Client) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	c, err := Dial(addr, tenant)
+	c, err := Dial(addr, tenant, org)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = c.Close() }()
+	if err := c.EnsureOrg(ctx); err != nil {
+		return err
+	}
 	return scenario(ctx, c)
 }
 
@@ -157,7 +183,7 @@ func Expect(ok bool, format string, args ...any) error {
 func WaitIdle(ctx context.Context, c *Client, bank string, ignoreKinds ...string) error {
 	quiet := 0 // a job can enqueue its successor as it finishes, so two quiet polls in a row count as idle
 	return Until(ctx, func() (bool, error) {
-		resp, err := c.Banks.GetBankStats(ctx, &pb.GetBankStatsRequest{BankId: bank})
+		resp, err := c.Banks.GetBankStats(ctx, &pb.GetBankStatsRequest{OrgId: c.Org, BankId: bank})
 		if err != nil {
 			return false, fmt.Errorf("get bank stats: %w", err)
 		}
@@ -177,7 +203,7 @@ func WaitOperation(ctx context.Context, c *Client, bank, id string, extra ...pb.
 ) (*pb.Operation, error) {
 	var op *pb.Operation
 	err := Until(ctx, func() (bool, error) {
-		resp, err := c.Operations.GetOperation(ctx, &pb.GetOperationRequest{BankId: bank, OperationId: id})
+		resp, err := c.Operations.GetOperation(ctx, &pb.GetOperationRequest{OrgId: c.Org, BankId: bank, OperationId: id})
 		if err != nil {
 			return false, fmt.Errorf("get operation %s: %w", id, err)
 		}

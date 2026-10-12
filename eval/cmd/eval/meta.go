@@ -74,6 +74,8 @@ type targetMeta struct {
 	Address string `json:"address"`
 	// Tenant is memd's tenant.
 	Tenant string `json:"tenant,omitempty"`
+	// Org is memd's org.
+	Org string `json:"org,omitempty"`
 	// Models is the model bound to each slot, as the target reports it for the first bank.
 	Models map[string]string `json:"models,omitempty"`
 	// ModelsError is why Models could not be read.

@@ -22,7 +22,7 @@ import (
 )
 
 // testBank is the bank every retain test writes to.
-var testBank = domain.BankRef{Tenant: "acme", Bank: "notes"}
+var testBank = domain.NewBankRef("acme", "org", "notes")
 
 // env is the Service over a pgtest store, fake.Blob, fake.LLM and fake.Embedder, with its retainer and
 // ingestor at hand.
@@ -54,6 +54,7 @@ func newEnv(t *testing.T, batch int) *env {
 		emb: fake.NewEmbedder(fake.EmbedSimilar), blob: fake.NewBlob(),
 	}
 	e.store = pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, e.store, domain.NewBankRef("acme", "org", ""))
 	e.cfg = config.NewResolver(e.store, server)
 	router := ai.NewRouter()
 	e.svc = New(Deps{

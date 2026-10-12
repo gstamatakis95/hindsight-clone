@@ -19,7 +19,7 @@ var _ store.DocumentRepo = (*documentRepo)(nil)
 
 // Get returns the document with its live unit counts; an unknown id is domain.ErrNotFound.
 func (r *documentRepo) Get(ctx context.Context, b domain.BankRef, id domain.DocumentID) (domain.Document, error) {
-	row, err := r.q.DocumentGet(ctx, db.DocumentGetParams{TenantID: b.Tenant, BankID: b.Bank, ID: string(id)})
+	row, err := r.q.DocumentGet(ctx, db.DocumentGetParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id)})
 	if err != nil {
 		return domain.Document{}, mapErr(fmt.Sprintf("document %s", id), err)
 	}
@@ -28,7 +28,7 @@ func (r *documentRepo) Get(ctx context.Context, b domain.BankRef, id domain.Docu
 		return domain.Document{}, err
 	}
 	counts, err := r.q.DocumentUnitCounts(ctx, db.DocumentUnitCountsParams{
-		TenantID: b.Tenant, BankID: b.Bank, DocumentID: textPtr(id),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, DocumentID: textPtr(id),
 	})
 	if err != nil {
 		return domain.Document{}, mapErr("document unit counts", err)
@@ -43,7 +43,7 @@ func (r *documentRepo) Get(ctx context.Context, b domain.BankRef, id domain.Docu
 // documentOf builds a domain.Document from its row, without the unit counts (MemoriesByFactType is empty).
 func documentOf(row db.Document) (domain.Document, error) {
 	d := domain.Document{
-		ID: domain.DocumentID(row.ID), Bank: domain.BankRef{Tenant: row.TenantID, Bank: row.BankID},
+		ID: domain.DocumentID(row.ID), Bank: domain.NewBankRef(row.TenantID, row.OrgID, row.BankID),
 		ContentHash: row.ContentHash, OverridesHash: row.OverridesHash, Tags: row.Tags, BlobKey: row.BlobKey,
 		ExtractedAt: row.ExtractedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		MemoriesByFactType: map[domain.FactType]int64{},
@@ -76,7 +76,7 @@ func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
 		return err
 	}
 	err = r.q.DocumentUpsert(ctx, db.DocumentUpsertParams{
-		TenantID: d.Bank.Tenant, BankID: d.Bank.Bank, ID: string(d.ID), Overrides: overrides,
+		TenantID: d.Bank.Tenant, OrgID: d.Bank.Org, BankID: d.Bank.Bank, ID: string(d.ID), Overrides: overrides,
 		Tags: tagsOrEmpty(d.Tags), BlobKey: d.BlobKey, ObservationScopeModes: scopes,
 	})
 	return mapErr(fmt.Sprintf("upsert document %s", d.ID), err)
@@ -87,7 +87,7 @@ func (r *documentRepo) Complete(
 	ctx context.Context, b domain.BankRef, id domain.DocumentID, contentHash, overridesHash string,
 ) error {
 	n, err := r.q.DocumentComplete(ctx, db.DocumentCompleteParams{
-		ContentHash: contentHash, OverridesHash: overridesHash, TenantID: b.Tenant, BankID: b.Bank, ID: string(id),
+		ContentHash: contentHash, OverridesHash: overridesHash, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id),
 	})
 	return docRowsErr(fmt.Sprintf("complete document %s", id), n, err)
 }
@@ -98,7 +98,7 @@ func (r *documentRepo) SetTags(ctx context.Context, b domain.BankRef, id domain.
 		return err
 	}
 	n, err := r.q.DocumentSetTags(ctx, db.DocumentSetTagsParams{
-		Tags: tagsOrEmpty(tags), TenantID: b.Tenant, BankID: b.Bank, ID: string(id),
+		Tags: tagsOrEmpty(tags), TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id),
 	})
 	return docRowsErr(fmt.Sprintf("set tags of document %s", id), n, err)
 }

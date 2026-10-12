@@ -304,7 +304,7 @@ func (s *Service) enqueueEach(ctx context.Context, banks []domain.BankRef, enque
 		switch {
 		case gone(err):
 		case err != nil:
-			errs = append(errs, fmt.Errorf("bank %s/%s: %w", b.Tenant, b.Bank, err))
+			errs = append(errs, fmt.Errorf("bank %s: %w", b, err))
 		case !joined:
 			inserted++
 		}

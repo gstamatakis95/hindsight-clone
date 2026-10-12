@@ -122,7 +122,7 @@ func TestExpandScopesRejectsNonPositiveCap(t *testing.T) {
 }
 
 // bank is the bank the scope tests expand under.
-var bank = BankRef{Tenant: "t", Bank: "b"}
+var bank = NewBankRef("t", "org", "b")
 
 // ptr returns a pointer to v.
 func ptr[T any](v T) *T { return &v }

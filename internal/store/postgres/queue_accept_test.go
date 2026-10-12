@@ -69,7 +69,7 @@ func TestAcceptSerialKeys(t *testing.T) {
 	t.Parallel()
 	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
-	bank := domain.BankRef{Tenant: "tenant-serial", Bank: "bank-serial"}
+	bank := domain.NewBankRef("tenant-serial", "org", "bank-serial")
 	ensureQueueBanks(t, s, bank)
 	enqueueSerialJobs(t, s, bank)
 
@@ -185,7 +185,7 @@ func sampleDoubleHeld(ctx context.Context, pool *pgxpool.Pool, stop <-chan struc
 		var dup int
 		err := pool.QueryRow(ctx, `SELECT count(*) FROM (
 			SELECT 1 FROM operations WHERE status = 'processing' AND serial_key IS NOT NULL
-			GROUP BY tenant_id, bank_id, serial_key HAVING count(*) > 1) d`).Scan(&dup)
+			GROUP BY tenant_id, org_id, bank_id, serial_key HAVING count(*) > 1) d`).Scan(&dup)
 		if err != nil {
 			if ctx.Err() == nil {
 				res.err = err
@@ -205,7 +205,7 @@ func TestAcceptReclaim(t *testing.T) {
 	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
 	ctx := t.Context()
-	bank := domain.BankRef{Tenant: "tenant-reclaim", Bank: "bank-reclaim"}
+	bank := domain.NewBankRef("tenant-reclaim", "org", "bank-reclaim")
 	ensureQueueBanks(t, s, bank)
 	kind := domain.OperationKindRetainDocument
 	id := enqueueJob(t, s, store.Job{Bank: bank, Kind: kind, SerialKey: "doc:1", Payload: json.RawMessage(`{}`)})
@@ -230,7 +230,8 @@ func TestAcceptReclaim(t *testing.T) {
 	}
 	var events int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM lifecycle_events WHERE type = 'operation_failed'
-		AND operation_id = $1 AND tenant_id = $2 AND bank_id = $3`, string(id), bank.Tenant, bank.Bank).
+		AND operation_id = $1 AND tenant_id = $2 AND org_id = $3 AND bank_id = $4`,
+		string(id), bank.Tenant, bank.Org, bank.Bank).
 		Scan(&events); err != nil || events != 1 {
 		t.Errorf("operation_failed events = %d (%v), want 1", events, err)
 	}

@@ -37,7 +37,8 @@ func TestAcceptSeqOrder(t *testing.T) {
 	t.Parallel()
 	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
-	bank := domain.BankRef{Tenant: "tenant-seq", Bank: "bank-seq"}
+	bank := domain.NewBankRef("tenant-seq", "org", "bank-seq")
+	pgtest.CreateOrgs(t, s, bank)
 	if err := s.InTx(t.Context(), func(tx store.Tx) error {
 		_, err := tx.Banks().Ensure(t.Context(), bank)
 		return err
@@ -132,8 +133,8 @@ func checkSeqPrefix(
 		}
 		var n int64
 		err = pool.QueryRow(ctx,
-			`SELECT count(*) FROM memory_units WHERE tenant_id = $1 AND bank_id = $2 AND seq <= $3`,
-			bank.Tenant, bank.Bank, seq).Scan(&n)
+			`SELECT count(*) FROM memory_units WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND seq <= $4`,
+			bank.Tenant, bank.Org, bank.Bank, seq).Scan(&n)
 		if err != nil {
 			return fmt.Errorf("count units: %w", err)
 		}

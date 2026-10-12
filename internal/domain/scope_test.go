@@ -7,7 +7,7 @@ import (
 )
 
 func TestScopeKeyString(t *testing.T) {
-	b := BankRef{Tenant: "t", Bank: "b"}
+	b := NewBankRef("t", "org", "b")
 	cases := []struct {
 		name string
 		tags []string
@@ -59,7 +59,7 @@ func TestScopeKeyNoCollisions(t *testing.T) {
 }
 
 func TestParseScopeKeyCanonicalOnly(t *testing.T) {
-	b := BankRef{Tenant: "t", Bank: "b"}
+	b := NewBankRef("t", "org", "b")
 	k := NewScopeKey(b, []string{"Zed", "alpha", "é"})
 	got, err := ParseScopeKey(b, k.String())
 	if err != nil || !slices.Equal(got.Tags, k.Tags) || got.BankRef != b {

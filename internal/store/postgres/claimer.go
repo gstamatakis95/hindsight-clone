@@ -288,7 +288,7 @@ func (s *DB) finishFailed(ctx context.Context, id uuid.UUID, errText *string, gu
 		if peek.Status != string(domain.OperationStatusProcessing) {
 			return fmt.Errorf("%w: fail %s: status %s", domain.ErrFailedPrecondition, id, peek.Status)
 		}
-		bank := domain.BankRef{Tenant: peek.TenantID, Bank: peek.BankID}
+		bank := domain.NewBankRef(peek.TenantID, peek.OrgID, peek.BankID)
 		var seq int64
 		if !peek.CancelRequested {
 			if seq, err = liveSeq(ctx, t, bank); err != nil {
@@ -308,7 +308,7 @@ func (s *DB) finishFailed(ctx context.Context, id uuid.UUID, errText *string, gu
 			return nil
 		}
 		err = t.q.ClaimAppendFailedEvent(ctx, db.ClaimAppendFailedEventParams{
-			TenantID: bank.Tenant, BankID: bank.Bank, Seq: seq, OperationID: uuid.NullUUID{UUID: id, Valid: true},
+			TenantID: bank.Tenant, OrgID: bank.Org, BankID: bank.Bank, Seq: seq, OperationID: uuid.NullUUID{UUID: id, Valid: true},
 		})
 		return mapErr(fmt.Sprintf("fail %s: event", id), err)
 	})

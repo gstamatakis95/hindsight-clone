@@ -78,8 +78,10 @@ func (w *wiredStack) callRPC(t *testing.T, sd protoreflect.ServiceDescriptor, md
 	fillRequest(req)
 	method := "/" + string(sd.FullName()) + "/" + string(md.Name())
 	err = w.conn.Invoke(w.ctx(t), method, req.Interface(), out.New().Interface())
-	switch status.Code(err) {
-	case codes.Unimplemented, codes.Internal, codes.Unknown:
+	switch code := status.Code(err); {
+	case method == "/memory.v1.OrgService/DeleteOrg" && code == codes.Unimplemented:
+		// Wired, and answers UNIMPLEMENTED: org deletion is not available in this version.
+	case code == codes.Unimplemented, code == codes.Internal, code == codes.Unknown:
 		t.Fatalf("%s: %v", method, err)
 	}
 }
@@ -118,7 +120,7 @@ func configWrites() map[string]configWrite {
 			ctx context.Context, w *wiredStack, id string, c *pb.BankConfig,
 		) *status.Status {
 			_, err := banks(w).CreateBank(ctx, &pb.CreateBankRequest{
-				BankId: id, Initial: &pb.CreateBankRequest_Config{Config: c},
+				OrgId: testOrg, BankId: id, Initial: &pb.CreateBankRequest_Config{Config: c},
 			})
 			return status.Convert(err)
 		}},
@@ -126,19 +128,19 @@ func configWrites() map[string]configWrite {
 			ctx context.Context, w *wiredStack, id string, c *pb.BankConfig,
 		) *status.Status {
 			_, err := banks(w).CreateBank(ctx, &pb.CreateBankRequest{
-				BankId: id, Initial: &pb.CreateBankRequest_Template{Template: &pb.BankTemplate{Config: c}},
+				OrgId: testOrg, BankId: id, Initial: &pb.CreateBankRequest_Template{Template: &pb.BankTemplate{Config: c}},
 			})
 			return status.Convert(err)
 		}},
 		"UpdateBankConfig": {send: func(ctx context.Context, w *wiredStack, id string, c *pb.BankConfig) *status.Status {
-			_, err := configs(w).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{BankId: id, Config: c})
+			_, err := configs(w).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{OrgId: testOrg, BankId: id, Config: c})
 			return status.Convert(err)
 		}},
 		"UpdateBankConfig/masked": {send: func(
 			ctx context.Context, w *wiredStack, id string, c *pb.BankConfig,
 		) *status.Status {
 			_, err := configs(w).UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
-				BankId: id, Config: c, UpdateMask: masked,
+				OrgId: testOrg, BankId: id, Config: c, UpdateMask: masked,
 			})
 			return status.Convert(err)
 		}},
@@ -157,7 +159,7 @@ func (w *wiredStack) storedConfigs(t *testing.T, ctx context.Context, bank strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := configs.GetBankConfig(ctx, &pb.GetBankConfigRequest{BankId: bank})
+	b, err := configs.GetBankConfig(ctx, &pb.GetBankConfigRequest{OrgId: testOrg, BankId: bank})
 	if status.Code(err) != codes.NotFound && err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +180,7 @@ func TestConfigWritesValidated(t *testing.T) {
 				ctx := w.ctxAs(t, tenant)
 				if !cw.creates {
 					if _, err := pb.NewBankServiceClient(w.conn).CreateBank(ctx, &pb.CreateBankRequest{
-						BankId: bank, Initial: &pb.CreateBankRequest_Config{Config: seed},
+						OrgId: testOrg, BankId: bank, Initial: &pb.CreateBankRequest_Config{Config: seed},
 					}); err != nil {
 						t.Fatal(err)
 					}
@@ -219,23 +221,23 @@ func TestSpecOverridesValidated(t *testing.T) {
 	ctx := w.ctx(t)
 	bad := &pb.RefreshOverrides{Reflect: &pb.ReflectConfig{Disposition: &pb.Disposition{Empathy: 9}}}
 	banks := pb.NewBankServiceClient(w.conn)
-	_, err := banks.CreateBank(ctx, &pb.CreateBankRequest{BankId: "tpl", Initial: &pb.CreateBankRequest_Template{
+	_, err := banks.CreateBank(ctx, &pb.CreateBankRequest{OrgId: testOrg, BankId: "tpl", Initial: &pb.CreateBankRequest_Template{
 		Template: &pb.BankTemplate{MentalModels: []*pb.MentalModelSpec{{Id: "m", Overrides: bad}}},
 	}})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("template spec: err = %v, want INVALID_ARGUMENT", err)
 	}
-	if _, err := banks.GetBank(ctx, &pb.GetBankRequest{BankId: "tpl"}); status.Code(err) != codes.NotFound {
+	if _, err := banks.GetBank(ctx, &pb.GetBankRequest{OrgId: testOrg, BankId: "tpl"}); status.Code(err) != codes.NotFound {
 		t.Errorf("rejected template left a bank: err = %v, want NOT_FOUND", err)
 	}
 	models := pb.NewMentalModelServiceClient(w.conn)
-	if _, err := models.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{BankId: "b", Spec: &pb.MentalModelSpec{
+	if _, err := models.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{OrgId: testOrg, BankId: "b", Spec: &pb.MentalModelSpec{
 		Id: "m", Name: "M", SourceQuery: "q",
 	}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = models.UpdateMentalModel(ctx, &pb.UpdateMentalModelRequest{
-		BankId: "b", MentalModelId: "m", Spec: &pb.MentalModelSpec{Overrides: bad},
+		OrgId: testOrg, BankId: "b", MentalModelId: "m", Spec: &pb.MentalModelSpec{Overrides: bad},
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("update with invalid overrides: err = %v, want INVALID_ARGUMENT", err)
@@ -247,25 +249,25 @@ func TestRetagDocumentTags(t *testing.T) {
 	w := startWired(t)
 	ctx := w.ctx(t)
 	if _, err := pb.NewMemoryServiceClient(w.conn).Retain(ctx, &pb.RetainRequest{
-		BankId: "b", DocumentTags: []string{"x"},
+		OrgId: testOrg, BankId: "b", DocumentTags: []string{"x"},
 		Items: []*pb.RetainItem{{Content: "Alice works as a nurse.", DocumentId: "d"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	w.idle(t, "b")
 	documents := pb.NewDocumentServiceClient(w.conn)
-	_, err := documents.RetagDocument(ctx, &pb.RetagDocumentRequest{BankId: "b", DocumentId: "d"})
+	_, err := documents.RetagDocument(ctx, &pb.RetagDocumentRequest{OrgId: testOrg, BankId: "b", DocumentId: "d"})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("nil tags: err = %v, want INVALID_ARGUMENT", err)
 	}
 	resp, err := documents.RetagDocument(ctx, &pb.RetagDocumentRequest{
-		BankId: "b", DocumentId: "d", Tags: &pb.TagSet{},
+		OrgId: testOrg, BankId: "b", DocumentId: "d", Tags: &pb.TagSet{},
 	})
 	if err != nil || resp.GetOperation() == nil {
 		t.Fatalf("empty tag set: %v, %v; want a retag operation", resp, err)
 	}
 	w.idle(t, "b")
-	doc, err := documents.GetDocument(ctx, &pb.GetDocumentRequest{BankId: "b", DocumentId: "d"})
+	doc, err := documents.GetDocument(ctx, &pb.GetDocumentRequest{OrgId: testOrg, BankId: "b", DocumentId: "d"})
 	if err != nil || len(doc.GetDocument().GetTags()) != 0 {
 		t.Fatalf("after clearing: %v, %v; want no tags", doc, err)
 	}
@@ -278,14 +280,14 @@ func TestClearObservationsNeedsTarget(t *testing.T) {
 	ctx := w.ctx(t)
 	mem := pb.NewMemoryServiceClient(w.conn)
 	if _, err := mem.Retain(ctx, &pb.RetainRequest{
-		BankId: "b", Items: []*pb.RetainItem{{Content: "Alice moved to Lisbon in 2021. Alice works as a nurse."}},
+		OrgId: testOrg, BankId: "b", Items: []*pb.RetainItem{{Content: "Alice moved to Lisbon in 2021. Alice works as a nurse."}},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	w.idle(t, "b")
 	countObservations := func() int {
 		resp, err := mem.ListMemories(ctx, &pb.ListMemoriesRequest{
-			BankId: "b", FactTypes: []pb.FactType{pb.FactType_FACT_TYPE_OBSERVATION},
+			OrgId: testOrg, BankId: "b", FactTypes: []pb.FactType{pb.FactType_FACT_TYPE_OBSERVATION},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -298,9 +300,9 @@ func TestClearObservationsNeedsTarget(t *testing.T) {
 	}
 	observations := pb.NewObservationServiceClient(w.conn)
 	for name, req := range map[string]*pb.ClearObservationsRequest{
-		"no target":   {BankId: "b"},
-		"no scopes":   {BankId: "b", Target: &pb.ClearObservationsRequest_Scopes{Scopes: &pb.TagSetList{}}},
-		"all = false": {BankId: "b", Target: &pb.ClearObservationsRequest_All{All: false}},
+		"no target":   {OrgId: testOrg, BankId: "b"},
+		"no scopes":   {OrgId: testOrg, BankId: "b", Target: &pb.ClearObservationsRequest_Scopes{Scopes: &pb.TagSetList{}}},
+		"all = false": {OrgId: testOrg, BankId: "b", Target: &pb.ClearObservationsRequest_All{All: false}},
 	} {
 		if _, err := observations.ClearObservations(ctx, req); status.Code(err) != codes.InvalidArgument {
 			t.Errorf("%s: err = %v, want INVALID_ARGUMENT", name, err)
@@ -318,16 +320,16 @@ func TestReflectBasedOn(t *testing.T) {
 	ctx := w.ctx(t)
 	mem := pb.NewMemoryServiceClient(w.conn)
 	if _, err := mem.Retain(ctx, &pb.RetainRequest{
-		BankId: "b", Items: []*pb.RetainItem{{Content: "Alice works as a nurse."}},
+		OrgId: testOrg, BankId: "b", Items: []*pb.RetainItem{{Content: "Alice works as a nurse."}},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := mem.Reflect(ctx, &pb.ReflectRequest{BankId: "b", Query: "q"})
+	resp, err := mem.Reflect(ctx, &pb.ReflectRequest{OrgId: testOrg, BankId: "b", Query: "q"})
 	if err != nil || resp.GetBasedOn() == nil {
 		t.Errorf("based_on included by default: based_on = %v, err = %v; want non-nil", resp.GetBasedOn(), err)
 	}
 	resp, err = mem.Reflect(ctx, &pb.ReflectRequest{
-		BankId: "b", Query: "q", Include: &pb.ReflectInclude{BasedOn: proto.Bool(false)},
+		OrgId: testOrg, BankId: "b", Query: "q", Include: &pb.ReflectInclude{BasedOn: proto.Bool(false)},
 	})
 	if err != nil || resp.GetBasedOn() != nil {
 		t.Errorf("based_on excluded: based_on = %v, err = %v; want nil", resp.GetBasedOn(), err)

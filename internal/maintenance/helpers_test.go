@@ -26,9 +26,9 @@ import (
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 var (
-	bankA = domain.BankRef{Tenant: "t1", Bank: "a"}
-	bankB = domain.BankRef{Tenant: "t1", Bank: "b"}
-	bankC = domain.BankRef{Tenant: "t2", Bank: "c"}
+	bankA = domain.NewBankRef("t1", "org", "a")
+	bankB = domain.NewBankRef("t1", "org", "b")
+	bankC = domain.NewBankRef("t2", "org", "c")
 )
 
 // newClock returns a manual clock a day behind the database clock, at whole seconds.
@@ -47,6 +47,7 @@ type opsDB struct {
 func newOps(t testing.TB) *opsDB {
 	t.Helper()
 	d := pgtest.New(t)
+	pgtest.CreateOrgs(t, d.Store(), domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
 	o := &opsDB{DB: d.Store(), t: t, pool: d.Pool}
 	if err := o.InTx(t.Context(), func(tx store.Tx) error {
 		for _, b := range []domain.BankRef{bankA, bankB, bankC} {
@@ -110,14 +111,14 @@ func (o *opsDB) count(where string, args ...any) int {
 }
 
 // countBank counts bank b's operations of kind, with an extra SQL condition when where is not empty; its
-// placeholders start at $4.
+// placeholders start at $5.
 func (o *opsDB) countBank(b domain.BankRef, kind domain.OperationKind, where string, args ...any) int {
 	o.t.Helper()
-	cond := `tenant_id = $1 AND bank_id = $2 AND kind = $3`
+	cond := `tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND kind = $4`
 	if where != "" {
 		cond += " AND " + where
 	}
-	return o.count(cond, append([]any{b.Tenant, b.Bank, string(kind)}, args...)...)
+	return o.count(cond, append([]any{b.Tenant, b.Org, b.Bank, string(kind)}, args...)...)
 }
 
 // exec runs a SQL statement on the test's database.
@@ -153,8 +154,8 @@ func (o *opsDB) cancel(b domain.BankRef, id domain.OperationID) (domain.Operatio
 // markDeleting tombstones bank b, creating it if needed.
 func (o *opsDB) markDeleting(b domain.BankRef) {
 	o.t.Helper()
-	o.exec(`INSERT INTO banks (tenant_id, id, deleting_at) VALUES ($1, $2, now())
-		ON CONFLICT (tenant_id, id) DO UPDATE SET deleting_at = now()`, b.Tenant, b.Bank)
+	o.exec(`INSERT INTO banks (tenant_id, org_id, id, deleting_at) VALUES ($1, $2, $3, now())
+		ON CONFLICT (tenant_id, org_id, id) DO UPDATE SET deleting_at = now()`, b.Tenant, b.Org, b.Bank)
 }
 
 // retainJob is a retain_document job for document doc of bankA.

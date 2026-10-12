@@ -38,6 +38,7 @@ var errorCodes = []struct {
 var codeReasons = map[codes.Code]string{
 	codes.DeadlineExceeded: "DEADLINE_EXCEEDED",
 	codes.Canceled:         "CANCELLED",
+	codes.Unimplemented:    "UNIMPLEMENTED",
 	codes.Internal:         "INTERNAL",
 }
 

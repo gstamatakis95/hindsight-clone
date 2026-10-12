@@ -48,7 +48,7 @@ func (r *reader) GetUnits(ctx context.Context, b domain.BankRef, ids []domain.Un
 	if len(uuids) == 0 {
 		return []domain.Unit{}, nil
 	}
-	rows, err := r.queries().GetUnits(ctx, db.GetUnitsParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	rows, err := r.queries().GetUnits(ctx, db.GetUnitsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
 	if err != nil {
 		return nil, mapErr("get units", err)
 	}
@@ -72,7 +72,7 @@ func (r *reader) GetUnits(ctx context.Context, b domain.BankRef, ids []domain.Un
 
 // BankSeq returns the bank's latest committed change_seq; unknown = domain.ErrNotFound.
 func (r *reader) BankSeq(ctx context.Context, b domain.BankRef) (int64, error) {
-	seq, err := r.queries().BankChangeSeq(ctx, db.BankChangeSeqParams{TenantID: b.Tenant, ID: b.Bank})
+	seq, err := r.queries().BankChangeSeq(ctx, db.BankChangeSeqParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
 		return 0, bankErr(b, err)
 	}

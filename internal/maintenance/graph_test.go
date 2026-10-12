@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var testBank = domain.BankRef{Tenant: "acme", Bank: "notes"}
+var testBank = domain.NewBankRef("acme", "org", "notes")
 
 // stubLinker records the units it is asked to top up; advance moves the clock on its first call.
 type stubLinker struct {
@@ -164,6 +164,7 @@ func TestGraphMaintenanceTopsUpAndPrunes(t *testing.T) {
 	ctx := context.Background()
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
 	seedHub(t, db, 3)
 	if d, p := queues(t, db); len(d) != 3 || len(p) != 2 {
 		t.Fatalf("seeded queues: %d dirty, %d entities; want 3 and 2", len(d), len(p))
@@ -195,6 +196,7 @@ func TestGraphMaintenanceResumesAfterBudget(t *testing.T) {
 	ctx := context.Background()
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
 	n := DirtyBatch + 50
 	seedHub(t, db, n)
 	// The first batch "takes" longer than the whole budget.
@@ -225,6 +227,7 @@ func TestGraphMaintenanceStopsOnTombstone(t *testing.T) {
 	ctx := context.Background()
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
 	seedHub(t, db, 2)
 	g := New(Deps{Store: db, Linker: &stubLinker{clock: clock}, Clock: clock})
 
@@ -239,7 +242,7 @@ func TestGraphMaintenanceStopsOnTombstone(t *testing.T) {
 	if d, _ := queues(t, db); len(d) != 2 {
 		t.Fatalf("a run on a deleting bank touched graph_dirty: %d left", len(d))
 	}
-	gone := domain.BankRef{Tenant: "acme", Bank: "gone"}
+	gone := domain.NewBankRef("acme", "org", "gone")
 	if _, err := g.drainGraph(ctx, gone, DefaultGraphBudget); !errors.Is(err, domain.ErrCancelled) {
 		t.Fatalf("Run on an unknown bank: %v, want ErrCancelled", err)
 	}
@@ -269,6 +272,7 @@ func TestGraphMaintenanceRechecksAfterFinalBatch(t *testing.T) {
 	ctx := context.Background()
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
 	seedHub(t, db, 2)
 	z, w := pgtest.ID[domain.UnitID]("z"), pgtest.ID[domain.UnitID]("w")
 	err := db.InTx(ctx, func(tx store.Tx) error {
@@ -356,6 +360,7 @@ func pendingGraphJobs(t *testing.T, db *postgres.DB) []domain.Operation {
 func TestGraphJobReenqueuesAndRechecks(t *testing.T) {
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
 	seedHub(t, db, DirtyBatch+50)
 	l := &stubLinker{clock: clock, advance: DefaultGraphBudget + time.Second}
 	g := New(Deps{Store: db, Linker: l, Clock: clock})

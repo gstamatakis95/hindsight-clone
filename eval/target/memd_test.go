@@ -33,7 +33,7 @@ func dialStub(t *testing.T, o stub.Options) *grpc.ClientConn {
 
 func TestMemdRetainRecallReflect(t *testing.T) {
 	ctx := context.Background()
-	m := target.NewMemd(dialStub(t, stub.Options{PendingPolls: 2}), "t1")
+	m := target.NewMemd(dialStub(t, stub.Options{PendingPolls: 2}), "t1", "o1")
 	if m.Name() != "memd" {
 		t.Fatalf("Name = %q", m.Name())
 	}
@@ -84,7 +84,7 @@ func TestMemdRetainRecallReflect(t *testing.T) {
 
 func TestMemdBackground(t *testing.T) {
 	ctx := context.Background()
-	m := target.NewMemd(dialStub(t, stub.Options{FailedOps: 1}), "t1")
+	m := target.NewMemd(dialStub(t, stub.Options{FailedOps: 1}), "t1", "o1")
 	for _, id := range []string{"s1", "s2"} {
 		if _, err := m.Retain(ctx, "b", harness.Session{ID: id, Content: "hello"}); err != nil {
 			t.Fatalf("Retain: %v", err)
@@ -104,7 +104,7 @@ func TestMemdBackground(t *testing.T) {
 }
 
 func TestMemdTenantRequired(t *testing.T) {
-	m := target.NewMemd(dialStub(t, stub.Options{}), "")
+	m := target.NewMemd(dialStub(t, stub.Options{}), "", "o1")
 	_, err := m.Retain(context.Background(), "b", harness.Session{ID: "s1", Content: "x"})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("Retain without tenant: got %v, want InvalidArgument", err)
@@ -114,10 +114,10 @@ func TestMemdTenantRequired(t *testing.T) {
 func TestMemdTenantIsolation(t *testing.T) {
 	ctx := context.Background()
 	conn := dialStub(t, stub.Options{})
-	if _, err := target.NewMemd(conn, "t1").Retain(ctx, "b", harness.Session{ID: "s1", Content: "x"}); err != nil {
+	if _, err := target.NewMemd(conn, "t1", "o1").Retain(ctx, "b", harness.Session{ID: "s1", Content: "x"}); err != nil {
 		t.Fatalf("Retain: %v", err)
 	}
-	_, err := target.NewMemd(conn, "t2").PendingOperations(ctx, "b")
+	_, err := target.NewMemd(conn, "t2", "o1").PendingOperations(ctx, "b")
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("other tenant's bank: got %v, want NotFound", err)
 	}

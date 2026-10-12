@@ -19,7 +19,7 @@ var _ store.ChunkRepo = (*chunkRepo)(nil)
 // Committed returns the document's committed chunks as index -> content hash.
 func (r *chunkRepo) Committed(ctx context.Context, b domain.BankRef, doc domain.DocumentID) (map[int]string, error) {
 	rows, err := r.q.ChunkCommitted(ctx, db.ChunkCommittedParams{
-		TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, DocumentID: string(doc),
 	})
 	if err != nil {
 		return nil, mapErr(fmt.Sprintf("committed chunks of %s", doc), err)
@@ -43,13 +43,13 @@ func (r *chunkRepo) Insert(ctx context.Context, cs []domain.Chunk) error {
 		}
 		idx := toInt32Sat(c.Index)
 		err = r.q.ChunkDeleteReplaced(ctx, db.ChunkDeleteReplacedParams{
-			TenantID: c.Bank.Tenant, BankID: c.Bank.Bank, DocumentID: string(c.DocumentID), ChunkIndex: idx, ID: id,
+			TenantID: c.Bank.Tenant, OrgID: c.Bank.Org, BankID: c.Bank.Bank, DocumentID: string(c.DocumentID), ChunkIndex: idx, ID: id,
 		})
 		if err != nil {
 			return mapErr("replace chunk", err)
 		}
 		err = r.q.ChunkInsert(ctx, db.ChunkInsertParams{
-			ID: id, TenantID: c.Bank.Tenant, BankID: c.Bank.Bank, DocumentID: string(c.DocumentID), ChunkIndex: idx,
+			ID: id, TenantID: c.Bank.Tenant, OrgID: c.Bank.Org, BankID: c.Bank.Bank, DocumentID: string(c.DocumentID), ChunkIndex: idx,
 			Text: c.Text, ContentHash: c.ContentHash, TokenCount: toInt32Sat(c.TokenCount), CreatedAt: orNow(c.CreatedAt),
 		})
 		if err != nil {

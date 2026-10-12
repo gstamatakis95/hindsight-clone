@@ -19,7 +19,7 @@ var _ pb.MemoryServiceServer = (*MemoryHandler)(nil)
 
 // Retain stores content and extracts memories from it.
 func (h *MemoryHandler) Retain(ctx context.Context, req *pb.RetainRequest) (*pb.RetainResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -45,7 +45,7 @@ func (h *MemoryHandler) Retain(ctx context.Context, req *pb.RetainRequest) (*pb.
 
 // Recall retrieves memories for a query.
 func (h *MemoryHandler) Recall(ctx context.Context, req *pb.RecallRequest) (*pb.RecallResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -78,7 +78,7 @@ func (h *MemoryHandler) ListRecallArms(
 
 // Reflect answers a query with the agentic reflect loop.
 func (h *MemoryHandler) Reflect(ctx context.Context, req *pb.ReflectRequest) (*pb.ReflectResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -102,8 +102,8 @@ func (h *MemoryHandler) Reflect(ctx context.Context, req *pb.ReflectRequest) (*p
 }
 
 // unitRef resolves the bank and a required memory id field of a request.
-func unitRef(ctx context.Context, bankID, field, id string) (domain.BankRef, domain.UnitID, error) {
-	b, err := bankRef(ctx, bankID)
+func unitRef(ctx context.Context, r bankScoped, field, id string) (domain.BankRef, domain.UnitID, error) {
+	b, err := bankRef(ctx, r)
 	if err != nil {
 		return domain.BankRef{}, "", err
 	}
@@ -117,7 +117,7 @@ func unitRef(ctx context.Context, bankID, field, id string) (domain.BankRef, dom
 func (h *MemoryHandler) ListMemories(
 	ctx context.Context, req *pb.ListMemoriesRequest,
 ) (*pb.ListMemoriesResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -135,7 +135,7 @@ func (h *MemoryHandler) ListMemories(
 
 // GetMemory returns one memory, live or invalidated.
 func (h *MemoryHandler) GetMemory(ctx context.Context, req *pb.GetMemoryRequest) (*pb.GetMemoryResponse, error) {
-	b, id, err := unitRef(ctx, req.GetBankId(), "memory_id", req.GetMemoryId())
+	b, id, err := unitRef(ctx, req, "memory_id", req.GetMemoryId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -150,7 +150,7 @@ func (h *MemoryHandler) GetMemory(ctx context.Context, req *pb.GetMemoryRequest)
 func (h *MemoryHandler) UpdateMemory(
 	ctx context.Context, req *pb.UpdateMemoryRequest,
 ) (*pb.UpdateMemoryResponse, error) {
-	b, _, err := unitRef(ctx, req.GetBankId(), "memory_id", req.GetMemoryId())
+	b, _, err := unitRef(ctx, req, "memory_id", req.GetMemoryId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -173,7 +173,7 @@ func (h *MemoryHandler) UpdateMemory(
 func (h *MemoryHandler) InvalidateMemory(
 	ctx context.Context, req *pb.InvalidateMemoryRequest,
 ) (*pb.InvalidateMemoryResponse, error) {
-	b, id, err := unitRef(ctx, req.GetBankId(), "memory_id", req.GetMemoryId())
+	b, id, err := unitRef(ctx, req, "memory_id", req.GetMemoryId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -188,7 +188,7 @@ func (h *MemoryHandler) InvalidateMemory(
 func (h *MemoryHandler) RestoreMemory(
 	ctx context.Context, req *pb.RestoreMemoryRequest,
 ) (*pb.RestoreMemoryResponse, error) {
-	b, _, err := unitRef(ctx, req.GetBankId(), "memory_id", req.GetMemoryId())
+	b, _, err := unitRef(ctx, req, "memory_id", req.GetMemoryId())
 	if err != nil {
 		return nil, toStatus(err)
 	}

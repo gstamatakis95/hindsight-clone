@@ -22,17 +22,24 @@ var _ store.BankRepo = (*bankRepo)(nil)
 
 // Get returns the bank, including a tombstoned one; unknown = domain.ErrNotFound.
 func (r *bankRepo) Get(ctx context.Context, b domain.BankRef) (domain.Bank, error) {
-	row, err := r.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
+	if err := checkRef(b); err != nil {
+		return domain.Bank{}, err
+	}
+	row, err := r.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
 		return domain.Bank{}, bankErr(b, err)
 	}
 	return bankOf(row)
 }
 
-// Ensure returns the bank, creating it with empty overrides when missing; a tombstoned bank is
-// domain.ErrBankDeleting.
+// Ensure returns the bank, creating it with empty overrides when missing, after share-locking its org
+// (lockLiveOrg); a tombstoned bank is domain.ErrBankDeleting.
 func (r *bankRepo) Ensure(ctx context.Context, b domain.BankRef) (domain.Bank, error) {
-	if err := r.q.InsertBankIfMissing(ctx, db.InsertBankIfMissingParams{TenantID: b.Tenant, ID: b.Bank}); err != nil {
+	if err := r.lockOrg(ctx, b); err != nil {
+		return domain.Bank{}, err
+	}
+	err := r.q.InsertBankIfMissing(ctx, db.InsertBankIfMissingParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
+	if err != nil {
 		return domain.Bank{}, mapErr("ensure bank", err)
 	}
 	bank, err := r.Get(ctx, b)
@@ -40,50 +47,71 @@ func (r *bankRepo) Ensure(ctx context.Context, b domain.BankRef) (domain.Bank, e
 		return domain.Bank{}, err
 	}
 	if bank.Deleting() {
-		return domain.Bank{}, fmt.Errorf("%w: %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		return domain.Bank{}, fmt.Errorf("%w: %s", domain.ErrBankDeleting, b)
 	}
 	return bank, nil
 }
 
 // Create inserts a new bank with its name and config; an existing id is domain.ErrAlreadyExists.
 func (r *bankRepo) Create(ctx context.Context, bank domain.Bank) error {
+	if err := r.lockOrg(ctx, bank.Ref); err != nil {
+		return err
+	}
 	cfg, err := marshal("bank config", bank.Config)
 	if err != nil {
 		return err
 	}
 	err = r.q.CreateBank(ctx, db.CreateBankParams{
-		TenantID: bank.Ref.Tenant, ID: bank.Ref.Bank, Name: bank.Name, Config: cfg,
+		TenantID: bank.Ref.Tenant, OrgID: bank.Ref.Org, ID: bank.Ref.Bank, Name: bank.Name, Config: cfg,
 	})
 	return mapErr("create bank", err)
 }
 
-// SetConfig replaces the bank's own overrides, creating the bank if needed; a tombstoned bank is
-// domain.ErrBankDeleting.
+// SetConfig replaces the bank's own overrides, creating the bank if needed (after share-locking its org,
+// lockLiveOrg); a tombstoned bank is domain.ErrBankDeleting.
 func (r *bankRepo) SetConfig(ctx context.Context, b domain.BankRef, c domain.BankConfig) error {
+	if err := r.lockOrg(ctx, b); err != nil {
+		return err
+	}
 	cfg, err := marshal("bank config", c)
 	if err != nil {
 		return err
 	}
-	n, err := r.q.UpsertBankConfig(ctx, db.UpsertBankConfigParams{TenantID: b.Tenant, ID: b.Bank, Config: cfg})
+	n, err := r.q.UpsertBankConfig(ctx, db.UpsertBankConfigParams{
+		TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank, Config: cfg,
+	})
 	if err != nil {
 		return mapErr("set bank config", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("%w: %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: %s", domain.ErrBankDeleting, b)
 	}
 	return nil
 }
 
 // MarkDeleting tombstones the bank; marking it again keeps the first time. Unknown = domain.ErrNotFound.
 func (r *bankRepo) MarkDeleting(ctx context.Context, b domain.BankRef, at time.Time) error {
-	n, err := r.q.MarkBankDeleting(ctx, db.MarkBankDeletingParams{TenantID: b.Tenant, ID: b.Bank, At: at})
+	if err := checkRef(b); err != nil {
+		return err
+	}
+	n, err := r.q.MarkBankDeleting(ctx, db.MarkBankDeletingParams{
+		TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank, At: at,
+	})
 	if err != nil {
 		return mapErr("mark bank deleting", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s", domain.ErrBankNotFound, b)
 	}
 	return nil
+}
+
+// lockOrg checks b and share-locks its org (lockLiveOrg) before a bank is created.
+func (r *bankRepo) lockOrg(ctx context.Context, b domain.BankRef) error {
+	if err := checkRef(b); err != nil {
+		return err
+	}
+	return lockLiveOrg(ctx, r.q, b.OrgRef())
 }
 
 // TenantConfig returns the tenant-level config; a tenant with none set returns the zero config.

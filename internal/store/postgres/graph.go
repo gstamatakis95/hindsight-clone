@@ -64,7 +64,7 @@ func (g *graphStore) AddLinks(ctx context.Context, ls []graph.Link) error {
 			continue
 		}
 		err = g.q.LinkInsert(ctx, db.LinkInsertParams{
-			TenantID: l.Bank.Tenant, BankID: l.Bank.Bank, FromUnitID: from, ToUnitID: to, Kind: string(l.Kind),
+			TenantID: l.Bank.Tenant, OrgID: l.Bank.Org, BankID: l.Bank.Bank, FromUnitID: from, ToUnitID: to, Kind: string(l.Kind),
 			Weight: l.Weight, CreatedAt: orNow(l.CreatedAt),
 		})
 		if err != nil {
@@ -111,7 +111,7 @@ func (r *unitRepo) DirtyLinks(ctx context.Context, b domain.BankRef, limit int) 
 	if limit <= 0 {
 		return []domain.UnitID{}, nil
 	}
-	ids, err := r.q.LinkDirty(ctx, db.LinkDirtyParams{TenantID: b.Tenant, BankID: b.Bank, Lim: contentLimit(limit)})
+	ids, err := r.q.LinkDirty(ctx, db.LinkDirtyParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: contentLimit(limit)})
 	if err != nil {
 		return nil, mapErr("dirty units", err)
 	}
@@ -124,7 +124,7 @@ func (r *unitRepo) ClearDirtyLinks(ctx context.Context, b domain.BankRef, ids []
 	if len(uuids) == 0 {
 		return nil
 	}
-	err := r.q.LinkClearDirty(ctx, db.LinkClearDirtyParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	err := r.q.LinkClearDirty(ctx, db.LinkClearDirtyParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
 	return mapErr("clear dirty units", err)
 }
 
@@ -138,14 +138,14 @@ func clampHops(h int) int {
 
 // graphSQL builds the graph query: walk follows the bank's links forward (from -> to) from
 // the seeds for up to MaxHops hops, multiplying the link weights along each path, restricted to Kinds at
-// every step. Every link is bound to the query's tenant and bank, at the anchor and at each step. A reached
+// every step. Every link is bound to the query's tenant, org and bank, at the anchor and at each step. A reached
 // unit scores the best (max) weight over its paths. Seeds are never hits; reached units must be live units of
 // the bank and pass Types, Tags and Seq (intermediate units on a path are not filtered).
 func graphSQL(q graph.Query, seeds []uuid.UUID) (string, []any) {
 	var a sqlArgs
-	tenant, bank := a.add(q.Bank.Tenant, "::text"), a.add(q.Bank.Bank, "::text")
+	tenant, org, bank := a.add(q.Bank.Tenant, "::text"), a.add(q.Bank.Org, "::text"), a.add(q.Bank.Bank, "::text")
 	seedArg := a.add(seeds, "::uuid[]")
-	links := "l.tenant_id = " + tenant + " AND l.bank_id = " + bank
+	links := "l.tenant_id = " + tenant + " AND l.org_id = " + org + " AND l.bank_id = " + bank
 	if len(q.Kinds) > 0 {
 		kinds := make([]string, len(q.Kinds))
 		for i, k := range q.Kinds {

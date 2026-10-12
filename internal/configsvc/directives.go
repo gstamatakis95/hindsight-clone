@@ -190,7 +190,7 @@ func writableBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 		return err
 	}
 	if bank.Deleting() {
-		return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: bank %s", domain.ErrBankDeleting, b)
 	}
 	return nil
 }
@@ -221,7 +221,7 @@ func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 		return err
 	}
 	if bank.Deleting() {
-		return fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b)
 	}
 	return nil
 }

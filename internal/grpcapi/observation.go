@@ -20,7 +20,7 @@ var _ pb.ObservationServiceServer = (*ObservationHandler)(nil)
 func (h *ObservationHandler) Consolidate(
 	ctx context.Context, req *pb.ConsolidateRequest,
 ) (*pb.ConsolidateResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -44,7 +44,7 @@ func (h *ObservationHandler) Consolidate(
 func (h *ObservationHandler) ListObservationScopes(
 	ctx context.Context, req *pb.ListObservationScopesRequest,
 ) (*pb.ListObservationScopesResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -59,7 +59,7 @@ func (h *ObservationHandler) ListObservationScopes(
 func (h *ObservationHandler) ListObservationHistory(
 	ctx context.Context, req *pb.ListObservationHistoryRequest,
 ) (*pb.ListObservationHistoryResponse, error) {
-	b, id, err := unitRef(ctx, req.GetBankId(), "observation_id", req.GetObservationId())
+	b, id, err := unitRef(ctx, req, "observation_id", req.GetObservationId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -75,7 +75,7 @@ func (h *ObservationHandler) ListObservationHistory(
 func (h *ObservationHandler) ClearObservations(
 	ctx context.Context, req *pb.ClearObservationsRequest,
 ) (*pb.ClearObservationsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -95,7 +95,7 @@ func (h *ObservationHandler) ClearObservations(
 func (h *ObservationHandler) PreviewConsolidationStrategies(
 	ctx context.Context, req *pb.PreviewConsolidationStrategiesRequest,
 ) (*pb.PreviewConsolidationStrategiesResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}

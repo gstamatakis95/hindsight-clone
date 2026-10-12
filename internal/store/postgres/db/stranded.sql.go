@@ -12,22 +12,22 @@ import (
 )
 
 const strandedFacts = `-- name: StrandedFacts :many
-SELECT DISTINCT u.tenant_id, u.bank_id, u.id, u.document_id
+SELECT DISTINCT u.tenant_id, u.org_id, u.bank_id, u.id, u.document_id
 FROM operations f
 JOIN memory_units u
-  ON u.tenant_id = f.tenant_id AND u.bank_id = f.bank_id
+  ON u.tenant_id = f.tenant_id AND u.org_id = f.org_id AND u.bank_id = f.bank_id
  AND u.id = (CASE WHEN f.payload->>'unit_id' ~ '^[0-9a-fA-F-]{36}$' THEN (f.payload->>'unit_id')::uuid END)
-JOIN banks b ON b.tenant_id = u.tenant_id AND b.id = u.bank_id
+JOIN banks b ON b.tenant_id = u.tenant_id AND b.org_id = u.org_id AND b.id = u.bank_id
 WHERE f.kind = 'rederive_memory' AND f.status IN ('failed', 'cancelled')
   AND u.embedding IS NULL AND u.fact_type <> 'observation' AND b.deleting_at IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM operations o
-    WHERE o.tenant_id = u.tenant_id AND o.bank_id = u.bank_id AND o.kind = 'rederive_memory'
+    WHERE o.tenant_id = u.tenant_id AND o.org_id = u.org_id AND o.bank_id = u.bank_id AND o.kind = 'rederive_memory'
       AND o.payload->>'unit_id' = u.id::text
       AND (o.status IN ('pending', 'processing')
            OR COALESCE(o.finished_at, o.updated_at) > now() - make_interval(secs => $1::float8))
   )
-ORDER BY u.tenant_id, u.bank_id, u.id
+ORDER BY u.tenant_id, u.org_id, u.bank_id, u.id
 LIMIT $2
 `
 
@@ -38,6 +38,7 @@ type StrandedFactsParams struct {
 
 type StrandedFactsRow struct {
 	TenantID   string
+	OrgID      string
 	BankID     string
 	ID         uuid.UUID
 	DocumentID *string
@@ -58,6 +59,7 @@ func (q *Queries) StrandedFacts(ctx context.Context, arg StrandedFactsParams) ([
 		var i StrandedFactsRow
 		if err := rows.Scan(
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.ID,
 			&i.DocumentID,

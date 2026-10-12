@@ -28,7 +28,7 @@ import (
 func retainOne(t *testing.T, w *wiredStack, bank string) {
 	t.Helper()
 	mem := pb.NewMemoryServiceClient(w.conn)
-	ret, err := mem.Retain(w.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{{
+	ret, err := mem.Retain(w.ctx(t), &pb.RetainRequest{OrgId: testOrg, BankId: bank, Items: []*pb.RetainItem{{
 		Content: "Alice moved to Lisbon in 2021. Alice works as a nurse.", DocumentId: "d1",
 	}}})
 	if err != nil || ret.GetDocuments()[0].GetMemoriesCreated() == 0 {
@@ -324,7 +324,7 @@ func TestDatadogUnreachableAgentStillServes(t *testing.T) {
 	}
 	w := startWiredWith(t, tel)
 	retainOne(t, w, "b")
-	rec, err := pb.NewMemoryServiceClient(w.conn).Recall(w.ctx(t), &pb.RecallRequest{BankId: "b", Query: "Lisbon"})
+	rec, err := pb.NewMemoryServiceClient(w.conn).Recall(w.ctx(t), &pb.RecallRequest{OrgId: testOrg, BankId: "b", Query: "Lisbon"})
 	if err != nil || len(rec.GetResults()) == 0 {
 		t.Fatalf("recall with an unreachable agent: %v %v", rec, err)
 	}

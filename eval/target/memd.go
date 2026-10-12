@@ -6,10 +6,13 @@ import (
 	"math"
 	"memd/eval/harness"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -27,24 +30,47 @@ var (
 	_ harness.ModelReporter = (*Memd)(nil)
 )
 
-// Memd is the harness.Target for memd's gRPC API. Every call carries the tenant in the x-tenant-id header.
+// Memd is the harness.Target for memd's gRPC API. Every call carries the tenant in the x-tenant-id header, and
+// every bank lives in one org, which the first Retain creates (orgs are never created on first use).
 type Memd struct {
 	memory memoryv1.MemoryServiceClient
 	banks  memoryv1.BankServiceClient
 	config memoryv1.ConfigServiceClient
 	ops    memoryv1.OperationServiceClient
+	orgs   memoryv1.OrgServiceClient
 	tenant string
+	org    string
+
+	orgMu    sync.Mutex
+	orgReady bool
 }
 
-// NewMemd returns a Memd target that sends every call over conn on behalf of tenant.
-func NewMemd(conn grpc.ClientConnInterface, tenant string) *Memd {
+// NewMemd returns a Memd target that sends every call over conn on behalf of tenant, for banks of org.
+func NewMemd(conn grpc.ClientConnInterface, tenant, org string) *Memd {
 	return &Memd{
 		memory: memoryv1.NewMemoryServiceClient(conn),
 		banks:  memoryv1.NewBankServiceClient(conn),
 		config: memoryv1.NewConfigServiceClient(conn),
 		ops:    memoryv1.NewOperationServiceClient(conn),
+		orgs:   memoryv1.NewOrgServiceClient(conn),
 		tenant: tenant,
+		org:    org,
 	}
+}
+
+// ensureOrg creates the org once; an org that already exists (a resumed or repeated run) is fine.
+func (m *Memd) ensureOrg(ctx context.Context) error {
+	m.orgMu.Lock()
+	defer m.orgMu.Unlock()
+	if m.orgReady {
+		return nil
+	}
+	_, err := m.orgs.CreateOrg(m.out(ctx), &memoryv1.CreateOrgRequest{OrgId: m.org})
+	if err != nil && status.Code(err) != codes.AlreadyExists {
+		return fmt.Errorf("memd: create org %s: %w", m.org, err)
+	}
+	m.orgReady = true
+	return nil
 }
 
 // Name returns "memd".
@@ -53,7 +79,10 @@ func (m *Memd) Name() string { return "memd" }
 // Retain stores s as one document (document id = session id) with a synchronous Retain and returns the
 // per-slot usage the response reports (extraction, time parsing, embedding).
 func (m *Memd) Retain(ctx context.Context, bank string, s harness.Session) ([]harness.Usage, error) {
-	req := &memoryv1.RetainRequest{BankId: bank, Items: []*memoryv1.RetainItem{{
+	if err := m.ensureOrg(ctx); err != nil {
+		return nil, err
+	}
+	req := &memoryv1.RetainRequest{OrgId: m.org, BankId: bank, Items: []*memoryv1.RetainItem{{
 		Content:    s.Content,
 		Context:    s.Context,
 		DocumentId: s.ID,
@@ -70,7 +99,7 @@ func (m *Memd) Retain(ctx context.Context, bank string, s harness.Session) ([]ha
 
 // PendingOperations returns BankStats.pending_operations_by_kind without zero counts.
 func (m *Memd) PendingOperations(ctx context.Context, bank string) (map[string]int64, error) {
-	resp, err := m.banks.GetBankStats(m.out(ctx), &memoryv1.GetBankStatsRequest{BankId: bank})
+	resp, err := m.banks.GetBankStats(m.out(ctx), &memoryv1.GetBankStatsRequest{OrgId: m.org, BankId: bank})
 	if err != nil {
 		return nil, fmt.Errorf("memd: bank stats %s: %w", bank, err)
 	}
@@ -98,7 +127,7 @@ func (m *Memd) Recall(
 		return harness.Recalled{}, fmt.Errorf("memd: unknown recall budget %q (want low, mid or high)", opts.Budget)
 	}
 	req := &memoryv1.RecallRequest{
-		BankId: bank, Query: query, QueryTime: timestamp(at), Budget: budget, MaxTokens: clampInt32(opts.MaxTokens),
+		OrgId: m.org, BankId: bank, Query: query, QueryTime: timestamp(at), Budget: budget, MaxTokens: clampInt32(opts.MaxTokens),
 	}
 	if opts.ChunkTokens > 0 {
 		chunks, limit := true, clampInt32(opts.ChunkTokens)
@@ -131,7 +160,7 @@ func (m *Memd) Recall(
 
 // Models returns the model of every slot bound in bank's effective config (server < tenant < bank).
 func (m *Memd) Models(ctx context.Context, bank string) (map[string]string, error) {
-	resp, err := m.config.GetBankConfig(m.out(ctx), &memoryv1.GetBankConfigRequest{BankId: bank})
+	resp, err := m.config.GetBankConfig(m.out(ctx), &memoryv1.GetBankConfigRequest{OrgId: m.org, BankId: bank})
 	if err != nil {
 		return nil, fmt.Errorf("memd: bank config %s: %w", bank, err)
 	}
@@ -169,7 +198,7 @@ func clampInt32(n int) int32 {
 // Reflect returns the reflect answer and its per-slot usage.
 func (m *Memd) Reflect(ctx context.Context, bank, query string, at time.Time) (string, []harness.Usage, error) {
 	resp, err := m.memory.Reflect(m.out(ctx), &memoryv1.ReflectRequest{
-		BankId: bank, Query: query, QueryTime: timestamp(at),
+		OrgId: m.org, BankId: bank, Query: query, QueryTime: timestamp(at),
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("memd: reflect %s: %w", bank, err)
@@ -190,7 +219,7 @@ func (m *Memd) Background(ctx context.Context, bank string) (harness.BackgroundS
 	ctx = m.out(ctx)
 	for {
 		resp, err := m.ops.ListOperations(ctx, &memoryv1.ListOperationsRequest{
-			BankId: bank, ExcludeParents: true, PageSize: operationsPageSize, PageToken: token,
+			OrgId: m.org, BankId: bank, ExcludeParents: true, PageSize: operationsPageSize, PageToken: token,
 		})
 		if err != nil {
 			return harness.BackgroundStats{}, fmt.Errorf("memd: list operations %s: %w", bank, err)

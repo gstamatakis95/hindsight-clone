@@ -36,7 +36,7 @@ func (s *Service) ReconcileConsolidation(ctx context.Context) (int, error) {
 		switch {
 		case gone(err):
 		case err != nil:
-			errs = append(errs, fmt.Errorf("bank %s/%s: config: %w", b.Bank.Tenant, b.Bank.Bank, err))
+			errs = append(errs, fmt.Errorf("bank %s: config: %w", b.Bank, err))
 		case ok:
 			keep = append(keep, b.Bank)
 		}
@@ -81,7 +81,7 @@ func (s *Service) enqueueAuto(ctx context.Context, banks []domain.BankRef) (int,
 		switch {
 		case gone(err):
 		case err != nil:
-			errs = append(errs, fmt.Errorf("bank %s/%s: %w", b.Tenant, b.Bank, err))
+			errs = append(errs, fmt.Errorf("bank %s: %w", b, err))
 		case !joined:
 			inserted++
 		}

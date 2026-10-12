@@ -12,17 +12,18 @@ import (
 )
 
 const bankChangeSeq = `-- name: BankChangeSeq :one
-SELECT change_seq FROM banks WHERE tenant_id = $1 AND id = $2
+SELECT change_seq FROM banks WHERE tenant_id = $1 AND org_id = $2 AND id = $3
 `
 
 type BankChangeSeqParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
 // BankChangeSeq returns the bank's latest committed change_seq.
 func (q *Queries) BankChangeSeq(ctx context.Context, arg BankChangeSeqParams) (int64, error) {
-	row := q.db.QueryRow(ctx, bankChangeSeq, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, bankChangeSeq, arg.TenantID, arg.OrgID, arg.ID)
 	var change_seq int64
 	err := row.Scan(&change_seq)
 	return change_seq, err
@@ -31,29 +32,31 @@ func (q *Queries) BankChangeSeq(ctx context.Context, arg BankChangeSeqParams) (i
 const bumpBankSeq = `-- name: BumpBankSeq :one
 UPDATE banks
 SET change_seq = change_seq + 1, last_memory_write_at = now(), updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND deleting_at IS NULL
+WHERE tenant_id = $1 AND org_id = $2 AND id = $3 AND deleting_at IS NULL
 RETURNING change_seq
 `
 
 type BumpBankSeqParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
 // BumpBankSeq increments a live bank's change_seq and returns it; the row lock is held until commit.
 func (q *Queries) BumpBankSeq(ctx context.Context, arg BumpBankSeqParams) (int64, error) {
-	row := q.db.QueryRow(ctx, bumpBankSeq, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, bumpBankSeq, arg.TenantID, arg.OrgID, arg.ID)
 	var change_seq int64
 	err := row.Scan(&change_seq)
 	return change_seq, err
 }
 
 const createBank = `-- name: CreateBank :exec
-INSERT INTO banks (tenant_id, id, name, config) VALUES ($1, $2, $3, $4)
+INSERT INTO banks (tenant_id, org_id, id, name, config) VALUES ($1, $2, $3, $4, $5)
 `
 
 type CreateBankParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 	Name     string
 	Config   json.RawMessage
@@ -63,6 +66,7 @@ type CreateBankParams struct {
 func (q *Queries) CreateBank(ctx context.Context, arg CreateBankParams) error {
 	_, err := q.db.Exec(ctx, createBank,
 		arg.TenantID,
+		arg.OrgID,
 		arg.ID,
 		arg.Name,
 		arg.Config,
@@ -71,20 +75,22 @@ func (q *Queries) CreateBank(ctx context.Context, arg CreateBankParams) error {
 }
 
 const getBank = `-- name: GetBank :one
-SELECT tenant_id, id, name, config, change_seq, deleting_at, last_memory_write_at, created_at, updated_at FROM banks WHERE tenant_id = $1 AND id = $2
+SELECT tenant_id, org_id, id, name, config, change_seq, deleting_at, last_memory_write_at, created_at, updated_at FROM banks WHERE tenant_id = $1 AND org_id = $2 AND id = $3
 `
 
 type GetBankParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
 // GetBank returns one bank, tombstoned or not.
 func (q *Queries) GetBank(ctx context.Context, arg GetBankParams) (Bank, error) {
-	row := q.db.QueryRow(ctx, getBank, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, getBank, arg.TenantID, arg.OrgID, arg.ID)
 	var i Bank
 	err := row.Scan(
 		&i.TenantID,
+		&i.OrgID,
 		&i.ID,
 		&i.Name,
 		&i.Config,
@@ -110,41 +116,45 @@ func (q *Queries) GetTenantConfig(ctx context.Context, id string) (json.RawMessa
 }
 
 const insertBankIfMissing = `-- name: InsertBankIfMissing :exec
-INSERT INTO banks (tenant_id, id) VALUES ($1, $2) ON CONFLICT (tenant_id, id) DO NOTHING
+INSERT INTO banks (tenant_id, org_id, id) VALUES ($1, $2, $3)
+ON CONFLICT (tenant_id, org_id, id) DO NOTHING
 `
 
 type InsertBankIfMissingParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
 // InsertBankIfMissing creates a bank with empty overrides unless it exists.
 func (q *Queries) InsertBankIfMissing(ctx context.Context, arg InsertBankIfMissingParams) error {
-	_, err := q.db.Exec(ctx, insertBankIfMissing, arg.TenantID, arg.ID)
+	_, err := q.db.Exec(ctx, insertBankIfMissing, arg.TenantID, arg.OrgID, arg.ID)
 	return err
 }
 
 const listBanks = `-- name: ListBanks :many
-SELECT tenant_id, id, name, config, change_seq, deleting_at, last_memory_write_at, created_at, updated_at FROM banks
-WHERE tenant_id = $1 AND deleting_at IS NULL
-  AND starts_with(id, $2::text)
-  AND id COLLATE "C" > $3::text
+SELECT tenant_id, org_id, id, name, config, change_seq, deleting_at, last_memory_write_at, created_at, updated_at FROM banks
+WHERE tenant_id = $1 AND org_id = $2 AND deleting_at IS NULL
+  AND starts_with(id, $3::text)
+  AND id COLLATE "C" > $4::text
 ORDER BY id COLLATE "C"
-LIMIT $4::int
+LIMIT $5::int
 `
 
 type ListBanksParams struct {
 	TenantID string
+	OrgID    string
 	IDPrefix string
 	AfterID  string
 	Lim      int32
 }
 
-// ListBanks returns one keyset page of a tenant's live banks (tombstoned ones left out) whose id starts with
+// ListBanks returns one keyset page of an org's live banks (tombstoned ones left out) whose id starts with
 // id_prefix, in byte order of id, after after_id ("" = from the start).
 func (q *Queries) ListBanks(ctx context.Context, arg ListBanksParams) ([]Bank, error) {
 	rows, err := q.db.Query(ctx, listBanks,
 		arg.TenantID,
+		arg.OrgID,
 		arg.IDPrefix,
 		arg.AfterID,
 		arg.Lim,
@@ -158,6 +168,7 @@ func (q *Queries) ListBanks(ctx context.Context, arg ListBanksParams) ([]Bank, e
 		var i Bank
 		if err := rows.Scan(
 			&i.TenantID,
+			&i.OrgID,
 			&i.ID,
 			&i.Name,
 			&i.Config,
@@ -178,19 +189,25 @@ func (q *Queries) ListBanks(ctx context.Context, arg ListBanksParams) ([]Bank, e
 }
 
 const markBankDeleting = `-- name: MarkBankDeleting :execrows
-UPDATE banks SET deleting_at = COALESCE(deleting_at, $3::timestamptz), updated_at = now()
-WHERE tenant_id = $1 AND id = $2
+UPDATE banks SET deleting_at = COALESCE(deleting_at, $1::timestamptz), updated_at = now()
+WHERE tenant_id = $2 AND org_id = $3 AND id = $4
 `
 
 type MarkBankDeletingParams struct {
-	TenantID string
-	ID       string
 	At       time.Time
+	TenantID string
+	OrgID    string
+	ID       string
 }
 
 // MarkBankDeleting sets deleting_at unless already set.
 func (q *Queries) MarkBankDeleting(ctx context.Context, arg MarkBankDeletingParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markBankDeleting, arg.TenantID, arg.ID, arg.At)
+	result, err := q.db.Exec(ctx, markBankDeleting,
+		arg.At,
+		arg.TenantID,
+		arg.OrgID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -209,20 +226,26 @@ func (q *Queries) TenantConfigLock(ctx context.Context, tenantID string) error {
 }
 
 const upsertBankConfig = `-- name: UpsertBankConfig :execrows
-INSERT INTO banks AS b (tenant_id, id, config) VALUES ($1, $2, $3)
-ON CONFLICT (tenant_id, id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()
+INSERT INTO banks AS b (tenant_id, org_id, id, config) VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, org_id, id) DO UPDATE SET config = EXCLUDED.config, updated_at = now()
 WHERE b.deleting_at IS NULL
 `
 
 type UpsertBankConfigParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 	Config   json.RawMessage
 }
 
 // UpsertBankConfig creates the bank if needed and replaces its overrides; a tombstoned bank matches nothing.
 func (q *Queries) UpsertBankConfig(ctx context.Context, arg UpsertBankConfigParams) (int64, error) {
-	result, err := q.db.Exec(ctx, upsertBankConfig, arg.TenantID, arg.ID, arg.Config)
+	result, err := q.db.Exec(ctx, upsertBankConfig,
+		arg.TenantID,
+		arg.OrgID,
+		arg.ID,
+		arg.Config,
+	)
 	if err != nil {
 		return 0, err
 	}

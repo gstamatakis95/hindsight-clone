@@ -13,13 +13,14 @@ import (
 const documentComplete = `-- name: DocumentComplete :execrows
 UPDATE documents
 SET content_hash = $1, overrides_hash = $2, extracted_at = now(), updated_at = now()
-WHERE tenant_id = $3 AND bank_id = $4 AND id = $5
+WHERE tenant_id = $3 AND org_id = $4 AND bank_id = $5 AND id = $6
 `
 
 type DocumentCompleteParams struct {
 	ContentHash   string
 	OverridesHash string
 	TenantID      string
+	OrgID         string
 	BankID        string
 	ID            string
 }
@@ -30,6 +31,7 @@ func (q *Queries) DocumentComplete(ctx context.Context, arg DocumentCompletePara
 		arg.ContentHash,
 		arg.OverridesHash,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ID,
 	)
@@ -40,21 +42,28 @@ func (q *Queries) DocumentComplete(ctx context.Context, arg DocumentCompletePara
 }
 
 const documentGet = `-- name: DocumentGet :one
-SELECT tenant_id, bank_id, id, content_hash, overrides_hash, overrides, tags, blob_key, extracted_at, created_at, updated_at, observation_scope_modes FROM documents WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+SELECT tenant_id, org_id, bank_id, id, content_hash, overrides_hash, overrides, tags, blob_key, extracted_at, created_at, updated_at, observation_scope_modes FROM documents WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4
 `
 
 type DocumentGetParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 }
 
 // DocumentGet returns one document of a bank.
 func (q *Queries) DocumentGet(ctx context.Context, arg DocumentGetParams) (Document, error) {
-	row := q.db.QueryRow(ctx, documentGet, arg.TenantID, arg.BankID, arg.ID)
+	row := q.db.QueryRow(ctx, documentGet,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	var i Document
 	err := row.Scan(
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.ID,
 		&i.ContentHash,
@@ -72,12 +81,13 @@ func (q *Queries) DocumentGet(ctx context.Context, arg DocumentGetParams) (Docum
 
 const documentSetTags = `-- name: DocumentSetTags :execrows
 UPDATE documents SET tags = $1, updated_at = now()
-WHERE tenant_id = $2 AND bank_id = $3 AND id = $4
+WHERE tenant_id = $2 AND org_id = $3 AND bank_id = $4 AND id = $5
 `
 
 type DocumentSetTagsParams struct {
 	Tags     []string
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 }
@@ -87,6 +97,7 @@ func (q *Queries) DocumentSetTags(ctx context.Context, arg DocumentSetTagsParams
 	result, err := q.db.Exec(ctx, documentSetTags,
 		arg.Tags,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ID,
 	)
@@ -99,12 +110,13 @@ func (q *Queries) DocumentSetTags(ctx context.Context, arg DocumentSetTagsParams
 const documentUnitCounts = `-- name: DocumentUnitCounts :many
 SELECT fact_type, count(*)::bigint AS n
 FROM memory_units
-WHERE tenant_id = $1 AND bank_id = $2 AND document_id = $3
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND document_id = $4
 GROUP BY fact_type
 `
 
 type DocumentUnitCountsParams struct {
 	TenantID   string
+	OrgID      string
 	BankID     string
 	DocumentID *string
 }
@@ -116,7 +128,12 @@ type DocumentUnitCountsRow struct {
 
 // DocumentUnitCounts counts a document's live units per fact type.
 func (q *Queries) DocumentUnitCounts(ctx context.Context, arg DocumentUnitCountsParams) ([]DocumentUnitCountsRow, error) {
-	rows, err := q.db.Query(ctx, documentUnitCounts, arg.TenantID, arg.BankID, arg.DocumentID)
+	rows, err := q.db.Query(ctx, documentUnitCounts,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.DocumentID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -136,15 +153,16 @@ func (q *Queries) DocumentUnitCounts(ctx context.Context, arg DocumentUnitCounts
 }
 
 const documentUpsert = `-- name: DocumentUpsert :exec
-INSERT INTO documents AS d (tenant_id, bank_id, id, overrides, tags, blob_key, observation_scope_modes, extracted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, NULL)
-ON CONFLICT (tenant_id, bank_id, id) DO UPDATE
+INSERT INTO documents AS d (tenant_id, org_id, bank_id, id, overrides, tags, blob_key, observation_scope_modes, extracted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
+ON CONFLICT (tenant_id, org_id, bank_id, id) DO UPDATE
 SET overrides = EXCLUDED.overrides, tags = EXCLUDED.tags, blob_key = EXCLUDED.blob_key,
     observation_scope_modes = EXCLUDED.observation_scope_modes, extracted_at = NULL, updated_at = now()
 `
 
 type DocumentUpsertParams struct {
 	TenantID              string
+	OrgID                 string
 	BankID                string
 	ID                    string
 	Overrides             json.RawMessage
@@ -158,6 +176,7 @@ type DocumentUpsertParams struct {
 func (q *Queries) DocumentUpsert(ctx context.Context, arg DocumentUpsertParams) error {
 	_, err := q.db.Exec(ctx, documentUpsert,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ID,
 		arg.Overrides,

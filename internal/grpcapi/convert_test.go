@@ -64,7 +64,6 @@ func TestGoldenRetainRequest(t *testing.T) {
 		RunAsync:          false,
 	}
 	want := memory.RetainRequest{
-		Bank: domain.BankRef{Bank: "bank-1"},
 		Items: []memory.RetainItem{{
 			Content:    "content-1",
 			Context:    "context-1",
@@ -131,7 +130,6 @@ func TestGoldenRecallRequest(t *testing.T) {
 		},
 	}
 	want := recall.Request{
-		Bank:      domain.BankRef{Bank: "bank-2"},
 		Query:     "what happened",
 		FactTypes: []domain.FactType{domain.FactTypeExperience, domain.FactTypeObservation},
 		Tags: domain.TagFilter{
@@ -200,7 +198,6 @@ func TestGoldenReflectRequest(t *testing.T) {
 		},
 	}
 	want := reflecteng.Request{
-		Bank:  domain.BankRef{Bank: "bank-3"},
 		Query: "why",
 		Tags: domain.TagFilter{
 			Tags: []string{"reflect-tag"}, Match: domain.TagsMatchAnyStrict,
@@ -329,7 +326,7 @@ func TestEmptyRepeatedOverrideIsNotAClear(t *testing.T) {
 func viewModel() domain.MentalModel {
 	return domain.MentalModel{
 		Spec:                 domain.MentalModelSpec{ID: "m1", Name: "page"},
-		Bank:                 domain.BankRef{Tenant: "t", Bank: "b"},
+		Bank:                 domain.NewBankRef("t", "org", "b"),
 		ContentMD:            "# page",
 		StructuredOutputJSON: json.RawMessage(`{"a":1}`),
 		Version:              3,

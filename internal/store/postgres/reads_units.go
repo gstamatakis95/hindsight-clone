@@ -57,7 +57,7 @@ func (r *reader) ListUnits(ctx context.Context, q store.UnitQuery) ([]domain.Uni
 // the limit.
 func unitListBase(b domain.BankRef) db.ReadsListUnitsParams {
 	return db.ReadsListUnitsParams{
-		TenantID: b.Tenant, BankID: b.Bank, Types: []string{}, TimeField: string(domain.TimeFieldCreatedAt),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Types: []string{}, TimeField: string(domain.TimeFieldCreatedAt),
 		TagsMatch: string(domain.TagsMatchAny), FilterTags: []string{},
 	}
 }
@@ -127,7 +127,7 @@ func (r *reader) listUnits(ctx context.Context, p db.ReadsListUnitsParams) ([]do
 // Stale as the row carries them.
 func unitOfListRow(row db.ReadsListUnitsRow) (domain.Unit, error) {
 	u, err := unitOf(db.MemoryUnit{
-		ID: row.ID, TenantID: row.TenantID, BankID: row.BankID, DocumentID: row.DocumentID, ChunkID: row.ChunkID,
+		ID: row.ID, TenantID: row.TenantID, OrgID: row.OrgID, BankID: row.BankID, DocumentID: row.DocumentID, ChunkID: row.ChunkID,
 		FactType: row.FactType, Text: row.Text, Context: row.Context, Metadata: row.Metadata, Tags: row.Tags,
 		Embedding: row.Embedding, OccurredStart: row.OccurredStart, OccurredEnd: row.OccurredEnd,
 		MentionedAt: row.MentionedAt, Timeless: row.Timeless, ProofCount: row.ProofCount, Version: row.Version,

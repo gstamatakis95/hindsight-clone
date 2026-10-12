@@ -42,6 +42,7 @@ var (
 	_ memoryv1.BankServiceServer      = (*Server)(nil)
 	_ memoryv1.ConfigServiceServer    = (*Server)(nil)
 	_ memoryv1.OperationServiceServer = (*Server)(nil)
+	_ memoryv1.OrgServiceServer       = (*Server)(nil)
 )
 
 // Options tunes the stub's behaviour.
@@ -68,15 +69,23 @@ type bank struct {
 	ops     []*memoryv1.Operation
 }
 
-// bankKey identifies a bank across tenants.
+// bankKey identifies a bank across tenants and orgs.
 type bankKey struct {
 	tenant string
+	org    string
 	bank   string
 }
 
-// Server implements the subset of memd's MemoryService, BankService, ConfigService and OperationService the eval
-// uses.
+// orgKey identifies an org across tenants.
+type orgKey struct {
+	tenant string
+	org    string
+}
+
+// Server implements the subset of memd's MemoryService, BankService, ConfigService, OperationService and
+// OrgService the eval uses. Like memd, it never creates an org on first use.
 type Server struct {
+	memoryv1.UnimplementedOrgServiceServer
 	memoryv1.UnimplementedMemoryServiceServer
 	memoryv1.UnimplementedBankServiceServer
 	memoryv1.UnimplementedConfigServiceServer
@@ -85,6 +94,7 @@ type Server struct {
 	opts    Options
 	mu      sync.Mutex
 	banks   map[bankKey]*bank
+	orgs    map[orgKey]bool
 	retains int
 	nextDoc int
 	nextOp  int
@@ -92,11 +102,12 @@ type Server struct {
 
 // New returns an empty stub server.
 func New(o Options) *Server {
-	return &Server{opts: o, banks: map[bankKey]*bank{}}
+	return &Server{opts: o, banks: map[bankKey]*bank{}, orgs: map[orgKey]bool{}}
 }
 
-// Register registers the stub's four services on g.
+// Register registers the stub's five services on g.
 func (s *Server) Register(g *grpc.Server) {
+	memoryv1.RegisterOrgServiceServer(g, s)
 	memoryv1.RegisterMemoryServiceServer(g, s)
 	memoryv1.RegisterBankServiceServer(g, s)
 	memoryv1.RegisterConfigServiceServer(g, s)
@@ -127,6 +138,22 @@ func (s *Server) Retains() int {
 	return s.retains
 }
 
+// CreateOrg records the org; an existing one is ALREADY_EXISTS.
+func (s *Server) CreateOrg(ctx context.Context, req *memoryv1.CreateOrgRequest) (*memoryv1.CreateOrgResponse, error) {
+	tenant, err := tenantOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := orgKey{tenant, req.GetOrgId()}
+	if s.orgs[k] {
+		return nil, status.Errorf(codes.AlreadyExists, "org %q already exists", req.GetOrgId())
+	}
+	s.orgs[k] = true
+	return &memoryv1.CreateOrgResponse{Org: &memoryv1.Org{Id: req.GetOrgId()}}, nil
+}
+
 // Retain upserts each item as a document (by document_id), creating the bank when it is unknown. It arms
 // the bank's pending polls, records one completed consolidate operation per call and, like a sync retain,
 // reports EXTRACT usage (20 in, 4 out per item).
@@ -140,7 +167,10 @@ func (s *Server) Retain(ctx context.Context, req *memoryv1.RetainRequest) (*memo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b := s.bankOrCreate(bankKey{tenant, req.GetBankId()})
+	if !s.orgs[orgKey{tenant, req.GetOrgId()}] {
+		return nil, status.Errorf(codes.NotFound, "org %q not found", req.GetOrgId())
+	}
+	b := s.bankOrCreate(bankKey{tenant, req.GetOrgId(), req.GetBankId()})
 	resp := &memoryv1.RetainResponse{}
 	for _, it := range req.GetItems() {
 		id := it.GetDocumentId()
@@ -168,7 +198,7 @@ func (s *Server) GetBankStats(
 ) (*memoryv1.GetBankStatsResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b, err := s.lookup(ctx, req.GetBankId())
+	b, err := s.lookup(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +220,7 @@ func (s *Server) GetBankConfig(
 ) (*memoryv1.GetBankConfigResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.lookup(ctx, req.GetBankId()); err != nil {
+	if _, err := s.lookup(ctx, req); err != nil {
 		return nil, err
 	}
 	stub := func() *memoryv1.ModelBinding { return &memoryv1.ModelBinding{Model: stubModel} }
@@ -206,7 +236,7 @@ func (s *Server) GetBankConfig(
 func (s *Server) Recall(ctx context.Context, req *memoryv1.RecallRequest) (*memoryv1.RecallResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b, err := s.lookup(ctx, req.GetBankId())
+	b, err := s.lookup(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +247,7 @@ func (s *Server) Recall(ctx context.Context, req *memoryv1.RecallRequest) (*memo
 func (s *Server) Reflect(ctx context.Context, req *memoryv1.ReflectRequest) (*memoryv1.ReflectResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b, err := s.lookup(ctx, req.GetBankId())
+	b, err := s.lookup(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +271,7 @@ func (s *Server) ListOperations(
 ) (*memoryv1.ListOperationsResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	b, err := s.lookup(ctx, req.GetBankId())
+	b, err := s.lookup(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -258,15 +288,21 @@ func (s *Server) ListOperations(
 	return resp, nil
 }
 
-// lookup resolves the caller's tenant and an existing bank. The caller holds s.mu.
-func (s *Server) lookup(ctx context.Context, bankID string) (*bank, error) {
+// bankRequest is a request naming an org and a bank.
+type bankRequest interface {
+	GetOrgId() string
+	GetBankId() string
+}
+
+// lookup resolves the caller's tenant and the request's existing bank. The caller holds s.mu.
+func (s *Server) lookup(ctx context.Context, req bankRequest) (*bank, error) {
 	tenant, err := tenantOf(ctx)
 	if err != nil {
 		return nil, err
 	}
-	b, ok := s.banks[bankKey{tenant, bankID}]
+	b, ok := s.banks[bankKey{tenant, req.GetOrgId(), req.GetBankId()}]
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "bank %q not found", bankID)
+		return nil, status.Errorf(codes.NotFound, "bank %q not found", req.GetBankId())
 	}
 	return b, nil
 }

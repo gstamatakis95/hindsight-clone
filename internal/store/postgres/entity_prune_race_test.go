@@ -13,6 +13,7 @@ import (
 func orphanEntityAndUnit(t *testing.T, s *postgres.DB, b domain.BankRef) (domain.EntityID, domain.Unit) {
 	t.Helper()
 	var e domain.EntityID
+	pgtest.CreateOrgs(t, s, b)
 	if err := s.InTx(t.Context(), func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
 			return err
@@ -64,7 +65,7 @@ func pruneOne(t *testing.T, s *postgres.DB, b domain.BankRef, e domain.EntityID)
 func TestAttachAfterConcurrentPruneReresolves(t *testing.T) {
 	t.Parallel()
 	s := pgtest.NewStore(t)
-	b := domain.BankRef{Tenant: "t-race", Bank: "b-ent"}
+	b := domain.NewBankRef("t-race", "org", "b-ent")
 	e, u := orphanEntityAndUnit(t, s, b)
 
 	resolved, pruned, done := make(chan struct{}), make(chan struct{}), make(chan struct{})

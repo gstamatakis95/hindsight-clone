@@ -15,13 +15,32 @@ func main() {
 	exampleutil.Run(func(ctx context.Context, c *exampleutil.Client) error {
 		suffix := exampleutil.UniqueID("")
 		s := &scenario{root: c, acme: c.As("acme" + suffix), globex: c.As("globex" + suffix)}
-		return exampleutil.Steps(ctx, s.tenantConfig, s.createFromConfig, s.createFromTemplate, s.isolation)
+		return exampleutil.Steps(ctx, s.orgs, s.tenantConfig, s.createFromConfig, s.createFromTemplate, s.isolation)
 	})
 }
 
 type scenario struct {
 	root, acme, globex *exampleutil.Client
 	template           *pb.BankTemplate
+}
+
+// orgs creates each tenant's org: banks live in an org, and an org must exist before anything is written under it.
+// A write under an org that was never created is NOT_FOUND (ORG_NOT_FOUND) instead of creating it.
+func (s *scenario) orgs(ctx context.Context) error {
+	exampleutil.Section("orgs")
+	for _, t := range []*exampleutil.Client{s.acme, s.globex} {
+		if err := t.EnsureOrg(ctx); err != nil {
+			return err
+		}
+		fmt.Printf("%s: org %q created\n", t.Tenant, t.Org)
+	}
+	_, err := s.acme.Memory.Retain(ctx, &pb.RetainRequest{OrgId: "no-such-org", BankId: "support",
+		Items: []*pb.RetainItem{{Content: "This write has no org to go to."}}})
+	fmt.Println("a write under an org that does not exist:", status.Code(err))
+	if status.Code(err) != codes.NotFound {
+		return fmt.Errorf("expected NOT_FOUND for an unknown org, got %w", err)
+	}
+	return nil
 }
 
 // tenantConfig gives acme a skeptical assistant by default; globex keeps the server defaults.
@@ -51,7 +70,7 @@ func (s *scenario) tenantConfig(ctx context.Context) error {
 func (s *scenario) createFromConfig(ctx context.Context) error {
 	exampleutil.Section("a bank with its own mission, exported as a template")
 	if _, err := s.acme.Banks.CreateBank(ctx, &pb.CreateBankRequest{
-		BankId: "support", Name: "Support desk",
+		OrgId: s.acme.Org, BankId: "support", Name: "Support desk",
 		Initial: &pb.CreateBankRequest_Config{Config: &pb.BankConfig{
 			Retain: &pb.RetainConfig{Mission: "Extract customer problems, product names and promised follow-ups."},
 			Reflect: &pb.ReflectConfig{
@@ -63,14 +82,14 @@ func (s *scenario) createFromConfig(ctx context.Context) error {
 		return fmt.Errorf("create bank: %w", err)
 	}
 	if _, err := s.acme.Config.CreateDirective(ctx, &pb.CreateDirectiveRequest{
-		BankId: "support",
+		OrgId: s.acme.Org, BankId: "support",
 		Directive: &pb.Directive{
 			Name: "no-refund-promises", Rules: []string{"Never promise a refund; say a human will confirm."}, Active: true,
 		},
 	}); err != nil {
 		return fmt.Errorf("create directive: %w", err)
 	}
-	exported, err := s.acme.Banks.ExportBankTemplate(ctx, &pb.ExportBankTemplateRequest{BankId: "support"})
+	exported, err := s.acme.Banks.ExportBankTemplate(ctx, &pb.ExportBankTemplateRequest{OrgId: s.acme.Org, BankId: "support"})
 	if err != nil {
 		return fmt.Errorf("export template: %w", err)
 	}
@@ -84,19 +103,19 @@ func (s *scenario) createFromConfig(ctx context.Context) error {
 func (s *scenario) createFromTemplate(ctx context.Context) error {
 	exampleutil.Section("the same template in another tenant")
 	if _, err := s.globex.Banks.CreateBank(ctx, &pb.CreateBankRequest{
-		BankId: "support", Name: "Globex support", Initial: &pb.CreateBankRequest_Template{Template: s.template},
+		OrgId: s.globex.Org, BankId: "support", Name: "Globex support", Initial: &pb.CreateBankRequest_Template{Template: s.template},
 	}); err != nil {
 		return fmt.Errorf("create bank from template: %w", err)
 	}
 	if _, err := s.globex.Config.UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
-		BankId:     "support",
+		OrgId: s.globex.Org, BankId:     "support",
 		Config:     &pb.BankConfig{Reflect: &pb.ReflectConfig{Mission: "You help support agents of a logistics company."}},
 		UpdateMask: exampleutil.Paths("reflect.mission"),
 	}); err != nil {
 		return fmt.Errorf("update bank config: %w", err)
 	}
 	for _, t := range []*exampleutil.Client{s.acme, s.globex} {
-		resp, err := t.Config.GetBankConfig(ctx, &pb.GetBankConfigRequest{BankId: "support"})
+		resp, err := t.Config.GetBankConfig(ctx, &pb.GetBankConfigRequest{OrgId: t.Org, BankId: "support"})
 		if err != nil {
 			return fmt.Errorf("get bank config: %w", err)
 		}
@@ -110,19 +129,19 @@ func (s *scenario) createFromTemplate(ctx context.Context) error {
 // isolation shows that one bank id holds different memories per tenant and a tenant cannot read another's banks.
 func (s *scenario) isolation(ctx context.Context) error {
 	exampleutil.Section("isolation")
-	if _, err := s.acme.Memory.Retain(ctx, &pb.RetainRequest{BankId: "support", Items: []*pb.RetainItem{
+	if _, err := s.acme.Memory.Retain(ctx, &pb.RetainRequest{OrgId: s.acme.Org, BankId: "support", Items: []*pb.RetainItem{
 		{DocumentId: "ticket-1", Content: "Customer Rivera reported that the export button crashes the app."},
 	}}); err != nil {
 		return fmt.Errorf("retain: %w", err)
 	}
 	for _, t := range []*exampleutil.Client{s.acme, s.globex} {
-		stats, err := t.Banks.GetBankStats(ctx, &pb.GetBankStatsRequest{BankId: "support"})
+		stats, err := t.Banks.GetBankStats(ctx, &pb.GetBankStatsRequest{OrgId: t.Org, BankId: "support"})
 		if err != nil {
 			return fmt.Errorf("stats: %w", err)
 		}
 		fmt.Printf("%s/support: %d documents\n", t.Tenant, stats.GetStats().GetDocuments())
 	}
-	_, err := s.globex.Banks.GetBank(ctx, &pb.GetBankRequest{BankId: "acme-only"})
+	_, err := s.globex.Banks.GetBank(ctx, &pb.GetBankRequest{OrgId: s.globex.Org, BankId: "acme-only"})
 	fmt.Println("a bank the tenant does not have:", status.Code(err))
 	if status.Code(err) != codes.NotFound {
 		return fmt.Errorf("expected NOT_FOUND for an unknown bank, got %w", err)

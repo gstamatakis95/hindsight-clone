@@ -24,7 +24,7 @@ func run(ctx context.Context, c *exampleutil.Client) error {
 	// first write, with the server defaults.
 	exampleutil.Section("retain the conversation")
 	retained, err := c.Memory.Retain(ctx, &pb.RetainRequest{
-		BankId: bank,
+		OrgId: c.Org, BankId: bank,
 		Items: []*pb.RetainItem{{
 			DocumentId: "chat-2026-10-04",
 			Content:    conversation,
@@ -47,7 +47,7 @@ func run(ctx context.Context, c *exampleutil.Client) error {
 	// 2. Recall: fetch the memories relevant to the user's next message, to put into your own prompt.
 	exampleutil.Section("recall")
 	recalled, err := c.Memory.Recall(ctx, &pb.RecallRequest{
-		BankId:    bank,
+		OrgId: c.Org, BankId:    bank,
 		Query:     "Where should I take Dana for dinner?",
 		MaxTokens: 1024,
 	})
@@ -64,7 +64,7 @@ func run(ctx context.Context, c *exampleutil.Client) error {
 	// 3. Reflect: let memd's agent search the memories and write the answer itself, citing what it used.
 	exampleutil.Section("reflect")
 	reflected, err := c.Memory.Reflect(ctx, &pb.ReflectRequest{
-		BankId: bank,
+		OrgId: c.Org, BankId: bank,
 		Query:  "What should I keep in mind when I plan a dinner for Dana and her sister?",
 	})
 	if err != nil {

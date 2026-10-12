@@ -7,4 +7,4 @@ SELECT sqlc.embed(u),
     COALESCE((SELECT array_agg(ev.unit_id ORDER BY ev.unit_id)
               FROM observation_evidence ev WHERE ev.observation_id = u.id), '{}')::uuid[] AS source_ids
 FROM memory_units u
-WHERE u.tenant_id = $1 AND u.bank_id = $2 AND u.id = ANY(@ids::uuid[]);
+WHERE u.tenant_id = @tenant_id AND u.org_id = @org_id AND u.bank_id = @bank_id AND u.id = ANY(@ids::uuid[]);

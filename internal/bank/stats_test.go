@@ -14,7 +14,7 @@ import (
 func TestListTagsPaging(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc(DeleteConfig{})
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	e.tx(t, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(e.ctx, b); err != nil {
 			return err

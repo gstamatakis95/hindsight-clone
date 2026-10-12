@@ -43,6 +43,7 @@ func newCurateEnv(t *testing.T) *curateEnv {
 	t.Helper()
 	clock := clock.NewManual(time.Time{})
 	fs := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, fs, domain.NewBankRef("acme", "org", ""))
 	e := &curateEnv{
 		t: t, ctx: context.Background(), clock: clock, fake: fs, store: &auditStore{DB: fs},
 		emb: fake.NewEmbedder(fake.EmbedSimilar),

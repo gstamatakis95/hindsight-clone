@@ -44,7 +44,7 @@ func (v *countingVocab) TagCounts(
 	return stubVocab(v.tags).TagCounts(ctx, b, s, prefix, after, limit)
 }
 
-var tagsBank = domain.BankRef{Tenant: "t", Bank: "b"}
+var tagsBank = domain.NewBankRef("t", "org", "b")
 
 // unitTagSets covers untagged, overlapping, containing, exact, disjoint and un-normalized units against
 // filters over {a, b}.

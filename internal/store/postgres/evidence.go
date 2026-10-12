@@ -41,7 +41,7 @@ func (r *evidenceRepo) Add(ctx context.Context, obs domain.UnitID, ev []domain.E
 		quotes[i] = e.Quote
 	}
 	err = r.q.EvidenceAdd(ctx, db.EvidenceAddParams{
-		TenantID: bank.TenantID, BankID: bank.BankID, ObservationID: oid, Quotes: quotes, UnitIds: units,
+		TenantID: bank.TenantID, OrgID: bank.OrgID, BankID: bank.BankID, ObservationID: oid, Quotes: quotes, UnitIds: units,
 	})
 	return mapErr("add evidence", err)
 }
@@ -53,7 +53,7 @@ func (r *evidenceRepo) Cites(ctx context.Context, s domain.ScopeKey, unit domain
 		return false, err
 	}
 	ok, err := r.q.EvidenceCites(ctx, db.EvidenceCitesParams{
-		UnitID: uid, TenantID: s.Tenant, BankID: s.Bank, ScopeKey: domain.NewScopeKey(s.BankRef, s.Tags).String(),
+		UnitID: uid, TenantID: s.Tenant, OrgID: s.Org, BankID: s.Bank, ScopeKey: domain.NewScopeKey(s.BankRef, s.Tags).String(),
 	})
 	if err != nil {
 		return false, mapErr("cites", err)
@@ -73,7 +73,7 @@ func (r *evidenceRepo) DeleteCiting(
 	if len(cited) == 0 {
 		return []domain.UnitID{}, []domain.UnitID{}, nil
 	}
-	obs, err := r.q.EvidenceCiting(ctx, db.EvidenceCitingParams{TenantID: b.Tenant, BankID: b.Bank, Ids: cited})
+	obs, err := r.q.EvidenceCiting(ctx, db.EvidenceCitingParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: cited})
 	if err != nil {
 		return nil, nil, mapErr("observations citing units", err)
 	}
@@ -101,7 +101,7 @@ func (r *evidenceRepo) deleteObservations(
 		return nil, nil, err
 	}
 	if len(others) > 0 {
-		err = r.q.EvidenceResetSources(ctx, db.EvidenceResetSourcesParams{TenantID: b.Tenant, BankID: b.Bank, Ids: others})
+		err = r.q.EvidenceResetSources(ctx, db.EvidenceResetSourcesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: others})
 		if err != nil {
 			return nil, nil, mapErr("reset sources", err)
 		}
@@ -119,7 +119,7 @@ func (r *evidenceRepo) CitingScopes(
 		return []domain.ScopeKey{}, nil
 	}
 	keys, err := r.q.EvidenceCitingScopes(ctx, db.EvidenceCitingScopesParams{
-		TenantID: b.Tenant, BankID: b.Bank, Ids: cited,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: cited,
 	})
 	if err != nil {
 		return nil, mapErr("scopes citing units", err)
@@ -147,7 +147,7 @@ func (r *evidenceRepo) DeleteScopes(
 	for i, s := range scopes {
 		keys[i] = domain.NewScopeKey(b, s.Tags).String()
 	}
-	obs, err := r.q.EvidenceLockScopes(ctx, db.EvidenceLockScopesParams{TenantID: b.Tenant, BankID: b.Bank, Keys: keys})
+	obs, err := r.q.EvidenceLockScopes(ctx, db.EvidenceLockScopesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Keys: keys})
 	if err != nil {
 		return nil, nil, mapErr("observations in scopes", err)
 	}
@@ -158,7 +158,7 @@ func (r *evidenceRepo) DeleteScopes(
 func (r *evidenceRepo) DeleteAllObservations(
 	ctx context.Context, b domain.BankRef,
 ) (deleted, reset []domain.UnitID, err error) {
-	obs, err := r.q.EvidenceLockAll(ctx, db.EvidenceLockAllParams{TenantID: b.Tenant, BankID: b.Bank})
+	obs, err := r.q.EvidenceLockAll(ctx, db.EvidenceLockAllParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank})
 	if err != nil {
 		return nil, nil, mapErr("observations of bank", err)
 	}

@@ -11,11 +11,18 @@
 //
 // Tenant. The tenant comes from the x-tenant-id metadata header, never from the request body.
 //
-// Banks. A bank is an isolated memory store within a tenant. A write to an unknown bank creates it with
-// tenant defaults, and every read of an unknown bank returns NOT_FOUND.
+// Orgs. An org groups a tenant's banks; every bank belongs to exactly one, and bank ids are unique within
+// their org. Every bank-scoped request names both org_id and bank_id. Orgs are created explicitly
+// (OrgService.CreateOrg) and never on first use: any request under an unknown org returns NOT_FOUND
+// (ORG_NOT_FOUND).
+//
+// Banks. A bank is an isolated memory store within an org. A write to an unknown bank of an existing org creates
+// it with no config of its own (it inherits the org's, the tenant's and the server's), and every read of an
+// unknown bank returns NOT_FOUND.
 //
 // Configuration. BankConfig is the one config shape used at every stored level: server (the defaults block of
-// the server config file) < tenant < bank, then a consolidation strategy and the request (< item, for retain).
+// the server config file) < tenant < org < bank, then a consolidation strategy and the request (< item, for
+// retain).
 // It is grouped by phase: retain, observations, recall, reflect, mental_models, models. Scalars: a set value
 // replaces an unset one. Groups merge field by field. A ModelBinding is atomic. Lists: a set list replaces the
 // inherited one (no append). Patch RPCs take a FieldMask, which is also how a list is cleared. Each request
@@ -57,13 +64,14 @@
 // reasons, by code:
 //   INVALID_ARGUMENT     INVALID_ARGUMENT (malformed request), TOO_MANY_SCOPES (ALL_COMBINATIONS fan-out
 //                        over max_combinations), MEMORY_IS_OBSERVATION (curating an observation)
-//   NOT_FOUND            NOT_FOUND (the named object does not exist), BANK_NOT_FOUND (unknown bank, or any
-//                        read of a bank being deleted except GetOperation of its delete_bank operations)
+//   NOT_FOUND            NOT_FOUND (the named object does not exist), ORG_NOT_FOUND (unknown org, or an org
+//                        being deleted), BANK_NOT_FOUND (unknown bank, or any read of a bank being deleted
+//                        except GetOperation of its delete_bank operations)
 //   ALREADY_EXISTS       ALREADY_EXISTS (a create collided with an existing id)
-//   FAILED_PRECONDITION  FAILED_PRECONDITION (the state forbids the call), BANK_DELETING (a write to a bank
-//                        being deleted), MODEL_UNBOUND (a model slot the call needs has no binding),
-//                        OPERATION_NOT_CANCELLABLE, OPERATION_NOT_RETRYABLE (the operation's status or kind
-//                        forbids it)
+//   FAILED_PRECONDITION  FAILED_PRECONDITION (the state forbids the call), ORG_DELETING (a write under an org
+//                        being deleted), BANK_DELETING (a write to a bank being deleted), MODEL_UNBOUND (a
+//                        model slot the call needs has no binding), OPERATION_NOT_CANCELLABLE,
+//                        OPERATION_NOT_RETRYABLE (the operation's status or kind forbids it)
 //   UNAVAILABLE          UNAVAILABLE (a dependency failed; retry with backoff), RETRIEVAL_UNAVAILABLE (a
 //                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
 //   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens)
@@ -71,6 +79,7 @@
 //                        concurrent writer won; retry)
 //   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
 //   CANCELLED            CANCELLED (the client cancelled the call)
+//   UNIMPLEMENTED        UNIMPLEMENTED (the RPC is not available in this server version)
 //   INTERNAL             INTERNAL (a server bug)
 // The x-tenant-id header is checked first: missing or invalid = INVALID_ARGUMENT with field x-tenant-id.
 //
@@ -90,7 +99,7 @@ option go_package = "memd/gen/memory/v1;memoryv1";
 service MemoryService {
   // Retain stores content and extracts memories from it. Synchronous by default (returns after the memories
   // commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
-  // bank creates it with tenant defaults.
+  // bank of an existing org creates it.
   rpc Retain(RetainRequest) returns (RetainResponse);
   // Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
   // rerank, boosts and token packing. Unknown bank = NOT_FOUND.
@@ -177,6 +186,21 @@ service MentalModelService {
   rpc SearchMentalModels(SearchMentalModelsRequest) returns (SearchMentalModelsResponse);
 }
 
+// OrgService manages the calling tenant's orgs. Every bank belongs to exactly one org, and an org must exist
+// before anything can be written under it.
+service OrgService {
+  // CreateOrg creates an org, optionally with its own config level. An existing org = ALREADY_EXISTS; an org
+  // being deleted = FAILED_PRECONDITION (ORG_DELETING).
+  rpc CreateOrg(CreateOrgRequest) returns (CreateOrgResponse);
+  // GetOrg returns one org. Unknown, or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+  rpc GetOrg(GetOrgRequest) returns (GetOrgResponse);
+  // ListOrgs pages through the tenant's orgs in id order; orgs being deleted are left out.
+  rpc ListOrgs(ListOrgsRequest) returns (ListOrgsResponse);
+  // DeleteOrg deletes an org with every bank in it. Not available in this server version: it returns
+  // UNIMPLEMENTED.
+  rpc DeleteOrg(DeleteOrgRequest) returns (DeleteOrgResponse);
+}
+
 // BankService manages the calling tenant's banks: create (optionally from a template), get, list, delete,
 // stats, tags and template export.
 service BankService {
@@ -186,7 +210,7 @@ service BankService {
   rpc CreateBank(CreateBankRequest) returns (CreateBankResponse);
   // GetBank returns one bank. Unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
   rpc GetBank(GetBankRequest) returns (GetBankResponse);
-  // ListBanks pages through the tenant's banks in id order; banks being deleted are left out.
+  // ListBanks pages through an org's banks in id order; banks being deleted are left out.
   rpc ListBanks(ListBanksRequest) returns (ListBanksResponse);
   // DeleteBank marks the bank as being deleted, cancels its pending operations and enqueues delete_bank, all
   // at once, and returns that operation. The only bulk hard delete: while it runs, writes fail FAILED_PRECONDITION
@@ -205,8 +229,8 @@ service BankService {
   rpc ExportBankTemplate(ExportBankTemplateRequest) returns (ExportBankTemplateResponse);
 }
 
-// ConfigService reads and writes how the tenant's banks behave: the tenant and bank config levels, the prompt
-// preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
+// ConfigService reads and writes how the tenant's banks behave: the tenant, org and bank config levels, the
+// prompt preview, and each bank's directives. Every config RPC returns a ConfigView: the level's own overrides and
 // the effective config they resolve to.
 service ConfigService {
   // GetTenantConfig returns the tenant's own config and the effective tenant defaults (server < tenant).
@@ -216,7 +240,15 @@ service ConfigService {
   // ResetTenantConfig removes the tenant's own config at the given paths, so they inherit the server defaults
   // again.
   rpc ResetTenantConfig(ResetTenantConfigRequest) returns (ResetTenantConfigResponse);
-  // GetBankConfig returns the bank's own overrides and its effective config (server < tenant < bank).
+  // GetOrgConfig returns the org's own config and its effective config (server < tenant < org). Unknown, or
+  // being deleted = NOT_FOUND (ORG_NOT_FOUND).
+  rpc GetOrgConfig(GetOrgConfigRequest) returns (GetOrgConfigResponse);
+  // UpdateOrgConfig patches the org's own config with a FieldMask. It never creates an org.
+  rpc UpdateOrgConfig(UpdateOrgConfigRequest) returns (UpdateOrgConfigResponse);
+  // ResetOrgConfig removes the org's own config at the given paths, so they inherit the tenant and server
+  // levels again.
+  rpc ResetOrgConfig(ResetOrgConfigRequest) returns (ResetOrgConfigResponse);
+  // GetBankConfig returns the bank's own overrides and its effective config (server < tenant < org < bank).
   rpc GetBankConfig(GetBankConfigRequest) returns (GetBankConfigResponse);
   // UpdateBankConfig patches the bank's own overrides with a FieldMask.
   rpc UpdateBankConfig(UpdateBankConfigRequest) returns (UpdateBankConfigResponse);
@@ -262,19 +294,22 @@ service OperationService {
 
 // RetainRequest retains a batch of documents into one bank.
 message RetainRequest {
-  // Target bank; created with tenant defaults if unknown.
-  string bank_id = 1;
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
+  // Target bank; created in its org if unknown.
+  string bank_id = 2;
   // Documents to retain.
-  repeated RetainItem items = 2;
+  repeated RetainItem items = 3;
   // Tags added to every item's memories.
-  repeated string document_tags = 3;
+  repeated string document_tags = 4;
   // Request-level overrides. Stored on each document (part of its no-op hash); never inherited by automatic
   // consolidation.
-  RetainOverrides overrides = 4;
+  RetainOverrides overrides = 5;
   // Do not enqueue consolidation after this retain, so a manual Consolidate can run with its own settings.
-  bool skip_consolidation = 5;
+  bool skip_consolidation = 6;
   // false (default) = return after the memories commit; true = enqueue jobs and return their operations.
-  bool run_async = 6;
+  bool run_async = 7;
 }
 
 // RetainResponse reports per-document outcomes.
@@ -342,39 +377,42 @@ message RetainedDocument {
 
 // RecallRequest retrieves memories for a query.
 message RecallRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to search; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Query text, at most 500 tokens.
-  string query = 2;
+  string query = 3;
   // Fact types to return; empty = all.
-  repeated FactType fact_types = 3;
+  repeated FactType fact_types = 4;
   // Tag filter on the memories' tags; unset = no filter. Flat tags or groups; tags.match unset =
   // TAGS_MATCH_ANY.
-  TagFilter tags = 4;
+  TagFilter tags = 5;
   // Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
-  Budget budget = 5;
+  Budget budget = 6;
   // Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
-  int32 max_tokens = 6;
+  int32 max_tokens = 7;
   // Reference time for relative expressions and recency; unset = now.
-  google.protobuf.Timestamp query_time = 7;
+  google.protobuf.Timestamp query_time = 8;
   // Explicit time window start; when set, the query is not parsed for a window.
-  google.protobuf.Timestamp time_window_start = 8;
+  google.protobuf.Timestamp time_window_start = 9;
   // Explicit time window end.
-  google.protobuf.Timestamp time_window_end = 9;
+  google.protobuf.Timestamp time_window_end = 10;
   // Prefer observations: drop raw facts covered by a returned observation and backfill the budget.
-  bool prefer_observations = 10;
+  bool prefer_observations = 11;
   // Score floors.
-  MinScores min_scores = 11;
+  MinScores min_scores = 12;
   // Extra material to attach.
-  RecallInclude include = 12;
+  RecallInclude include = 13;
   // Return a RecallTrace.
-  bool trace = 13;
+  bool trace = 14;
   // Overrides for this call only.
-  RecallOverrides overrides = 14;
+  RecallOverrides overrides = 15;
   // Recall arms to run, by name (ListRecallArms), e.g. ["graph", "vector"] runs only those two; empty = the
   // effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
   // INVALID_ARGUMENT.
-  repeated string arms = 15;
+  repeated string arms = 16;
 }
 
 // RecallResponse carries ranked memories and any requested attachments.
@@ -421,33 +459,36 @@ message EntityState {
 
 // ReflectRequest asks the reflect agent a question.
 message ReflectRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to reason over; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // The question to answer in natural language.
-  string query = 2;
+  string query = 3;
   // Tag filter for retrieval and directive selection; unset = no filter (only untagged directives apply).
   // Flat tags or groups; tags.match unset = TAGS_MATCH_ANY.
-  TagFilter tags = 3;
+  TagFilter tags = 4;
   // Size class scaling iterations and recall budgets, default BUDGET_LOW.
-  Budget budget = 4;
+  Budget budget = 5;
   // Token cap on the final answer; overrides ReflectConfig.max_answer_tokens.
-  optional int32 max_tokens = 5;
+  optional int32 max_tokens = 6;
   // JSON Schema for a structured second pass (STRUCTURED_OUTPUT slot); empty = prose only.
-  string response_schema_json = 6;
+  string response_schema_json = 7;
   // Apply every active directive, not only those matching the request tags.
-  bool apply_all_directives = 7;
+  bool apply_all_directives = 8;
   // Directives added for this call only; stored directives can never be removed by a request.
-  repeated Directive extra_directives = 8;
+  repeated Directive extra_directives = 9;
   // What to return beside the answer.
-  ReflectInclude include = 9;
+  ReflectInclude include = 10;
   // Reference time for relative expressions; unset = now.
-  google.protobuf.Timestamp query_time = 10;
+  google.protobuf.Timestamp query_time = 11;
   // Overrides for this call only. Extra directives come through extra_directives.
-  ReflectOverrides overrides = 11;
+  ReflectOverrides overrides = 12;
   // Recall arms the agent's recall and search_observations tools run, by name (ListRecallArms); empty = the
   // effective RecallConfig.arms (all registered arms by default). An unknown or repeated name =
   // INVALID_ARGUMENT.
-  repeated string arms = 12;
+  repeated string arms = 13;
 }
 
 // ReflectResponse carries the answer and its provenance.
@@ -514,31 +555,34 @@ message RecallArm {
 
 // ListMemoriesRequest filters and pages the bank's memories.
 message ListMemoriesRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to list; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Fact types; empty = all.
-  repeated FactType fact_types = 2;
+  repeated FactType fact_types = 3;
   // Case-insensitive substring the memory text must contain; empty = no filter.
-  string text_contains = 3;
+  string text_contains = 4;
   // Only memories of this document.
-  string document_id = 4;
+  string document_id = 5;
   // Only live memories linked to this entity.
-  string entity_id = 5;
+  string entity_id = 6;
   // Live or invalidated memories; unspecified = no state filter.
-  MemoryState state = 6;
+  MemoryState state = 7;
   // Inclusive start of the time range on time_field.
-  google.protobuf.Timestamp start = 7;
+  google.protobuf.Timestamp start = 8;
   // Exclusive end of the time range on time_field.
-  google.protobuf.Timestamp end = 8;
+  google.protobuf.Timestamp end = 9;
   // Timestamp the range applies to.
-  TimeField time_field = 9;
+  TimeField time_field = 10;
   // Tag filter on the memories' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
   // TAGS_MATCH_ANY.
-  TagFilter tags = 10;
+  TagFilter tags = 11;
   // Maximum memories per page; 0 = 100, at most 1000.
-  int32 page_size = 11;
+  int32 page_size = 12;
   // Token from a previous response; empty = first page.
-  string page_token = 12;
+  string page_token = 13;
 
   // TimeField picks the memory timestamp the time range applies to.
   enum TimeField {
@@ -569,10 +613,13 @@ message ListMemoriesResponse {
 
 // GetMemoryRequest names one memory.
 message GetMemoryRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the memory; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Memory id.
-  string memory_id = 2;
+  string memory_id = 3;
 }
 
 // GetMemoryResponse carries the memory.
@@ -587,24 +634,27 @@ message GetMemoryResponse {
 // the rederive_memory job writes a new one, deletes the observations citing the fact and queues refreshes of
 // the mental models that cite one of those observations.
 message UpdateMemoryRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the memory.
-  string bank_id = 1;
+  string bank_id = 2;
   // Memory id; must be a live raw fact. An observation = INVALID_ARGUMENT (reason MEMORY_IS_OBSERVATION); an
   // invalidated or unknown memory = NOT_FOUND.
-  string memory_id = 2;
+  string memory_id = 3;
   // The new values; only the fields update_mask names are applied.
-  MemoryEdit memory = 3;
+  MemoryEdit memory = 4;
   // Fields of memory to apply: text, context, occurred_start, occurred_end, fact_type, entities. Empty = the
   // populated fields of memory. A named field left unset clears it, so clearing a field (the entities, or
   // both occurred bounds to make the fact timeless) needs it named here. Any other path, or nothing to
   // apply, = INVALID_ARGUMENT.
-  google.protobuf.FieldMask update_mask = 4;
+  google.protobuf.FieldMask update_mask = 5;
   // false = take the new entity names literally instead of resolving them to existing entities; unset = true.
-  optional bool resolve_entities = 5;
+  optional bool resolve_entities = 6;
   // Why the change was made; recorded with the edit.
-  string reason = 6;
+  string reason = 7;
   // Overrides for re-deriving; kept on the rederive operation.
-  RederiveOverrides overrides = 7;
+  RederiveOverrides overrides = 8;
 }
 
 // UpdateMemoryResponse carries the edited memory and its rederive operation.
@@ -637,13 +687,16 @@ message MemoryEdit {
 // fact, queues consolidation and graph maintenance, and queues refreshes of the mental models that cite the
 // fact or one of those observations.
 message InvalidateMemoryRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the memory.
-  string bank_id = 1;
+  string bank_id = 2;
   // Memory id; must be a live raw fact. An observation = INVALID_ARGUMENT (reason MEMORY_IS_OBSERVATION); an
   // invalidated or unknown memory = NOT_FOUND.
-  string memory_id = 2;
+  string memory_id = 3;
   // Why the fact is invalidated; recorded with the change.
-  string reason = 3;
+  string reason = 4;
 }
 
 // InvalidateMemoryResponse carries the invalidated memory.
@@ -657,18 +710,21 @@ message InvalidateMemoryResponse {
 // RestoreMemoryRequest names the invalidated raw fact to bring back. The restore re-attaches the entities the
 // fact had when it was invalidated; its rederive_memory job re-embeds and re-links it.
 message RestoreMemoryRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the memory.
-  string bank_id = 1;
+  string bank_id = 2;
   // Memory id. An unknown memory = NOT_FOUND; an observation = INVALID_ARGUMENT (reason
   // MEMORY_IS_OBSERVATION); a live fact is left unchanged.
-  string memory_id = 2;
+  string memory_id = 3;
   // Why the fact is restored; recorded with the change.
-  string reason = 3;
+  string reason = 4;
   // false = re-attach the fact's entity names literally instead of resolving them to existing entities;
   // unset = true.
-  optional bool resolve_entities = 4;
+  optional bool resolve_entities = 5;
   // Overrides for re-deriving; kept on the rederive operation.
-  RederiveOverrides overrides = 5;
+  RederiveOverrides overrides = 6;
 }
 
 // RestoreMemoryResponse carries the restored memory and its rederive operation.
@@ -741,23 +797,26 @@ enum MemoryState {
 
 // ListDocumentsRequest filters and pages the bank's documents.
 message ListDocumentsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to list; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Case-insensitive substring the document id must contain; empty = no filter.
-  string document_id_contains = 2;
+  string document_id_contains = 3;
   // Tag filter on the documents' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
   // TAGS_MATCH_ANY_STRICT.
-  TagFilter tags = 3;
+  TagFilter tags = 4;
   // Inclusive start of the time range on time_field.
-  google.protobuf.Timestamp start = 4;
+  google.protobuf.Timestamp start = 5;
   // Exclusive end of the time range on time_field.
-  google.protobuf.Timestamp end = 5;
+  google.protobuf.Timestamp end = 6;
   // Timestamp the range applies to.
-  TimeField time_field = 6;
+  TimeField time_field = 7;
   // Maximum documents per page; 0 = 100, at most 1000.
-  int32 page_size = 7;
+  int32 page_size = 8;
   // Token from a previous response; empty = first page.
-  string page_token = 8;
+  string page_token = 9;
 
   // TimeField picks the document timestamp the time range applies to.
   enum TimeField {
@@ -782,12 +841,15 @@ message ListDocumentsResponse {
 
 // GetDocumentRequest names one document.
 message GetDocumentRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the document; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Document id.
-  string document_id = 2;
+  string document_id = 3;
   // Read and return the original text from the blob store.
-  bool include_text = 3;
+  bool include_text = 4;
 }
 
 // GetDocumentResponse carries the document.
@@ -800,13 +862,16 @@ message GetDocumentResponse {
 
 // RetagDocumentRequest replaces a document's tag set.
 message RetagDocumentRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the document.
-  string bank_id = 1;
+  string bank_id = 2;
   // Document id.
-  string document_id = 2;
+  string document_id = 3;
   // The new tag set; replaces the old one entirely. Required: unset = INVALID_ARGUMENT; a set but empty
   // TagSet removes every document tag.
-  TagSet tags = 3;
+  TagSet tags = 4;
 }
 
 // RetagDocumentResponse carries the retag job.
@@ -820,12 +885,15 @@ message RetagDocumentResponse {
 
 // ReprocessDocumentRequest re-extracts a document.
 message ReprocessDocumentRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the document.
-  string bank_id = 1;
+  string bank_id = 2;
   // Document id.
-  string document_id = 2;
+  string document_id = 3;
   // New retain overrides; they replace the document's stored overrides. Unset = replay the stored overrides.
-  RetainOverrides overrides = 3;
+  RetainOverrides overrides = 4;
 }
 
 // ReprocessDocumentResponse carries the reprocess job.
@@ -874,12 +942,15 @@ message Document {
 
 // ConsolidateRequest asks for a manual consolidation run.
 message ConsolidateRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to consolidate.
-  string bank_id = 1;
+  string bank_id = 2;
   // Scopes to consolidate; empty = every scope.
-  repeated TagSet scopes = 2;
+  repeated TagSet scopes = 3;
   // Overrides for this run only; kept on the operation.
-  ConsolidateOverrides overrides = 3;
+  ConsolidateOverrides overrides = 4;
 }
 
 // ConsolidateResponse carries the consolidation job.
@@ -892,12 +963,15 @@ message ConsolidateResponse {
 
 // ListObservationScopesRequest pages the bank's observation scopes.
 message ListObservationScopesRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to list; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Maximum scopes per page; 0 = 100, at most 1000.
-  int32 page_size = 2;
+  int32 page_size = 3;
   // Token from a previous response; empty = first page.
-  string page_token = 3;
+  string page_token = 4;
 }
 
 // ListObservationScopesResponse is one page of observation scopes, ordered by the scope's tags.
@@ -922,14 +996,17 @@ message ObservationScope {
 
 // ListObservationHistoryRequest pages one observation's versions.
 message ListObservationHistoryRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the observation; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Observation id; an id with no history (unknown, or not an observation) = NOT_FOUND.
-  string observation_id = 2;
+  string observation_id = 3;
   // Maximum versions per page; 0 = 100, at most 1000.
-  int32 page_size = 3;
+  int32 page_size = 4;
   // Token from a previous response; empty = first page.
-  string page_token = 4;
+  string page_token = 5;
 }
 
 // ListObservationHistoryResponse is one page of an observation's versions.
@@ -956,21 +1033,24 @@ message ObservationVersion {
 
 // ClearObservationsRequest selects the observations to delete: exactly one target.
 message ClearObservationsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to clear.
-  string bank_id = 1;
+  string bank_id = 2;
   // What to clear. Required: no target, an empty scope list or all = false is INVALID_ARGUMENT.
   oneof target {
     // Every observation of exactly these scopes (tag sets, compared as sets); other scopes, supersets and
     // subsets included, are kept.
-    TagSetList scopes = 2;
+    TagSetList scopes = 3;
     // Every observation citing this memory (unknown = NOT_FOUND); a raw fact then consolidates again.
-    string memory_id = 3;
+    string memory_id = 4;
     // true clears every observation of the bank.
-    bool all = 4;
+    bool all = 5;
   }
   // Enqueue a consolidation of what was cleared afterwards: the same scopes, or every scope for memory_id
   // and all.
-  bool reconsolidate = 5;
+  bool reconsolidate = 6;
 }
 
 // TagSetList is a list of tag sets, so that a oneof can carry several scopes.
@@ -991,10 +1071,13 @@ message ClearObservationsResponse {
 
 // PreviewConsolidationStrategiesRequest carries draft strategies to evaluate.
 message PreviewConsolidationStrategiesRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank whose existing scopes are matched.
-  string bank_id = 1;
+  string bank_id = 2;
   // Draft strategies, in priority order (first match wins).
-  repeated ConsolidationStrategy strategies = 2;
+  repeated ConsolidationStrategy strategies = 3;
 }
 
 // PreviewConsolidationStrategiesResponse reports the matches of every draft strategy.
@@ -1031,10 +1114,13 @@ message StrategyMatch {
 
 // CreateMentalModelRequest creates a model.
 message CreateMentalModelRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to create it in.
-  string bank_id = 1;
+  string bank_id = 2;
   // The model's spec; spec.id must be unique in the bank.
-  MentalModelSpec spec = 2;
+  MentalModelSpec spec = 3;
 }
 
 // CreateMentalModelResponse carries the new model and its first build.
@@ -1049,12 +1135,15 @@ message CreateMentalModelResponse {
 
 // GetMentalModelRequest names one model.
 message GetMentalModelRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the model; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Model id.
-  string mental_model_id = 2;
+  string mental_model_id = 3;
   // How much to return; unset = MENTAL_MODEL_VIEW_FULL.
-  MentalModelView view = 3;
+  MentalModelView view = 4;
 }
 
 // GetMentalModelResponse carries the model.
@@ -1079,19 +1168,22 @@ enum MentalModelView {
 
 // ListMentalModelsRequest filters and pages the bank's models.
 message ListMentalModelsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to list; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Only models whose folder path starts with this; empty = all.
-  string folder_prefix = 2;
+  string folder_prefix = 3;
   // How much of each model to return; unset = MENTAL_MODEL_VIEW_BASIC.
-  MentalModelView view = 3;
+  MentalModelView view = 4;
   // Tag filter on the models' own tags (MentalModelSpec.tags); unset or empty tags = no filter. Flat form
   // only; tags.match unset = TAGS_MATCH_ANY.
-  TagFilter tags = 4;
+  TagFilter tags = 5;
   // Maximum models per page; 0 = 100, at most 1000.
-  int32 page_size = 5;
+  int32 page_size = 6;
   // Token from a previous response; empty = first page.
-  string page_token = 6;
+  string page_token = 7;
 }
 
 // ListMentalModelsResponse is one page of models.
@@ -1106,16 +1198,19 @@ message ListMentalModelsResponse {
 
 // UpdateMentalModelRequest patches a model's spec.
 message UpdateMentalModelRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the model.
-  string bank_id = 1;
+  string bank_id = 2;
   // Model id.
-  string mental_model_id = 2;
+  string mental_model_id = 3;
   // New values for the fields named in update_mask.
-  MentalModelSpec spec = 3;
+  MentalModelSpec spec = 4;
   // MentalModelSpec paths to replace (for example schedule.cron, scope.fact_types, strategy or
   // overrides.reflect.mission); a path set to an empty value clears it. Setting either member of
   // schedule.when clears the other one. Unset = every populated field of spec; id cannot be updated.
-  google.protobuf.FieldMask update_mask = 4;
+  google.protobuf.FieldMask update_mask = 5;
 }
 
 // UpdateMentalModelResponse carries the patched model.
@@ -1128,17 +1223,20 @@ message UpdateMentalModelResponse {
 
 // RefreshMentalModelRequest asks for a manual refresh.
 message RefreshMentalModelRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the model.
-  string bank_id = 1;
+  string bank_id = 2;
   // Model id.
-  string mental_model_id = 2;
+  string mental_model_id = 3;
   // Force a full refresh; OR-ed into a queued refresh this joins.
-  bool force_full = 3;
+  bool force_full = 4;
   // Overrides for this refresh only, over the model's stored ones. Kept on the operation; they replace a
   // queued refresh's overrides.
-  RefreshOverrides overrides = 4;
+  RefreshOverrides overrides = 5;
   // Strategy for this refresh only; unset = MentalModelSpec.strategy.
-  RefreshStrategy strategy = 5;
+  RefreshStrategy strategy = 6;
 }
 
 // RefreshMentalModelResponse carries the refresh job.
@@ -1153,12 +1251,15 @@ message RefreshMentalModelResponse {
 
 // PreviewMentalModelRefreshRequest asks for a refresh that writes nothing.
 message PreviewMentalModelRefreshRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the model.
-  string bank_id = 1;
+  string bank_id = 2;
   // Model id.
-  string mental_model_id = 2;
+  string mental_model_id = 3;
   // Strategy to preview; unset = MentalModelSpec.strategy.
-  RefreshStrategy strategy = 3;
+  RefreshStrategy strategy = 4;
 }
 
 // PreviewMentalModelRefreshResponse reports what a refresh would do.
@@ -1195,16 +1296,19 @@ message ResolvedScope {
 
 // ListMentalModelHistoryRequest pages a model's history.
 message ListMentalModelHistoryRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the model; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Model id.
-  string mental_model_id = 2;
+  string mental_model_id = 3;
   // Only this kind; unspecified = both.
-  MentalModelHistoryEntry.Kind kind = 3;
+  MentalModelHistoryEntry.Kind kind = 4;
   // Maximum entries per page; 0 = 100, at most 1000.
-  int32 page_size = 4;
+  int32 page_size = 5;
   // Token from a previous response; empty = first page.
-  string page_token = 5;
+  string page_token = 6;
 }
 
 // ListMentalModelHistoryResponse is one page of history, newest first.
@@ -1245,10 +1349,13 @@ message MentalModelHistoryEntry {
 
 // DeleteMentalModelRequest names the model to delete.
 message DeleteMentalModelRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the model.
-  string bank_id = 1;
+  string bank_id = 2;
   // Model id.
-  string mental_model_id = 2;
+  string mental_model_id = 3;
 }
 
 // DeleteMentalModelResponse is empty on success.
@@ -1258,10 +1365,13 @@ message DeleteMentalModelResponse {}
 
 // DeleteMentalModelFolderRequest names the folder to delete.
 message DeleteMentalModelFolderRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the folder.
-  string bank_id = 1;
+  string bank_id = 2;
   // Folder path; every model under it is deleted, recursively. Empty = INVALID_ARGUMENT.
-  string folder_path = 2;
+  string folder_path = 3;
 }
 
 // DeleteMentalModelFolderResponse reports how many models were deleted.
@@ -1274,14 +1384,17 @@ message DeleteMentalModelFolderResponse {
 
 // SearchMentalModelsRequest searches the bank's mental models by content.
 message SearchMentalModelsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to search; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Search text.
-  string query = 2;
+  string query = 3;
   // Only models whose folder path starts with this; empty = all.
-  string folder_prefix = 3;
+  string folder_prefix = 4;
   // Maximum hits; 0 = 10, at most 100, negative = INVALID_ARGUMENT.
-  int32 max_results = 4;
+  int32 max_results = 5;
 }
 
 // SearchMentalModelsResponse lists matching models.
@@ -1489,6 +1602,90 @@ enum RefreshOutcome {
   REFRESH_OUTCOME_FAILED = 3;
 }
 
+// ======================= OrgService =======================
+
+// Org lifecycle and inventory: create, get, list and delete. An org's config level is ConfigService.
+
+// ---- CreateOrg ----
+
+// CreateOrgRequest creates an org.
+message CreateOrgRequest {
+  // Org id, unique within the tenant: non-empty, at most 256 bytes, no '/' or control characters, not "." or
+  // "..".
+  string org_id = 1;
+  // Display name.
+  string name = 2;
+  // Initial config of the org level; unset = none (its banks inherit the tenant and server levels). Validated
+  // as a whole level, as CreateBank validates a bank's.
+  BankConfig config = 3;
+}
+
+// CreateOrgResponse carries the new org.
+message CreateOrgResponse {
+  // The newly created org; its config is ConfigService.GetOrgConfig.
+  Org org = 1;
+}
+
+// ---- GetOrg ----
+
+// GetOrgRequest names one org.
+message GetOrgRequest {
+  // Org id; unknown, or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
+}
+
+// GetOrgResponse carries the org.
+message GetOrgResponse {
+  // The org; its config is ConfigService.GetOrgConfig.
+  Org org = 1;
+}
+
+// ---- ListOrgs ----
+
+// ListOrgsRequest pages the tenant's orgs.
+message ListOrgsRequest {
+  // Maximum orgs per page; 0 = 100, at most 1000.
+  int32 page_size = 1;
+  // Token from a previous response; empty = first page.
+  string page_token = 2;
+  // Only orgs whose id starts with this; empty = all.
+  string id_prefix = 3;
+}
+
+// ListOrgsResponse is one page of orgs, in id order.
+message ListOrgsResponse {
+  // Orgs on this page; orgs being deleted are left out.
+  repeated Org orgs = 1;
+  // Token for the next page; empty = no more.
+  string next_page_token = 2;
+}
+
+// ---- DeleteOrg ----
+
+// DeleteOrgRequest names the org to delete.
+message DeleteOrgRequest {
+  // Org id.
+  string org_id = 1;
+}
+
+// DeleteOrgResponse carries the delete job.
+message DeleteOrgResponse {
+  // The operation deleting the org.
+  Operation operation = 1;
+}
+
+// ---- Resources ----
+
+// Org is a group of a tenant's banks.
+message Org {
+  // Org id, unique within the tenant.
+  string id = 1;
+  // Display name.
+  string name = 2;
+  // When the org was created.
+  google.protobuf.Timestamp created_at = 3;
+}
+
 // ======================= BankService =======================
 
 // Bank lifecycle and inventory: create (optionally from a template), get, list, delete, stats, tag listing and
@@ -1498,17 +1695,20 @@ enum RefreshOutcome {
 
 // CreateBankRequest creates a bank.
 message CreateBankRequest {
-  // Bank id, unique within the tenant.
-  string bank_id = 1;
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
+  // Bank id, unique within the org.
+  string bank_id = 2;
   // Display name.
-  string name = 2;
+  string name = 3;
   // What the bank starts with; unset = no own config (everything inherits tenant and server defaults).
   oneof initial {
     // Initial config overrides; unset fields inherit tenant and server defaults.
-    BankConfig config = 3;
+    BankConfig config = 4;
     // A template (ExportBankTemplate): its config becomes the bank's own overrides, its directives are created
     // with new ids, and its mental models are created with their first builds enqueued.
-    BankTemplate template = 4;
+    BankTemplate template = 5;
   }
 }
 
@@ -1535,8 +1735,11 @@ message BankTemplate {
 
 // GetBankRequest names one bank.
 message GetBankRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id; unknown, or being deleted = NOT_FOUND (BANK_NOT_FOUND).
-  string bank_id = 1;
+  string bank_id = 2;
 }
 
 // GetBankResponse carries the bank.
@@ -1547,14 +1750,16 @@ message GetBankResponse {
 
 // ---- ListBanks ----
 
-// ListBanksRequest pages the tenant's banks.
+// ListBanksRequest pages an org's banks.
 message ListBanksRequest {
+  // Org whose banks are listed; unknown or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Maximum banks per page; 0 = 100, at most 1000.
-  int32 page_size = 1;
+  int32 page_size = 2;
   // Token from a previous response; empty = first page.
-  string page_token = 2;
+  string page_token = 3;
   // Only banks whose id starts with this; empty = all.
-  string id_prefix = 3;
+  string id_prefix = 4;
 }
 
 // ListBanksResponse is one page of banks, in id order.
@@ -1569,8 +1774,11 @@ message ListBanksResponse {
 
 // DeleteBankRequest names the bank to delete.
 message DeleteBankRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id; unknown = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
 }
 
 // DeleteBankResponse carries the delete job.
@@ -1583,8 +1791,11 @@ message DeleteBankResponse {
 
 // GetBankStatsRequest names one bank.
 message GetBankStatsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id; unknown = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
 }
 
 // GetBankStatsResponse carries the stats.
@@ -1622,16 +1833,19 @@ message BankStats {
 
 // ListTagsRequest pages the bank's tags.
 message ListTagsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id; unknown = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Which objects to count tags on.
-  TagSource source = 2;
+  TagSource source = 3;
   // Only tags starting with this; empty = all.
-  string prefix = 3;
+  string prefix = 4;
   // Maximum tags per page; 0 = 100, at most 1000.
-  int32 page_size = 4;
+  int32 page_size = 5;
   // Token from a previous response; empty = first page.
-  string page_token = 5;
+  string page_token = 6;
 
   // TagSource picks which objects ListTags counts tags on.
   enum TagSource {
@@ -1666,8 +1880,11 @@ message TagCount {
 
 // ExportBankTemplateRequest names the bank to export.
 message ExportBankTemplateRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id; unknown = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
 }
 
 // ExportBankTemplateResponse carries the template.
@@ -1680,18 +1897,21 @@ message ExportBankTemplateResponse {
 
 // Bank is a memory bank. Its config is read and written through ConfigService.
 message Bank {
-  // Bank id, unique within the tenant.
-  string id = 1;
+  // Org the bank belongs to.
+  string org_id = 1;
+  // Bank id, unique within the org.
+  string id = 2;
   // Display name.
-  string name = 2;
+  string name = 3;
   // When the bank was created.
-  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp created_at = 4;
 }
 
 // ======================= ConfigService =======================
 
 // The config levels a tenant controls and what they feed. A tenant's BankConfig sits between the server
-// defaults and each bank's own config in the hierarchy server < tenant < bank < strategy < request. Update
+// defaults and each org's config, and an org's between the tenant's and each of its banks' own config, in the
+// hierarchy server < tenant < org < bank < strategy < request. Update
 // sets the masked paths (a masked path left empty is an explicit empty value, which is how a list is
 // cleared); Reset unsets them, so they inherit from the less specific level again. Directives are standing
 // reflect instructions; the prompt preview shows how config and directives render.
@@ -1739,32 +1959,88 @@ message ResetTenantConfigResponse {
   ConfigView config = 1;
 }
 
+// ---- GetOrgConfig ----
+
+// GetOrgConfigRequest names one org.
+message GetOrgConfigRequest {
+  // Org id; unknown, or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
+}
+
+// GetOrgConfigResponse carries the org's config.
+message GetOrgConfigResponse {
+  // own: only what the org itself sets; effective: server < tenant < org, merged.
+  ConfigView config = 1;
+}
+
+// ---- UpdateOrgConfig ----
+
+// UpdateOrgConfigRequest patches the org's own config. An unknown org is NOT_FOUND: orgs are never created here.
+message UpdateOrgConfigRequest {
+  // Org id; unknown, or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
+  // New values for the fields named in update_mask.
+  BankConfig config = 2;
+  // BankConfig paths to replace; a path set to an empty value clears it (this is how a list is cleared).
+  // Unset = every populated field of config.
+  google.protobuf.FieldMask update_mask = 3;
+}
+
+// UpdateOrgConfigResponse carries the org's config after the patch.
+message UpdateOrgConfigResponse {
+  // The org's config after the patch.
+  ConfigView config = 1;
+}
+
+// ---- ResetOrgConfig ----
+
+// ResetOrgConfigRequest removes some or all of the org's own config.
+message ResetOrgConfigRequest {
+  // Org id; unknown, or being deleted = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
+  // BankConfig paths to reset, so they inherit the tenant and server levels again; the single path "*" resets
+  // everything. Empty = INVALID_ARGUMENT.
+  google.protobuf.FieldMask reset_mask = 2;
+}
+
+// ResetOrgConfigResponse carries the org's config after the reset.
+message ResetOrgConfigResponse {
+  // The org's config after the reset.
+  ConfigView config = 1;
+}
+
 // ---- GetBankConfig ----
 
 // GetBankConfigRequest names one bank.
 message GetBankConfigRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id; unknown, or being deleted = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
 }
 
 // GetBankConfigResponse carries the bank's config.
 message GetBankConfigResponse {
-  // own: only what the bank itself sets; effective: server < tenant < bank, merged.
+  // own: only what the bank itself sets; effective: server < tenant < org < bank, merged.
   ConfigView config = 1;
 }
 
 // ---- UpdateBankConfig ----
 
-// UpdateBankConfigRequest patches the bank's own overrides. An unknown bank is created with tenant defaults.
+// UpdateBankConfigRequest patches the bank's own overrides. An unknown bank of an existing org is created.
 message UpdateBankConfigRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id.
-  string bank_id = 1;
+  string bank_id = 2;
   // New values for the fields named in update_mask.
-  BankConfig config = 2;
+  BankConfig config = 3;
   // BankConfig paths to replace (for example observations.dedup_threshold or models.extract; a model binding
   // is replaced whole). A path set to an empty value clears it (this is how a list is cleared). Unset = every
   // populated field of config.
-  google.protobuf.FieldMask update_mask = 3;
+  google.protobuf.FieldMask update_mask = 4;
 }
 
 // UpdateBankConfigResponse carries the bank's config after the patch.
@@ -1777,11 +2053,14 @@ message UpdateBankConfigResponse {
 
 // ResetBankConfigRequest removes some or all of the bank's own overrides.
 message ResetBankConfigRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id.
-  string bank_id = 1;
+  string bank_id = 2;
   // BankConfig paths to reset, so they inherit again; the single path "*" resets everything. Empty =
   // INVALID_ARGUMENT.
-  google.protobuf.FieldMask reset_mask = 2;
+  google.protobuf.FieldMask reset_mask = 3;
 }
 
 // ResetBankConfigResponse carries the bank's config after the reset.
@@ -1794,22 +2073,25 @@ message ResetBankConfigResponse {
 
 // PreviewPromptRequest asks for a prompt rendering.
 message PreviewPromptRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank whose effective config is used.
-  string bank_id = 1;
+  string bank_id = 2;
   // Operation to render.
-  PromptOperation operation = 2;
+  PromptOperation operation = 3;
   // Request-level overrides to render with, as a real request would. The kind must match operation (retain
   // for RETAIN, consolidation for CONSOLIDATION, reflect for REFLECT, mental_model for MENTAL_MODEL_DELTA and
   // SYNTHESIZE); a mismatch is INVALID_ARGUMENT. Unset = none.
   oneof overrides {
     // Overrides of a Retain.
-    RetainOverrides retain = 3;
+    RetainOverrides retain = 4;
     // Overrides of a Consolidate.
-    ConsolidateOverrides consolidation = 4;
+    ConsolidateOverrides consolidation = 5;
     // Overrides of a Reflect.
-    ReflectOverrides reflect = 5;
+    ReflectOverrides reflect = 6;
     // Overrides of a RefreshMentalModel.
-    RefreshOverrides mental_model = 6;
+    RefreshOverrides mental_model = 7;
   }
 
   // PromptOperation picks which operation's prompt to preview.
@@ -1889,13 +2171,16 @@ message PromptBlock {
 
 // ---- CreateDirective ----
 
-// CreateDirectiveRequest adds a directive to a bank. An unknown bank is created with tenant defaults.
+// CreateDirectiveRequest adds a directive to a bank. An unknown bank of an existing org is created.
 message CreateDirectiveRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the directive.
-  string bank_id = 1;
+  string bank_id = 2;
   // The directive. Its id is assigned by the server (a set id is ignored); its name is required and must be
   // new in the bank (taken = ALREADY_EXISTS).
-  Directive directive = 2;
+  Directive directive = 3;
 }
 
 // CreateDirectiveResponse carries the stored directive.
@@ -1908,16 +2193,19 @@ message CreateDirectiveResponse {
 
 // UpdateDirectiveRequest patches one directive.
 message UpdateDirectiveRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the directive; unknown = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Directive id; unknown = NOT_FOUND.
-  string directive_id = 2;
+  string directive_id = 3;
   // New values for the fields named in update_mask.
-  Directive directive = 3;
+  Directive directive = 4;
   // Directive paths to replace: name, rules, tags, active (id cannot be changed). A masked field left unset
   // clears it (so active=false needs an explicit mask); the name must stay set and unique in the bank (taken =
   // ALREADY_EXISTS). Unset = every populated field of directive.
-  google.protobuf.FieldMask update_mask = 4;
+  google.protobuf.FieldMask update_mask = 5;
 }
 
 // UpdateDirectiveResponse carries the directive after the patch.
@@ -1930,17 +2218,20 @@ message UpdateDirectiveResponse {
 
 // ListDirectivesRequest filters and pages the bank's directives.
 message ListDirectivesRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank id; unknown = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Tag filter on the directives' tags; unset or empty tags = no filter. Flat form only; tags.match unset =
   // TAGS_MATCH_ANY_STRICT (directives sharing a tag; untagged ones are left out).
-  TagFilter tags = 2;
+  TagFilter tags = 3;
   // Only active directives.
-  bool active_only = 3;
+  bool active_only = 4;
   // Maximum directives per page; 0 = 100, at most 1000.
-  int32 page_size = 4;
+  int32 page_size = 5;
   // Token from a previous response; empty = first page.
-  string page_token = 5;
+  string page_token = 6;
 }
 
 // ListDirectivesResponse is one page of directives, oldest first.
@@ -1955,10 +2246,13 @@ message ListDirectivesResponse {
 
 // DeleteDirectiveRequest names the directive to delete.
 message DeleteDirectiveRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the directive.
-  string bank_id = 1;
+  string bank_id = 2;
   // Directive id.
-  string directive_id = 2;
+  string directive_id = 3;
 }
 
 // DeleteDirectiveResponse is empty on success.
@@ -1968,9 +2262,10 @@ message DeleteDirectiveResponse {}
 
 // ConfigView is one config level as every config RPC returns it.
 message ConfigView {
-  // Only what this level itself sets (the tenant's config, or the bank's own overrides).
+  // Only what this level itself sets (the tenant's or the org's config, or the bank's own overrides).
   BankConfig own = 1;
-  // The config this level resolves to: server < tenant for a tenant, server < tenant < bank for a bank.
+  // The config this level resolves to: server < tenant for a tenant, server < tenant < org for an org, and
+  // server < tenant < org < bank for a bank.
   BankConfig effective = 2;
 }
 
@@ -1999,11 +2294,14 @@ message Directive {
 
 // GetOperationRequest names one operation.
 message GetOperationRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the operation; unknown bank = NOT_FOUND. A bank being deleted serves only its delete_bank
   // operations.
-  string bank_id = 1;
+  string bank_id = 2;
   // Operation id.
-  string operation_id = 2;
+  string operation_id = 3;
 }
 
 // GetOperationResponse carries the operation.
@@ -2016,18 +2314,21 @@ message GetOperationResponse {
 
 // ListOperationsRequest filters and pages the bank's operations.
 message ListOperationsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to list; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Only this status; unspecified = any.
-  OperationStatus status = 2;
+  OperationStatus status = 3;
   // Only this kind; unspecified = any.
-  OperationKind kind = 3;
+  OperationKind kind = 4;
   // Omit retain_batch parents, listing only operations that do work.
-  bool exclude_parents = 4;
+  bool exclude_parents = 5;
   // Maximum operations per page; 0 = 100, at most 1000.
-  int32 page_size = 5;
+  int32 page_size = 6;
   // Token from a previous response; empty = first page.
-  string page_token = 6;
+  string page_token = 7;
 }
 
 // ListOperationsResponse is one page of operations.
@@ -2042,10 +2343,13 @@ message ListOperationsResponse {
 
 // CancelOperationRequest names the operation to cancel.
 message CancelOperationRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the operation.
-  string bank_id = 1;
+  string bank_id = 2;
   // Operation id; must be PENDING or PROCESSING.
-  string operation_id = 2;
+  string operation_id = 3;
 }
 
 // CancelOperationResponse carries the cancelled operation.
@@ -2058,10 +2362,13 @@ message CancelOperationResponse {
 
 // RetryOperationRequest names the operation to retry.
 message RetryOperationRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank owning the operation.
-  string bank_id = 1;
+  string bank_id = 2;
   // Operation id; must be FAILED or CANCELLED (a cancel-requested PROCESSING operation is refused).
-  string operation_id = 2;
+  string operation_id = 3;
 }
 
 // RetryOperationResponse carries the re-queued operation.
@@ -2074,16 +2381,19 @@ message RetryOperationResponse {
 
 // ListEventsRequest polls a bank's lifecycle events after a known sequence number.
 message ListEventsRequest {
+  // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
+  // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
+  string org_id = 1;
   // Bank to read; unknown bank = NOT_FOUND.
-  string bank_id = 1;
+  string bank_id = 2;
   // Return only events with seq greater than this (the previous response's next_after_seq); 0 = from the
   // oldest retained event.
-  int64 after_seq = 2;
+  int64 after_seq = 3;
   // Soft maximum of events per page; 0 = 100, at most 1000, negative = INVALID_ARGUMENT. A page never
   // splits a seq group: it is extended past page_size to finish the last seq it includes.
-  int32 page_size = 3;
+  int32 page_size = 4;
   // Only these event types; empty = all types.
-  repeated EventType types = 4;
+  repeated EventType types = 5;
 }
 
 // ListEventsResponse returns events in seq order.
@@ -2103,14 +2413,16 @@ message LifecycleEvent {
   int64 seq = 1;
   // What happened.
   EventType type = 2;
+  // Org of the bank the event belongs to.
+  string org_id = 3;
   // Bank the event belongs to.
-  string bank_id = 3;
+  string bank_id = 4;
   // Commit time of the change.
-  google.protobuf.Timestamp created_at = 4;
+  google.protobuf.Timestamp created_at = 5;
   // Operation that caused the change, if any.
-  string operation_id = 5;
+  string operation_id = 6;
   // Document, memory or mental-model id the event is about.
-  string subject_id = 6;
+  string subject_id = 7;
 }
 
 // ---- Resources ----
@@ -2119,38 +2431,41 @@ message LifecycleEvent {
 message Operation {
   // Operation (job) id.
   string id = 1;
+  // Org of the bank the operation belongs to; GetOperation, CancelOperation and RetryOperation take it
+  // with bank_id and id.
+  string org_id = 2;
   // Bank the operation belongs to; GetOperation, CancelOperation and RetryOperation take it with id.
-  string bank_id = 2;
+  string bank_id = 3;
   // Job type.
-  OperationKind kind = 3;
+  OperationKind kind = 4;
   // Lifecycle state.
-  OperationStatus status = 4;
+  OperationStatus status = 5;
   // Last error message; set when FAILED.
-  string error = 5;
+  string error = 6;
   // A kind-specific summary of the outcome as a JSON object, for people and logs. It is NOT a stable
   // contract: keys may change in any release, so never parse it in client logic.
-  string debug_summary = 6;
+  string debug_summary = 7;
   // Token usage per slot and model of every LLM call the job made.
-  repeated SlotUsage usage = 7;
+  repeated SlotUsage usage = 8;
   // The overrides the run actually used (request, strategy and stored overrides merged).
-  BankConfig effective_overrides = 8;
+  BankConfig effective_overrides = 9;
   // Parent operation (a retain_batch); empty for top-level operations.
-  string parent_id = 9;
+  string parent_id = 10;
   // Last reported checkpoint.
-  Progress progress = 10;
+  Progress progress = 11;
   // When the operation was enqueued.
-  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp created_at = 12;
   // Last change to the operation.
-  google.protobuf.Timestamp updated_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
   // When a parked operation becomes runnable: backoff, debounce or refresh interval floor.
-  google.protobuf.Timestamp next_run_at = 13;
+  google.protobuf.Timestamp next_run_at = 14;
   // Earlier attempts that failed with a retry or were reclaimed (0 on the first run); transient failures
   // retry with backoff up to the kind's limit (consolidate: unbounded). With next_run_at it tells a
   // retrying operation from a parked one.
-  int32 attempts = 14;
+  int32 attempts = 15;
   // Last sign of life from the server while PROCESSING; an old value means the operation is stalled and
   // will be picked up again.
-  google.protobuf.Timestamp heartbeat_at = 15;
+  google.protobuf.Timestamp heartbeat_at = 16;
 }
 
 // Progress is the last checkpoint an operation reported.
@@ -2406,7 +2721,7 @@ message ReflectTrace {
 // BankConfig and its phase groups, the model bindings, then the per-RPC override messages.
 //
 // Model routing. Every model-backed step has its own slot (ModelSlot), and ModelBindings binds slots to gateway
-// models with their own parameters. Each level (server config file < tenant < bank < consolidation strategy <
+// models with their own parameters. Each level (server config file < tenant < org < bank < consolidation strategy <
 // request < retain item) may set models.default and any slot. For each slot, the most specific level that yields
 // a binding wins, where a level yields its own binding for the slot, else its models.default (chat-model slots
 // only). So models.default on a bank swaps every chat step of that bank, even ones the server file binds by name,

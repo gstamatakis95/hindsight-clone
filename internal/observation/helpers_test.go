@@ -25,7 +25,7 @@ import (
 )
 
 // bank is the test bank.
-var bank = domain.BankRef{Tenant: "t1", Bank: "b1"}
+var bank = domain.NewBankRef("t1", "org", "b1")
 
 // errPoison is what a scripted CONSOLIDATE call fails with for a batch holding a poison unit.
 var errPoison = errors.New("poison input")
@@ -118,6 +118,7 @@ func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 	t.Helper()
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.New(t)
+	pgtest.CreateOrgs(t, db.Store(), domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t", "org", ""), domain.NewBankRef("t1", "org", ""))
 	e := &env{
 		t: t, clock: clock, store: db.Store(), pool: db.Pool, llm: fake.NewLLM(),
 		emb: fake.NewEmbedder(fake.EmbedSimilar), texts: map[domain.UnitID]string{},
@@ -299,7 +300,8 @@ func (e *env) unit(id string) domain.Unit {
 func (e *env) observations() []domain.Unit {
 	e.t.Helper()
 	rows, err := e.pool.Query(e.t.Context(), `SELECT id::text FROM memory_units
-		WHERE tenant_id = $1 AND bank_id = $2 AND fact_type = 'observation' ORDER BY id`, bank.Tenant, bank.Bank)
+		WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND fact_type = 'observation' ORDER BY id`,
+		bank.Tenant, bank.Org, bank.Bank)
 	if err != nil {
 		e.t.Fatal(err)
 	}

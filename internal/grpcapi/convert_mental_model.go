@@ -165,7 +165,6 @@ func historyPageToProto(p mentalmodel.HistoryPage) *pb.ListMentalModelHistoryRes
 func historyRequestFromProto(r *pb.ListMentalModelHistoryRequest) (mentalmodel.HistoryRequest, error) {
 	var d decoder
 	out := mentalmodel.HistoryRequest{
-		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		ID:        domain.MentalModelID(r.GetMentalModelId()),
 		Kind:      fromEnum[domain.HistoryKind](&d, r.GetKind()),
 		PageSize:  int(r.GetPageSize()),
@@ -179,7 +178,6 @@ func historyRequestFromProto(r *pb.ListMentalModelHistoryRequest) (mentalmodel.H
 func listMentalModelsFromProto(r *pb.ListMentalModelsRequest) (mentalmodel.ListRequest, error) {
 	var d decoder
 	out := mentalmodel.ListRequest{
-		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		FolderPrefix: r.GetFolderPrefix(),
 		View:         fromEnum[domain.MentalModelView](&d, r.GetView()),
 		Tags:         d.tagFilter(r.GetTags()),
@@ -201,7 +199,6 @@ func mentalModelPageToProto(p mentalmodel.ModelPage, view domain.MentalModelView
 func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (mentalmodel.RefreshRequest, error) {
 	var d decoder
 	out := mentalmodel.RefreshRequest{
-		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		ID:        domain.MentalModelID(r.GetMentalModelId()),
 		ForceFull: r.GetForceFull(),
 		Overrides: d.refreshOverrides(r.GetOverrides()),
@@ -213,7 +210,6 @@ func refreshRequestFromProto(r *pb.RefreshMentalModelRequest) (mentalmodel.Refre
 // searchFromProto converts a SearchMentalModelsRequest; Bank.Bank carries bank_id.
 func searchFromProto(r *pb.SearchMentalModelsRequest) recall.SearchMentalModelsRequest {
 	return recall.SearchMentalModelsRequest{
-		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		Query:        r.GetQuery(),
 		FolderPrefix: r.GetFolderPrefix(),
 		MaxResults:   int(r.GetMaxResults()),

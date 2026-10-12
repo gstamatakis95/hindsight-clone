@@ -57,7 +57,7 @@ func (e env) deleteOps(t *testing.T, b domain.BankRef) []domain.Operation {
 // run that finishes queues none.
 func TestRunDeleteJobReenqueuesUntilDone(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	seedBank(t, e, b)
 	s := e.svc(DeleteConfig{BatchSize: 1, MaxBatches: 1})
 	if _, err := s.DeleteBank(e.ctx, b); err != nil {
@@ -78,7 +78,7 @@ func TestRunDeleteJobReenqueuesUntilDone(t *testing.T) {
 	if len(pending) != 1 || pending[0].SerialKey != jobs.SerialKeyDeleteBank {
 		t.Fatalf("continuations: %+v, want one pending (second joined)", pending)
 	}
-	empty := domain.BankRef{Tenant: "t", Bank: "empty"} // not tombstoned: the run is done at once
+	empty := domain.NewBankRef("t", "org", "empty") // not tombstoned: the run is done at once
 	e.ensure(t, empty)
 	job = store.Job{Bank: empty, Kind: domain.OperationKindDeleteBank, Payload: []byte(`{}`)}
 	if err := s.RunDeleteJob(e.ctx, jobs.Inline(job)); err != nil {
@@ -106,7 +106,7 @@ func TestRunDeleteJobRetriesWithoutAttemptCap(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
-			b := domain.BankRef{Tenant: "t", Bank: "b"}
+			b := domain.NewBankRef("t", "org", "b")
 			e.ensure(t, b)
 			s := e.svcOver(failingDeletes{DB: e.store, err: tc.err}, e.blob, DeleteConfig{})
 			job := store.Job{Bank: b, Kind: domain.OperationKindDeleteBank, Attempt: tc.attempt}
@@ -145,7 +145,7 @@ func (h *hookBlob) DeletePrefix(ctx context.Context, prefix string) (int, error)
 // longer tombstoned between pages (an earlier run finished and a write recreated it) stops the deletes.
 func TestDeletePagesBlobsWithFencing(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	e.ensure(t, b)
 	var keys []string
 	for _, doc := range []domain.DocumentID{"a", "b", "c"} {
@@ -185,7 +185,7 @@ func TestDeletePagesBlobsWithFencing(t *testing.T) {
 // bank; re-issuing DeleteBank enqueues a new delete_bank that finishes it.
 func TestRedeleteResumesHalfDeletedBank(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "half"}
+	b := domain.NewBankRef("t", "org", "half")
 	_, claimed := seedBank(t, e, b)
 	if err := e.store.Fail(e.ctx, claimed, errors.New("stopped"), nil); err != nil {
 		t.Fatal(err)

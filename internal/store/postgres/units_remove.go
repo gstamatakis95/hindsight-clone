@@ -17,7 +17,7 @@ func (r *unitRepo) DeleteByDocument(
 	ctx context.Context, b domain.BankRef, doc domain.DocumentID,
 ) ([]domain.UnitID, error) {
 	ids, err := r.q.UnitLockDocument(ctx, db.UnitLockDocumentParams{
-		TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, DocumentID: string(doc),
 	})
 	if err != nil {
 		return nil, mapErr("lock document units", err)
@@ -41,7 +41,7 @@ func (r *unitRepo) Archive(ctx context.Context, b domain.BankRef, id domain.Unit
 	if err != nil {
 		return err
 	}
-	locked, err := r.q.UnitLockIDs(ctx, db.UnitLockIDsParams{TenantID: b.Tenant, BankID: b.Bank, Ids: []uuid.UUID{uid}})
+	locked, err := r.q.UnitLockIDs(ctx, db.UnitLockIDsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: []uuid.UUID{uid}})
 	if err != nil {
 		return mapErr("lock unit", err)
 	}
@@ -49,7 +49,7 @@ func (r *unitRepo) Archive(ctx context.Context, b domain.BankRef, id domain.Unit
 		return fmt.Errorf("%w: live unit %s", domain.ErrNotFound, id)
 	}
 	n, err := r.q.UnitArchive(ctx, db.UnitArchiveParams{
-		Seq: seq, Reason: reason, ID: uid, TenantID: b.Tenant, BankID: b.Bank,
+		Seq: seq, Reason: reason, ID: uid, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank,
 	})
 	if err != nil {
 		return mapErr("archive unit", err)
@@ -75,7 +75,7 @@ func (r *unitRepo) Restore(ctx context.Context, b domain.BankRef, id domain.Unit
 	if err != nil {
 		return err
 	}
-	a, err := r.q.UnitTakeArchived(ctx, db.UnitTakeArchivedParams{ID: uid, TenantID: b.Tenant, BankID: b.Bank})
+	a, err := r.q.UnitTakeArchived(ctx, db.UnitTakeArchivedParams{ID: uid, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank})
 	if err != nil {
 		return mapErr(fmt.Sprintf("archived unit %s", id), err)
 	}
@@ -83,20 +83,20 @@ func (r *unitRepo) Restore(ctx context.Context, b domain.BankRef, id domain.Unit
 		return err
 	}
 	err = r.q.UnitRestoreEntities(ctx, db.UnitRestoreEntitiesParams{
-		UnitID: uid, TenantID: b.Tenant, BankID: b.Bank, Snapshot: snapshotOrEmpty(a.EntitiesSnapshot),
+		UnitID: uid, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Snapshot: snapshotOrEmpty(a.EntitiesSnapshot),
 	})
 	if err != nil {
 		return mapErr("restore unit entities", err)
 	}
 	links := snapshotOrEmpty(a.LinksSnapshot)
 	err = r.q.UnitRestoreLinks(ctx, db.UnitRestoreLinksParams{
-		Snapshot: links, UnitID: uid, TenantID: b.Tenant, BankID: b.Bank,
+		Snapshot: links, UnitID: uid, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank,
 	})
 	if err != nil {
 		return mapErr("restore unit links", err)
 	}
 	err = r.q.UnitHandOverLinks(ctx, db.UnitHandOverLinksParams{
-		TenantID: b.Tenant, BankID: b.Bank, UnitID: uid, Snapshot: links,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, UnitID: uid, Snapshot: links,
 	})
 	return mapErr("hand over archived partners' links", err)
 }
@@ -113,7 +113,7 @@ func (r *unitRepo) restoreRow(ctx context.Context, b domain.BankRef, a db.Memory
 		}
 	}
 	err := r.q.UnitRestore(ctx, db.UnitRestoreParams{
-		ID: a.ID, TenantID: a.TenantID, BankID: a.BankID, DocumentID: a.DocumentID, ChunkID: a.ChunkID,
+		ID: a.ID, TenantID: a.TenantID, OrgID: a.OrgID, BankID: a.BankID, DocumentID: a.DocumentID, ChunkID: a.ChunkID,
 		FactType: a.FactType, Text: a.Text, Context: a.Context, Metadata: snapshotOrObject(a.Metadata),
 		Tags: tagsOrEmpty(a.Tags), OccurredStart: a.OccurredStart, OccurredEnd: a.OccurredEnd,
 		MentionedAt: a.MentionedAt, Timeless: a.Timeless, ScopeKey: scope, Seq: seq, EditedAt: a.EditedAt,

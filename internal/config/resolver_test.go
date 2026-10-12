@@ -12,16 +12,23 @@ import (
 	"time"
 )
 
-var ref = domain.BankRef{Tenant: "t1", Bank: "b1"}
+var ref = domain.NewBankRef("t1", "org", "b1")
 
-// seedStore returns a store over a new database holding tenant t1's config and banks (with their configs,
-// tombstoned when DeletingAt is set).
-func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank) store.DB {
+// seedStore returns a store over a new database holding tenant t1's config, its org "org" with the org config
+// (orgCfg) and banks (with their configs, tombstoned when DeletingAt is set).
+func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank, orgCfg ...domain.BankConfig) store.DB {
 	t.Helper()
 	s := pgtest.NewStore(t)
 	ctx := t.Context()
 	err := s.InTx(ctx, func(tx store.Tx) error {
 		if err := tx.Banks().SetTenantConfig(ctx, ref.Tenant, tenant); err != nil {
+			return err
+		}
+		org := domain.Org{Ref: ref.OrgRef()}
+		if len(orgCfg) > 0 {
+			org.Config = orgCfg[0]
+		}
+		if err := tx.Orgs().Create(ctx, org); err != nil {
 			return err
 		}
 		for _, b := range banks {
@@ -56,12 +63,16 @@ func TestEffectivePrecedence(t *testing.T) {
 	}
 	tenant := domain.BankConfig{
 		Reflect: &domain.ReflectConfig{Mission: "tenant"}, Observations: &domain.ObservationConfig{Mission: "tenant"},
+		Retain: &domain.RetainConfig{Mission: "tenant"},
+	}
+	org := domain.BankConfig{
+		Reflect: &domain.ReflectConfig{Mission: "org"}, Observations: &domain.ObservationConfig{Mission: "org"},
 	}
 	bank := domain.Bank{Ref: ref, Config: domain.BankConfig{
 		Observations: &domain.ObservationConfig{Mission: "bank"},
 		Models:       bindings("", map[domain.ModelSlot]string{domain.ModelSlotRerank: "b-rr"}),
 	}}
-	r := NewResolver(seedStore(t, tenant, map[string]domain.Bank{"b1": bank}), server)
+	r := NewResolver(seedStore(t, tenant, map[string]domain.Bank{"b1": bank}, org), server)
 
 	got, err := r.Effective(context.Background(), ref,
 		domain.BankConfig{Observations: &domain.ObservationConfig{DedupThreshold: ptr(0.5)}},
@@ -69,7 +80,7 @@ func TestEffectivePrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Retain.Mission != "server" || got.Reflect.Mission != "tenant" || got.Observations.Mission != "bank" ||
+	if got.Retain.Mission != "tenant" || got.Reflect.Mission != "org" || got.Observations.Mission != "bank" ||
 		*got.Observations.DedupThreshold != 0.6 || modelOf(t, got, domain.ModelSlotRerank) != "b-rr" ||
 		modelOf(t, got, domain.ModelSlotExtract) != "s-ext" {
 		t.Fatalf("got %+v", got)
@@ -78,13 +89,17 @@ func TestEffectivePrecedence(t *testing.T) {
 
 func TestEffectiveUnknownOrDeletingBank(t *testing.T) {
 	now := time.Unix(0, 0)
-	banks := map[string]domain.Bank{"gone": {Ref: domain.BankRef{Tenant: "t1", Bank: "gone"}, DeletingAt: &now}}
+	banks := map[string]domain.Bank{"gone": {Ref: domain.NewBankRef("t1", "org", "gone"), DeletingAt: &now}}
 	r := NewResolver(seedStore(t, domain.BankConfig{}, banks), domain.BankConfig{})
 	for _, b := range []string{"missing", "gone"} {
-		_, err := r.Effective(context.Background(), domain.BankRef{Tenant: "t1", Bank: b})
-		if !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("%s: err = %v, want NotFound", b, err)
+		_, err := r.Effective(context.Background(), domain.NewBankRef("t1", "org", b))
+		if !errors.Is(err, domain.ErrBankNotFound) {
+			t.Errorf("%s: err = %v, want BankNotFound", b, err)
 		}
+	}
+	_, err := r.Effective(context.Background(), domain.NewBankRef("t1", "no-org", "b1"))
+	if !errors.Is(err, domain.ErrOrgNotFound) {
+		t.Errorf("unknown org: err = %v, want OrgNotFound", err)
 	}
 }
 
@@ -199,7 +214,7 @@ func TestMatchStrategy(t *testing.T) {
 		{nil, "shared"},
 		{[]string{"other"}, ""},
 	}
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	for _, tc := range tests {
 		st, ok := MatchStrategy(strategies, domain.NewScopeKey(b, tc.tags))
 		got := ""

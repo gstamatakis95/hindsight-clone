@@ -37,7 +37,7 @@ func (s *scenario) retain(ctx context.Context) error {
 	item := func(id string, d int, content string, tags ...string) *pb.RetainItem {
 		return &pb.RetainItem{DocumentId: id, Timestamp: day(d), Content: content, Tags: tags}
 	}
-	if _, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{BankId: s.bank, Items: []*pb.RetainItem{
+	if _, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{OrgId: s.c.Org, BankId: s.bank, Items: []*pb.RetainItem{
 		item("eng-1", 1, "Engineering shipped the Atlas ledger importer.", "team:eng", "project:atlas"),
 		item("sales-1", 10, "Sales signed Acme as the first Atlas customer.", "team:sales", "project:atlas"),
 		item("eng-2", 20, "Engineering retired the legacy ledger cron runner.", "team:eng", "project:legacy"),
@@ -170,7 +170,7 @@ func (s *scenario) arms(ctx context.Context) error {
 	if !slices.Equal(ran, []string{"graph", "vector"}) {
 		return fmt.Errorf("expected only graph and vector to run, got %v", ran)
 	}
-	_, err = s.c.Memory.Recall(ctx, &pb.RecallRequest{BankId: s.bank, Query: "ledger", Arms: []string{"telepathy"}})
+	_, err = s.c.Memory.Recall(ctx, &pb.RecallRequest{OrgId: s.c.Org, BankId: s.bank, Query: "ledger", Arms: []string{"telepathy"}})
 	fmt.Println("  an unknown arm:", status.Code(err))
 	if status.Code(err) != codes.InvalidArgument {
 		return fmt.Errorf("expected INVALID_ARGUMENT for an unknown arm, got %w", err)

@@ -53,7 +53,7 @@ func TestTenantConfig(t *testing.T) {
 // writes.
 func TestBankConfig(t *testing.T) {
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t", Bank: "fresh"}
+	b := domain.NewBankRef("t", "org", "fresh")
 	if _, err := e.svc.UpdateTenantConfig(e.ctx, "t", func(cur domain.BankConfig) (domain.BankConfig, error) {
 		cur.Reflect = &domain.ReflectConfig{Mission: "tenant"}
 		return cur, nil
@@ -110,7 +110,7 @@ func seedDirectives(t *testing.T, e env, b domain.BankRef) {
 func TestDirectives(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc
-	b := domain.BankRef{Tenant: "t", Bank: "new"}
+	b := domain.NewBankRef("t", "org", "new")
 	if _, err := s.ListDirectives(e.ctx, ListDirectivesRequest{Bank: b}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("list on unknown bank: %v", err)
 	}
@@ -266,7 +266,7 @@ func racePatches(
 func TestConcurrentBankConfigPatchesKeepBoth(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	b := domain.BankRef{Tenant: "t-race", Bank: "b-cfg"}
+	b := domain.NewBankRef("t-race", "org", "b-cfg")
 	admin := e.svc
 	if _, err := admin.UpdateBankConfig(t.Context(), b, func(c domain.BankConfig) (domain.BankConfig, error) {
 		return c, nil

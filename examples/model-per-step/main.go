@@ -33,7 +33,7 @@ type scenario struct {
 func (s *scenario) bindModels(ctx context.Context) error {
 	exampleutil.Section("bind models on the bank")
 	cfg, err := s.c.Config.UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
-		BankId: s.bank,
+		OrgId: s.c.Org, BankId: s.bank,
 		Config: &pb.BankConfig{Models: &pb.ModelBindings{
 			Default:     exampleutil.Model(*cheap),
 			Reflect:     exampleutil.Model(*strong),
@@ -60,7 +60,7 @@ func (s *scenario) retain(ctx context.Context) error {
 		{"notes-2", *oneOff, "Priya reports to Tomas. Tomas runs the platform group."},
 	} {
 		req := &pb.RetainRequest{
-			BankId:            s.bank,
+			OrgId: s.c.Org, BankId:            s.bank,
 			Items:             []*pb.RetainItem{{DocumentId: doc.id, Content: doc.text}},
 			SkipConsolidation: true,
 		}
@@ -85,7 +85,7 @@ func (s *scenario) retain(ctx context.Context) error {
 func (s *scenario) consolidate(ctx context.Context) error {
 	exampleutil.Section("consolidate with a one-off model")
 	cons, err := s.c.Observations.Consolidate(ctx, &pb.ConsolidateRequest{
-		BankId:    s.bank,
+		OrgId: s.c.Org, BankId:    s.bank,
 		Overrides: &pb.ConsolidateOverrides{ConsolidateModel: exampleutil.Model(*oneOff)},
 	})
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *scenario) consolidate(ctx context.Context) error {
 // recall uses the bank's reranker; the trace shows how many candidates the cross-encoder scored.
 func (s *scenario) recall(ctx context.Context) error {
 	exampleutil.Section("recall with the reranker")
-	rec, err := s.c.Memory.Recall(ctx, &pb.RecallRequest{BankId: s.bank, Query: "Who does Priya report to?", Trace: true})
+	rec, err := s.c.Memory.Recall(ctx, &pb.RecallRequest{OrgId: s.c.Org, BankId: s.bank, Query: "Who does Priya report to?", Trace: true})
 	if err != nil {
 		return fmt.Errorf("recall: %w", err)
 	}
@@ -121,7 +121,7 @@ func (s *scenario) recall(ctx context.Context) error {
 func (s *scenario) reflect(ctx context.Context) error {
 	exampleutil.Section("reflect: bank model, then a per-request model")
 	for _, override := range []string{"", *oneOff} {
-		req := &pb.ReflectRequest{BankId: s.bank, Query: "Who is in Priya's chain of command?"}
+		req := &pb.ReflectRequest{OrgId: s.c.Org, BankId: s.bank, Query: "Who is in Priya's chain of command?"}
 		want := *strong
 		if override != "" {
 			req.Overrides = &pb.ReflectOverrides{ReflectModel: exampleutil.Model(override)}
@@ -143,7 +143,7 @@ func (s *scenario) reflect(ctx context.Context) error {
 func (s *scenario) mentalModel(ctx context.Context) error {
 	exampleutil.Section("mental model build on the strong model")
 	created, err := s.c.MentalModels.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{
-		BankId: s.bank,
+		OrgId: s.c.Org, BankId: s.bank,
 		Spec: &pb.MentalModelSpec{
 			Id: "org-chart", Name: "Org chart", SourceQuery: "Who reports to whom?",
 			Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,

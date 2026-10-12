@@ -14,13 +14,13 @@ import (
 // Extra banks of the maintenance subtests. Factories hand out empty databases, so fixed names never collide.
 var (
 	// mtBankC is a tenant-1 bank that the subtests tombstone, so the cross-bank reads must skip it.
-	mtBankC = domain.BankRef{Tenant: "tenant-1", Bank: "bank-c"}
+	mtBankC = domain.NewBankRef("tenant-1", "org", "bank-c")
 	// mtBankD is a tenant-1 bank whose only unconsolidated fact has no embedding.
-	mtBankD = domain.BankRef{Tenant: "tenant-1", Bank: "bank-d"}
+	mtBankD = domain.NewBankRef("tenant-1", "org", "bank-d")
 	// mtBankE is a tenant-1 bank that holds an observation only.
-	mtBankE = domain.BankRef{Tenant: "tenant-1", Bank: "bank-e"}
+	mtBankE = domain.NewBankRef("tenant-1", "org", "bank-e")
 	// mtBankF is a tenant-1 bank whose only unconsolidated fact is archived.
-	mtBankF = domain.BankRef{Tenant: "tenant-1", Bank: "bank-f"}
+	mtBankF = domain.NewBankRef("tenant-1", "org", "bank-f")
 )
 
 // mtCron is the refresh_cron of the cron models.

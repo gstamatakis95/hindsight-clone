@@ -21,7 +21,7 @@ func (s *DB) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]store
 	}
 	out := make([]store.UnconsolidatedBank, len(rows))
 	for i, row := range rows {
-		out[i] = store.UnconsolidatedBank{Bank: domain.BankRef{Tenant: row.TenantID, Bank: row.ID}, Oldest: row.Oldest}
+		out[i] = store.UnconsolidatedBank{Bank: domain.NewBankRef(row.TenantID, row.OrgID, row.ID), Oldest: row.Oldest}
 	}
 	return out, nil
 }
@@ -35,7 +35,7 @@ func (s *DB) StalledBankDeletes(ctx context.Context) ([]domain.BankRef, error) {
 	}
 	out := make([]domain.BankRef, len(rows))
 	for i, row := range rows {
-		out[i] = domain.BankRef{Tenant: row.TenantID, Bank: row.ID}
+		out[i] = domain.NewBankRef(row.TenantID, row.OrgID, row.ID)
 	}
 	return out, nil
 }
@@ -49,7 +49,7 @@ func (s *DB) BanksWithGraphWork(ctx context.Context) ([]domain.BankRef, error) {
 	}
 	out := make([]domain.BankRef, len(rows))
 	for i, row := range rows {
-		out[i] = domain.BankRef{Tenant: row.TenantID, Bank: row.ID}
+		out[i] = domain.NewBankRef(row.TenantID, row.OrgID, row.ID)
 	}
 	return out, nil
 }
@@ -87,7 +87,7 @@ func (s *DB) FailedRefreshes(ctx context.Context) ([]store.FailedRefresh, error)
 	out := make([]store.FailedRefresh, len(rows))
 	for i, row := range rows {
 		f := store.FailedRefresh{
-			Bank: domain.BankRef{Tenant: row.TenantID, Bank: row.BankID}, ModelID: domain.MentalModelID(row.ModelID),
+			Bank: domain.NewBankRef(row.TenantID, row.OrgID, row.BankID), ModelID: domain.MentalModelID(row.ModelID),
 			OperationID: idOf[domain.OperationID](row.OperationID), Error: row.Error,
 		}
 		if row.FinishedAt != nil {
@@ -145,7 +145,7 @@ func (s *DB) StrandedFacts(ctx context.Context, retryAfter time.Duration, limit 
 	for i, row := range rows {
 		out[i] = domain.Unit{
 			ID:   idOf[domain.UnitID](row.ID),
-			Bank: domain.BankRef{Tenant: row.TenantID, Bank: row.BankID},
+			Bank: domain.NewBankRef(row.TenantID, row.OrgID, row.BankID),
 		}
 		if row.DocumentID != nil {
 			out[i].DocumentID = domain.DocumentID(*row.DocumentID)

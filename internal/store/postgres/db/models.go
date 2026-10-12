@@ -14,6 +14,7 @@ import (
 
 type Bank struct {
 	TenantID          string
+	OrgID             string
 	ID                string
 	Name              string
 	Config            json.RawMessage
@@ -27,6 +28,7 @@ type Bank struct {
 type Chunk struct {
 	ID          uuid.UUID
 	TenantID    string
+	OrgID       string
 	BankID      string
 	DocumentID  string
 	ChunkIndex  int32
@@ -39,6 +41,7 @@ type Chunk struct {
 
 type Directive struct {
 	TenantID  string
+	OrgID     string
 	BankID    string
 	ID        string
 	Name      string
@@ -51,6 +54,7 @@ type Directive struct {
 
 type Document struct {
 	TenantID              string
+	OrgID                 string
 	BankID                string
 	ID                    string
 	ContentHash           string
@@ -67,6 +71,7 @@ type Document struct {
 type Entity struct {
 	ID            uuid.UUID
 	TenantID      string
+	OrgID         string
 	BankID        string
 	CanonicalName string
 	Kind          string
@@ -80,6 +85,7 @@ type Entity struct {
 
 type EntityCooccurrence struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	EntityA  uuid.UUID
 	EntityB  uuid.UUID
@@ -89,6 +95,7 @@ type EntityCooccurrence struct {
 
 type EntityMaintenance struct {
 	TenantID  string
+	OrgID     string
 	BankID    string
 	EntityID  uuid.UUID
 	CreatedAt time.Time
@@ -96,6 +103,7 @@ type EntityMaintenance struct {
 
 type GraphDirty struct {
 	TenantID  string
+	OrgID     string
 	BankID    string
 	UnitID    uuid.UUID
 	CreatedAt time.Time
@@ -104,6 +112,7 @@ type GraphDirty struct {
 type LifecycleEvent struct {
 	ID          int64
 	TenantID    string
+	OrgID       string
 	BankID      string
 	Seq         int64
 	Type        string
@@ -115,6 +124,7 @@ type LifecycleEvent struct {
 type MemoryAudit struct {
 	ID          int64
 	TenantID    string
+	OrgID       string
 	BankID      string
 	UnitID      uuid.UUID
 	Action      string
@@ -127,6 +137,7 @@ type MemoryAudit struct {
 
 type MemoryLink struct {
 	TenantID   string
+	OrgID      string
 	BankID     string
 	FromUnitID uuid.UUID
 	ToUnitID   uuid.UUID
@@ -138,6 +149,7 @@ type MemoryLink struct {
 type MemoryUnit struct {
 	ID                    uuid.UUID
 	TenantID              string
+	OrgID                 string
 	BankID                string
 	DocumentID            *string
 	ChunkID               uuid.NullUUID
@@ -165,6 +177,7 @@ type MemoryUnit struct {
 type MemoryUnitsArchive struct {
 	ID               uuid.UUID
 	TenantID         string
+	OrgID            string
 	BankID           string
 	DocumentID       *string
 	ChunkID          uuid.NullUUID
@@ -189,6 +202,7 @@ type MemoryUnitsArchive struct {
 
 type MentalModel struct {
 	TenantID             string
+	OrgID                string
 	BankID               string
 	ID                   string
 	Name                 string
@@ -216,6 +230,7 @@ type MentalModel struct {
 type MentalModelHistory struct {
 	ID              int64
 	TenantID        string
+	OrgID           string
 	BankID          string
 	MentalModelID   string
 	Kind            string
@@ -229,6 +244,7 @@ type MentalModelHistory struct {
 
 type ObservationEvidence struct {
 	TenantID      string
+	OrgID         string
 	BankID        string
 	ObservationID uuid.UUID
 	UnitID        uuid.UUID
@@ -238,6 +254,7 @@ type ObservationEvidence struct {
 
 type ObservationScope struct {
 	TenantID  string
+	OrgID     string
 	BankID    string
 	ScopeKey  string
 	Tags      []string
@@ -248,6 +265,7 @@ type ObservationScope struct {
 type ObservationVersion struct {
 	ID            int64
 	TenantID      string
+	OrgID         string
 	BankID        string
 	ObservationID uuid.UUID
 	Version       int64
@@ -259,6 +277,7 @@ type ObservationVersion struct {
 type Operation struct {
 	ID                uuid.UUID
 	TenantID          string
+	OrgID             string
 	BankID            string
 	Kind              string
 	Status            string
@@ -281,6 +300,16 @@ type Operation struct {
 	CancelRequestedAt *time.Time
 }
 
+type Org struct {
+	TenantID   string
+	ID         string
+	Name       string
+	Config     json.RawMessage
+	DeletingAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type Tenant struct {
 	ID        string
 	Config    json.RawMessage
@@ -290,6 +319,7 @@ type Tenant struct {
 
 type UnitEntity struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	UnitID   uuid.UUID
 	EntityID uuid.UUID

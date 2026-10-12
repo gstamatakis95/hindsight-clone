@@ -127,7 +127,7 @@ func (s *Service) RetryOperation(
 				return err
 			}
 			if bank.Deleting() {
-				return fmt.Errorf("%w: bank %s/%s: can't retry %s", domain.ErrBankDeleting, b.Tenant, b.Bank, cur.Kind)
+				return fmt.Errorf("%w: bank %s: can't retry %s", domain.ErrBankDeleting, b, cur.Kind)
 			}
 		}
 		op, err = tx.Queue().Retry(ctx, b, id)

@@ -17,72 +17,72 @@ import (
 const readsListUnits = `-- name: ReadsListUnits :many
 
 WITH picked AS (
-    (SELECT u.id, u.tenant_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata,
+    (SELECT u.id, u.tenant_id, u.org_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata,
         u.tags, u.embedding, u.occurred_start, u.occurred_end, u.mentioned_at, u.timeless, u.proof_count,
         u.version, u.seq, u.consolidated_at, u.consolidation_failed_at, u.edited_at, u.created_at, u.updated_at,
         TRUE AS live, '[]'::jsonb AS entities_snapshot
     FROM memory_units u
-    WHERE $2::bool AND u.tenant_id = $3 AND u.bank_id = $4
-      AND ($5::uuid IS NULL OR u.id = $5::uuid)
-      AND (cardinality($6::text[]) = 0 OR u.fact_type = ANY($6::text[]))
-      AND ($7::text = '' OR u.text ILIKE $7::text)
-      AND ($8::text IS NULL OR u.document_id = $8::text)
-      AND ($9::uuid IS NULL OR EXISTS (
-          SELECT 1 FROM unit_entities ue WHERE ue.unit_id = u.id AND ue.entity_id = $9::uuid))
-      AND ($10::timestamptz IS NULL OR (CASE $11::text
+    WHERE $2::bool AND u.tenant_id = $3 AND u.org_id = $4 AND u.bank_id = $5
+      AND ($6::uuid IS NULL OR u.id = $6::uuid)
+      AND (cardinality($7::text[]) = 0 OR u.fact_type = ANY($7::text[]))
+      AND ($8::text = '' OR u.text ILIKE $8::text)
+      AND ($9::text IS NULL OR u.document_id = $9::text)
+      AND ($10::uuid IS NULL OR EXISTS (
+          SELECT 1 FROM unit_entities ue WHERE ue.unit_id = u.id AND ue.entity_id = $10::uuid))
+      AND ($11::timestamptz IS NULL OR (CASE $12::text
           WHEN 'updated_at' THEN u.updated_at WHEN 'mentioned_at' THEN u.mentioned_at
           WHEN 'occurred_start' THEN u.occurred_start WHEN 'occurred_end' THEN u.occurred_end
-          ELSE u.created_at END) >= $10::timestamptz)
-      AND ($12::timestamptz IS NULL OR (CASE $11::text
+          ELSE u.created_at END) >= $11::timestamptz)
+      AND ($13::timestamptz IS NULL OR (CASE $12::text
           WHEN 'updated_at' THEN u.updated_at WHEN 'mentioned_at' THEN u.mentioned_at
           WHEN 'occurred_start' THEN u.occurred_start WHEN 'occurred_end' THEN u.occurred_end
-          ELSE u.created_at END) < $12::timestamptz)
-      AND (CASE $13::text
-          WHEN 'exact' THEN u.tags @> $14::text[] AND u.tags <@ $14::text[]
-          WHEN 'any_strict' THEN cardinality($14::text[]) = 0 OR u.tags && $14::text[]
-          WHEN 'all_strict' THEN u.tags @> $14::text[]
-          WHEN 'all' THEN cardinality($14::text[]) = 0 OR cardinality(u.tags) = 0
-              OR u.tags @> $14::text[]
-          ELSE cardinality($14::text[]) = 0 OR cardinality(u.tags) = 0 OR u.tags && $14::text[]
+          ELSE u.created_at END) < $13::timestamptz)
+      AND (CASE $14::text
+          WHEN 'exact' THEN u.tags @> $15::text[] AND u.tags <@ $15::text[]
+          WHEN 'any_strict' THEN cardinality($15::text[]) = 0 OR u.tags && $15::text[]
+          WHEN 'all_strict' THEN u.tags @> $15::text[]
+          WHEN 'all' THEN cardinality($15::text[]) = 0 OR cardinality(u.tags) = 0
+              OR u.tags @> $15::text[]
+          ELSE cardinality($15::text[]) = 0 OR cardinality(u.tags) = 0 OR u.tags && $15::text[]
       END)
-      AND ($15::timestamptz IS NULL
-          OR (u.created_at, u.id) < ($15::timestamptz, $16::uuid))
+      AND ($16::timestamptz IS NULL
+          OR (u.created_at, u.id) < ($16::timestamptz, $17::uuid))
     ORDER BY u.created_at DESC, u.id DESC
     LIMIT $1::int)
     UNION ALL
-    (SELECT a.id, a.tenant_id, a.bank_id, a.document_id, a.chunk_id, a.fact_type, a.text, a.context, a.metadata,
+    (SELECT a.id, a.tenant_id, a.org_id, a.bank_id, a.document_id, a.chunk_id, a.fact_type, a.text, a.context, a.metadata,
         a.tags, NULL::vector, a.occurred_start, a.occurred_end, a.mentioned_at, a.timeless, 0::int,
         0::bigint, a.seq, NULL::timestamptz, NULL::timestamptz, a.edited_at, a.created_at, a.archived_at,
         FALSE, a.entities_snapshot
     FROM memory_units_archive a
-    WHERE $17::bool AND a.tenant_id = $3 AND a.bank_id = $4
-      AND $9::uuid IS NULL
-      AND ($5::uuid IS NULL OR a.id = $5::uuid)
-      AND (cardinality($6::text[]) = 0 OR a.fact_type = ANY($6::text[]))
-      AND ($7::text = '' OR a.text ILIKE $7::text)
-      AND ($8::text IS NULL OR a.document_id = $8::text)
-      AND ($10::timestamptz IS NULL OR (CASE $11::text
+    WHERE $18::bool AND a.tenant_id = $3 AND a.org_id = $4 AND a.bank_id = $5
+      AND $10::uuid IS NULL
+      AND ($6::uuid IS NULL OR a.id = $6::uuid)
+      AND (cardinality($7::text[]) = 0 OR a.fact_type = ANY($7::text[]))
+      AND ($8::text = '' OR a.text ILIKE $8::text)
+      AND ($9::text IS NULL OR a.document_id = $9::text)
+      AND ($11::timestamptz IS NULL OR (CASE $12::text
           WHEN 'updated_at' THEN a.archived_at WHEN 'mentioned_at' THEN a.mentioned_at
           WHEN 'occurred_start' THEN a.occurred_start WHEN 'occurred_end' THEN a.occurred_end
-          ELSE a.created_at END) >= $10::timestamptz)
-      AND ($12::timestamptz IS NULL OR (CASE $11::text
+          ELSE a.created_at END) >= $11::timestamptz)
+      AND ($13::timestamptz IS NULL OR (CASE $12::text
           WHEN 'updated_at' THEN a.archived_at WHEN 'mentioned_at' THEN a.mentioned_at
           WHEN 'occurred_start' THEN a.occurred_start WHEN 'occurred_end' THEN a.occurred_end
-          ELSE a.created_at END) < $12::timestamptz)
-      AND (CASE $13::text
-          WHEN 'exact' THEN a.tags @> $14::text[] AND a.tags <@ $14::text[]
-          WHEN 'any_strict' THEN cardinality($14::text[]) = 0 OR a.tags && $14::text[]
-          WHEN 'all_strict' THEN a.tags @> $14::text[]
-          WHEN 'all' THEN cardinality($14::text[]) = 0 OR cardinality(a.tags) = 0
-              OR a.tags @> $14::text[]
-          ELSE cardinality($14::text[]) = 0 OR cardinality(a.tags) = 0 OR a.tags && $14::text[]
+          ELSE a.created_at END) < $13::timestamptz)
+      AND (CASE $14::text
+          WHEN 'exact' THEN a.tags @> $15::text[] AND a.tags <@ $15::text[]
+          WHEN 'any_strict' THEN cardinality($15::text[]) = 0 OR a.tags && $15::text[]
+          WHEN 'all_strict' THEN a.tags @> $15::text[]
+          WHEN 'all' THEN cardinality($15::text[]) = 0 OR cardinality(a.tags) = 0
+              OR a.tags @> $15::text[]
+          ELSE cardinality($15::text[]) = 0 OR cardinality(a.tags) = 0 OR a.tags && $15::text[]
       END)
-      AND ($15::timestamptz IS NULL
-          OR (a.created_at, a.id) < ($15::timestamptz, $16::uuid))
+      AND ($16::timestamptz IS NULL
+          OR (a.created_at, a.id) < ($16::timestamptz, $17::uuid))
     ORDER BY a.created_at DESC, a.id DESC
     LIMIT $1::int)
 )
-SELECT p.id, p.tenant_id, p.bank_id, p.document_id, p.chunk_id, p.fact_type, p.text, p.context, p.metadata,
+SELECT p.id, p.tenant_id, p.org_id, p.bank_id, p.document_id, p.chunk_id, p.fact_type, p.text, p.context, p.metadata,
     p.tags, p.embedding, p.occurred_start, p.occurred_end, p.mentioned_at, p.timeless, p.proof_count,
     p.version, p.seq, p.consolidated_at, p.consolidation_failed_at, p.edited_at, p.created_at, p.updated_at,
     p.live::bool AS live,
@@ -100,7 +100,7 @@ SELECT p.id, p.tenant_id, p.bank_id, p.document_id, p.chunk_id, p.fact_type, p.t
     ELSE '{}' END)::uuid[] AS source_ids,
     (p.live AND p.fact_type = 'observation' AND EXISTS (
         SELECT 1 FROM memory_units f
-        WHERE f.tenant_id = p.tenant_id AND f.bank_id = p.bank_id AND f.fact_type <> 'observation'
+        WHERE f.tenant_id = p.tenant_id AND f.org_id = p.org_id AND f.bank_id = p.bank_id AND f.fact_type <> 'observation'
           AND f.consolidated_at IS NULL AND f.consolidation_failed_at IS NULL AND f.tags @> p.tags))::bool AS stale
 FROM picked p
 ORDER BY p.created_at DESC, p.id DESC, p.live DESC
@@ -111,6 +111,7 @@ type ReadsListUnitsParams struct {
 	Lim             int32
 	IncludeLive     bool
 	TenantID        string
+	OrgID           string
 	BankID          string
 	UnitID          uuid.NullUUID
 	Types           []string
@@ -130,6 +131,7 @@ type ReadsListUnitsParams struct {
 type ReadsListUnitsRow struct {
 	ID                    uuid.UUID
 	TenantID              string
+	OrgID                 string
 	BankID                string
 	DocumentID            *string
 	ChunkID               uuid.NullUUID
@@ -172,6 +174,7 @@ func (q *Queries) ReadsListUnits(ctx context.Context, arg ReadsListUnitsParams) 
 		arg.Lim,
 		arg.IncludeLive,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.UnitID,
 		arg.Types,
@@ -197,6 +200,7 @@ func (q *Queries) ReadsListUnits(ctx context.Context, arg ReadsListUnitsParams) 
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.DocumentID,
 			&i.ChunkID,

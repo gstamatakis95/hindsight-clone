@@ -40,12 +40,15 @@ func tagFilterArgs(tags []string, mode domain.TagsMatch) (match string, filter [
 // listedBank returns domain.ErrNotFound unless b exists and is not tombstoned: the regime of listings and
 // stats.
 func (r *reader) listedBank(ctx context.Context, b domain.BankRef) error {
-	row, err := r.queries().GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
+	if err := checkRef(b); err != nil {
+		return err
+	}
+	row, err := r.queries().GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
 		return bankErr(b, err)
 	}
 	if row.DeletingAt != nil {
-		return fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b)
 	}
 	return nil
 }
@@ -72,7 +75,7 @@ func (r *reader) TagCounts(
 	}
 	rows, err := r.queries().ReadsTagCounts(ctx, db.ReadsTagCountsParams{
 		PrefixLike: likeLiteral(prefix) + "%", After: after, Lim: lim, Source: string(source),
-		TenantID: b.Tenant, BankID: b.Bank,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank,
 	})
 	if err != nil {
 		return nil, mapErr("tag counts", err)
@@ -101,7 +104,7 @@ func (r *reader) ObservationHistory(
 		beforeVersion = &before
 	}
 	rows, err := r.queries().ReadsObservationHistory(ctx, db.ReadsObservationHistoryParams{
-		TenantID: b.Tenant, BankID: b.Bank, ObservationID: uid, BeforeVersion: beforeVersion, Lim: contentLimit(limit),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ObservationID: uid, BeforeVersion: beforeVersion, Lim: contentLimit(limit),
 	})
 	if err != nil {
 		return nil, mapErr(fmt.Sprintf("history of observation %s", id), err)
@@ -121,14 +124,17 @@ func (r *reader) ObservationHistory(
 	return out, nil
 }
 
-// ListBanks returns up to q.Limit of q.Tenant's live banks whose id starts with q.IDPrefix, in byte order of id,
+// ListBanks returns up to q.Limit of q.Org's live banks whose id starts with q.IDPrefix, in byte order of id,
 // after q.After.
 func (r *reader) ListBanks(ctx context.Context, q store.BankQuery) ([]domain.Bank, error) {
+	if err := checkOrgRef(q.Org); err != nil {
+		return nil, err
+	}
 	rows, err := r.queries().ListBanks(ctx, db.ListBanksParams{
-		TenantID: q.Tenant, IDPrefix: q.IDPrefix, AfterID: q.After, Lim: toInt32Sat(q.Limit),
+		TenantID: q.Org.Tenant, OrgID: q.Org.Org, IDPrefix: q.IDPrefix, AfterID: q.After, Lim: toInt32Sat(q.Limit),
 	})
 	if err != nil {
-		return nil, mapErr(fmt.Sprintf("list banks of tenant %s", q.Tenant), err)
+		return nil, mapErr(fmt.Sprintf("list banks of org %s", q.Org), err)
 	}
 	out := make([]domain.Bank, len(rows))
 	for i, row := range rows {
@@ -141,12 +147,12 @@ func (r *reader) ListBanks(ctx context.Context, q store.BankQuery) ([]domain.Ban
 
 // BankStats returns b's counts and change state, read in one statement.
 func (r *reader) BankStats(ctx context.Context, b domain.BankRef) (domain.BankStats, error) {
-	row, err := r.queries().ReadsBankStats(ctx, db.ReadsBankStatsParams{TenantID: b.Tenant, BankID: b.Bank})
+	row, err := r.queries().ReadsBankStats(ctx, db.ReadsBankStatsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank})
 	if err != nil {
 		return domain.BankStats{}, bankErr(b, err)
 	}
 	if row.DeletingAt != nil {
-		return domain.BankStats{}, fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return domain.BankStats{}, fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b)
 	}
 	byType, err := countMap[domain.FactType]("units by fact type", row.UnitsByFactType)
 	if err != nil {
@@ -197,7 +203,7 @@ func (r *reader) ListMentalModels(ctx context.Context, q store.ModelQuery) ([]do
 		lim = &v
 	}
 	rows, err := r.queries().ReadsListMentalModels(ctx, db.ReadsListMentalModelsParams{
-		TenantID: q.Bank.Tenant, BankID: q.Bank.Bank, Folder: q.FolderPrefix,
+		TenantID: q.Bank.Tenant, OrgID: q.Bank.Org, BankID: q.Bank.Bank, Folder: q.FolderPrefix,
 		FolderLike: likeLiteral(q.FolderPrefix) + "/%", RefreshAfter: q.RefreshAfterConsolidation,
 		AfterID: q.PageToken, TagsMatch: match, FilterTags: tags, Lim: lim,
 	})
@@ -234,7 +240,7 @@ func (r *reader) ListDocuments(ctx context.Context, q store.DocumentQuery) ([]do
 	}
 	match, tags := tagFilterArgs(q.Tags, q.TagsMatch)
 	p := db.ReadsListDocumentsParams{
-		TenantID: q.Bank.Tenant, BankID: q.Bank.Bank, IDLike: containsPattern(q.DocumentIDContains), TagsMatch: match,
+		TenantID: q.Bank.Tenant, OrgID: q.Bank.Org, BankID: q.Bank.Bank, IDLike: containsPattern(q.DocumentIDContains), TagsMatch: match,
 		FilterTags: tags, StartAt: q.Start, TimeField: string(q.TimeField), EndAt: q.End,
 		Lim: toInt32Sat(q.Limit),
 	}

@@ -11,12 +11,13 @@ import (
 )
 
 const directiveCreate = `-- name: DirectiveCreate :exec
-INSERT INTO directives (tenant_id, bank_id, id, name, rules, tags, active)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO directives (tenant_id, org_id, bank_id, id, name, rules, tags, active)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type DirectiveCreateParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 	Name     string
@@ -29,6 +30,7 @@ type DirectiveCreateParams struct {
 func (q *Queries) DirectiveCreate(ctx context.Context, arg DirectiveCreateParams) error {
 	_, err := q.db.Exec(ctx, directiveCreate,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ID,
 		arg.Name,
@@ -40,18 +42,24 @@ func (q *Queries) DirectiveCreate(ctx context.Context, arg DirectiveCreateParams
 }
 
 const directiveDelete = `-- name: DirectiveDelete :execrows
-DELETE FROM directives WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+DELETE FROM directives WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4
 `
 
 type DirectiveDeleteParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 }
 
 // DirectiveDelete removes one directive.
 func (q *Queries) DirectiveDelete(ctx context.Context, arg DirectiveDeleteParams) (int64, error) {
-	result, err := q.db.Exec(ctx, directiveDelete, arg.TenantID, arg.BankID, arg.ID)
+	result, err := q.db.Exec(ctx, directiveDelete,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -59,21 +67,28 @@ func (q *Queries) DirectiveDelete(ctx context.Context, arg DirectiveDeleteParams
 }
 
 const directiveGet = `-- name: DirectiveGet :one
-SELECT tenant_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives WHERE tenant_id = $1 AND bank_id = $2 AND id = $3 FOR UPDATE
+SELECT tenant_id, org_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4 FOR UPDATE
 `
 
 type DirectiveGetParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 }
 
 // DirectiveGet returns one directive, locked for update until the transaction ends.
 func (q *Queries) DirectiveGet(ctx context.Context, arg DirectiveGetParams) (Directive, error) {
-	row := q.db.QueryRow(ctx, directiveGet, arg.TenantID, arg.BankID, arg.ID)
+	row := q.db.QueryRow(ctx, directiveGet,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	var i Directive
 	err := row.Scan(
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.ID,
 		&i.Name,
@@ -87,20 +102,26 @@ func (q *Queries) DirectiveGet(ctx context.Context, arg DirectiveGetParams) (Dir
 }
 
 const directiveList = `-- name: DirectiveList :many
-SELECT tenant_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives
-WHERE tenant_id = $1 AND bank_id = $2 AND (NOT $3::boolean OR active)
+SELECT tenant_id, org_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND (NOT $4::boolean OR active)
 ORDER BY created_at, id
 `
 
 type DirectiveListParams struct {
 	TenantID   string
+	OrgID      string
 	BankID     string
 	ActiveOnly bool
 }
 
 // DirectiveList returns a bank's directives (only active ones when active_only), oldest first.
 func (q *Queries) DirectiveList(ctx context.Context, arg DirectiveListParams) ([]Directive, error) {
-	rows, err := q.db.Query(ctx, directiveList, arg.TenantID, arg.BankID, arg.ActiveOnly)
+	rows, err := q.db.Query(ctx, directiveList,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ActiveOnly,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +131,7 @@ func (q *Queries) DirectiveList(ctx context.Context, arg DirectiveListParams) ([
 		var i Directive
 		if err := rows.Scan(
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.ID,
 			&i.Name,
@@ -130,24 +152,25 @@ func (q *Queries) DirectiveList(ctx context.Context, arg DirectiveListParams) ([
 }
 
 const directivePage = `-- name: DirectivePage :many
-SELECT tenant_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives
-WHERE tenant_id = $1 AND bank_id = $2 AND (NOT $3::boolean OR active)
-  AND (CASE $4::text
-      WHEN 'exact' THEN tags @> $5::text[] AND tags <@ $5::text[]
-      WHEN 'any_strict' THEN cardinality($5::text[]) = 0 OR tags && $5::text[]
-      WHEN 'all_strict' THEN tags @> $5::text[]
-      WHEN 'all' THEN cardinality($5::text[]) = 0 OR cardinality(tags) = 0 OR tags @> $5::text[]
-      ELSE cardinality($5::text[]) = 0 OR cardinality(tags) = 0 OR tags && $5::text[]
+SELECT tenant_id, org_id, bank_id, id, name, rules, tags, active, created_at, updated_at FROM directives
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND (NOT $4::boolean OR active)
+  AND (CASE $5::text
+      WHEN 'exact' THEN tags @> $6::text[] AND tags <@ $6::text[]
+      WHEN 'any_strict' THEN cardinality($6::text[]) = 0 OR tags && $6::text[]
+      WHEN 'all_strict' THEN tags @> $6::text[]
+      WHEN 'all' THEN cardinality($6::text[]) = 0 OR cardinality(tags) = 0 OR tags @> $6::text[]
+      ELSE cardinality($6::text[]) = 0 OR cardinality(tags) = 0 OR tags && $6::text[]
   END)
-  AND ($6::timestamptz IS NULL
-      OR created_at > $6::timestamptz
-      OR (created_at = $6::timestamptz AND id COLLATE "C" > $7::text))
+  AND ($7::timestamptz IS NULL
+      OR created_at > $7::timestamptz
+      OR (created_at = $7::timestamptz AND id COLLATE "C" > $8::text))
 ORDER BY created_at, id COLLATE "C"
-LIMIT $8::int
+LIMIT $9::int
 `
 
 type DirectivePageParams struct {
 	TenantID       string
+	OrgID          string
 	BankID         string
 	ActiveOnly     bool
 	TagsMatch      string
@@ -164,6 +187,7 @@ type DirectivePageParams struct {
 func (q *Queries) DirectivePage(ctx context.Context, arg DirectivePageParams) ([]Directive, error) {
 	rows, err := q.db.Query(ctx, directivePage,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ActiveOnly,
 		arg.TagsMatch,
@@ -181,6 +205,7 @@ func (q *Queries) DirectivePage(ctx context.Context, arg DirectivePageParams) ([
 		var i Directive
 		if err := rows.Scan(
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.ID,
 			&i.Name,
@@ -203,7 +228,7 @@ func (q *Queries) DirectivePage(ctx context.Context, arg DirectivePageParams) ([
 const directiveUpdate = `-- name: DirectiveUpdate :execrows
 UPDATE directives
 SET name = $1, rules = $2, tags = $3, active = $4, updated_at = now()
-WHERE tenant_id = $5 AND bank_id = $6 AND id = $7
+WHERE tenant_id = $5 AND org_id = $6 AND bank_id = $7 AND id = $8
 `
 
 type DirectiveUpdateParams struct {
@@ -212,6 +237,7 @@ type DirectiveUpdateParams struct {
 	Tags     []string
 	Active   bool
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 }
@@ -225,6 +251,7 @@ func (q *Queries) DirectiveUpdate(ctx context.Context, arg DirectiveUpdateParams
 		arg.Tags,
 		arg.Active,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ID,
 	)

@@ -80,11 +80,65 @@ func (h *ConfigHandler) ResetTenantConfig(
 	return &pb.ResetTenantConfigResponse{Config: configViewToProto(out)}, nil
 }
 
+// GetOrgConfig returns the org's config view.
+func (h *ConfigHandler) GetOrgConfig(
+	ctx context.Context, req *pb.GetOrgConfigRequest,
+) (*pb.GetOrgConfigResponse, error) {
+	o, err := orgRef(ctx, req)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	out, err := h.Config.GetOrgConfig(ctx, o)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &pb.GetOrgConfigResponse{Config: configViewToProto(out)}, nil
+}
+
+// UpdateOrgConfig patches the org's config with the masked fields of the request config; the patched config must
+// pass config.Validate (checked inside the patch).
+func (h *ConfigHandler) UpdateOrgConfig(
+	ctx context.Context, req *pb.UpdateOrgConfigRequest,
+) (*pb.UpdateOrgConfigResponse, error) {
+	o, err := orgRef(ctx, req)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	patch, err := configPatch(req.GetConfig(), req.GetUpdateMask())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	out, err := h.Config.UpdateOrgConfig(ctx, o, patch)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &pb.UpdateOrgConfigResponse{Config: configViewToProto(out)}, nil
+}
+
+// ResetOrgConfig unsets the masked paths of the org's config ("*" = all), so they inherit again.
+func (h *ConfigHandler) ResetOrgConfig(
+	ctx context.Context, req *pb.ResetOrgConfigRequest,
+) (*pb.ResetOrgConfigResponse, error) {
+	o, err := orgRef(ctx, req)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	paths, err := resetPaths(req.GetResetMask())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	out, err := h.Config.ResetOrgConfig(ctx, o, paths)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &pb.ResetOrgConfigResponse{Config: configViewToProto(out)}, nil
+}
+
 // GetBankConfig returns the bank's config view.
 func (h *ConfigHandler) GetBankConfig(
 	ctx context.Context, req *pb.GetBankConfigRequest,
 ) (*pb.GetBankConfigResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -100,7 +154,7 @@ func (h *ConfigHandler) GetBankConfig(
 func (h *ConfigHandler) UpdateBankConfig(
 	ctx context.Context, req *pb.UpdateBankConfigRequest,
 ) (*pb.UpdateBankConfigResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -119,7 +173,7 @@ func (h *ConfigHandler) UpdateBankConfig(
 func (h *ConfigHandler) ResetBankConfig(
 	ctx context.Context, req *pb.ResetBankConfigRequest,
 ) (*pb.ResetBankConfigResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -138,7 +192,7 @@ func (h *ConfigHandler) ResetBankConfig(
 func (h *ConfigHandler) PreviewPrompt(
 	ctx context.Context, req *pb.PreviewPromptRequest,
 ) (*pb.PreviewPromptResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -164,7 +218,7 @@ func (h *ConfigHandler) PreviewPrompt(
 func (h *ConfigHandler) CreateDirective(
 	ctx context.Context, req *pb.CreateDirectiveRequest,
 ) (*pb.CreateDirectiveResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -184,7 +238,7 @@ func (h *ConfigHandler) CreateDirective(
 func (h *ConfigHandler) UpdateDirective(
 	ctx context.Context, req *pb.UpdateDirectiveRequest,
 ) (*pb.UpdateDirectiveResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -206,7 +260,7 @@ func (h *ConfigHandler) UpdateDirective(
 func (h *ConfigHandler) ListDirectives(
 	ctx context.Context, req *pb.ListDirectivesRequest,
 ) (*pb.ListDirectivesResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -228,7 +282,7 @@ func (h *ConfigHandler) ListDirectives(
 func (h *ConfigHandler) DeleteDirective(
 	ctx context.Context, req *pb.DeleteDirectiveRequest,
 ) (*pb.DeleteDirectiveResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}

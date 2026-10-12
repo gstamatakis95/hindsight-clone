@@ -14,6 +14,7 @@ mode: rag # rag | reflect (memd's own answer) | recall (graded on the recalled m
 memd:
   addr: localhost:50051
   tenant: eval
+  org: eval
 
 # The eval's own models, through any OpenAI-compatible gateway (it can be the one memd uses). Hindsight's
 # published runs answer and judge with Gemini models (judge: gemini-2.5-flash-lite, the same model its server

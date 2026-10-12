@@ -22,6 +22,7 @@ type env struct {
 func newEnv(t *testing.T) env {
 	t.Helper()
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("t", "org", ""), domain.NewBankRef("t-race", "org", ""))
 	return env{
 		ctx: context.Background(), store: db,
 		svc: New(Deps{DB: db, Config: config.NewResolver(db, domain.BankConfig{})}),

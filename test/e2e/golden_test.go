@@ -44,7 +44,7 @@ func TestGoldenAgainstMemdAll(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = journal.Close() })
 	runner, err := harness.NewRunner(
-		harness.Deps{Target: target.NewMemd(conn, "golden"), Judge: judge.Contains{}, Journal: journal},
+		harness.Deps{Target: target.NewMemd(conn, "golden", "golden"), Judge: judge.Contains{}, Journal: journal},
 		harness.Config{
 			Mode: harness.ModeRecall, BankPrefix: "golden-", Parallel: 4, PollInterval: 200 * time.Millisecond,
 			QuietPolls: 2, SettleTimeout: 90 * time.Second,

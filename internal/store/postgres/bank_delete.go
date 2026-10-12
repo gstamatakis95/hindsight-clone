@@ -23,61 +23,61 @@ type bankDeleteStep struct {
 // is empty.
 var bankDeleteSteps = []bankDeleteStep{
 	{"unit_entities", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteUnitEntities(ctx, db.BankDeleteUnitEntitiesParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteUnitEntities(ctx, db.BankDeleteUnitEntitiesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"entity_cooccurrences", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteCooccurrences(ctx, db.BankDeleteCooccurrencesParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteCooccurrences(ctx, db.BankDeleteCooccurrencesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"memory_links", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteLinks(ctx, db.BankDeleteLinksParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteLinks(ctx, db.BankDeleteLinksParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"observation_evidence", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteEvidence(ctx, db.BankDeleteEvidenceParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteEvidence(ctx, db.BankDeleteEvidenceParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"graph_dirty", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteGraphDirty(ctx, db.BankDeleteGraphDirtyParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteGraphDirty(ctx, db.BankDeleteGraphDirtyParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"entity_maintenance", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteEntityMaintenance(ctx, db.BankDeleteEntityMaintenanceParams{
-			TenantID: b.Tenant, BankID: b.Bank, Lim: lim,
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
 		})
 	}},
 	{"observation_versions", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteObservationVersions(ctx, db.BankDeleteObservationVersionsParams{
-			TenantID: b.Tenant, BankID: b.Bank, Lim: lim,
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
 		})
 	}},
 	{"memory_audit", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteMemoryAudit(ctx, db.BankDeleteMemoryAuditParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteMemoryAudit(ctx, db.BankDeleteMemoryAuditParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"memory_units_archive", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteArchive(ctx, db.BankDeleteArchiveParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteArchive(ctx, db.BankDeleteArchiveParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"memory_units", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteUnits(ctx, db.BankDeleteUnitsParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteUnits(ctx, db.BankDeleteUnitsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"chunks", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteChunks(ctx, db.BankDeleteChunksParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteChunks(ctx, db.BankDeleteChunksParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"documents", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteDocuments(ctx, db.BankDeleteDocumentsParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteDocuments(ctx, db.BankDeleteDocumentsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"entities", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteEntities(ctx, db.BankDeleteEntitiesParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteEntities(ctx, db.BankDeleteEntitiesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"observation_scopes", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteObservationScopes(ctx, db.BankDeleteObservationScopesParams{
-			TenantID: b.Tenant, BankID: b.Bank, Lim: lim,
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
 		})
 	}},
 	{"mental_model_history", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteModelHistory(ctx, db.BankDeleteModelHistoryParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteModelHistory(ctx, db.BankDeleteModelHistoryParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"mental_models", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteModels(ctx, db.BankDeleteModelsParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteModels(ctx, db.BankDeleteModelsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"directives", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteDirectives(ctx, db.BankDeleteDirectivesParams{TenantID: b.Tenant, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteDirectives(ctx, db.BankDeleteDirectivesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 }
 
@@ -96,7 +96,7 @@ func (r *bankRepo) DeleteBatch(ctx context.Context, b domain.BankRef, limit int)
 	for _, step := range bankDeleteSteps {
 		n, err := step.run(ctx, r.q, b, toInt32Sat(remaining))
 		if err != nil {
-			return total, mapErr(fmt.Sprintf("delete %s of bank %s/%s", step.table, b.Tenant, b.Bank), err)
+			return total, mapErr(fmt.Sprintf("delete %s of bank %s", step.table, b), err)
 		}
 		total += int(n)
 		if remaining -= int(n); remaining <= 0 {
@@ -112,24 +112,24 @@ func (r *bankRepo) DeleteBatch(ctx context.Context, b domain.BankRef, limit int)
 // the tables without one (bankUnkeyedTables) are deleted explicitly. A live bank is
 // domain.ErrFailedPrecondition, an unknown one domain.ErrNotFound.
 func (r *bankRepo) Delete(ctx context.Context, b domain.BankRef) error {
-	n, err := r.q.BankDeleteRow(ctx, db.BankDeleteRowParams{TenantID: b.Tenant, ID: b.Bank})
+	n, err := r.q.BankDeleteRow(ctx, db.BankDeleteRowParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
-		return mapErr(fmt.Sprintf("delete bank %s/%s", b.Tenant, b.Bank), err)
+		return mapErr(fmt.Sprintf("delete bank %s", b), err)
 	}
 	if n == 0 {
 		if err := r.requireTombstoned(ctx, b); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: bank %s/%s changed while being deleted", domain.ErrConflict, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: bank %s changed while being deleted", domain.ErrConflict, b)
 	}
 	if err := r.deleteUnkeyed(ctx, b); err != nil {
 		return err
 	}
-	if err := r.q.BankDeleteEvents(ctx, db.BankDeleteEventsParams{TenantID: b.Tenant, BankID: b.Bank}); err != nil {
-		return mapErr(fmt.Sprintf("delete events of bank %s/%s", b.Tenant, b.Bank), err)
+	if err := r.q.BankDeleteEvents(ctx, db.BankDeleteEventsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank}); err != nil {
+		return mapErr(fmt.Sprintf("delete events of bank %s", b), err)
 	}
-	err = r.q.BankDeleteOperations(ctx, db.BankDeleteOperationsParams{TenantID: b.Tenant, BankID: b.Bank})
-	return mapErr(fmt.Sprintf("delete operations of bank %s/%s", b.Tenant, b.Bank), err)
+	err = r.q.BankDeleteOperations(ctx, db.BankDeleteOperationsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank})
+	return mapErr(fmt.Sprintf("delete operations of bank %s", b), err)
 }
 
 // bankUnkeyedTables are the bank-keyed tables with no foreign key to the bank: the bank row's
@@ -146,7 +146,7 @@ func (r *bankRepo) deleteUnkeyed(ctx context.Context, b domain.BankRef) error {
 			continue
 		}
 		if _, err := step.run(ctx, r.q, b, math.MaxInt32); err != nil {
-			return mapErr(fmt.Sprintf("delete %s of bank %s/%s", step.table, b.Tenant, b.Bank), err)
+			return mapErr(fmt.Sprintf("delete %s of bank %s", step.table, b), err)
 		}
 	}
 	return nil
@@ -155,15 +155,15 @@ func (r *bankRepo) deleteUnkeyed(ctx context.Context, b domain.BankRef) error {
 // lockTombstoned takes FOR KEY SHARE on a tombstoned bank's row, so the bank row can't be deleted (and a new
 // bank of the same id can't appear) while this transaction deletes its content. Errors as requireTombstoned.
 func (r *bankRepo) lockTombstoned(ctx context.Context, b domain.BankRef) error {
-	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, ID: b.Bank})
+	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s", domain.ErrBankNotFound, b)
 	}
 	if err != nil {
 		return bankErr(b, err)
 	}
 	if deletingAt == nil {
-		return fmt.Errorf("%w: bank %s/%s is not being deleted", domain.ErrFailedPrecondition, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: bank %s is not being deleted", domain.ErrFailedPrecondition, b)
 	}
 	return nil
 }
@@ -171,15 +171,15 @@ func (r *bankRepo) lockTombstoned(ctx context.Context, b domain.BankRef) error {
 // requireTombstoned returns nil for a tombstoned bank, domain.ErrNotFound for an unknown one and
 // domain.ErrFailedPrecondition for a live one.
 func (r *bankRepo) requireTombstoned(ctx context.Context, b domain.BankRef) error {
-	bank, err := r.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, ID: b.Bank})
+	bank, err := r.q.GetBank(ctx, db.GetBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s", domain.ErrBankNotFound, b)
 	}
 	if err != nil {
 		return bankErr(b, err)
 	}
 	if bank.DeletingAt == nil {
-		return fmt.Errorf("%w: bank %s/%s is not being deleted", domain.ErrFailedPrecondition, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: bank %s is not being deleted", domain.ErrFailedPrecondition, b)
 	}
 	return nil
 }

@@ -7,7 +7,7 @@ Areas, in creation order:
 
 - extensions: vector (768-dim embeddings, HNSW), pg_trgm (fuzzy entity names), pg_search
   (BM25 keyword recall);
-- tenants and banks;
+- tenants, orgs and banks;
 - documents and chunks;
 - memory_units: raw facts (world, experience) and observations in one table;
 - graph: entities, unit_entities, entity_cooccurrences, memory_links and the graph
@@ -18,11 +18,13 @@ Areas, in creation order:
 - directives;
 - jobs: operations (the queue) and lifecycle_events.
 
-Conventions: every table but tenants carries ``tenant_id``. Bank-owned tables cascade from
-banks, directly or through their parent row; the tables without that foreign key (the graph
-queues, observation_versions, the curation tables, operations and lifecycle_events) are
-cleared explicitly by bank delete. Memory units carry the bank ``change_seq`` of the
-transaction that last wrote them.
+Conventions: every table but tenants carries ``tenant_id``, and every table but tenants and
+orgs carries ``org_id`` right after it. Bank ids are unique per org, so a bank's key is
+``(tenant_id, org_id, bank_id)`` and every bank-keyed index starts with that prefix.
+Bank-owned tables cascade from banks, directly or through their parent row; the tables
+without that foreign key (the graph queues, observation_versions, the curation tables,
+operations and lifecycle_events) are cleared explicitly by bank delete. Memory units carry
+the bank ``change_seq`` of the transaction that last wrote them.
 
 Revision ID: 0001
 Revises:
@@ -42,7 +44,7 @@ EXTENSIONS = [
     "CREATE EXTENSION IF NOT EXISTS pg_search",
 ]
 
-TENANTS_AND_BANKS = [
+TENANTS_ORGS_AND_BANKS = [
     """
     CREATE TABLE tenants (
         id         text        PRIMARY KEY,
@@ -51,9 +53,26 @@ TENANTS_AND_BANKS = [
         updated_at timestamptz NOT NULL DEFAULT now()
     )
     """,
+    # An org groups a tenant's banks; it must exist before anything is written under it (it is never
+    # auto-created). deleting_at is the org delete tombstone.
+    """
+    CREATE TABLE orgs (
+        tenant_id   text        NOT NULL,
+        id          text        NOT NULL,
+        name        text        NOT NULL DEFAULT '',
+        -- The org config level, between the tenant's and the bank's.
+        config      jsonb       NOT NULL DEFAULT '{}',
+        deleting_at timestamptz NULL,
+        created_at  timestamptz NOT NULL DEFAULT now(),
+        updated_at  timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (tenant_id, id)
+    )
+    """,
+    # Bank ids are unique per org. The org row can only go once no bank of it is left (RESTRICT).
     """
     CREATE TABLE banks (
         tenant_id            text        NOT NULL,
+        org_id               text        NOT NULL,
         id                   text        NOT NULL,
         name                 text        NOT NULL DEFAULT '',
         config               jsonb       NOT NULL DEFAULT '{}',
@@ -64,7 +83,8 @@ TENANTS_AND_BANKS = [
         last_memory_write_at timestamptz NULL,
         created_at           timestamptz NOT NULL DEFAULT now(),
         updated_at           timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (tenant_id, id)
+        PRIMARY KEY (tenant_id, org_id, id),
+        FOREIGN KEY (tenant_id, org_id) REFERENCES orgs (tenant_id, id) ON DELETE RESTRICT
     )
     """,
 ]
@@ -73,6 +93,7 @@ DOCUMENTS = [
     """
     CREATE TABLE documents (
         tenant_id      text        NOT NULL,
+        org_id        text        NOT NULL,
         bank_id        text        NOT NULL,
         id             text        NOT NULL,
         content_hash   text        NOT NULL DEFAULT '',
@@ -87,8 +108,8 @@ DOCUMENTS = [
         updated_at     timestamptz NOT NULL DEFAULT now(),
         -- The retain item's observation scope modes; NULL = the item set none.
         observation_scope_modes jsonb NULL,
-        PRIMARY KEY (tenant_id, bank_id, id),
-        FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE
+        PRIMARY KEY (tenant_id, org_id, bank_id, id),
+        FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES banks (tenant_id, org_id, id) ON DELETE CASCADE
     )
     """,
     "CREATE INDEX documents_tags_gin ON documents USING gin (tags)",
@@ -96,6 +117,7 @@ DOCUMENTS = [
     CREATE TABLE chunks (
         id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id    text        NOT NULL,
+        org_id      text        NOT NULL,
         bank_id      text        NOT NULL,
         document_id  text        NOT NULL,
         chunk_index  integer     NOT NULL,
@@ -104,9 +126,9 @@ DOCUMENTS = [
         token_count  integer     NOT NULL DEFAULT 0,
         truncated    boolean     NOT NULL DEFAULT false,
         created_at   timestamptz NOT NULL DEFAULT now(),
-        UNIQUE (tenant_id, bank_id, document_id, chunk_index),
-        FOREIGN KEY (tenant_id, bank_id, document_id)
-            REFERENCES documents (tenant_id, bank_id, id) ON DELETE CASCADE
+        UNIQUE (tenant_id, org_id, bank_id, document_id, chunk_index),
+        FOREIGN KEY (tenant_id, org_id, bank_id, document_id)
+            REFERENCES documents (tenant_id, org_id, bank_id, id) ON DELETE CASCADE
     )
     """,
 ]
@@ -116,6 +138,7 @@ MEMORY_UNITS = [
     CREATE TABLE memory_units (
         id                      uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id               text        NOT NULL,
+        org_id                 text        NOT NULL,
         bank_id                 text        NOT NULL,
         document_id             text        NULL,
         chunk_id                uuid        NULL REFERENCES chunks (id) ON DELETE SET NULL,
@@ -145,35 +168,36 @@ MEMORY_UNITS = [
         updated_at              timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT memory_units_scope_key_observation_only
             CHECK (scope_key IS NULL OR fact_type = 'observation'),
-        FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE,
-        FOREIGN KEY (tenant_id, bank_id, document_id)
-            REFERENCES documents (tenant_id, bank_id, id) ON DELETE CASCADE
+        FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES banks (tenant_id, org_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id, org_id, bank_id, document_id)
+            REFERENCES documents (tenant_id, org_id, bank_id, id) ON DELETE CASCADE
     )
     """,
     # Retrieval arms: semantic (HNSW), keyword (BM25), tags, temporal.
     "CREATE INDEX memory_units_embedding_hnsw ON memory_units USING hnsw (embedding vector_cosine_ops)",
     # pg_search: the uuid id comes first (ParadeDB's key-column convention; key_field is a no-op since
-    # 0.26). The pdb.literal columns make the tenant / bank / fact type filters exact and pushed into the scan.
+    # 0.26). The pdb.literal columns make the tenant / org / bank / fact type filters exact and pushed into
+    # the scan.
     """
     CREATE INDEX memory_units_bm25 ON memory_units USING bm25 (
         id, text, context,
-        (tenant_id::pdb.literal), (bank_id::pdb.literal), (fact_type::pdb.literal))
+        (tenant_id::pdb.literal), (org_id::pdb.literal), (bank_id::pdb.literal), (fact_type::pdb.literal))
     """,
     "CREATE INDEX memory_units_tags_gin ON memory_units USING gin (tags)",
-    "CREATE INDEX memory_units_occurred_start_idx ON memory_units (tenant_id, bank_id, occurred_start)",
+    "CREATE INDEX memory_units_occurred_start_idx ON memory_units (tenant_id, org_id, bank_id, occurred_start)",
     # Facts waiting for consolidation. Observations are its output and are never consolidated.
     """
-    CREATE INDEX memory_units_unconsolidated_idx ON memory_units (tenant_id, bank_id, created_at)
+    CREATE INDEX memory_units_unconsolidated_idx ON memory_units (tenant_id, org_id, bank_id, created_at)
         WHERE consolidated_at IS NULL AND consolidation_failed_at IS NULL AND fact_type <> 'observation'
     """,
     """
-    CREATE INDEX memory_units_observation_scope_idx ON memory_units (tenant_id, bank_id, scope_key)
+    CREATE INDEX memory_units_observation_scope_idx ON memory_units (tenant_id, org_id, bank_id, scope_key)
         WHERE fact_type = 'observation'
     """,
     # Staleness checks (newest seq in a scope), document and chunk cascades, listings.
-    "CREATE INDEX memory_units_seq_idx ON memory_units (tenant_id, bank_id, seq)",
-    "CREATE INDEX memory_units_document_idx ON memory_units (tenant_id, bank_id, document_id)",
-    "CREATE INDEX memory_units_created_at_idx ON memory_units (tenant_id, bank_id, created_at)",
+    "CREATE INDEX memory_units_seq_idx ON memory_units (tenant_id, org_id, bank_id, seq)",
+    "CREATE INDEX memory_units_document_idx ON memory_units (tenant_id, org_id, bank_id, document_id)",
+    "CREATE INDEX memory_units_created_at_idx ON memory_units (tenant_id, org_id, bank_id, created_at)",
     "CREATE INDEX memory_units_chunk_idx ON memory_units (chunk_id) WHERE chunk_id IS NOT NULL",
 ]
 
@@ -183,6 +207,7 @@ GRAPH = [
     CREATE TABLE entities (
         id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id      text        NOT NULL,
+        org_id        text        NOT NULL,
         bank_id        text        NOT NULL,
         canonical_name text        NOT NULL,
         kind           text        NOT NULL DEFAULT '',
@@ -193,20 +218,21 @@ GRAPH = [
         last_seen      timestamptz NULL,
         created_at     timestamptz NOT NULL DEFAULT now(),
         updated_at     timestamptz NOT NULL DEFAULT now(),
-        FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE
+        FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES banks (tenant_id, org_id, id) ON DELETE CASCADE
     )
     """,
     """
     CREATE UNIQUE INDEX entities_label_uniq
-        ON entities (tenant_id, bank_id, kind, label_value)
+        ON entities (tenant_id, org_id, bank_id, kind, label_value)
         WHERE label_value IS NOT NULL
     """,
     # Fuzzy (trigram) and exact case-insensitive name lookup.
     "CREATE INDEX entities_name_trgm ON entities USING gin (lower(canonical_name) gin_trgm_ops)",
-    "CREATE INDEX entities_name_idx ON entities (tenant_id, bank_id, lower(canonical_name))",
+    "CREATE INDEX entities_name_idx ON entities (tenant_id, org_id, bank_id, lower(canonical_name))",
     """
     CREATE TABLE unit_entities (
         tenant_id text NOT NULL,
+        org_id   text NOT NULL,
         bank_id   text NOT NULL,
         unit_id   uuid NOT NULL REFERENCES memory_units (id) ON DELETE CASCADE,
         entity_id uuid NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
@@ -218,6 +244,7 @@ GRAPH = [
     """
     CREATE TABLE entity_cooccurrences (
         tenant_id text        NOT NULL,
+        org_id   text        NOT NULL,
         bank_id   text        NOT NULL,
         entity_a  uuid        NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
         entity_b  uuid        NOT NULL REFERENCES entities (id) ON DELETE CASCADE,
@@ -231,6 +258,7 @@ GRAPH = [
     """
     CREATE TABLE memory_links (
         tenant_id    text             NOT NULL,
+        org_id      text             NOT NULL,
         bank_id      text             NOT NULL,
         from_unit_id uuid             NOT NULL REFERENCES memory_units (id) ON DELETE CASCADE,
         to_unit_id   uuid             NOT NULL REFERENCES memory_units (id) ON DELETE CASCADE,
@@ -247,19 +275,21 @@ GRAPH = [
     """
     CREATE TABLE graph_dirty (
         tenant_id  text        NOT NULL,
+        org_id    text        NOT NULL,
         bank_id    text        NOT NULL,
         unit_id    uuid        NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (tenant_id, bank_id, unit_id)
+        PRIMARY KEY (tenant_id, org_id, bank_id, unit_id)
     )
     """,
     """
     CREATE TABLE entity_maintenance (
         tenant_id  text        NOT NULL,
+        org_id    text        NOT NULL,
         bank_id    text        NOT NULL,
         entity_id  uuid        NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (tenant_id, bank_id, entity_id)
+        PRIMARY KEY (tenant_id, org_id, bank_id, entity_id)
     )
     """,
 ]
@@ -270,6 +300,7 @@ OBSERVATIONS = [
     """
     CREATE TABLE observation_evidence (
         tenant_id      text        NOT NULL,
+        org_id        text        NOT NULL,
         bank_id        text        NOT NULL,
         observation_id uuid        NOT NULL REFERENCES memory_units (id) ON DELETE CASCADE,
         unit_id        uuid        NOT NULL REFERENCES memory_units (id) ON DELETE CASCADE,
@@ -283,13 +314,14 @@ OBSERVATIONS = [
     """
     CREATE TABLE observation_scopes (
         tenant_id  text        NOT NULL,
+        org_id    text        NOT NULL,
         bank_id    text        NOT NULL,
         scope_key  text        NOT NULL,
         tags       text[]      NOT NULL DEFAULT '{}',
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (tenant_id, bank_id, scope_key),
-        FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE
+        PRIMARY KEY (tenant_id, org_id, bank_id, scope_key),
+        FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES banks (tenant_id, org_id, id) ON DELETE CASCADE
     )
     """,
     # Previous versions of each observation. No foreign key: history outlives the observation.
@@ -297,6 +329,7 @@ OBSERVATIONS = [
     CREATE TABLE observation_versions (
         id             bigserial   PRIMARY KEY,
         tenant_id      text        NOT NULL,
+        org_id        text        NOT NULL,
         bank_id        text        NOT NULL,
         observation_id uuid        NOT NULL,
         version        bigint      NOT NULL,
@@ -306,7 +339,7 @@ OBSERVATIONS = [
         UNIQUE (observation_id, version)
     )
     """,
-    "CREATE INDEX observation_versions_bank_idx ON observation_versions (tenant_id, bank_id)",
+    "CREATE INDEX observation_versions_bank_idx ON observation_versions (tenant_id, org_id, bank_id)",
 ]
 
 CURATION = [
@@ -317,6 +350,7 @@ CURATION = [
     CREATE TABLE memory_units_archive (
         id                uuid        PRIMARY KEY,
         tenant_id         text        NOT NULL,
+        org_id           text        NOT NULL,
         bank_id           text        NOT NULL,
         document_id       text        NULL,
         chunk_id          uuid        NULL,
@@ -340,8 +374,8 @@ CURATION = [
         archived_at       timestamptz NOT NULL DEFAULT now()
     )
     """,
-    "CREATE INDEX memory_units_archive_bank_idx ON memory_units_archive (tenant_id, bank_id, archived_at)",
-    "CREATE INDEX memory_units_archive_document_idx ON memory_units_archive (tenant_id, bank_id, document_id)",
+    "CREATE INDEX memory_units_archive_bank_idx ON memory_units_archive (tenant_id, org_id, bank_id, archived_at)",
+    "CREATE INDEX memory_units_archive_document_idx ON memory_units_archive (tenant_id, org_id, bank_id, document_id)",
     """
     CREATE INDEX memory_units_archive_operation_idx
         ON memory_units_archive (operation_id) WHERE operation_id IS NOT NULL
@@ -350,6 +384,7 @@ CURATION = [
     CREATE TABLE memory_audit (
         id           bigserial   PRIMARY KEY,
         tenant_id    text        NOT NULL,
+        org_id      text        NOT NULL,
         bank_id      text        NOT NULL,
         unit_id      uuid        NOT NULL,
         action       text        NOT NULL CHECK (action IN ('edit', 'invalidate', 'restore')),
@@ -360,7 +395,7 @@ CURATION = [
         at           timestamptz NOT NULL DEFAULT now()
     )
     """,
-    "CREATE INDEX memory_audit_unit_idx ON memory_audit (tenant_id, bank_id, unit_id, at)",
+    "CREATE INDEX memory_audit_unit_idx ON memory_audit (tenant_id, org_id, bank_id, unit_id, at)",
     "CREATE INDEX memory_audit_operation_idx ON memory_audit (operation_id) WHERE operation_id IS NOT NULL",
 ]
 
@@ -368,6 +403,7 @@ MENTAL_MODELS = [
     """
     CREATE TABLE mental_models (
         tenant_id              text        NOT NULL,
+        org_id                text        NOT NULL,
         bank_id                text        NOT NULL,
         id                     text        NOT NULL,
         name                   text        NOT NULL DEFAULT '',
@@ -395,8 +431,8 @@ MENTAL_MODELS = [
         refresh_cron           text        NULL,
         created_at             timestamptz NOT NULL DEFAULT now(),
         updated_at             timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (tenant_id, bank_id, id),
-        FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE
+        PRIMARY KEY (tenant_id, org_id, bank_id, id),
+        FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES banks (tenant_id, org_id, id) ON DELETE CASCADE
     )
     """,
     "CREATE INDEX mental_models_embedding_hnsw ON mental_models USING hnsw (embedding vector_cosine_ops)",
@@ -407,6 +443,7 @@ MENTAL_MODELS = [
     CREATE TABLE mental_model_history (
         id              bigserial   PRIMARY KEY,
         tenant_id       text        NOT NULL,
+        org_id         text        NOT NULL,
         bank_id         text        NOT NULL,
         mental_model_id text        NOT NULL,
         kind            text        NOT NULL CHECK (kind IN ('version', 'refresh_failed')),
@@ -416,13 +453,13 @@ MENTAL_MODELS = [
         failure_reason  text        NOT NULL DEFAULT '',
         error_message   text        NOT NULL DEFAULT '',
         changed_at      timestamptz NOT NULL DEFAULT now(),
-        FOREIGN KEY (tenant_id, bank_id, mental_model_id)
-            REFERENCES mental_models (tenant_id, bank_id, id) ON DELETE CASCADE
+        FOREIGN KEY (tenant_id, org_id, bank_id, mental_model_id)
+            REFERENCES mental_models (tenant_id, org_id, bank_id, id) ON DELETE CASCADE
     )
     """,
     """
     CREATE INDEX mental_model_history_model_idx
-        ON mental_model_history (tenant_id, bank_id, mental_model_id, kind, changed_at)
+        ON mental_model_history (tenant_id, org_id, bank_id, mental_model_id, kind, changed_at)
     """,
 ]
 
@@ -431,6 +468,7 @@ DIRECTIVES = [
     """
     CREATE TABLE directives (
         tenant_id  text        NOT NULL,
+        org_id    text        NOT NULL,
         bank_id    text        NOT NULL,
         id         text        NOT NULL,
         name       text        NOT NULL DEFAULT '',
@@ -439,14 +477,14 @@ DIRECTIVES = [
         active     boolean     NOT NULL DEFAULT true,
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (tenant_id, bank_id, id),
-        FOREIGN KEY (tenant_id, bank_id) REFERENCES banks (tenant_id, id) ON DELETE CASCADE
+        PRIMARY KEY (tenant_id, org_id, bank_id, id),
+        FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES banks (tenant_id, org_id, id) ON DELETE CASCADE
     )
     """,
     # ListDirectives pages a bank's directives oldest first by (created_at, id).
-    'CREATE INDEX directives_bank_created_idx ON directives (tenant_id, bank_id, created_at, id COLLATE "C")',
+    'CREATE INDEX directives_bank_created_idx ON directives (tenant_id, org_id, bank_id, created_at, id COLLATE "C")',
     # A directive's name is unique within its bank: CreateDirective and UpdateDirective refuse a taken one.
-    "CREATE UNIQUE INDEX directives_bank_name_key ON directives (tenant_id, bank_id, name)",
+    "CREATE UNIQUE INDEX directives_bank_name_key ON directives (tenant_id, org_id, bank_id, name)",
 ]
 
 JOBS = [
@@ -456,6 +494,7 @@ JOBS = [
     CREATE TABLE operations (
         id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id    text        NOT NULL,
+        org_id      text        NOT NULL,
         bank_id      text        NOT NULL,
         kind         text        NOT NULL CHECK (kind IN (
                          'retain_batch', 'retain_document', 'consolidate', 'rederive_memory',
@@ -495,18 +534,18 @@ JOBS = [
     "CREATE INDEX operations_pending_run_at_idx ON operations (run_at) WHERE status = 'pending'",
     # At most one processing row per (bank, serial key): this backs the one-at-a-time claim.
     """
-    CREATE UNIQUE INDEX operations_processing_serial_key_uniq ON operations (tenant_id, bank_id, serial_key)
+    CREATE UNIQUE INDEX operations_processing_serial_key_uniq ON operations (tenant_id, org_id, bank_id, serial_key)
         WHERE status = 'processing'
     """,
     # Active rows by serial key: the claim's NOT EXISTS and the dedupe lookup.
     """
-    CREATE INDEX operations_active_serial_key_idx ON operations (tenant_id, bank_id, serial_key, kind)
+    CREATE INDEX operations_active_serial_key_idx ON operations (tenant_id, org_id, bank_id, serial_key, kind)
         WHERE status IN ('pending', 'processing')
     """,
     # Stale-heartbeat reclaim.
     "CREATE INDEX operations_processing_heartbeat_idx ON operations (heartbeat_at) WHERE status = 'processing'",
     "CREATE INDEX operations_parent_idx ON operations (parent_id) WHERE parent_id IS NOT NULL",
-    "CREATE INDEX operations_bank_created_idx ON operations (tenant_id, bank_id, created_at)",
+    "CREATE INDEX operations_bank_created_idx ON operations (tenant_id, org_id, bank_id, created_at)",
     # Retention pruning of finished rows.
     """
     CREATE INDEX operations_terminal_finished_idx ON operations (finished_at)
@@ -518,6 +557,7 @@ JOBS = [
     CREATE TABLE lifecycle_events (
         id           bigserial   PRIMARY KEY,
         tenant_id    text        NOT NULL,
+        org_id      text        NOT NULL,
         bank_id      text        NOT NULL,
         seq          bigint      NOT NULL,
         type         text        NOT NULL,
@@ -526,13 +566,14 @@ JOBS = [
         subject_id   text        NOT NULL DEFAULT ''
     )
     """,
-    "CREATE INDEX lifecycle_events_seq_idx ON lifecycle_events (tenant_id, bank_id, seq)",
+    "CREATE INDEX lifecycle_events_seq_idx ON lifecycle_events (tenant_id, org_id, bank_id, seq)",
     "CREATE INDEX lifecycle_events_at_idx ON lifecycle_events (at)",
 ]
 
 # Every table, in creation order. downgrade() drops them in reverse; their indexes go with them.
 TABLES = [
     "tenants",
+    "orgs",
     "banks",
     "documents",
     "chunks",
@@ -560,7 +601,7 @@ def upgrade() -> None:
     """Create the extensions, then every area's tables and indexes."""
     for area in (
         EXTENSIONS,
-        TENANTS_AND_BANKS,
+        TENANTS_ORGS_AND_BANKS,
         DOCUMENTS,
         MEMORY_UNITS,
         GRAPH,

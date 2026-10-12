@@ -27,12 +27,19 @@ type Store interface {
 	DeletePrefix(ctx context.Context, prefix string) (int, error)
 }
 
-// Key is where a document's original text is stored: "{tenant}/{bank}/docs/{document_id}/{content_hash}".
+// Key is where a document's original text is stored: "{tenant}/{org}/{bank}/docs/{document_id}/{content_hash}".
+// Tenant, org and bank ids never contain '/' (the API rejects them), so the prefixes below are unique per org and
+// per bank.
 func Key(b domain.BankRef, doc domain.DocumentID, contentHash string) string {
-	return strings.Join([]string{b.Tenant, b.Bank, "docs", string(doc), contentHash}, "/")
+	return strings.Join([]string{b.Tenant, b.Org, b.Bank, "docs", string(doc), contentHash}, "/")
 }
 
-// BankPrefix is the prefix holding every object of a bank, "{tenant}/{bank}/": deleting the bank removes it.
+// BankPrefix is the prefix holding every object of a bank, "{tenant}/{org}/{bank}/": deleting the bank removes it.
 func BankPrefix(b domain.BankRef) string {
-	return b.Tenant + "/" + b.Bank + "/"
+	return b.Tenant + "/" + b.Org + "/" + b.Bank + "/"
+}
+
+// OrgPrefix is the prefix holding every object of an org's banks, "{tenant}/{org}/".
+func OrgPrefix(o domain.OrgRef) string {
+	return o.Tenant + "/" + o.Org + "/"
 }

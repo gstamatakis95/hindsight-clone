@@ -130,7 +130,7 @@ func (s *Service) ResumeStalledDeletes(ctx context.Context) (int, error) {
 		switch {
 		case errors.Is(err, domain.ErrBankDeleting) || errors.Is(err, domain.ErrNotFound):
 		case err != nil:
-			errs = append(errs, fmt.Errorf("bank %s/%s: %w", b.Tenant, b.Bank, err))
+			errs = append(errs, fmt.Errorf("bank %s: %w", b, err))
 		case !joined:
 			inserted++
 		}

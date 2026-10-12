@@ -24,8 +24,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	pb "memd/gen/memory/v1"
@@ -149,12 +151,21 @@ func (w *wiredStack) ctx(t *testing.T) context.Context {
 	return w.ctxAs(t, "t")
 }
 
-// ctxAs is a context for tenant with a deadline.
+// testOrg is the org every wired-stack test writes under; ctxAs creates it for the tenant.
+const testOrg = "o"
+
+// ctxAs is a context for tenant with a deadline. It creates the tenant's testOrg first (orgs are never created on
+// first use), treating ALREADY_EXISTS as done.
 func (w *wiredStack) ctxAs(t *testing.T, tenant string) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	t.Cleanup(cancel)
-	return metadata.AppendToOutgoingContext(ctx, grpcapi.TenantHeader, tenant)
+	ctx = metadata.AppendToOutgoingContext(ctx, grpcapi.TenantHeader, tenant)
+	_, err := pb.NewOrgServiceClient(w.conn).CreateOrg(ctx, &pb.CreateOrgRequest{OrgId: testOrg})
+	if err != nil && status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("create org %s/%s: %v", tenant, testOrg, err)
+	}
+	return ctx
 }
 
 // idle waits until the bank has no pending or processing operation.
@@ -163,7 +174,7 @@ func (w *wiredStack) idle(t *testing.T, bank string) {
 	banks := pb.NewBankServiceClient(w.conn)
 	ctx := w.ctx(t)
 	for {
-		resp, err := banks.GetBankStats(ctx, &pb.GetBankStatsRequest{BankId: bank})
+		resp, err := banks.GetBankStats(ctx, &pb.GetBankStatsRequest{OrgId: testOrg, BankId: bank})
 		if err != nil {
 			t.Fatal(err)
 		}
