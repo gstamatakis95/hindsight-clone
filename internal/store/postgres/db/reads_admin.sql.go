@@ -206,7 +206,7 @@ func (q *Queries) ReadsFailedRefreshes(ctx context.Context) ([]ReadsFailedRefres
 }
 
 const readsListDocuments = `-- name: ReadsListDocuments :many
-SELECT d.tenant_id, d.org_id, d.bank_id, d.id, d.content_hash, d.overrides_hash, d.overrides, d.tags, d.blob_key, d.extracted_at, d.created_at, d.updated_at, d.observation_scope_modes,
+SELECT d.tenant_id, d.org_id, d.bank_id, d.id, d.content_hash, d.overrides_hash, d.overrides, d.tags, d.blob_key, d.extracted_at, d.created_at, d.updated_at, d.observation_scope_modes, d.revision,
     COALESCE((SELECT jsonb_object_agg(c.fact_type, c.n) FROM (
         SELECT u.fact_type, count(*) AS n FROM memory_units u
         WHERE u.tenant_id = d.tenant_id AND u.org_id = d.org_id AND u.bank_id = d.bank_id AND u.document_id = d.id
@@ -296,6 +296,7 @@ func (q *Queries) ReadsListDocuments(ctx context.Context, arg ReadsListDocuments
 			&i.Document.CreatedAt,
 			&i.Document.UpdatedAt,
 			&i.Document.ObservationScopeModes,
+			&i.Document.Revision,
 			&i.UnitsByFactType,
 		); err != nil {
 			return nil, err

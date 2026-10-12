@@ -295,7 +295,7 @@ carries a gRPC status passes through; the message is the error text.
 | invalid argument | INVALID_ARGUMENT | `INVALID_ARGUMENT`, `TOO_MANY_SCOPES`, `MEMORY_IS_OBSERVATION` |
 | failed precondition | FAILED_PRECONDITION | `FAILED_PRECONDITION`, `BANK_DELETING`, `MODEL_UNBOUND`, `OPERATION_NOT_CANCELLABLE`, `OPERATION_NOT_RETRYABLE` |
 | unavailable | UNAVAILABLE | `UNAVAILABLE`, `RETRIEVAL_UNAVAILABLE`, `CONTEXT_OVERFLOW` |
-| resource exhausted | RESOURCE_EXHAUSTED | `RESOURCE_EXHAUSTED`, `MAX_TOTAL_TOKENS_EXCEEDED` |
+| resource exhausted | RESOURCE_EXHAUSTED | `RESOURCE_EXHAUSTED`, `MAX_TOTAL_TOKENS_EXCEEDED`, `INGEST_BACKLOG` |
 | cancelled operation | ABORTED | `OPERATION_CANCELLED` |
 | conflict (superseded sync retain, lost race) | ABORTED | `CONFLICT` |
 | anything else | INTERNAL | `INTERNAL` |
@@ -306,6 +306,8 @@ carries a gRPC status passes through; the message is the error text.
 - An error built with `domain.InvalidField` (request ids, paging, tag filters, config validation paths, update
   masks) also carries a `google.rpc.BadRequest` with one field violation per named field, for example `page_size`
   or `reflect.disposition.empathy`.
+- An error built with `domain.WithRetryDelay` (RetainBatch's backlog gate, `INGEST_BACKLOG`) also carries a
+  `google.rpc.RetryInfo` with the delay to wait before retrying.
 - Context errors come first, so a timeout wrapped as unavailable still reports DEADLINE_EXCEEDED. ABORTED (not
   CANCELLED) is used for an operation cancelled through the API or a bank deleted under a sync call: in gRPC,
   CANCELLED means the caller cancelled.

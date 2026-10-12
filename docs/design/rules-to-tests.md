@@ -79,6 +79,10 @@ Design: [curation-and-operations.md](curation-and-operations.md#banks), [storage
 | The tick re-enqueues delete_bank for a tombstoned bank with no active delete | `maintenance.TestMaintenanceResumesStalledBankDelete`, `postgres.TestStalledBankDeletes` |
 | Retain idempotency: same content and no-op hash is a no-op unless force_reextract | `memory.TestIngestUnchangedMakesNoLLMCall`, `memory.TestRetainCompletedJobReplayIsNoop`, `memory.TestRetainForceReextractCrashResume`, `memory.TestRetainSyncVictimPartialReplaceIsNotUnchanged`, `e2e.TestScenarios/RetainSync` |
 | A tombstoned bank refuses a retain before the blob is written | `memory.TestIngestDeletingBankStoresNoBlob` |
+| The no-op and revision checks run again under the Seq lock: a retain completing between the pre-read and the write makes the item unchanged, and its extracted_at is never cleared (Retain and RetainBatch) | `memory.TestRetainNoopRecheckUnderSeq` |
+| RetainBatch: a status per item, one bad item never fails the call; the highest revision of a document in the call wins (the last among equals), earlier items SUPERSEDED, a later lower revision STALE; a revision lower than the stored one is STALE and writes nothing | `memory.TestRetainBatchItemStatuses`, `e2e.TestScenarios/RetainBatch` |
+| RetainBatch: a redelivered identical item joins the retain in flight, and once it completed is UNCHANGED with no model call, job or seq bump | `memory.TestRetainBatchRedeliveryIsIdempotent`, `e2e.TestScenarios/RetainBatch` |
+| RetainBatch: over the bank's or org's pending retain backlog, the whole call is RESOURCE_EXHAUSTED (INGEST_BACKLOG) with a RetryInfo delay and writes nothing | `memory.TestRetainBatchBacklogWritesNothing`, `grpcapi.TestBacklogStatusAndItemError` |
 | A changed document replaces old memories in the first batch transaction, deleting observations and resetting co-sources; a document being replaced stays in flight | `memory.TestRetainReplacementDeletesObservationsAndResetsCoSources`, `memory.TestRetainResumeAfterCrashReextractsOnlyRemainingChunks`, `memory.TestRetainPartialReplaceAfterOtherRunCompletedIsNotUnchanged` |
 | Ownership: the latest retain wins; tags are adopted, not ownership | `memory.TestRetainSupersededAfterInterveningRetain`, `memory.TestRetainOverlappingRetainsOfOneDocument`, `memory.TestRetainRetaggedBetweenBatchesKeepsAllFacts`, `memory.TestRetainOlderRunCannotOverwriteNewerTags`, `memory.TestRetainOverridesChangeMidRunSupersedes` |
 | ALL_COMBINATIONS fan-out over max_combinations is INVALID_ARGUMENT synchronously | `memory.TestIngestFanOutRejectionStoresNothing`, `memory.TestIngestFanOutRejectionUnknownBankCreatesNothing`, `domain.TestExpandScopesTooManyCombinations` |
@@ -165,7 +169,7 @@ Design: [curation-and-operations.md](curation-and-operations.md).
 | Async retains create a retain_batch parent; eval barrier = sync Retain plus an empty pending_operations_by_kind | `memory.TestIngestAsyncEnqueuesChildrenUnderBatch`, `postgres.TestSettleRetainBatches`, `e2e.TestScenarios/RetainAsync`, `e2e.TestGoldenAgainstMemdAll` |
 | Terminal operations are pruned after the retention; pending and processing never are | `maintenance.TestPruneOperations`, `postgres.TestQueue/Prune`, `postgres.TestStore/EventsPrune` |
 | Every RPC is wired | `memd.TestEveryRPCWired` |
-| Errors carry ErrorInfo reasons and BadRequest field violations | `grpcapi.TestToStatus`, `grpcapi.TestToStatusFieldViolations` |
+| Errors carry ErrorInfo reasons and BadRequest field violations; a batch item's error carries the same code, reason and fields (under `items[k]`) | `grpcapi.TestToStatus`, `grpcapi.TestToStatusFieldViolations`, `grpcapi.TestBacklogStatusAndItemError` |
 | Paging: a negative page_size or max_results is INVALID_ARGUMENT | `grpcapi.TestPagingInterceptor`, `operation.TestListEventsPageBounds` |
 | FieldMask patches: implicit masks touch only populated leaves; reset needs a mask, `*` resets all | `grpcapi.TestFieldMaskImpliedLeaves`, `grpcapi.TestFieldMaskConfigPatch`, `grpcapi.TestResetMask`, `config.TestResetPaths`, `memd.TestConfigWritesValidated` |
 | Model routing: per slot, the most specific level yielding a binding wins, its own or its default | `config.TestModelResolution`, `config.TestMergePrecedence` |
@@ -173,15 +177,19 @@ Design: [curation-and-operations.md](curation-and-operations.md).
 
 ## Ingest boundary
 
-Design: [architecture.md](architecture.md#ingest-boundary). Every adapter runs `ingesttest.Run`; `memq` is the
-in-memory adapter (`memq.TestContract`).
+Design: [architecture.md](architecture.md#ingest-boundary). Every adapter runs `ingesttest.Run`: `memq`, the
+in-memory adapter (`memq.TestContract`), and `kafka` on a real broker (`kafka.TestContract`, which skips the lease
+case: Kafka has no lease).
 
 | Rule | Tests |
 |---|---|
-| An unsettled message is redelivered after Close, and after the lease runs out | `memq.TestContract/UnsettledRedeliveredAfterClose`, `memq.TestContract/UnsettledRedeliveredAfterLease` |
-| Ack settles for good, and is idempotent | `memq.TestContract/AckSettlesForGood` |
-| A stale settlement (after Close or a redelivery) neither fails nor settles the redelivered message | `memq.TestContract/StaleSettlementIsHarmless` |
-| Nack redelivers no sooner than its delay | `memq.TestContract/NackDelaysRedelivery`, `memq.TestNackKeepsKeyOrder` |
-| A dead-lettered message never returns on the main subscription | `memq.TestContract/DeadLetterNeverReturns` |
-| Messages with one key arrive in publish order | `memq.TestContract/SameKeyKeepsPublishOrder` |
-| Receive honours max, returns empty when idle, the context's error when cancelled and ErrClosed after Close | `memq.TestContract/ReceiveIdle`, `memq.TestContract/ReceiveHonoursMax`, `memq.TestContract/ReceiveContextCancelled`, `memq.TestContract/ReceiveAfterClose` |
+| An unsettled message is redelivered after Close, and after the lease runs out | `memq.TestContract/UnsettledRedeliveredAfterClose`, `memq.TestContract/UnsettledRedeliveredAfterLease`, `kafka.TestContract/UnsettledRedeliveredAfterClose` |
+| Ack settles for good, and is idempotent | `memq.TestContract/AckSettlesForGood`, `kafka.TestContract/AckSettlesForGood` |
+| A stale settlement (after Close or a redelivery) neither fails nor settles the redelivered message | `memq.TestContract/StaleSettlementIsHarmless`, `kafka.TestContract/StaleSettlementIsHarmless` |
+| Nack redelivers no sooner than its delay | `memq.TestContract/NackDelaysRedelivery`, `memq.TestNackKeepsKeyOrder`, `kafka.TestContract/NackDelaysRedelivery` |
+| A dead-lettered message never returns on the main subscription | `memq.TestContract/DeadLetterNeverReturns`, `kafka.TestContract/DeadLetterNeverReturns` |
+| Messages with one key arrive in publish order | `memq.TestContract/SameKeyKeepsPublishOrder`, `kafka.TestContract/SameKeyKeepsPublishOrder` |
+| Receive honours max, returns empty when idle, the context's error when cancelled and ErrClosed after Close | `memq.TestContract/ReceiveIdle`, `memq.TestContract/ReceiveHonoursMax`, `memq.TestContract/ReceiveContextCancelled`, `memq.TestContract/ReceiveAfterClose`, `kafka.TestContract/ReceiveIdle`, `kafka.TestContract/ReceiveHonoursMax`, `kafka.TestContract/ReceiveContextCancelled`, `kafka.TestContract/ReceiveAfterClose` |
+| An adapter without a dead-letter destination fails at construction | `kafka.TestNewRequiresDeadLetterTopic` |
+| Kafka commits a partition only past contiguously settled records | `kafka.TestCommitOnlyPastContiguousAcks` |
+| A Kafka dead letter keeps the key, value and headers and adds the reason and source position | `kafka.TestDeadLetterCarriesReason` |

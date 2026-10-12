@@ -21,7 +21,7 @@ tiers: "" {
     gw: ai/gateway {class: adapter}
     s3: blob/s3 {class: adapter}
     memq: ingest/memq {class: adapter}
-    kafka: "ingest/kafka\nand other brokers" {class: planned}
+    kafka: ingest/kafka {class: adapter}
     obs: observability {class: adapter}
   }
   transports: "Top: transports and the tick" {

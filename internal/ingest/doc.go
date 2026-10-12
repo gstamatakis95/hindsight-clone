@@ -30,20 +30,24 @@
 //
 // # Providers
 //
-// internal/ingest/memq is the in-memory source used by tests. No consumer or network provider exists yet.
+// internal/ingest/memq is the in-memory source used by tests. internal/ingest/kafka is the Kafka source (a
+// consumer group, with the pure-Go franz-go client); its package comment has the commit model and the operational
+// notes. No consumer drives a source yet.
 //
-// Adding a provider (Kafka, SQS, Pub/Sub, NATS):
+// Adding a provider (SQS, Pub/Sub, NATS):
 //
 //  1. Create internal/ingest/<provider> with a concrete type implementing Source and a compile-time assertion
-//     (`var _ ingest.Source = (*T)(nil)`). Import only this package, internal/domain and the provider SDK.
+//     (`var _ ingest.Source = (*T)(nil)`). Import only this package, internal/domain and the provider SDK, and add
+//     the package to the adapters tier of .golangci.yml.
 //  2. Map the provider's primitives to the four settlements. SQS maps Nack to ChangeMessageVisibility and
 //     DeadLetter to send-to-DLQ then delete, with FIFO groups giving per-key order. Pub/Sub uses ModifyAckDeadline,
 //     a dead-letter topic and ordering keys. NATS JetStream uses NakWithDelay and Term plus a publish to a DLQ
-//     subject. Kafka has no nack: commit only contiguous acked offsets, implement Nack as a seek back plus pausing
-//     the partition for the delay (which blocks the head of line but keeps order), and DeadLetter as a produce to
-//     the DLQ topic followed by marking the offset done.
+//     subject. Kafka has no nack: internal/ingest/kafka commits only contiguously settled offsets, redelivers a
+//     nacked record locally after the delay (holding back only the later records of its key), and dead-letters
+//     with a produce to the DLQ topic before settling the offset.
 //  3. Run the shared contract suite from the adapter's tests: ingesttest.Run(t, func(t *testing.T)
 //     ingesttest.Harness { ... }), giving every call a fresh subscription so tests never share messages.
-//  4. Add the provider's settings to cmd/memd's Config (environment: they are infrastructure) and a case to the
-//     provider switch in wire.go, and document the variables in the README.
+//  4. Add the provider's settings to cmd/memd's Config (environment: endpoints, names and credentials are
+//     infrastructure; behaviour such as poll waits goes in the server config file) and a case to the provider
+//     switch in wire.go, and document the settings in the README.
 package ingest

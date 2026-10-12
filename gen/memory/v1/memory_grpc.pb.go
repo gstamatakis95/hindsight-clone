@@ -42,7 +42,7 @@
 // mental_model_operations), never a bare id; OperationService reports its status and progress. Follow-up jobs
 // an RPC triggers on its own (such as consolidation after a retain) are not returned. Retain is synchronous by
 // default, returning once the memories are committed; run_async=true makes it return the enqueued operations instead.
-// Recall and Reflect are synchronous.
+// RetainBatch is always asynchronous. Recall and Reflect are synchronous.
 //
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
 // poll OperationService.ListEvents with after_seq, passing the previous response's next_after_seq.
@@ -74,7 +74,9 @@
 //                        OPERATION_NOT_RETRYABLE (the operation's status or kind forbids it)
 //   UNAVAILABLE          UNAVAILABLE (a dependency failed; retry with backoff), RETRIEVAL_UNAVAILABLE (a
 //                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
-//   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens)
+//   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens),
+//                        INGEST_BACKLOG (RetainBatch while the retain backlog is over its limit; it also carries a
+//                        google.rpc.RetryInfo with the delay to wait)
 //   ABORTED              OPERATION_CANCELLED (the operation was cancelled or its bank deleted), CONFLICT (a
 //                        concurrent writer won; retry)
 //   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
@@ -108,6 +110,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	MemoryService_Retain_FullMethodName           = "/memory.v1.MemoryService/Retain"
+	MemoryService_RetainBatch_FullMethodName      = "/memory.v1.MemoryService/RetainBatch"
 	MemoryService_Recall_FullMethodName           = "/memory.v1.MemoryService/Recall"
 	MemoryService_Reflect_FullMethodName          = "/memory.v1.MemoryService/Reflect"
 	MemoryService_ListRecallArms_FullMethodName   = "/memory.v1.MemoryService/ListRecallArms"
@@ -128,6 +131,16 @@ type MemoryServiceClient interface {
 	// commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
 	// bank of an existing org creates it.
 	Retain(ctx context.Context, in *RetainRequest, opts ...grpc.CallOption) (*RetainResponse, error)
+	// RetainBatch accepts documents for background retain and reports one result per item, in request order:
+	// an invalid item is REJECTED and never fails the call. Always asynchronous, with no batch parent operation:
+	// each accepted item's retain_document operation is its tracking. Every item needs a document_id, which makes
+	// a redelivered item idempotent (UNCHANGED, or ACCEPTED joining the identical retain in flight), and an
+	// optional revision keeps an older version from overwriting a newer one (STALE). The server limits the items
+	// per call, the bytes per item and the bytes per call (a call over a call limit = INVALID_ARGUMENT). While the
+	// bank's or the org's pending retain backlog is over its limit, the whole call fails with RESOURCE_EXHAUSTED
+	// (reason INGEST_BACKLOG, with a google.rpc.RetryInfo) before anything is written. A write to an unknown bank
+	// of an existing org creates it.
+	RetainBatch(ctx context.Context, in *RetainBatchRequest, opts ...grpc.CallOption) (*RetainBatchResponse, error)
 	// Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
 	// rerank, boosts and token packing. Unknown bank = NOT_FOUND.
 	Recall(ctx context.Context, in *RecallRequest, opts ...grpc.CallOption) (*RecallResponse, error)
@@ -166,6 +179,16 @@ func (c *memoryServiceClient) Retain(ctx context.Context, in *RetainRequest, opt
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RetainResponse)
 	err := c.cc.Invoke(ctx, MemoryService_Retain_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *memoryServiceClient) RetainBatch(ctx context.Context, in *RetainBatchRequest, opts ...grpc.CallOption) (*RetainBatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RetainBatchResponse)
+	err := c.cc.Invoke(ctx, MemoryService_RetainBatch_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -262,6 +285,16 @@ type MemoryServiceServer interface {
 	// commit); run_async=true enqueues retain_document jobs and returns their operations. A write to an unknown
 	// bank of an existing org creates it.
 	Retain(context.Context, *RetainRequest) (*RetainResponse, error)
+	// RetainBatch accepts documents for background retain and reports one result per item, in request order:
+	// an invalid item is REJECTED and never fails the call. Always asynchronous, with no batch parent operation:
+	// each accepted item's retain_document operation is its tracking. Every item needs a document_id, which makes
+	// a redelivered item idempotent (UNCHANGED, or ACCEPTED joining the identical retain in flight), and an
+	// optional revision keeps an older version from overwriting a newer one (STALE). The server limits the items
+	// per call, the bytes per item and the bytes per call (a call over a call limit = INVALID_ARGUMENT). While the
+	// bank's or the org's pending retain backlog is over its limit, the whole call fails with RESOURCE_EXHAUSTED
+	// (reason INGEST_BACKLOG, with a google.rpc.RetryInfo) before anything is written. A write to an unknown bank
+	// of an existing org creates it.
+	RetainBatch(context.Context, *RetainBatchRequest) (*RetainBatchResponse, error)
 	// Recall retrieves memories with the recall arms (built in: vector, text, graph, temporal), RRF fusion,
 	// rerank, boosts and token packing. Unknown bank = NOT_FOUND.
 	Recall(context.Context, *RecallRequest) (*RecallResponse, error)
@@ -298,6 +331,9 @@ type UnimplementedMemoryServiceServer struct{}
 
 func (UnimplementedMemoryServiceServer) Retain(context.Context, *RetainRequest) (*RetainResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Retain not implemented")
+}
+func (UnimplementedMemoryServiceServer) RetainBatch(context.Context, *RetainBatchRequest) (*RetainBatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RetainBatch not implemented")
 }
 func (UnimplementedMemoryServiceServer) Recall(context.Context, *RecallRequest) (*RecallResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Recall not implemented")
@@ -358,6 +394,24 @@ func _MemoryService_Retain_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MemoryServiceServer).Retain(ctx, req.(*RetainRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MemoryService_RetainBatch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetainBatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MemoryServiceServer).RetainBatch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MemoryService_RetainBatch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MemoryServiceServer).RetainBatch(ctx, req.(*RetainBatchRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -516,6 +570,10 @@ var MemoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Retain",
 			Handler:    _MemoryService_Retain_Handler,
+		},
+		{
+			MethodName: "RetainBatch",
+			Handler:    _MemoryService_RetainBatch_Handler,
 		},
 		{
 			MethodName: "Recall",
@@ -1561,8 +1619,9 @@ type OrgServiceClient interface {
 	// a deletion receipt; it returns both. From then on writes under the org fail FAILED_PRECONDITION
 	// (ORG_DELETING or BANK_DELETING) and reads NOT_FOUND, GetOrg included. The delete removes every bank, every
 	// row of the org and every stored blob, then verifies that none is left before it deletes the org and marks the
-	// receipt COMPLETED. Calling it again while the delete runs returns the same operation and receipt. Poll
-	// GetDeletionReceipt for completion: the operation itself is removed with the org.
+	// receipt COMPLETED. Calling it again while the delete runs joins it: it returns the same receipt and the delete's
+	// current operation (a long delete continues in new delete_org operations). Poll GetDeletionReceipt for
+	// completion: the operations are removed with the org.
 	DeleteOrg(ctx context.Context, in *DeleteOrgRequest, opts ...grpc.CallOption) (*DeleteOrgResponse, error)
 	// GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
 	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND.
@@ -1646,8 +1705,9 @@ type OrgServiceServer interface {
 	// a deletion receipt; it returns both. From then on writes under the org fail FAILED_PRECONDITION
 	// (ORG_DELETING or BANK_DELETING) and reads NOT_FOUND, GetOrg included. The delete removes every bank, every
 	// row of the org and every stored blob, then verifies that none is left before it deletes the org and marks the
-	// receipt COMPLETED. Calling it again while the delete runs returns the same operation and receipt. Poll
-	// GetDeletionReceipt for completion: the operation itself is removed with the org.
+	// receipt COMPLETED. Calling it again while the delete runs joins it: it returns the same receipt and the delete's
+	// current operation (a long delete continues in new delete_org operations). Poll GetDeletionReceipt for
+	// completion: the operations are removed with the org.
 	DeleteOrg(context.Context, *DeleteOrgRequest) (*DeleteOrgResponse, error)
 	// GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
 	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND.

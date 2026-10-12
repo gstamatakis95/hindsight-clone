@@ -14,7 +14,8 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   - internal/ai (LLM, Embedder, Reranker; Router and Tokenizer are concrete) — internal/ai/gateway
   - internal/blob (Store, Key; contract suite in blob/blobtest) — internal/blob/s3, chosen by MEMD_BLOB_PROVIDER
   - internal/ingest (Source: Receive, Ack, Nack, DeadLetter; the message-queue boundary with at-least-once delivery;
-    contract suite in ingest/ingesttest, in-memory source ingest/memq; doc.go has the recipe for a broker adapter)
+    contract suite in ingest/ingesttest, in-memory source ingest/memq; doc.go has the recipe for a broker adapter) —
+    internal/ingest/kafka (a consumer group on franz-go; not wired into cmd/memd yet)
   - internal/graph (Reader, Writer, Tx: the memory links; contract suite in graph/graphtest) — served by
     internal/store/postgres through store.Tx.Graph (writes, in the caller's transaction) and postgres.DB.Graph
     (the recall graph arm's Reader); graph/doc.go explains how a graph database would plug in
@@ -30,9 +31,9 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   each), and their contract suite in internal/recall/armtest.
 - Services, one package per gRPC service area, each exporting one `Service` built by `New(Deps)`; each owns its RPC
   logic, its job handlers (`RunXJob`) and its maintenance sweeps. Services never import each other.
-  - internal/memory: MemoryService (Retain, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory,
-    InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and retain-batch
-    sweeps.
+  - internal/memory: MemoryService (Retain, RetainBatch, Recall, Reflect, ListRecallArms, ListMemories, GetMemory,
+    UpdateMemory, InvalidateMemory, RestoreMemory); retain_document and rederive_memory; the stranded-fact and
+    retain-batch sweeps. RetainBatch is the bulk path the queue consumer will share.
   - internal/observation: ObservationService (Consolidate, ListObservationScopes, ListObservationHistory,
     ClearObservations, PreviewConsolidationStrategies); consolidate; the consolidation reconcile sweep.
   - internal/document: DocumentService (ListDocuments, GetDocument, RetagDocument, ReprocessDocument);

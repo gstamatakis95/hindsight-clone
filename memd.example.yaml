@@ -114,6 +114,16 @@ deletion:
 api:
   rpc_deadline: 120s                    # calls that carry no deadline; 0s = none
 
+# Request limits of Retain and RetainBatch, and RetainBatch's backlog gate.
+ingest:
+  max_batch_items: 500                  # items per RetainBatch call
+  max_retain_items: 100                 # items per Retain call (bulk ingestion belongs in RetainBatch)
+  max_document_bytes: 2097152           # one RetainBatch item's content (2 MiB); a larger item is REJECTED
+  max_request_bytes: 16777216           # every request message (the gRPC receive limit), and RetainBatch's content
+  max_pending_per_bank: 5000            # pending retains of a bank over which RetainBatch answers INGEST_BACKLOG
+  max_pending_per_org: 50000            # the same across an org's banks
+  retry_after: 10s                      # the RetryInfo delay of an INGEST_BACKLOG rejection
+
 # Datadog metrics, used only when MEMD_DATADOG_ENABLED is set (and MEMD_DATADOG_METRICS is not false).
 observability:
   metrics_interval: 15s                 # how often the Postgres pool and job queue gauges are sampled

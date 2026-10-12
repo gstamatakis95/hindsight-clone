@@ -47,7 +47,7 @@ func documentOf(row db.Document) (domain.Document, error) {
 	d := domain.Document{
 		ID: domain.DocumentID(row.ID), Bank: domain.NewBankRef(row.TenantID, row.OrgID, row.BankID),
 		ContentHash: row.ContentHash, OverridesHash: row.OverridesHash, Tags: row.Tags, BlobKey: row.BlobKey,
-		ExtractedAt: row.ExtractedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		ExtractedAt: row.ExtractedAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, Revision: row.Revision,
 		MemoriesByFactType: map[domain.FactType]int64{},
 	}
 	var err error
@@ -64,7 +64,7 @@ func documentOf(row db.Document) (domain.Document, error) {
 
 // Upsert inserts the document or replaces its tags, overrides, observation scopes and blob key, and clears
 // extracted_at; the hashes of the last completed retain stay until Complete. A nil ObservationScopeModes is
-// stored as NULL. An unknown bank is domain.ErrNotFound.
+// stored as NULL; a nil Revision keeps the stored revision. An unknown bank is domain.ErrNotFound.
 func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
 	if err := checkTags(d.Tags); err != nil {
 		return err
@@ -79,7 +79,7 @@ func (r *documentRepo) Upsert(ctx context.Context, d domain.Document) error {
 	}
 	err = r.q.DocumentUpsert(ctx, db.DocumentUpsertParams{
 		TenantID: d.Bank.Tenant, OrgID: d.Bank.Org, BankID: d.Bank.Bank, ID: string(d.ID), Overrides: overrides,
-		Tags: tagsOrEmpty(d.Tags), BlobKey: d.BlobKey, ObservationScopeModes: scopes,
+		Tags: tagsOrEmpty(d.Tags), BlobKey: d.BlobKey, ObservationScopeModes: scopes, Revision: d.Revision,
 	})
 	return mapErr(fmt.Sprintf("upsert document %s", d.ID), err)
 }

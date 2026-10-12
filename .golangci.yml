@@ -17,9 +17,9 @@ linters:
       # the examples' helper package wraps its own errors
       ignore-package-globs: ["memd/internal/store", "memd/internal/graph", "memd/internal/ai", "memd/internal/blob",
         "memd/internal/ingest", "memd/internal/jobs", "memd/examples/internal/*"]
-      # wrapcheck's defaults plus domain.InvalidField, the constructor of a field-naming invalid-argument error
+      # wrapcheck's defaults plus domain.InvalidField and domain.WithRetryDelay, constructors that keep the domain class
       ignore-sigs: [".Errorf(", "errors.New(", "errors.Unwrap(", "errors.Join(", ".Wrap(", ".Wrapf(", ".WithMessage(",
-        ".WithMessagef(", ".WithStack(", "domain.InvalidField("]
+        ".WithMessagef(", ".WithStack(", "domain.InvalidField(", "domain.WithRetryDelay("]
     depguard:
       rules:
         domain:
@@ -77,6 +77,8 @@ linters:
               desc: only store/postgres uses pgx
             - pkg: "github.com/aws"
               desc: only blob/s3 uses the AWS SDK
+            - pkg: "github.com/twmb/franz-go"
+              desc: only ingest/kafka uses the Kafka client
             - pkg: "github.com/DataDog"
               desc: contracts stay vendor-free
         graph:
@@ -128,7 +130,7 @@ linters:
               desc: the graph boundary stays vendor-free
         adapters:
           files: ["**/internal/store/postgres/**", "**/internal/ai/gateway/**", "**/internal/blob/s3/**",
-            "**/internal/ingest/memq/**", "!$test"]
+            "**/internal/ingest/memq/**", "**/internal/ingest/kafka/**", "!$test"]
           deny:
             - pkg: "memd/internal/config"
               desc: adapters translate; they never decide (this also covers configsvc)

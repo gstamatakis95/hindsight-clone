@@ -43,6 +43,31 @@ func (h *MemoryHandler) Retain(ctx context.Context, req *pb.RetainRequest) (*pb.
 	return retainResultToProto(out), nil
 }
 
+// RetainBatch accepts documents for background retain and reports one result per item. Only a call-level
+// problem (a malformed request-level field, invalid request overrides, the call limits, the backlog gate, an
+// unknown org, a bank being deleted) fails the call; an item's problem is that item's REJECTED or FAILED result.
+func (h *MemoryHandler) RetainBatch(
+	ctx context.Context, req *pb.RetainBatchRequest,
+) (*pb.RetainBatchResponse, error) {
+	b, err := bankRef(ctx, req)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	in, err := retainBatchRequestFromProto(req)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	in.Bank = b
+	if err := validate(in.Overrides); err != nil {
+		return nil, toStatus(err)
+	}
+	out, err := h.Memory.RetainBatch(ctx, in)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return retainBatchResultToProto(out), nil
+}
+
 // Recall retrieves memories for a query.
 func (h *MemoryHandler) Recall(ctx context.Context, req *pb.RecallRequest) (*pb.RecallResponse, error) {
 	b, err := bankRef(ctx, req)

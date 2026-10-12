@@ -9,6 +9,7 @@ import (
 	"memd/internal/store"
 	"slices"
 	"testing"
+	"time"
 
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
@@ -129,4 +130,32 @@ func fieldsOf(err error) []string {
 		}
 	}
 	return out
+}
+
+// TestBacklogStatusAndItemError: a backlog rejection is RESOURCE_EXHAUSTED with reason INGEST_BACKLOG and a
+// RetryInfo carrying the delay; a batch item's error carries the code name, reason and its fields under items[k].
+func TestBacklogStatusAndItemError(t *testing.T) {
+	err := domain.WithRetryDelay(fmt.Errorf("%w: bank b", domain.ErrIngestBacklog), 7*time.Second)
+	st := status.Convert(toStatus(err))
+	if st.Code() != codes.ResourceExhausted || errorInfo(t, st).GetReason() != "INGEST_BACKLOG" {
+		t.Fatalf("status = %v %v, want RESOURCE_EXHAUSTED INGEST_BACKLOG", st.Code(), errorInfo(t, st))
+	}
+	var retry *errdetails.RetryInfo
+	for _, d := range st.Details() {
+		if r, ok := d.(*errdetails.RetryInfo); ok {
+			retry = r
+		}
+	}
+	if retry == nil || retry.GetRetryDelay().AsDuration() != 7*time.Second {
+		t.Fatalf("RetryInfo = %v, want a 7s delay", retry)
+	}
+
+	ie := itemErrorToProto(3, fmt.Errorf("item: %w", domain.InvalidField("document_id", "missing")))
+	if ie.GetCode() != "INVALID_ARGUMENT" || ie.GetReason() != "INVALID_ARGUMENT" ||
+		!slices.Equal(ie.GetFields(), []string{"items[3].document_id"}) {
+		t.Fatalf("ItemError = %v", ie)
+	}
+	if ie := itemErrorToProto(0, fmt.Errorf("store blob: %w", domain.ErrUnavailable)); ie.GetCode() != "UNAVAILABLE" {
+		t.Fatalf("ItemError = %v, want UNAVAILABLE", ie)
+	}
 }

@@ -112,7 +112,7 @@ func wireMemory(c core, in infra, d *deps) {
 	svc := memory.New(memory.Deps{
 		DB: c.db, Maintenance: in.maint, Blob: in.blob, LLM: in.gw, Embedder: in.gw, Router: c.router,
 		Tokens: c.tok, Config: c.resolver, Times: c.times, Linker: c.linker, Entities: c.entities,
-		Recall: c.recall, Agent: c.agent, Clock: c.clock,
+		Recall: c.recall, Agent: c.agent, Clock: c.clock, Ingest: d.cfg.File.Ingest.limits(),
 	})
 	d.api.Memory = &grpcapi.MemoryHandler{Memory: svc}
 	d.handlers.add(domain.OperationKindRetainDocument, svc.RunRetainJob)
