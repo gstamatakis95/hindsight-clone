@@ -245,7 +245,7 @@ func TestSQLNamesOrg(t *testing.T) {
 		t.Fatalf("no queries: %v", err)
 	}
 	for _, f := range files {
-		src, err := os.ReadFile(f)
+		src, err := os.ReadFile(filepath.Clean(f))
 		if err != nil {
 			t.Fatal(err)
 		}

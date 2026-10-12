@@ -71,7 +71,8 @@ func unitInsertParams(u domain.Unit) (db.UnitInsertParams, error) {
 		version = 1
 	}
 	return db.UnitInsertParams{
-		ID: id, TenantID: u.Bank.Tenant, OrgID: u.Bank.Org, BankID: u.Bank.Bank, DocumentID: textPtr(u.DocumentID), ChunkID: chunk,
+		ID: id, TenantID: u.Bank.Tenant, OrgID: u.Bank.Org, BankID: u.Bank.Bank,
+		DocumentID: textPtr(u.DocumentID), ChunkID: chunk,
 		FactType: string(u.Type), Text: u.Text, Context: u.Context, Metadata: rawMeta, Tags: tagsOrEmpty(u.Tags),
 		Embedding: vec(u.Embedding), OccurredStart: u.OccurredStart, OccurredEnd: u.OccurredEnd,
 		MentionedAt: u.MentionedAt, Timeless: u.Timeless, ProofCount: int32(u.ProofCount), //nolint:gosec // counts are small
@@ -188,7 +189,8 @@ func (r *unitRepo) AppendAudit(ctx context.Context, a domain.AuditEntry) error {
 		return err
 	}
 	p := db.UnitAppendAuditParams{
-		TenantID: a.Bank.Tenant, OrgID: a.Bank.Org, BankID: a.Bank.Bank, UnitID: unit, Action: string(a.Action), Reason: a.Reason,
+		TenantID: a.Bank.Tenant, OrgID: a.Bank.Org, BankID: a.Bank.Bank,
+		UnitID: unit, Action: string(a.Action), Reason: a.Reason,
 		OperationID: op, At: orNow(a.At),
 	}
 	if len(a.Before) > 0 {

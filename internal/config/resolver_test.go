@@ -16,7 +16,9 @@ var ref = domain.NewBankRef("t1", "org", "b1")
 
 // seedStore returns a store over a new database holding tenant t1's config, its org "org" with the org config
 // (orgCfg) and banks (with their configs, tombstoned when DeletingAt is set).
-func seedStore(t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank, orgCfg ...domain.BankConfig) store.DB {
+func seedStore(
+	t *testing.T, tenant domain.BankConfig, banks map[string]domain.Bank, orgCfg ...domain.BankConfig,
+) store.DB {
 	t.Helper()
 	s := pgtest.NewStore(t)
 	ctx := t.Context()

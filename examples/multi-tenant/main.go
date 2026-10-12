@@ -34,8 +34,10 @@ func (s *scenario) orgs(ctx context.Context) error {
 		}
 		fmt.Printf("%s: org %q created\n", t.Tenant, t.Org)
 	}
-	_, err := s.acme.Memory.Retain(ctx, &pb.RetainRequest{OrgId: "no-such-org", BankId: "support",
-		Items: []*pb.RetainItem{{Content: "This write has no org to go to."}}})
+	_, err := s.acme.Memory.Retain(ctx, &pb.RetainRequest{
+		OrgId: "no-such-org", BankId: "support",
+		Items: []*pb.RetainItem{{Content: "This write has no org to go to."}},
+	})
 	fmt.Println("a write under an org that does not exist:", status.Code(err))
 	if status.Code(err) != codes.NotFound {
 		return fmt.Errorf("expected NOT_FOUND for an unknown org, got %w", err)
@@ -89,7 +91,9 @@ func (s *scenario) createFromConfig(ctx context.Context) error {
 	}); err != nil {
 		return fmt.Errorf("create directive: %w", err)
 	}
-	exported, err := s.acme.Banks.ExportBankTemplate(ctx, &pb.ExportBankTemplateRequest{OrgId: s.acme.Org, BankId: "support"})
+	exported, err := s.acme.Banks.ExportBankTemplate(ctx, &pb.ExportBankTemplateRequest{
+		OrgId: s.acme.Org, BankId: "support",
+	})
 	if err != nil {
 		return fmt.Errorf("export template: %w", err)
 	}
@@ -103,12 +107,13 @@ func (s *scenario) createFromConfig(ctx context.Context) error {
 func (s *scenario) createFromTemplate(ctx context.Context) error {
 	exampleutil.Section("the same template in another tenant")
 	if _, err := s.globex.Banks.CreateBank(ctx, &pb.CreateBankRequest{
-		OrgId: s.globex.Org, BankId: "support", Name: "Globex support", Initial: &pb.CreateBankRequest_Template{Template: s.template},
+		OrgId: s.globex.Org, BankId: "support",
+		Name: "Globex support", Initial: &pb.CreateBankRequest_Template{Template: s.template},
 	}); err != nil {
 		return fmt.Errorf("create bank from template: %w", err)
 	}
 	if _, err := s.globex.Config.UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
-		OrgId: s.globex.Org, BankId:     "support",
+		OrgId: s.globex.Org, BankId: "support",
 		Config:     &pb.BankConfig{Reflect: &pb.ReflectConfig{Mission: "You help support agents of a logistics company."}},
 		UpdateMask: exampleutil.Paths("reflect.mission"),
 	}); err != nil {

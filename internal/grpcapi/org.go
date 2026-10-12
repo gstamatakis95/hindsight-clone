@@ -83,7 +83,8 @@ func (h *OrgHandler) DeleteOrg(ctx context.Context, req *pb.DeleteOrgRequest) (*
 	if _, err := orgRef(ctx, req); err != nil {
 		return nil, toStatus(err)
 	}
-	return nil, withDetails(status.New(codes.Unimplemented, errDeleteOrgUnavailable.Error()), errDeleteOrgUnavailable).Err()
+	st := status.New(codes.Unimplemented, errDeleteOrgUnavailable.Error())
+	return nil, withDetails(st, errDeleteOrgUnavailable).Err() //nolint:wrapcheck // the status goes to the client as is
 }
 
 // orgToProto converts an org.

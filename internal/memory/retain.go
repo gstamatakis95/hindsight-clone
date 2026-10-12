@@ -182,7 +182,7 @@ func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.Ban
 	err = i.d.Store.InTx(ctx, func(tx store.Tx) error {
 		var err error
 		tenant, org, err = config.StoredOrgLevels(ctx, tx, b.OrgRef())
-		return err
+		return err //nolint:wrapcheck // wrapped once below, after the transaction
 	})
 	if err != nil {
 		return domain.BankConfig{}, false, fmt.Errorf("retain: %w", err)

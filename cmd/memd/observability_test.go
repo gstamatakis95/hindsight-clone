@@ -324,7 +324,9 @@ func TestDatadogUnreachableAgentStillServes(t *testing.T) {
 	}
 	w := startWiredWith(t, tel)
 	retainOne(t, w, "b")
-	rec, err := pb.NewMemoryServiceClient(w.conn).Recall(w.ctx(t), &pb.RecallRequest{OrgId: testOrg, BankId: "b", Query: "Lisbon"})
+	rec, err := pb.NewMemoryServiceClient(w.conn).Recall(w.ctx(t), &pb.RecallRequest{
+		OrgId: testOrg, BankId: "b", Query: "Lisbon",
+	})
 	if err != nil || len(rec.GetResults()) == 0 {
 		t.Fatalf("recall with an unreachable agent: %v %v", rec, err)
 	}

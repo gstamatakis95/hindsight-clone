@@ -73,10 +73,12 @@ func (e *env) retainSync(t *testing.T) {
 // barrier drains, every child completes and the units are there.
 func (e *env) retainAsync(t *testing.T) {
 	const bank = "sc-retain-async"
-	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{OrgId: e.c.Org, BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
-		{Content: aliceText, DocumentId: aliceDoc},
-		{Content: "Bob plays chess on Sundays. Bob lives in Porto.", DocumentId: "doc-bob"},
-	}})
+	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: e.c.Org, BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
+			{Content: aliceText, DocumentId: aliceDoc},
+			{Content: "Bob plays chess on Sundays. Bob lives in Porto.", DocumentId: "doc-bob"},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,8 +129,10 @@ func (e *env) consolidationRecallReflect(t *testing.T) {
 	}
 	_, err = e.c.Memory.Recall(e.ctx(t), &pb.RecallRequest{OrgId: e.c.Org, BankId: "sc-never-written", Query: "x"})
 	wantCode(t, "recall of an unknown bank", err, codes.NotFound)
-	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{OrgId: "sc-no-such-org", BankId: bank,
-		Items: []*pb.RetainItem{{Content: "x"}}})
+	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: "sc-no-such-org", BankId: bank,
+		Items: []*pb.RetainItem{{Content: "x"}},
+	})
 	wantCode(t, "retain under an org that was never created", err, codes.NotFound)
 }
 
@@ -176,9 +180,11 @@ func (e *env) mentalModels(t *testing.T) {
 func (e *env) consolidationTriggersRefresh(t *testing.T) {
 	const bank = "sc-mm-after-consolidation"
 	debounce := int32(1)
-	_, err := e.c.Banks.CreateBank(e.ctx(t), &pb.CreateBankRequest{OrgId: e.c.Org, BankId: bank, Initial: &pb.CreateBankRequest_Config{
-		Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
-	}})
+	_, err := e.c.Banks.CreateBank(e.ctx(t), &pb.CreateBankRequest{
+		OrgId: e.c.Org, BankId: bank, Initial: &pb.CreateBankRequest_Config{
+			Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +224,8 @@ func (e *env) consolidationTriggersRefresh(t *testing.T) {
 func (e *env) refreshOps(t *testing.T, bank string, status pb.OperationStatus) []*pb.Operation {
 	t.Helper()
 	resp, err := e.c.Operations.ListOperations(e.ctx(t), &pb.ListOperationsRequest{
-		OrgId: e.c.Org, BankId: bank, Status: status, Kind: pb.OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL, PageSize: 100,
+		OrgId: e.c.Org, BankId: bank,
+		Status: status, Kind: pb.OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL, PageSize: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -229,7 +236,9 @@ func (e *env) refreshOps(t *testing.T, bank string, status pb.OperationStatus) [
 // model reads a mental model at full detail.
 func (e *env) model(t *testing.T, bank, id string) *pb.MentalModel {
 	t.Helper()
-	resp, err := e.c.MentalModels.GetMentalModel(e.ctx(t), &pb.GetMentalModelRequest{OrgId: e.c.Org, BankId: bank, MentalModelId: id})
+	resp, err := e.c.MentalModels.GetMentalModel(e.ctx(t), &pb.GetMentalModelRequest{
+		OrgId: e.c.Org, BankId: bank, MentalModelId: id,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +355,9 @@ func (e *env) retagReprocess(t *testing.T) {
 	}
 	e.idle(t, bank)
 	before := e.facts(t, bank, aliceDoc)
-	rp, err := e.c.Documents.ReprocessDocument(e.ctx(t), &pb.ReprocessDocumentRequest{OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc})
+	rp, err := e.c.Documents.ReprocessDocument(e.ctx(t), &pb.ReprocessDocumentRequest{
+		OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,9 +403,11 @@ func (e *env) cancelRetry(t *testing.T) {
 // retainAsync1 retains one document asynchronously and returns its operation id.
 func (e *env) retainAsync1(t *testing.T, bank, doc, content string) string {
 	t.Helper()
-	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{OrgId: e.c.Org, BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
-		{Content: content, DocumentId: doc},
-	}})
+	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: e.c.Org, BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
+			{Content: content, DocumentId: doc},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,11 +458,15 @@ func (e *env) bankDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	opID := del.GetOperation().GetId()
-	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{OrgId: e.c.Org, BankId: bank, Items: []*pb.RetainItem{{Content: "x"}}})
+	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: e.c.Org, BankId: bank, Items: []*pb.RetainItem{{Content: "x"}},
+	})
 	wantCode(t, "write to a deleting bank", err, codes.FailedPrecondition)
 	_, err = e.c.Banks.GetBank(e.ctx(t), &pb.GetBankRequest{OrgId: e.c.Org, BankId: bank})
 	wantCode(t, "GetBank of a deleting bank", err, codes.NotFound)
-	op, err := e.c.Operations.GetOperation(e.ctx(t), &pb.GetOperationRequest{OrgId: e.c.Org, BankId: bank, OperationId: opID})
+	op, err := e.c.Operations.GetOperation(e.ctx(t), &pb.GetOperationRequest{
+		OrgId: e.c.Org, BankId: bank, OperationId: opID,
+	})
 	if err != nil || op.GetOperation().GetStatus() != pb.OperationStatus_OPERATION_STATUS_PENDING {
 		t.Fatalf("delete_bank operation while the worker is stopped: %v %v", op, err)
 	}
@@ -472,7 +489,9 @@ func (e *env) bankDelete(t *testing.T) {
 	if got := e.facts(t, bank, aliceDoc); len(got) != 0 {
 		t.Fatalf("recreated bank still has %d of the deleted bank's facts", len(got))
 	}
-	_, err = e.c.Documents.GetDocument(e.ctx(t), &pb.GetDocumentRequest{OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc})
+	_, err = e.c.Documents.GetDocument(e.ctx(t), &pb.GetDocumentRequest{
+		OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc,
+	})
 	wantCode(t, "deleted document", err, codes.NotFound)
 	e.idle(t, bank)
 }

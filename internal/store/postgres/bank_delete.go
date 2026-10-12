@@ -23,19 +23,27 @@ type bankDeleteStep struct {
 // is empty.
 var bankDeleteSteps = []bankDeleteStep{
 	{"unit_entities", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteUnitEntities(ctx, db.BankDeleteUnitEntitiesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteUnitEntities(ctx, db.BankDeleteUnitEntitiesParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"entity_cooccurrences", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteCooccurrences(ctx, db.BankDeleteCooccurrencesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteCooccurrences(ctx, db.BankDeleteCooccurrencesParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"memory_links", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteLinks(ctx, db.BankDeleteLinksParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"observation_evidence", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteEvidence(ctx, db.BankDeleteEvidenceParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteEvidence(ctx, db.BankDeleteEvidenceParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"graph_dirty", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteGraphDirty(ctx, db.BankDeleteGraphDirtyParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteGraphDirty(ctx, db.BankDeleteGraphDirtyParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"entity_maintenance", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteEntityMaintenance(ctx, db.BankDeleteEntityMaintenanceParams{
@@ -48,10 +56,14 @@ var bankDeleteSteps = []bankDeleteStep{
 		})
 	}},
 	{"memory_audit", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteMemoryAudit(ctx, db.BankDeleteMemoryAuditParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteMemoryAudit(ctx, db.BankDeleteMemoryAuditParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"memory_units_archive", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteArchive(ctx, db.BankDeleteArchiveParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteArchive(ctx, db.BankDeleteArchiveParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"memory_units", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteUnits(ctx, db.BankDeleteUnitsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
@@ -60,10 +72,14 @@ var bankDeleteSteps = []bankDeleteStep{
 		return q.BankDeleteChunks(ctx, db.BankDeleteChunksParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"documents", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteDocuments(ctx, db.BankDeleteDocumentsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteDocuments(ctx, db.BankDeleteDocumentsParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"entities", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteEntities(ctx, db.BankDeleteEntitiesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteEntities(ctx, db.BankDeleteEntitiesParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"observation_scopes", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteObservationScopes(ctx, db.BankDeleteObservationScopesParams{
@@ -71,13 +87,17 @@ var bankDeleteSteps = []bankDeleteStep{
 		})
 	}},
 	{"mental_model_history", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteModelHistory(ctx, db.BankDeleteModelHistoryParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteModelHistory(ctx, db.BankDeleteModelHistoryParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 	{"mental_models", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
 		return q.BankDeleteModels(ctx, db.BankDeleteModelsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
 	}},
 	{"directives", func(ctx context.Context, q *db.Queries, b domain.BankRef, lim int32) (int64, error) {
-		return q.BankDeleteDirectives(ctx, db.BankDeleteDirectivesParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim})
+		return q.BankDeleteDirectives(ctx, db.BankDeleteDirectivesParams{
+			TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: lim,
+		})
 	}},
 }
 
@@ -125,7 +145,9 @@ func (r *bankRepo) Delete(ctx context.Context, b domain.BankRef) error {
 	if err := r.deleteUnkeyed(ctx, b); err != nil {
 		return err
 	}
-	if err := r.q.BankDeleteEvents(ctx, db.BankDeleteEventsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank}); err != nil {
+	if err := r.q.BankDeleteEvents(ctx, db.BankDeleteEventsParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank,
+	}); err != nil {
 		return mapErr(fmt.Sprintf("delete events of bank %s", b), err)
 	}
 	err = r.q.BankDeleteOperations(ctx, db.BankDeleteOperationsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank})

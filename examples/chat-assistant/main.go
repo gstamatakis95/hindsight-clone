@@ -47,7 +47,7 @@ func run(ctx context.Context, c *exampleutil.Client) error {
 	// 2. Recall: fetch the memories relevant to the user's next message, to put into your own prompt.
 	exampleutil.Section("recall")
 	recalled, err := c.Memory.Recall(ctx, &pb.RecallRequest{
-		OrgId: c.Org, BankId:    bank,
+		OrgId: c.Org, BankId: bank,
 		Query:     "Where should I take Dana for dinner?",
 		MaxTokens: 1024,
 	})
@@ -65,7 +65,7 @@ func run(ctx context.Context, c *exampleutil.Client) error {
 	exampleutil.Section("reflect")
 	reflected, err := c.Memory.Reflect(ctx, &pb.ReflectRequest{
 		OrgId: c.Org, BankId: bank,
-		Query:  "What should I keep in mind when I plan a dinner for Dana and her sister?",
+		Query: "What should I keep in mind when I plan a dinner for Dana and her sister?",
 	})
 	if err != nil {
 		return fmt.Errorf("reflect: %w", err)

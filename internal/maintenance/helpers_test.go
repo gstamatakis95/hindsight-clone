@@ -47,7 +47,8 @@ type opsDB struct {
 func newOps(t testing.TB) *opsDB {
 	t.Helper()
 	d := pgtest.New(t)
-	pgtest.CreateOrgs(t, d.Store(), domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
+	pgtest.CreateOrgs(t, d.Store(),
+		domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""))
 	o := &opsDB{DB: d.Store(), t: t, pool: d.Pool}
 	if err := o.InTx(t.Context(), func(tx store.Tx) error {
 		for _, b := range []domain.BankRef{bankA, bankB, bankC} {

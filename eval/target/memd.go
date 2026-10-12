@@ -127,7 +127,8 @@ func (m *Memd) Recall(
 		return harness.Recalled{}, fmt.Errorf("memd: unknown recall budget %q (want low, mid or high)", opts.Budget)
 	}
 	req := &memoryv1.RecallRequest{
-		OrgId: m.org, BankId: bank, Query: query, QueryTime: timestamp(at), Budget: budget, MaxTokens: clampInt32(opts.MaxTokens),
+		OrgId: m.org, BankId: bank,
+		Query: query, QueryTime: timestamp(at), Budget: budget, MaxTokens: clampInt32(opts.MaxTokens),
 	}
 	if opts.ChunkTokens > 0 {
 		chunks, limit := true, clampInt32(opts.ChunkTokens)

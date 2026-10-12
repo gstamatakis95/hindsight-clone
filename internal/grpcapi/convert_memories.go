@@ -75,7 +75,7 @@ func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (memory.UpdateReque
 	}
 	var d decoder
 	out := memory.UpdateRequest{
-		ID:   domain.UnitID(r.GetMemoryId()),
+		ID: domain.UnitID(r.GetMemoryId()),
 		Edit: memory.Edit{
 			Text:          ed.GetText(),
 			Context:       ed.GetContext(),

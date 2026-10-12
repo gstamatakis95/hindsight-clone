@@ -45,7 +45,9 @@ func (r *directiveRepo) Create(ctx context.Context, d domain.Directive) (domain.
 
 // Get returns one directive, locked until the transaction ends; unknown = domain.ErrNotFound.
 func (r *directiveRepo) Get(ctx context.Context, b domain.BankRef, id domain.DirectiveID) (domain.Directive, error) {
-	row, err := r.q.DirectiveGet(ctx, db.DirectiveGetParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id)})
+	row, err := r.q.DirectiveGet(ctx, db.DirectiveGetParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id),
+	})
 	if err != nil {
 		return domain.Directive{}, mapErr(fmt.Sprintf("directive %s", id), err)
 	}
@@ -86,7 +88,9 @@ func directiveErr(d domain.Directive, verb string, err error) error {
 
 // List returns the bank's directives (only active ones when activeOnly), oldest first.
 func (r *directiveRepo) List(ctx context.Context, b domain.BankRef, activeOnly bool) ([]domain.Directive, error) {
-	rows, err := r.q.DirectiveList(ctx, db.DirectiveListParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ActiveOnly: activeOnly})
+	rows, err := r.q.DirectiveList(ctx, db.DirectiveListParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ActiveOnly: activeOnly,
+	})
 	if err != nil {
 		return nil, mapErr("list directives", err)
 	}
@@ -98,7 +102,8 @@ func (r *directiveRepo) List(ctx context.Context, b domain.BankRef, activeOnly b
 func (r *directiveRepo) Page(ctx context.Context, q store.DirectiveQuery) ([]domain.Directive, error) {
 	match, tags := tagFilterArgs(q.Tags, q.TagsMatch)
 	arg := db.DirectivePageParams{
-		TenantID: q.Bank.Tenant, OrgID: q.Bank.Org, BankID: q.Bank.Bank, ActiveOnly: q.ActiveOnly, TagsMatch: match, FilterTags: tags,
+		TenantID: q.Bank.Tenant, OrgID: q.Bank.Org, BankID: q.Bank.Bank,
+		ActiveOnly: q.ActiveOnly, TagsMatch: match, FilterTags: tags,
 		Lim: int32(min(q.Limit, math.MaxInt32)), //nolint:gosec // clamped to the int32 range
 	}
 	if q.After != nil {
@@ -125,6 +130,8 @@ func directivesOf(b domain.BankRef, rows []db.Directive) []domain.Directive {
 
 // Delete removes the directive; unknown = domain.ErrNotFound.
 func (r *directiveRepo) Delete(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error {
-	n, err := r.q.DirectiveDelete(ctx, db.DirectiveDeleteParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id)})
+	n, err := r.q.DirectiveDelete(ctx, db.DirectiveDeleteParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id),
+	})
 	return docRowsErr(fmt.Sprintf("delete directive %s", id), n, err)
 }

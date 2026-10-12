@@ -118,7 +118,8 @@ func newEnv(t *testing.T, cfg domain.BankConfig) *env {
 	t.Helper()
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.New(t)
-	pgtest.CreateOrgs(t, db.Store(), domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t", "org", ""), domain.NewBankRef("t1", "org", ""))
+	pgtest.CreateOrgs(t, db.Store(),
+		domain.NewBankRef("acme", "org", ""), domain.NewBankRef("t", "org", ""), domain.NewBankRef("t1", "org", ""))
 	e := &env{
 		t: t, clock: clock, store: db.Store(), pool: db.Pool, llm: fake.NewLLM(),
 		emb: fake.NewEmbedder(fake.EmbedSimilar), texts: map[domain.UnitID]string{},

@@ -101,12 +101,15 @@ func checkName(what, v string) error {
 
 // bankScoped is a request that names a bank: every request with org_id and bank_id fields.
 type bankScoped interface {
+	// GetOrgId returns the request's org_id.
 	GetOrgId() string
+	// GetBankId returns the request's bank_id.
 	GetBankId() string
 }
 
 // orgScoped is a request that names an org.
 type orgScoped interface {
+	// GetOrgId returns the request's org_id.
 	GetOrgId() string
 }
 

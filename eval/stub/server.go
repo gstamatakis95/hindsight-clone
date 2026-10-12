@@ -290,7 +290,9 @@ func (s *Server) ListOperations(
 
 // bankRequest is a request naming an org and a bank.
 type bankRequest interface {
+	// GetOrgId returns the request's org id.
 	GetOrgId() string
+	// GetBankId returns the request's bank id.
 	GetBankId() string
 }
 

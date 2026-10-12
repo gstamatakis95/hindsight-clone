@@ -104,7 +104,8 @@ func (r *reader) ObservationHistory(
 		beforeVersion = &before
 	}
 	rows, err := r.queries().ReadsObservationHistory(ctx, db.ReadsObservationHistoryParams{
-		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ObservationID: uid, BeforeVersion: beforeVersion, Lim: contentLimit(limit),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank,
+		ObservationID: uid, BeforeVersion: beforeVersion, Lim: contentLimit(limit),
 	})
 	if err != nil {
 		return nil, mapErr(fmt.Sprintf("history of observation %s", id), err)
@@ -240,7 +241,8 @@ func (r *reader) ListDocuments(ctx context.Context, q store.DocumentQuery) ([]do
 	}
 	match, tags := tagFilterArgs(q.Tags, q.TagsMatch)
 	p := db.ReadsListDocumentsParams{
-		TenantID: q.Bank.Tenant, OrgID: q.Bank.Org, BankID: q.Bank.Bank, IDLike: containsPattern(q.DocumentIDContains), TagsMatch: match,
+		TenantID: q.Bank.Tenant, OrgID: q.Bank.Org, BankID: q.Bank.Bank,
+		IDLike: containsPattern(q.DocumentIDContains), TagsMatch: match,
 		FilterTags: tags, StartAt: q.Start, TimeField: string(q.TimeField), EndAt: q.End,
 		Lim: toInt32Sat(q.Limit),
 	}

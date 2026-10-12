@@ -112,7 +112,8 @@ func (e *env) retain(t *testing.T, bank, doc, content string, tags ...string) *p
 func (e *env) memories(t *testing.T, bank, doc string, types ...pb.FactType) []*pb.Memory {
 	t.Helper()
 	resp, err := e.c.Memory.ListMemories(e.ctx(t), &pb.ListMemoriesRequest{
-		OrgId: e.c.Org, BankId: bank, FactTypes: types, DocumentId: doc, State: pb.MemoryState_MEMORY_STATE_VALID, PageSize: 500,
+		OrgId: e.c.Org, BankId: bank,
+		FactTypes: types, DocumentId: doc, State: pb.MemoryState_MEMORY_STATE_VALID, PageSize: 500,
 	})
 	if err != nil {
 		t.Fatalf("list memories: %v", err)
@@ -129,7 +130,9 @@ func (e *env) facts(t *testing.T, bank, doc string) []*pb.Memory {
 // recall runs a recall and returns its result texts by id.
 func (e *env) recall(t *testing.T, bank, query string) map[string]string {
 	t.Helper()
-	resp, err := e.c.Memory.Recall(e.ctx(t), &pb.RecallRequest{OrgId: e.c.Org, BankId: bank, Query: query, MaxTokens: 4096})
+	resp, err := e.c.Memory.Recall(e.ctx(t), &pb.RecallRequest{
+		OrgId: e.c.Org, BankId: bank, Query: query, MaxTokens: 4096,
+	})
 	if err != nil {
 		t.Fatalf("recall %q: %v", query, err)
 	}

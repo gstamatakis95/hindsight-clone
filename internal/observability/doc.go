@@ -63,9 +63,11 @@
 //   - gRPC server ([Telemetry.GRPCServerOptions]): one "grpc.server" span per RPC, resource = the full method, as the
 //     outermost interceptor (it sets grpc.UnaryInterceptor and grpc.StreamInterceptor, so the server only chains its
 //     own) so calls the tenant check rejects are traced too; tagged memd.tenant, memd.org and memd.bank (the request's
-//     org_id and bank_id) by an inner interceptor that runs after the tenant check. Health checks and reflection are not traced.
+//     org_id and bank_id) by an inner interceptor that runs after the tenant check. Health checks and reflection are
+//     not traced.
 //   - Worker jobs ([Telemetry.JobHook] -> jobs.Config.TraceJob): one [SpanJob] span per run, resource = the job
-//     kind, tagged memd.operation_id, memd.tenant, memd.org, memd.bank, memd.job.attempt and memd.job.outcome (completed, retry,
+//     kind, tagged memd.operation_id, memd.tenant, memd.org, memd.bank, memd.job.attempt and memd.job.outcome
+//     (completed, retry,
 //     failed, released, lost), error unless completed. The handler and the terminal Complete/Fail run under it, so
 //     their Postgres and gateway spans nest under the job.
 //   - Maintenance ([Telemetry.TickHook] -> maintenance.Deps.TraceTick): one [SpanTick] span per tick.

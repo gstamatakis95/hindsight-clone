@@ -43,13 +43,15 @@ func (r *chunkRepo) Insert(ctx context.Context, cs []domain.Chunk) error {
 		}
 		idx := toInt32Sat(c.Index)
 		err = r.q.ChunkDeleteReplaced(ctx, db.ChunkDeleteReplacedParams{
-			TenantID: c.Bank.Tenant, OrgID: c.Bank.Org, BankID: c.Bank.Bank, DocumentID: string(c.DocumentID), ChunkIndex: idx, ID: id,
+			TenantID: c.Bank.Tenant, OrgID: c.Bank.Org, BankID: c.Bank.Bank,
+			DocumentID: string(c.DocumentID), ChunkIndex: idx, ID: id,
 		})
 		if err != nil {
 			return mapErr("replace chunk", err)
 		}
 		err = r.q.ChunkInsert(ctx, db.ChunkInsertParams{
-			ID: id, TenantID: c.Bank.Tenant, OrgID: c.Bank.Org, BankID: c.Bank.Bank, DocumentID: string(c.DocumentID), ChunkIndex: idx,
+			ID: id, TenantID: c.Bank.Tenant, OrgID: c.Bank.Org, BankID: c.Bank.Bank,
+			DocumentID: string(c.DocumentID), ChunkIndex: idx,
 			Text: c.Text, ContentHash: c.ContentHash, TokenCount: toInt32Sat(c.TokenCount), CreatedAt: orNow(c.CreatedAt),
 		})
 		if err != nil {

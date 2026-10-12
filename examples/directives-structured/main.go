@@ -61,14 +61,16 @@ func (s *scenario) ask(ctx context.Context, req *pb.ReflectRequest) (*pb.Reflect
 // answer come back in based_on, and PreviewPrompt shows how the rule reaches the model without calling it.
 func (s *scenario) standingDirective(ctx context.Context) error {
 	exampleutil.Section("a standing directive")
-	created, err := s.c.Config.CreateDirective(ctx, &pb.CreateDirectiveRequest{OrgId: s.c.Org, BankId: s.bank, Directive: &pb.Directive{
-		Name: "blameless",
-		Rules: []string{
-			"Describe what happened to systems, never blame a person.",
-			"Mention the rollback if there was one.",
+	created, err := s.c.Config.CreateDirective(ctx, &pb.CreateDirectiveRequest{
+		OrgId: s.c.Org, BankId: s.bank, Directive: &pb.Directive{
+			Name: "blameless",
+			Rules: []string{
+				"Describe what happened to systems, never blame a person.",
+				"Mention the rollback if there was one.",
+			},
+			Active: true,
 		},
-		Active: true,
-	}})
+	})
 	if err != nil {
 		return fmt.Errorf("create directive: %w", err)
 	}

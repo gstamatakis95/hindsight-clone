@@ -170,7 +170,9 @@ func (s *scenario) arms(ctx context.Context) error {
 	if !slices.Equal(ran, []string{"graph", "vector"}) {
 		return fmt.Errorf("expected only graph and vector to run, got %v", ran)
 	}
-	_, err = s.c.Memory.Recall(ctx, &pb.RecallRequest{OrgId: s.c.Org, BankId: s.bank, Query: "ledger", Arms: []string{"telepathy"}})
+	_, err = s.c.Memory.Recall(ctx, &pb.RecallRequest{
+		OrgId: s.c.Org, BankId: s.bank, Query: "ledger", Arms: []string{"telepathy"},
+	})
 	fmt.Println("  an unknown arm:", status.Code(err))
 	if status.Code(err) != codes.InvalidArgument {
 		return fmt.Errorf("expected INVALID_ARGUMENT for an unknown arm, got %w", err)

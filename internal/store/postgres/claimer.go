@@ -308,7 +308,8 @@ func (s *DB) finishFailed(ctx context.Context, id uuid.UUID, errText *string, gu
 			return nil
 		}
 		err = t.q.ClaimAppendFailedEvent(ctx, db.ClaimAppendFailedEventParams{
-			TenantID: bank.Tenant, OrgID: bank.Org, BankID: bank.Bank, Seq: seq, OperationID: uuid.NullUUID{UUID: id, Valid: true},
+			TenantID: bank.Tenant, OrgID: bank.Org, BankID: bank.Bank,
+			Seq: seq, OperationID: uuid.NullUUID{UUID: id, Valid: true},
 		})
 		return mapErr(fmt.Sprintf("fail %s: event", id), err)
 	})

@@ -17,7 +17,9 @@ func tenantCtx(tenant string) context.Context {
 
 func retain(t *testing.T, s *Server, ctx context.Context, bank string, items ...*memoryv1.RetainItem) {
 	t.Helper()
-	if _, err := s.CreateOrg(ctx, &memoryv1.CreateOrgRequest{OrgId: "o"}); err != nil && status.Code(err) != codes.AlreadyExists {
+	if _, err := s.CreateOrg(ctx, &memoryv1.CreateOrgRequest{
+		OrgId: "o",
+	}); err != nil && status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("CreateOrg: %v", err)
 	}
 	if _, err := s.Retain(ctx, &memoryv1.RetainRequest{OrgId: "o", BankId: bank, Items: items}); err != nil {
@@ -28,7 +30,9 @@ func retain(t *testing.T, s *Server, ctx context.Context, bank string, items ...
 func TestTenantRequired(t *testing.T) {
 	s := New(Options{})
 	for _, ctx := range []context.Context{context.Background(), tenantCtx("")} {
-		_, err := s.Retain(ctx, &memoryv1.RetainRequest{OrgId: "o", BankId: "b", Items: []*memoryv1.RetainItem{{Content: "x"}}})
+		_, err := s.Retain(ctx, &memoryv1.RetainRequest{
+			OrgId: "o", BankId: "b", Items: []*memoryv1.RetainItem{{Content: "x"}},
+		})
 		if status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("Retain without tenant: got %v, want InvalidArgument", err)
 		}

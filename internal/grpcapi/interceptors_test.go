@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"memd/internal/domain"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +14,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "memd/gen/memory/v1"
-	"memd/internal/domain"
 )
 
 // TestTenantInterceptor checks header handling: exactly one valid x-tenant-id, health exempt.

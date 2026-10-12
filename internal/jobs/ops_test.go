@@ -68,7 +68,9 @@ func newOps(t testing.TB) *opsDB {
 	t.Helper()
 	d := pgtest.New(t)
 	o := &opsDB{DB: d.Store(), t: t, pool: d.Pool}
-	pgtest.CreateOrgs(t, o.DB, domain.NewBankRef("t", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""), domain.NewBankRef("t9", "org", ""))
+	pgtest.CreateOrgs(t, o.DB,
+		domain.NewBankRef("t", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""),
+		domain.NewBankRef("t9", "org", ""))
 
 	if err := o.InTx(t.Context(), func(tx store.Tx) error {
 		for _, b := range []domain.BankRef{bankA, bankB, bankC} {

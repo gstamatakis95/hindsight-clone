@@ -19,7 +19,9 @@ var _ store.DocumentRepo = (*documentRepo)(nil)
 
 // Get returns the document with its live unit counts; an unknown id is domain.ErrNotFound.
 func (r *documentRepo) Get(ctx context.Context, b domain.BankRef, id domain.DocumentID) (domain.Document, error) {
-	row, err := r.q.DocumentGet(ctx, db.DocumentGetParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id)})
+	row, err := r.q.DocumentGet(ctx, db.DocumentGetParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id),
+	})
 	if err != nil {
 		return domain.Document{}, mapErr(fmt.Sprintf("document %s", id), err)
 	}
@@ -87,7 +89,8 @@ func (r *documentRepo) Complete(
 	ctx context.Context, b domain.BankRef, id domain.DocumentID, contentHash, overridesHash string,
 ) error {
 	n, err := r.q.DocumentComplete(ctx, db.DocumentCompleteParams{
-		ContentHash: contentHash, OverridesHash: overridesHash, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id),
+		ContentHash: contentHash, OverridesHash: overridesHash,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: string(id),
 	})
 	return docRowsErr(fmt.Sprintf("complete document %s", id), n, err)
 }

@@ -18,7 +18,9 @@ func (r *reader) GetChunks(ctx context.Context, b domain.BankRef, ids []domain.C
 	if len(uuids) == 0 {
 		return []domain.Chunk{}, nil
 	}
-	rows, err := r.queries().ChunkGetMany(ctx, db.ChunkGetManyParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
+	rows, err := r.queries().ChunkGetMany(ctx, db.ChunkGetManyParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return nil, mapErr("get chunks", err)
 	}
@@ -50,7 +52,9 @@ func (r *reader) EntityStates(
 	if len(uuids) == 0 {
 		return []domain.EntityState{}, nil
 	}
-	rows, err := r.queries().EntityStatesOf(ctx, db.EntityStatesOfParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
+	rows, err := r.queries().EntityStatesOf(ctx, db.EntityStatesOfParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return nil, mapErr("entity states", err)
 	}

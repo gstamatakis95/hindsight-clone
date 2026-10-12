@@ -28,7 +28,9 @@ func TestWiredStackNoModelCallInsideTransaction(t *testing.T) {
 	if err != nil || len(obs.GetMemories()) == 0 {
 		t.Fatalf("observations: %v %v", obs, err)
 	}
-	rec, err := mem.Recall(w.ctx(t), &pb.RecallRequest{OrgId: testOrg, BankId: bank, Query: "Where does Alice live? Lisbon"})
+	rec, err := mem.Recall(w.ctx(t), &pb.RecallRequest{
+		OrgId: testOrg, BankId: bank, Query: "Where does Alice live? Lisbon",
+	})
 	if err != nil || len(rec.GetResults()) == 0 {
 		t.Fatalf("recall: %v %v", rec, err)
 	}
@@ -59,7 +61,8 @@ func (w *wiredStack) invalidateAndRestore(t *testing.T, mem pb.MemoryServiceClie
 	// debounce, so that refresh runs before the stack goes idle.
 	debounce := int32(0)
 	if _, err := pb.NewConfigServiceClient(w.conn).UpdateBankConfig(w.ctx(t), &pb.UpdateBankConfigRequest{
-		OrgId: testOrg, BankId: bank, Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
+		OrgId: testOrg, BankId: bank,
+		Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -80,20 +83,25 @@ func (w *wiredStack) invalidateAndRestore(t *testing.T, mem pb.MemoryServiceClie
 // mentalModelBothStrategies builds a model agentically, then refreshes it single-shot.
 func (w *wiredStack) mentalModelBothStrategies(t *testing.T, models pb.MentalModelServiceClient, bank string) {
 	t.Helper()
-	if _, err := models.CreateMentalModel(w.ctx(t), &pb.CreateMentalModelRequest{OrgId: testOrg, BankId: bank, Spec: &pb.MentalModelSpec{
-		Id: "alice", Name: "Alice", SourceQuery: "Who is Alice?",
-		Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_AGENTIC,
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	w.idle(t, bank)
-	if _, err := models.RefreshMentalModel(w.ctx(t), &pb.RefreshMentalModelRequest{
-		OrgId: testOrg, BankId: bank, MentalModelId: "alice", ForceFull: true, Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,
+	if _, err := models.CreateMentalModel(w.ctx(t), &pb.CreateMentalModelRequest{
+		OrgId: testOrg, BankId: bank, Spec: &pb.MentalModelSpec{
+			Id: "alice", Name: "Alice", SourceQuery: "Who is Alice?",
+			Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_AGENTIC,
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	w.idle(t, bank)
-	m, err := models.GetMentalModel(w.ctx(t), &pb.GetMentalModelRequest{OrgId: testOrg, BankId: bank, MentalModelId: "alice"})
+	if _, err := models.RefreshMentalModel(w.ctx(t), &pb.RefreshMentalModelRequest{
+		OrgId: testOrg, BankId: bank,
+		MentalModelId: "alice", ForceFull: true, Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	w.idle(t, bank)
+	m, err := models.GetMentalModel(w.ctx(t), &pb.GetMentalModelRequest{
+		OrgId: testOrg, BankId: bank, MentalModelId: "alice",
+	})
 	if err != nil || m.GetMentalModel().GetVersion() < 2 || m.GetMentalModel().GetContentMd() == "" {
 		t.Fatalf("mental model after two refreshes: %v %v", m, err)
 	}

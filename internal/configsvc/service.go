@@ -99,7 +99,7 @@ func (s *Service) GetOrgConfig(ctx context.Context, o domain.OrgRef) (View, erro
 	var tenant, own domain.BankConfig
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		var err error
-		tenant, own, err = config.StoredOrgLevels(ctx, tx, o)
+		tenant, own, err = orgLevels(ctx, tx, o)
 		return err
 	})
 	if err != nil {
@@ -119,7 +119,7 @@ func (s *Service) UpdateOrgConfig(ctx context.Context, o domain.OrgRef, patch Pa
 		if err := tx.Orgs().LockConfig(ctx, o); err != nil {
 			return err
 		}
-		_, cur, err := config.StoredOrgLevels(ctx, tx, o)
+		_, cur, err := orgLevels(ctx, tx, o)
 		if err != nil {
 			return err
 		}
@@ -130,7 +130,7 @@ func (s *Service) UpdateOrgConfig(ctx context.Context, o domain.OrgRef, patch Pa
 		if err := tx.Orgs().SetConfig(ctx, o, next); err != nil {
 			return err
 		}
-		tenant, own, err = config.StoredOrgLevels(ctx, tx, o)
+		tenant, own, err = orgLevels(ctx, tx, o)
 		return err
 	})
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *Service) GetBankConfig(ctx context.Context, b domain.BankRef) (View, er
 	var tenant, org, own domain.BankConfig
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		var err error
-		if tenant, org, err = config.StoredOrgLevels(ctx, tx, b.OrgRef()); err != nil {
+		if tenant, org, err = orgLevels(ctx, tx, b.OrgRef()); err != nil {
 			return err
 		}
 		bank, err := tx.Banks().Get(ctx, b)
@@ -176,7 +176,8 @@ func (s *Service) GetBankConfig(ctx context.Context, b domain.BankRef) (View, er
 
 // UpdateBankConfig ensures the bank, patches its own overrides and returns its config view, in one transaction.
 // It is a write: an unknown bank is created with empty overrides in its existing org (BankRepo.Ensure; an unknown
-// org is domain.ErrOrgNotFound), a tombstoned one is domain.ErrBankDeleting. It takes the bank's change seq (which locks the bank row) before reading the overrides,
+// org is domain.ErrOrgNotFound), a tombstoned one is domain.ErrBankDeleting. It takes the bank's change seq (which
+// locks the bank row) before reading the overrides,
 // so concurrent patches of different fields serialize instead of one overwriting the other.
 func (s *Service) UpdateBankConfig(ctx context.Context, b domain.BankRef, patch Patch) (View, error) {
 	var tenant, org, own domain.BankConfig
@@ -204,7 +205,7 @@ func (s *Service) UpdateBankConfig(ctx context.Context, b domain.BankRef, patch 
 			return err
 		}
 		own = stored.Config
-		tenant, org, err = config.StoredOrgLevels(ctx, tx, b.OrgRef())
+		tenant, org, err = orgLevels(ctx, tx, b.OrgRef())
 		return err
 	})
 	if err != nil {
@@ -221,6 +222,14 @@ func (s *Service) ResetBankConfig(ctx context.Context, b domain.BankRef, paths [
 		return View{}, fmt.Errorf("reset bank config: %w", err)
 	}
 	return s.UpdateBankConfig(ctx, b, resetPatch(paths))
+}
+
+// orgLevels reads the tenant and org config levels of o in tx (config.StoredOrgLevels).
+func orgLevels(ctx context.Context, tx store.Tx, o domain.OrgRef) (tenant, org domain.BankConfig, err error) {
+	if tenant, org, err = config.StoredOrgLevels(ctx, tx, o); err != nil {
+		return tenant, org, fmt.Errorf("org config: %w", err)
+	}
+	return tenant, org, nil
 }
 
 // resetPatch is the Patch that unsets paths.

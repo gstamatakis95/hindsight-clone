@@ -41,7 +41,9 @@ func (r *unitRepo) Archive(ctx context.Context, b domain.BankRef, id domain.Unit
 	if err != nil {
 		return err
 	}
-	locked, err := r.q.UnitLockIDs(ctx, db.UnitLockIDsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: []uuid.UUID{uid}})
+	locked, err := r.q.UnitLockIDs(ctx, db.UnitLockIDsParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: []uuid.UUID{uid},
+	})
 	if err != nil {
 		return mapErr("lock unit", err)
 	}
@@ -75,7 +77,9 @@ func (r *unitRepo) Restore(ctx context.Context, b domain.BankRef, id domain.Unit
 	if err != nil {
 		return err
 	}
-	a, err := r.q.UnitTakeArchived(ctx, db.UnitTakeArchivedParams{ID: uid, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank})
+	a, err := r.q.UnitTakeArchived(ctx, db.UnitTakeArchivedParams{
+		ID: uid, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank,
+	})
 	if err != nil {
 		return mapErr(fmt.Sprintf("archived unit %s", id), err)
 	}

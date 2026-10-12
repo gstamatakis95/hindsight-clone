@@ -23,7 +23,8 @@ func (r *eventRepo) Append(ctx context.Context, e domain.LifecycleEvent) error {
 		return err
 	}
 	err = r.q.EventAppend(ctx, db.EventAppendParams{
-		TenantID: e.Bank.Tenant, OrgID: e.Bank.Org, BankID: e.Bank.Bank, Seq: e.Seq, Type: string(e.Type), At: orNow(e.CreatedAt),
+		TenantID: e.Bank.Tenant, OrgID: e.Bank.Org, BankID: e.Bank.Bank,
+		Seq: e.Seq, Type: string(e.Type), At: orNow(e.CreatedAt),
 		OperationID: op, SubjectID: e.SubjectID,
 	})
 	return mapErr("append event", err)

@@ -60,7 +60,7 @@ func (s *scenario) retain(ctx context.Context) error {
 		{"notes-2", *oneOff, "Priya reports to Tomas. Tomas runs the platform group."},
 	} {
 		req := &pb.RetainRequest{
-			OrgId: s.c.Org, BankId:            s.bank,
+			OrgId: s.c.Org, BankId: s.bank,
 			Items:             []*pb.RetainItem{{DocumentId: doc.id, Content: doc.text}},
 			SkipConsolidation: true,
 		}
@@ -85,7 +85,7 @@ func (s *scenario) retain(ctx context.Context) error {
 func (s *scenario) consolidate(ctx context.Context) error {
 	exampleutil.Section("consolidate with a one-off model")
 	cons, err := s.c.Observations.Consolidate(ctx, &pb.ConsolidateRequest{
-		OrgId: s.c.Org, BankId:    s.bank,
+		OrgId: s.c.Org, BankId: s.bank,
 		Overrides: &pb.ConsolidateOverrides{ConsolidateModel: exampleutil.Model(*oneOff)},
 	})
 	if err != nil {
@@ -105,7 +105,9 @@ func (s *scenario) consolidate(ctx context.Context) error {
 // recall uses the bank's reranker; the trace shows how many candidates the cross-encoder scored.
 func (s *scenario) recall(ctx context.Context) error {
 	exampleutil.Section("recall with the reranker")
-	rec, err := s.c.Memory.Recall(ctx, &pb.RecallRequest{OrgId: s.c.Org, BankId: s.bank, Query: "Who does Priya report to?", Trace: true})
+	rec, err := s.c.Memory.Recall(ctx, &pb.RecallRequest{
+		OrgId: s.c.Org, BankId: s.bank, Query: "Who does Priya report to?", Trace: true,
+	})
 	if err != nil {
 		return fmt.Errorf("recall: %w", err)
 	}

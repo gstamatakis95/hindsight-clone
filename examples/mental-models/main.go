@@ -25,7 +25,7 @@ type scenario struct {
 func (s *scenario) setup(ctx context.Context) error {
 	debounce := int32(1)
 	if _, err := s.c.Config.UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
-		OrgId: s.c.Org, BankId:     s.bank,
+		OrgId: s.c.Org, BankId: s.bank,
 		Config:     &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
 		UpdateMask: exampleutil.Paths("mental_models.refresh_debounce_seconds"),
 	}); err != nil {
@@ -61,7 +61,9 @@ func (s *scenario) createModels(ctx context.Context) error {
 		Schedule:    &pb.RefreshSchedule{When: &pb.RefreshSchedule_Cron{Cron: "0 9 * * 1"}},
 		Strategy:    pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,
 	}} {
-		created, err := s.c.MentalModels.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{OrgId: s.c.Org, BankId: s.bank, Spec: spec})
+		created, err := s.c.MentalModels.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{
+			OrgId: s.c.Org, BankId: s.bank, Spec: spec,
+		})
 		if err != nil {
 			return fmt.Errorf("create %s: %w", spec.GetId(), err)
 		}

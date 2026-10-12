@@ -221,19 +221,25 @@ func TestSpecOverridesValidated(t *testing.T) {
 	ctx := w.ctx(t)
 	bad := &pb.RefreshOverrides{Reflect: &pb.ReflectConfig{Disposition: &pb.Disposition{Empathy: 9}}}
 	banks := pb.NewBankServiceClient(w.conn)
-	_, err := banks.CreateBank(ctx, &pb.CreateBankRequest{OrgId: testOrg, BankId: "tpl", Initial: &pb.CreateBankRequest_Template{
-		Template: &pb.BankTemplate{MentalModels: []*pb.MentalModelSpec{{Id: "m", Overrides: bad}}},
-	}})
+	_, err := banks.CreateBank(ctx, &pb.CreateBankRequest{
+		OrgId: testOrg, BankId: "tpl", Initial: &pb.CreateBankRequest_Template{
+			Template: &pb.BankTemplate{MentalModels: []*pb.MentalModelSpec{{Id: "m", Overrides: bad}}},
+		},
+	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("template spec: err = %v, want INVALID_ARGUMENT", err)
 	}
-	if _, err := banks.GetBank(ctx, &pb.GetBankRequest{OrgId: testOrg, BankId: "tpl"}); status.Code(err) != codes.NotFound {
+	if _, err := banks.GetBank(ctx, &pb.GetBankRequest{
+		OrgId: testOrg, BankId: "tpl",
+	}); status.Code(err) != codes.NotFound {
 		t.Errorf("rejected template left a bank: err = %v, want NOT_FOUND", err)
 	}
 	models := pb.NewMentalModelServiceClient(w.conn)
-	if _, err := models.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{OrgId: testOrg, BankId: "b", Spec: &pb.MentalModelSpec{
-		Id: "m", Name: "M", SourceQuery: "q",
-	}}); err != nil {
+	if _, err := models.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{
+		OrgId: testOrg, BankId: "b", Spec: &pb.MentalModelSpec{
+			Id: "m", Name: "M", SourceQuery: "q",
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = models.UpdateMentalModel(ctx, &pb.UpdateMentalModelRequest{
@@ -280,7 +286,8 @@ func TestClearObservationsNeedsTarget(t *testing.T) {
 	ctx := w.ctx(t)
 	mem := pb.NewMemoryServiceClient(w.conn)
 	if _, err := mem.Retain(ctx, &pb.RetainRequest{
-		OrgId: testOrg, BankId: "b", Items: []*pb.RetainItem{{Content: "Alice moved to Lisbon in 2021. Alice works as a nurse."}},
+		OrgId: testOrg, BankId: "b",
+		Items: []*pb.RetainItem{{Content: "Alice moved to Lisbon in 2021. Alice works as a nurse."}},
 	}); err != nil {
 		t.Fatal(err)
 	}

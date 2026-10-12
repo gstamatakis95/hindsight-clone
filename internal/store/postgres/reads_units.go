@@ -127,7 +127,8 @@ func (r *reader) listUnits(ctx context.Context, p db.ReadsListUnitsParams) ([]do
 // Stale as the row carries them.
 func unitOfListRow(row db.ReadsListUnitsRow) (domain.Unit, error) {
 	u, err := unitOf(db.MemoryUnit{
-		ID: row.ID, TenantID: row.TenantID, OrgID: row.OrgID, BankID: row.BankID, DocumentID: row.DocumentID, ChunkID: row.ChunkID,
+		ID: row.ID, TenantID: row.TenantID, OrgID: row.OrgID, BankID: row.BankID,
+		DocumentID: row.DocumentID, ChunkID: row.ChunkID,
 		FactType: row.FactType, Text: row.Text, Context: row.Context, Metadata: row.Metadata, Tags: row.Tags,
 		Embedding: row.Embedding, OccurredStart: row.OccurredStart, OccurredEnd: row.OccurredEnd,
 		MentionedAt: row.MentionedAt, Timeless: row.Timeless, ProofCount: row.ProofCount, Version: row.Version,

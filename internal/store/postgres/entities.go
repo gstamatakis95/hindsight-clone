@@ -140,7 +140,9 @@ func (r *entityRepo) Attach(ctx context.Context, unit domain.UnitID, ents []doma
 	if len(ids) == 0 {
 		return nil
 	}
-	locked, err := r.q.EntityLock(ctx, db.EntityLockParams{TenantID: bank.TenantID, OrgID: bank.OrgID, BankID: bank.BankID, Ids: ids})
+	locked, err := r.q.EntityLock(ctx, db.EntityLockParams{
+		TenantID: bank.TenantID, OrgID: bank.OrgID, BankID: bank.BankID, Ids: ids,
+	})
 	if err != nil {
 		return mapErr("lock entities", err)
 	}
@@ -203,15 +205,21 @@ func (r *entityRepo) PruneOrphans(ctx context.Context, b domain.BankRef, ids []d
 	if len(uuids) == 0 {
 		return 0, nil
 	}
-	_, err := r.q.EntityLockForDelete(ctx, db.EntityLockForDeleteParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
+	_, err := r.q.EntityLockForDelete(ctx, db.EntityLockForDeleteParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return 0, mapErr("lock entities", err)
 	}
-	n, err := r.q.EntityDeleteOrphans(ctx, db.EntityDeleteOrphansParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
+	n, err := r.q.EntityDeleteOrphans(ctx, db.EntityDeleteOrphansParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return 0, mapErr("prune orphan entities", err)
 	}
-	err = r.q.EntityClearMaintenance(ctx, db.EntityClearMaintenanceParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids})
+	err = r.q.EntityClearMaintenance(ctx, db.EntityClearMaintenanceParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return 0, mapErr("clear entity maintenance", err)
 	}

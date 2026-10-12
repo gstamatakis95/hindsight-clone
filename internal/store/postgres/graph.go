@@ -64,7 +64,8 @@ func (g *graphStore) AddLinks(ctx context.Context, ls []graph.Link) error {
 			continue
 		}
 		err = g.q.LinkInsert(ctx, db.LinkInsertParams{
-			TenantID: l.Bank.Tenant, OrgID: l.Bank.Org, BankID: l.Bank.Bank, FromUnitID: from, ToUnitID: to, Kind: string(l.Kind),
+			TenantID: l.Bank.Tenant, OrgID: l.Bank.Org, BankID: l.Bank.Bank,
+			FromUnitID: from, ToUnitID: to, Kind: string(l.Kind),
 			Weight: l.Weight, CreatedAt: orNow(l.CreatedAt),
 		})
 		if err != nil {
@@ -111,7 +112,9 @@ func (r *unitRepo) DirtyLinks(ctx context.Context, b domain.BankRef, limit int) 
 	if limit <= 0 {
 		return []domain.UnitID{}, nil
 	}
-	ids, err := r.q.LinkDirty(ctx, db.LinkDirtyParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: contentLimit(limit)})
+	ids, err := r.q.LinkDirty(ctx, db.LinkDirtyParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: contentLimit(limit),
+	})
 	if err != nil {
 		return nil, mapErr("dirty units", err)
 	}
