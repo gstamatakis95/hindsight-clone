@@ -19,7 +19,7 @@ run: "delete_org run (re-runs itself until done)" {
   fanout: "1. enqueue delete_bank for every\ntombstoned bank; bank rows left: re-run in 5 s" {class: job}
   sweep: "2. sweep the org's rows in every table,\nwhatever their bank" {class: tx}
   fence: "3. fence: still holds its operation,\nnothing else of the org processing" {class: step}
-  blobs: "4. after the blob grace: delete the blobs\nunder tenant/org/, page by page" {class: step}
+  blobs: "4. after the blob grace: delete the blobs\nunder {tenant}/{org}/, page by page" {class: step}
   finish: "5. one transaction: delete operations, events\nand the org row, count the org's rows\nin every table with org_id" {class: tx}
   fanout -> sweep: "no bank row left"
   sweep -> fence
@@ -30,7 +30,7 @@ run: "delete_org run (re-runs itself until done)" {
 banks: "delete_bank per bank\nrows, blobs, bank row" {class: job}
 store: "Object storage" {class: store}
 done: "receipt COMPLETED\nwith the verification counts" {class: tx}
-failed: "receipt FAILED_VERIFICATION\n(own transaction); sweep again" {class: step}
+failed: "receipt FAILED_VERIFICATION\n(own transaction); sweep again,\nup to 3 times per attempt" {class: step}
 tick: "tick: resume_org_deletes,\nprune_deletion_receipts" {class: ext}
 
 request -> run.fanout

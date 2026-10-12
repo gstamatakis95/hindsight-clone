@@ -14,7 +14,7 @@ Postgres and object storage, so processes are disposable and scale by replica co
 
 | Mode | Runs |
 |---|---|
-| `memd api` | The gRPC server: Recall, Reflect, sync Retain (extraction inline) and every admin, curation and mental-model RPC. It writes state and the jobs that state causes in one transaction. |
+| `memd api` | The gRPC server: Recall, Reflect, sync Retain (extraction inline), RetainBatch and every admin, curation and mental-model RPC. It writes state and the jobs that state causes in one transaction. |
 | `memd worker` | The job runner over the `operations` table, its heartbeats, and the maintenance tick. |
 | `memd ingest` | The queue consumer (`internal/ingestapi`): it reads the broker `MEMD_INGEST_PROVIDER` names (Kafka) and retains each message through RetainBatch's path. It makes no model call and takes no worker slot. See [retain.md](retain.md#queue-ingestion). |
 | `memd all` | The api and the worker in one process, plus the queue consumer when `MEMD_INGEST_PROVIDER` is set (not `none`), under one error group: if one fails, all stop. |
@@ -29,8 +29,9 @@ gateway. Schema migrations are a separate step (`alembic upgrade head`, see
 
 - **Startup.** memd reads its environment and flags (deployment, infrastructure and secrets only) and the server
   config file (models, behaviour defaults, operator settings), validates both, and refuses to start when the
-  EXTRACT or REFLECT step has no model, the blob storage is incomplete, an operator setting is out of range, or
-  the embedding model does not return 768 dimensions. See [configuration.md](configuration.md).
+  EXTRACT or REFLECT step has no model, the blob storage is incomplete, the queue consumer's settings are
+  incomplete or a tenant or org pin is malformed, an operator setting is out of range, or the embedding model
+  does not return 768 dimensions. See [configuration.md](configuration.md).
 - **Health.** The api serves `grpc.health.v1`. `Check` runs the readiness probes (a Postgres ping, and a plain
   GET of the gateway base URL where any HTTP status counts as up, cached for 10 s) and ignores the service name.
   `Watch` and `List` are grpc-go's standard implementation and run no probe: `Watch("")` streams SERVING once, a
@@ -155,6 +156,8 @@ so that a graph database can be adopted later as an adapter plus a sync job, wit
 
 ## Tenancy and ids
 
+![Tenancy: tenant, org and bank, their rows and config levels, the isolation keys and the blob prefixes](diagrams/tenancy.svg)
+
 - The tenant comes from the `x-tenant-id` gRPC metadata header, never from a request body. Exactly one non-empty
   value is required; anything else is INVALID_ARGUMENT naming `x-tenant-id`. Health methods need no tenant.
 - Orgs group a tenant's banks: every bank belongs to exactly one org, bank ids are unique within their org, and
@@ -225,14 +228,15 @@ key, dedupe policy and Enqueue helper is decided there once.
 
 | Kind | Handler | Serial key | Dedupe | Enqueued by | Does |
 |---|---|---|---|---|---|
-| retain_document | `memory` | `doc:{document}` | none | async Retain, ReprocessDocument | Extract, embed, resolve, link; one transaction per batch of chunks; resumes; enqueues consolidate |
+| retain_document | `memory` | `doc:{document}` | none | async Retain, RetainBatch (and the queue consumer), ReprocessDocument | Extract, embed, resolve, link; one transaction per batch of chunks; resumes; enqueues consolidate |
 | retain_batch | none | none | none | async Retain of 2+ changed documents | Parent only, never claimed; the tick settles it from its children |
 | consolidate | `observation` | `consolidate` | pending (automatic); pending or running (tick); none with scopes or overrides | retain, rederive, the retag job, invalidate, ClearObservations with `reconsolidate`, Consolidate, the tick, its own continuation | Up to `observations.max_units_per_run` oldest facts, every scope of each; continues itself; triggers refreshes |
 | rederive_memory | `memory` | `doc:{unit's document}` (or `unit:{id}`) | none | UpdateMemory, RestoreMemory, the tick | Re-embed, relink, enqueue consolidate |
 | retag_document | `document` | `doc:{document}` | pending | RetagDocument | Clear the observations of the document's units, reset their stamps, enqueue consolidate |
 | refresh_mental_model | `mentalmodel` | `mm:{model}` | always pending; a joiner upgrades the queued row | consolidation, cron, invalidate and edit, CreateMentalModel, CreateBank from a template, RefreshMentalModel | Synthesize a new page version |
 | graph_maintenance | `maintenance` | `graph` | pending or running | every unit removal, rederive, the tick | Link top-ups and orphan-entity pruning within 240 s |
-| delete_bank | `bank` | `bank` | pending or running | DeleteBank, the tick | Batched row deletes, blobs, then the bank row |
+| delete_bank | `bank` | `bank` | pending or running | DeleteBank, delete_org, the tick | Batched row deletes, blobs, then the bank row |
+| delete_org | `org` | `org` (org-scoped: empty bank id) | pending or running | DeleteOrg, the tick | Fan out to delete_bank, sweep the org's rows, delete its blobs, verify, complete the receipt ([storage.md](storage.md#deleting-an-org)) |
 
 ### Enqueue and dedupe
 

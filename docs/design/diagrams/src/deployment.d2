@@ -8,7 +8,7 @@ direction: down
 clients: "Clients\nagents, admin tools,\neval harness" {class: ext}
 
 memd: "memd: stateless, scale by replicas" {
-  api: "memd api\ngRPC: Retain, Recall, Reflect,\nadmin and curation RPCs" {class: svc}
+  api: "memd api\ngRPC: Retain, RetainBatch, Recall,\nReflect, admin and curation RPCs" {class: svc}
   worker: "memd worker\njob runner, heartbeats,\nmaintenance tick" {class: svc}
   ingest: "memd ingest\nqueue consumer:\nRetainBatch path, Ack after commit" {class: svc}
 }

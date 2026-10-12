@@ -75,35 +75,14 @@ func DeadlineInterceptor(def time.Duration) grpc.UnaryServerInterceptor {
 	}
 }
 
-// maxNameLen bounds tenant, org and bank ids.
-const maxNameLen = 256
-
-// checkName validates a tenant, org or bank id: non-empty, not "." or "..", at most 256 bytes, and free of '/'
-// and control characters. Blob keys are "{tenant}/{org}/{bank}/...", so a '/' would let one org's or bank's prefix
-// cover another's, and a dot segment would make the key a relative path on stores or tools that normalize it. The
-// error names the request field: org_id, bank_id, or x-tenant-id for the tenant.
+// checkName validates a tenant, org or bank id with domain.CheckName. The error names the request field: org_id,
+// bank_id, or x-tenant-id for the tenant.
 func checkName(what, v string) error {
 	field := what
 	if what == "tenant" {
 		field = TenantHeader
 	}
-	return checkNameAt(field, what, v)
-}
-
-// checkNameAt is checkName with the field the error names given explicitly (an envelope names the tenant
-// tenant_id).
-func checkNameAt(field, what, v string) error {
-	switch {
-	case v == "":
-		return domain.InvalidField(field, "%s is required", what)
-	case v == "." || v == "..":
-		return domain.InvalidField(field, "%s must not be %q", what, v)
-	case len(v) > maxNameLen:
-		return domain.InvalidField(field, "%s is longer than %d bytes", what, maxNameLen)
-	case strings.ContainsFunc(v, func(r rune) bool { return r == '/' || r < 0x20 || r == 0x7f }):
-		return domain.InvalidField(field, "%s %q contains '/' or a control character", what, v)
-	}
-	return nil
+	return domain.CheckName(field, what, v) //nolint:wrapcheck // an InvalidField, already the domain class
 }
 
 // bankScoped is a request that names a bank: every request with org_id and bank_id fields.

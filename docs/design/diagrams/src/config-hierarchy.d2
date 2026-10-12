@@ -1,0 +1,63 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+levels: "One BankConfig shape at every level, merged least to most specific (config.Merge)" {
+  grid-columns: 7
+  grid-gap: 24
+  server: "server\nmemd.yaml defaults:\nover the built-in\ndefaults" {class: svc}
+  tenant: "tenant\nUpdateTenantConfig,\nResetTenantConfig" {class: tx}
+  org: "org\nCreateOrg config,\nUpdateOrgConfig,\nResetOrgConfig" {class: tx}
+  bank: "bank\nCreateBank config\nor template,\nUpdateBankConfig" {class: tx}
+  strategy: "strategy\nthe first matching\nconsolidation\nstrategy (only\nconsolidation)" {class: step}
+  request: "request\nthe RPC's overrides\nmessage (Retain's is\nstored on the\ndocument)" {class: ext}
+  item: "item\na retain item's\noverrides" {class: ext}
+  server -> tenant -> org -> bank -> strategy -> request -> item
+}
+levels.*.width: 220
+levels.*.height: 170
+
+rules: "Merge rules" {
+  grid-columns: 2
+  grid-gap: 12
+  scalar: "Scalars: a set value replaces an unset one\n(presence: false and 0 are real values)" {class: step}
+  group: "Groups and nested messages\nmerge field by field" {class: step}
+  list: "Lists and maps: the most specific level that\nsets one replaces it; an empty one clears" {class: step}
+  binding: "A model binding is atomic: the level that\nsupplies a slot supplies the whole binding" {class: step}
+}
+rules.*.width: 560
+rules.*.height: 90
+
+models: "Model slot resolution, per slot" {
+  grid-columns: 1
+  grid-gap: 12
+  walk: "From the most specific level down: the level's models.<slot>, else its models.default;\nthe first level that yields a binding wins. A bank's models.default beats a slot the server file binds." {class: boundary}
+  never: "rerank and embed are never filled by a default; embed is set only in the server file (768 dimensions)\nno binding at any level: FAILED_PRECONDITION MODEL_UNBOUND" {class: step}
+}
+models.*.width: 1140
+
+chains: "Other chains" {
+  grid-columns: 2
+  grid-gap: 12
+  refresh: "Mental-model refresh\nserver < tenant < org < bank\n< the model's stored overrides < the call's" {class: step}
+  graph: "Graph maintenance\ntenant < org < bank tuning" {class: step}
+}
+chains.*.width: 560
+chains.*.height: 110
+
+levels -> rules
+rules -> models
+models -> chains {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: "Server file" {class: svc; width: 150; height: 50}
+  b: "Stored level (API)" {class: tx; width: 210; height: 50}
+  c: "Per call" {class: ext; width: 130; height: 50}
+  d: "Rule" {class: boundary; width: 110; height: 50}
+  e: "arrows: less to more specific" {shape: text; width: 320; height: 50}
+}

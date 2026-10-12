@@ -299,6 +299,39 @@ func TestValidateRejects(t *testing.T) {
 	}
 }
 
+// TestValidateIngestPins: a malformed MEMD_INGEST_TENANT or MEMD_INGEST_ORG fails startup, naming the variable,
+// instead of dead-lettering every message; a valid pin passes.
+func TestValidateIngestPins(t *testing.T) {
+	cases := []struct{ name, env, pin string }{
+		{"valid pins", "", ""},
+		{"tenant with a slash", envIngestTenant, "acme/eu"},
+		{"dot-dot org", envIngestOrg, ".."},
+		{"org with a control character", envIngestOrg, "support\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := baseEnv(t, baseFile)
+			maps.Copy(env, map[string]string{
+				envIngestProvider: ingestProviderKafka, envKafkaBrokers: "localhost:9092", envKafkaTopic: "docs",
+				envKafkaDLQTopic: "docs-dlq", envIngestTenant: "acme", envIngestOrg: "support",
+			})
+			if tc.env != "" {
+				env[tc.env] = tc.pin
+			}
+			cfg, err := LoadConfig([]string{modeIngest}, func(k string) string { return env[k] })
+			if err == nil {
+				err = cfg.Validate()
+			}
+			switch {
+			case tc.env == "" && err != nil:
+				t.Fatalf("valid pins rejected: %v", err)
+			case tc.env != "" && (err == nil || !strings.Contains(err.Error(), tc.env)):
+				t.Fatalf("err = %v, want one naming %s", err, tc.env)
+			}
+		})
+	}
+}
+
 // embedder is a ai.Embedder returning vectors of a fixed size.
 type embedder struct {
 	dim int

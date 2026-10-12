@@ -5,7 +5,7 @@ direction: down
 (** -> **)[*].style.font-size: 18
 
 rpc: "Retain RPC (memd api)" {
-  checks: "Validate every item, no-op and revision check, bank check\nan unchanged or stale document stops here" {class: step}
+  checks: "Validate every item, org and bank check, no-op and revision check\nan unchanged or stale document stops here" {class: step}
   blobput: "Blob Put of the original\noutside any transaction" {class: step}
   write: "Write transaction\nEnsure bank, Seq, no-op and revision re-check,\nupsert documents" {class: tx}
   checks -> blobput -> write

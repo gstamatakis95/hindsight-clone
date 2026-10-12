@@ -31,7 +31,7 @@ overflow: "Context window full\nsynthesis over the tool outputs so far,\ndroppin
 cite: "Keep only retrieved citations\nde-duplicated, in citation order" {class: step}
 structured: "Structured output pass\nSTRUCTURED_OUTPUT projects the answer\ninto response_schema_json" {class: model}
 out: "ReflectResponse\ntext, based_on, trace, usage" {class: ext}
-fail: "Retrieval error: the call fails\nreflect never answers from evidence\nit could not gather" {class: planned}
+fail: "Retrieval error: the call fails\nreflect never answers from evidence\nit could not gather" {class: failure}
 
 req -> loop
 loop.guard -> cite: accepted

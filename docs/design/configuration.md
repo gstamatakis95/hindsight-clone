@@ -3,7 +3,7 @@
 memd has three kinds of settings:
 
 - **BankConfig**: every memory-behaviour knob and the model bindings. One shape at every level of a hierarchy,
-  stored as JSON on the tenant, bank, document, operation and mental-model rows, and accepted per request through
+  stored as JSON on the tenant, org, bank, document, operation and mental-model rows, and accepted per request through
   each RPC's overrides message.
 - **The server config file** (YAML, `MEMD_CONFIG`, default `./memd.yaml`): the server level of BankConfig (the
   `defaults:` block) and the operator settings that are not per bank. `memd.example.yaml` documents every key.
@@ -14,6 +14,8 @@ tunes for the whole process is a section of the server config file; only address
 and switches are environment variables.
 
 ## BankConfig levels
+
+![Config hierarchy: the levels, the merge rules, model-slot resolution and the other chains](diagrams/config-hierarchy.svg)
 
 ```
 server < tenant < org < bank < strategy < request < item
@@ -256,7 +258,7 @@ with no mode prints the list.
 | `MEMD_DATADOG_METRICS` | true | memd's own metrics (only with Datadog enabled) |
 | `MEMD_DATADOG_PROFILER` | false | Datadog profiler (only with Datadog enabled) |
 | `MEMD_INGEST_PROVIDER` | `none` | The queue consumer's source: `none` or `kafka`. `memd ingest` needs one; `memd all` runs the consumer when one is set |
-| `MEMD_INGEST_TENANT`, `MEMD_INGEST_ORG` | empty | Pin the source to one tenant (and org): an envelope may omit it, and one naming another is dead-lettered. Unpinned, every envelope names its tenant and org |
+| `MEMD_INGEST_TENANT`, `MEMD_INGEST_ORG` | empty | Pin the source to one tenant (and org): an envelope may omit it, and one naming another is dead-lettered; a malformed pin fails startup. Unpinned, every envelope names its tenant and org |
 | `MEMD_INGEST_HEALTH_ADDR` | empty (none) | Where `memd ingest` serves `grpc.health.v1` (ready while Postgres answers) |
 | `MEMD_INGEST_KAFKA_BROKERS` | required with kafka | Seed brokers, comma-separated `host:port` |
 | `MEMD_INGEST_KAFKA_TOPIC` | required with kafka | The topic to consume |

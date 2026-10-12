@@ -1,0 +1,72 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+tenant: "Tenant: the x-tenant-id header; every table but tenants carries tenant_id" {
+  grid-columns: 1
+  grid-gap: 16
+
+  row: "tenants row\nconfig = the tenant level (UpdateTenantConfig)" {class: tx}
+  receipts: "deletion_receipts: the org named only by sha256(tenant, org id), no org_id;\nno delete path touches them, so they outlive the org (pruned after 3 years)" {class: tx}
+
+  org: "Org: created by CreateOrg, never on first use; every table but tenants, orgs and deletion_receipts carries org_id" {
+    grid-columns: 1
+    grid-gap: 16
+
+    row: "orgs row\nconfig = the org level (CreateOrg, UpdateOrgConfig)\ndeleting_at = the DeleteOrg tombstone" {class: tx}
+    ops: "delete_org operation: org-scoped (bank_id = '')" {class: job}
+
+    bank: "Bank: created by the first write in its org; bank-scoped rows carry bank_id" {
+      grid-columns: 1
+      grid-gap: 16
+
+      row: "banks row\nconfig = the bank level (CreateBank, UpdateBankConfig)\nchange_seq, deleting_at = the DeleteBank tombstone" {class: tx}
+      content: "" {
+        grid-columns: 4
+        grid-gap: 10
+        style: {stroke-width: 0}
+        docs: "documents\nand chunks" {class: step}
+        units: "memory units,\narchive, audit" {class: step}
+        graph: "entities\nand links" {class: step}
+        obs: "observations\nand versions" {class: step}
+        mm: "mental models\nand history" {class: step}
+        dir: "directives" {class: step}
+        ops: "operations\nand events" {class: step}
+        queues: "graph queues" {class: step}
+      }
+      content.*.width: 200
+      content.*.height: 80
+      blob: "Object storage: {tenant}/{org}/{bank}/docs/{document_id}/{content_hash}\nthe original text of each document content" {class: store}
+    }
+  }
+}
+tenant.*.width: 980
+tenant.org.*.width: 900
+tenant.org.bank.row.width: 860
+tenant.org.bank.blob.width: 860
+
+keys: "Isolation and deletion" {
+  grid-columns: 1
+  grid-gap: 10
+  k1: "Every store call takes a BankRef (tenant, org, bank);\nevery index on bank rows starts (tenant_id, org_id, bank_id)" {class: boundary}
+  k2: "Ids: non-empty, at most 256 bytes, no '/', no control\ncharacters, not . or ..: prefixes stay unique per org and bank" {class: boundary}
+  k3: "DeleteBank: the bank's rows and blob prefix\nblob.BankPrefix = {tenant}/{org}/{bank}/" {class: step}
+  k4: "DeleteOrg: every bank, the org's rows in every table\nwith org_id, blob.OrgPrefix = {tenant}/{org}/;\nverified zero, then the receipt" {class: step}
+}
+keys.*.width: 620
+
+tenant.org.bank -> keys.k3 {class: async}
+tenant.org -> keys.k4 {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: "Table row" {class: tx; width: 150; height: 50}
+  b: "Content tables" {class: step; width: 180; height: 50}
+  c: Datastore {class: store; width: 140; height: 60}
+  d: Rule {class: boundary; width: 110; height: 50}
+  e: Operation {class: job; width: 140; height: 50}
+}

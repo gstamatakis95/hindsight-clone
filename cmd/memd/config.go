@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"memd/internal/domain"
 	"strconv"
 	"strings"
 )
@@ -512,8 +513,8 @@ func (c Config) runsConsumer() bool {
 }
 
 // validateIngest checks the provider and, when the mode runs the consumer, its settings: memd ingest needs a
-// provider, and kafka needs brokers, a topic, a group and a dead-letter topic. The pinned tenant and org are
-// checked with every envelope's ids.
+// provider, kafka needs brokers, a topic, a group and a dead-letter topic, and a pinned tenant or org must be a
+// valid id.
 func (c Config) validateIngest() []error {
 	switch c.Ingest.Provider {
 	case ingestProviderNone, ingestProviderKafka:
@@ -542,6 +543,24 @@ func (c Config) validateIngest() []error {
 	}
 	if (k.TLSCertFile == "") != (k.TLSKeyFile == "") {
 		errs = append(errs, fmt.Errorf("%s and %s go together", envKafkaTLSCert, envKafkaTLSKey))
+	}
+	return append(errs, c.validatePins()...)
+}
+
+// validatePins checks the pinned tenant and org ids with the API's id rules, so a malformed pin fails startup
+// instead of dead-lettering every message.
+func (c Config) validatePins() []error {
+	var errs []error
+	for _, p := range []struct{ env, what, v string }{
+		{envIngestTenant, "tenant", c.Ingest.Tenant},
+		{envIngestOrg, "org", c.Ingest.Org},
+	} {
+		if p.v == "" {
+			continue
+		}
+		if err := domain.CheckName(p.env, p.what, p.v); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", p.env, err))
+		}
 	}
 	return errs
 }
