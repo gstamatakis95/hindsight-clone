@@ -35,8 +35,10 @@ type env struct {
 func newEnv(t *testing.T, blobs int) env {
 	t.Helper()
 	pool := pgtest.Pool(t)
-	e := env{ctx: t.Context(), pool: pool, db: postgres.New(pool), blob: fake.NewBlob(),
-		org: domain.OrgRef{Tenant: "t", Org: "o"}}
+	e := env{
+		ctx: t.Context(), pool: pool, db: postgres.New(pool), blob: fake.NewBlob(),
+		org: domain.OrgRef{Tenant: "t", Org: "o"},
+	}
 	pgtest.CreateOrgs(t, e.db, domain.NewBankRef("t", "o", ""))
 	e.svc = e.service(e.blob)
 	for i := range blobs {
@@ -50,8 +52,10 @@ func newEnv(t *testing.T, blobs int) env {
 
 // service returns a Service over e's database and bs, with small pages so a delete spans several.
 func (e env) service(bs blob.Store) *Service {
-	return New(Deps{DB: e.db, Maintenance: e.db, Blob: bs, Clock: clock.NewManual(time.Now()),
-		Delete: DeleteConfig{BlobPageSize: 2, SweepBatch: 2}})
+	return New(Deps{
+		DB: e.db, Maintenance: e.db, Blob: bs, Clock: clock.NewManual(time.Now()),
+		Delete: DeleteConfig{BlobPageSize: 2, SweepBatch: 2},
+	})
 }
 
 // exec runs SQL on the test database.
@@ -122,14 +126,10 @@ func (f *failingBlob) DeletePrefix(ctx context.Context, prefix string) (int, err
 	return f.Blob.DeletePrefix(ctx, prefix) //nolint:wrapcheck // test double
 }
 
-// TestDeleteOrgResumesAfterCrash: a worker that dies part-way through an org delete (some blobs deleted, its row
-// left PROCESSING) is reclaimed; at its attempt cap the reclaim fails it, the tick's resume step enqueues a new
-// delete_org, and that run finishes the job: rows a dead bank left behind, every blob, the org row, and a COMPLETED
-// receipt. Re-issuing DeleteOrg meanwhile joins the delete instead of starting another.
-func TestDeleteOrgResumesAfterCrash(t *testing.T) {
-	t.Parallel()
-	e := newEnv(t, 5)
-	e.exec(t, `INSERT INTO graph_dirty (tenant_id, org_id, bank_id, unit_id) VALUES ('t', 'o', 'gone', gen_random_uuid())`)
+// deleteTwice calls DeleteOrg twice and checks that it starts an IN_PROGRESS receipt and an org-scoped delete_org,
+// and that the second call joins them.
+func (e env) deleteTwice(t *testing.T) (domain.Operation, domain.DeletionReceipt) {
+	t.Helper()
 	op, rc, err := e.svc.DeleteOrg(e.ctx, e.org)
 	if err != nil || rc.Status != domain.ReceiptStatusInProgress || op.Kind != domain.OperationKindDeleteOrg ||
 		!op.Bank.OrgScoped() {
@@ -140,6 +140,18 @@ func TestDeleteOrgResumesAfterCrash(t *testing.T) {
 		t.Fatalf("DeleteOrg again = %s / %s, %v; want the same operation %s and receipt %s", again.ID, rc2.ID, err,
 			op.ID, rc.ID)
 	}
+	return op, rc
+}
+
+// TestDeleteOrgResumesAfterCrash: a worker that dies part-way through an org delete (some blobs deleted, its row
+// left PROCESSING) is reclaimed; at its attempt cap the reclaim fails it, the tick's resume step enqueues a new
+// delete_org, and that run finishes the job: rows a dead bank left behind, every blob, the org row, and a COMPLETED
+// receipt. Re-issuing DeleteOrg meanwhile joins the delete instead of starting another.
+func TestDeleteOrgResumesAfterCrash(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t, 5)
+	e.exec(t, `INSERT INTO graph_dirty (tenant_id, org_id, bank_id, unit_id) VALUES ('t', 'o', 'gone', gen_random_uuid())`)
+	op, rc := e.deleteTwice(t)
 	dying := &failingBlob{Blob: e.blob, ok: 2}
 	if err := e.service(dying).RunDeleteJob(e.ctx, e.claim(t)); err == nil {
 		t.Fatal("the dying run returned nil")

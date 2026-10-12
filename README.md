@@ -89,6 +89,10 @@ every service shares, then the seven services, then each service's messages. The
 - Orgs group a tenant's banks (`CreateOrg`, `GetOrg`, `ListOrgs`). Every bank belongs to one org, bank ids are
   unique within it, and every bank-scoped request names `org_id` and `bank_id`. An org must exist before anything
   is written under it: a write under an unknown org is `NOT_FOUND` (`ORG_NOT_FOUND`), never a new org.
+- Delete an org for good (`DeleteOrg`): every bank, row and blob of it is removed and verified gone, and a
+  deletion receipt that outlives the org (`GetDeletionReceipt`, kept 3 years) records the result
+  ([design](docs/design/storage.md#deleting-an-org), including what lingers outside memd: backups, versioned
+  buckets, broker topics, logs).
 - Create a bank with initial config or from a template (`CreateBank`), export one as a template
   (`ExportBankTemplate`), get and list banks (`GetBank`, `ListBanks`), stats and tag counts (`GetBankStats`,
   `ListTags`), and delete a bank with everything it holds, blobs included (`DeleteBank`).
@@ -222,7 +226,8 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","men
   localhost:50051 memory.v1.MentalModelService/GetMentalModel
 ```
 
-**OrgService**: the tenant's orgs. DeleteOrg is not available in this version (`UNIMPLEMENTED`).
+**OrgService**: the tenant's orgs, their deletion and its receipts. Poll `GetDeletionReceipt` until
+`STATE_COMPLETED` after a `DeleteOrg`.
 
 ```sh
 grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"page_size":50}' localhost:50051 memory.v1.OrgService/ListOrgs
@@ -572,7 +577,7 @@ handlers and maintenance sweeps)
 | `internal/observation` | ObservationService and consolidation: the `consolidate` job (scopes, decide, dedup, apply, stamp), clears, the strategy preview and the consolidation reconcile sweep. |
 | `internal/mentalmodel` | MentalModelService: the refresh pipeline (agentic and single-shot, full and delta), staleness, scheduling, the `refresh_mental_model` job, and the cron and failed-refresh sweeps. |
 | `internal/bank` | BankService: create (plain or from a template), get, list, stats, tags, export, and the two-step delete with the `delete_bank` job and its resume sweep. |
-| `internal/org` | OrgService: create, get and list orgs. |
+| `internal/org` | OrgService: create, get, list and delete orgs; the delete_org job and its receipts. |
 | `internal/configsvc` | ConfigService: the tenant, org and bank config levels as views, resets, directives and the prompt preview. |
 | `internal/operation` | OperationService: operation reads, cancel and retry, and the lifecycle event feed. |
 

@@ -134,8 +134,8 @@ func New(d Deps) *Service {
 // refreshes, consolidation and graph-maintenance reconciles, re-queue rederives of stranded facts, settle
 // retain_batch parents, prune terminal ops, events and old deletion receipts. No leader: each step is
 // idempotent. The delete resumes and the refresh-failure reconcile run right after reclaim, so they see jobs
-// reclaim failed in the same tick. It ticks once at start and returns nil when ctx is done; a failing step is logged and never stops
-// the others.
+// reclaim failed in the same tick. It ticks once at start and returns nil when ctx is done; a failing step is
+// logged and never stops the others.
 func (s *Service) Run(ctx context.Context) error {
 	if s.d.Claimer == nil || s.d.Store == nil {
 		return errors.New("maintenance: the tick needs a Claimer and a Store")

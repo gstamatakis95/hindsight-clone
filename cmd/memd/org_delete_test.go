@@ -79,8 +79,8 @@ func (w *wiredStack) waitReceipt(t *testing.T, ctx context.Context, org string) 
 
 // TestDeleteOrgWhileRunning: from the moment DeleteOrg returns, writes under the org fail FAILED_PRECONDITION
 // (ORG_DELETING) and reads NOT_FOUND, GetOrg included; the org's delete_org operation is readable (org-scoped, no
-// bank) and can't be cancelled; DeleteOrg again joins the running delete and returns the same receipt. A long blob grace keeps the
-// delete from finishing, so every check sees it running.
+// bank) and can't be cancelled; DeleteOrg again joins the running delete and returns the same receipt. A long blob
+// grace keeps the delete from finishing, so every check sees it running.
 func TestDeleteOrgWhileRunning(t *testing.T) {
 	w := startWiredFile(t, nil, func(f *ServerFile) {
 		grace := Duration(time.Hour)
@@ -141,11 +141,7 @@ func TestDeleteOrgEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rc := w.waitReceipt(t, ctx, "del")
-	if rc.GetBanks() != 3 || rc.GetTablesChecked() == 0 || rc.GetRowsRemaining() != 0 || rc.GetBlobsRemaining() != 0 ||
-		rc.GetCompletedAt() == nil || rc.GetId() != del.GetReceipt().GetId() {
-		t.Fatalf("completed receipt = %v", rc)
-	}
+	wantCleanReceipt(t, w.waitReceipt(t, ctx, "del"), del.GetReceipt().GetId(), 3)
 	if rows, blobs := w.orgLeft(t, "del"); rows != 0 || blobs != 0 {
 		t.Fatalf("after the delete: %d rows, %d blobs left", rows, blobs)
 	}
@@ -162,6 +158,15 @@ func TestDeleteOrgEndToEnd(t *testing.T) {
 	banks, err := pb.NewBankServiceClient(w.conn).ListBanks(ctx, &pb.ListBanksRequest{OrgId: "del"})
 	if err != nil || len(banks.GetBanks()) != 0 {
 		t.Errorf("the recreated org lists %v, %v; want no bank", banks.GetBanks(), err)
+	}
+}
+
+// wantCleanReceipt fails unless rc is receipt id, completed over banks banks with a clean verification.
+func wantCleanReceipt(t *testing.T, rc *pb.DeletionReceipt, id string, banks int32) {
+	t.Helper()
+	if rc.GetBanks() != banks || rc.GetTablesChecked() == 0 || rc.GetRowsRemaining() != 0 || rc.GetBlobsRemaining() != 0 ||
+		rc.GetCompletedAt() == nil || rc.GetId() != id {
+		t.Fatalf("completed receipt = %v", rc)
 	}
 }
 

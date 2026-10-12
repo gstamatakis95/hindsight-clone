@@ -40,6 +40,12 @@ These rules add to the root AGENTS.md.
   queries and the dynamic builders); every new table but tenants and orgs carries org_id (TestSchemaOrgColumns).
 - The adapter refuses a BankRef without an org (ErrInvalidArgument) at its choke points: the bank repo, Tx.Seq,
   Queue.Enqueue and the bank-level reads.
+- Org deletion: OrgRepo.LockForDelete (FOR UPDATE) then MarkDeleting tombstones the org and, in a later statement,
+  its banks. delete_org is org-scoped (bank_id ''): Enqueue share-locks the org row for it, ClaimSelect and
+  ClaimAlive join orgs, and a failed org-scoped row gets no lifecycle event. OrgRepo.CountRows reads the tables with
+  org_id from information_schema, so a new table is verified without a code change; TestOrgSweepCoversSchema keeps
+  DeleteBatch's table list complete. deletion_receipts has no org_id (it outlives the org; TestSchemaOrgColumns
+  exempts it).
 - Orgs are never created on first use. Bank creation (Ensure, Create, SetConfig) takes FOR KEY SHARE on the org row
   first: unknown = ErrOrgNotFound, tombstoned = ErrOrgDeleting. An org delete locks the row FOR UPDATE before it
   tombstones the org's banks, so a concurrent creation waits and then fails; org config updates (an advisory lock

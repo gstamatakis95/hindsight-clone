@@ -1,0 +1,52 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+request: "DeleteOrg: one transaction, no change seq" {
+  grid-columns: 1
+  grid-gap: 10
+  lock: "lock the org row FOR UPDATE\n(waits for bank creations in flight)" {class: tx}
+  tomb: "tombstone the org, then every live bank;\ncancel their pending jobs" {class: tx}
+  rc: "start the receipt IN_PROGRESS\n(sha256 of tenant and org id)" {class: tx}
+  enq: "enqueue delete_org (org-scoped)" {class: tx}
+}
+request.*.width: 460
+
+run: "delete_org run (re-runs itself until done)" {
+  direction: down
+  fanout: "1. enqueue delete_bank for every\ntombstoned bank; bank rows left: re-run in 5 s" {class: job}
+  sweep: "2. sweep the org's rows in every table,\nwhatever their bank" {class: tx}
+  fence: "3. fence: still holds its operation,\nnothing else of the org processing" {class: step}
+  blobs: "4. after the blob grace: delete the blobs\nunder tenant/org/, page by page" {class: step}
+  finish: "5. one transaction: delete operations, events\nand the org row, count the org's rows\nin every table with org_id" {class: tx}
+  fanout -> sweep: "no bank row left"
+  sweep -> fence
+  fence -> blobs
+  blobs -> finish: "no blob listed"
+}
+
+banks: "delete_bank per bank\nrows, blobs, bank row" {class: job}
+store: "Object storage" {class: store}
+done: "receipt COMPLETED\nwith the verification counts" {class: tx}
+failed: "receipt FAILED_VERIFICATION\n(own transaction); sweep again" {class: step}
+tick: "tick: resume_org_deletes,\nprune_deletion_receipts" {class: ext}
+
+request -> run.fanout
+run.fanout -> banks: enqueue {class: async}
+run.blobs -> store
+run.finish -> done: "0 rows"
+run.finish -> failed: "rows left: roll back"
+failed -> run.sweep {class: async}
+tick -> run.fanout: "re-enqueue a stopped delete" {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 4
+  grid-gap: 12
+  a: "DB transaction" {class: tx; width: 170; height: 50}
+  b: Step {class: step; width: 110; height: 50}
+  c: Job {class: job; width: 110; height: 50}
+  d: "the receipt outlives the org" {shape: text; width: 360; height: 50}
+}

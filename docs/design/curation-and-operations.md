@@ -11,7 +11,7 @@ explains the behaviour behind them.
 | DocumentService | `document` | ListDocuments, GetDocument, RetagDocument, ReprocessDocument |
 | ObservationService | `observation` | Consolidate, ListObservationScopes, ListObservationHistory, ClearObservations, PreviewConsolidationStrategies |
 | MentalModelService | `mentalmodel` | CreateMentalModel, GetMentalModel, ListMentalModels, UpdateMentalModel, RefreshMentalModel, PreviewMentalModelRefresh, ListMentalModelHistory, DeleteMentalModel, DeleteMentalModelFolder, SearchMentalModels |
-| OrgService | `org` | CreateOrg, GetOrg, ListOrgs, DeleteOrg (UNIMPLEMENTED in this version) |
+| OrgService | `org` | CreateOrg, GetOrg, ListOrgs, DeleteOrg, GetDeletionReceipt |
 | BankService | `bank` | CreateBank, GetBank, ListBanks, DeleteBank, GetBankStats, ListTags, ExportBankTemplate |
 | ConfigService | `configsvc` | GetTenantConfig, UpdateTenantConfig, ResetTenantConfig, GetOrgConfig, UpdateOrgConfig, ResetOrgConfig, GetBankConfig, UpdateBankConfig, ResetBankConfig, PreviewPrompt, CreateDirective, UpdateDirective, ListDirectives, DeleteDirective |
 | OperationService | `operation` | GetOperation, ListOperations, CancelOperation, RetryOperation, ListEvents |
@@ -167,7 +167,16 @@ problems through missions and reprocess; curate the residue. Audit and archive r
   level). An existing org is ALREADY_EXISTS; one being deleted FAILED_PRECONDITION (`ORG_DELETING`).
 - **GetOrg** returns a live org; unknown or deleting = NOT_FOUND (`ORG_NOT_FOUND`).
 - **ListOrgs** pages the tenant's live orgs by id, optionally under an `id_prefix`; orgs being deleted are left out.
-- **DeleteOrg** is not available in this version: it answers UNIMPLEMENTED (reason `UNIMPLEMENTED`).
+- **DeleteOrg** tombstones the org and its banks, cancels their pending jobs, starts a deletion receipt and
+  enqueues the org-scoped `delete_org`, in one transaction, and returns the operation and the receipt. The delete
+  removes every bank, row and blob of the org, verifies none is left and deletes the org
+  ([storage.md](storage.md#deleting-an-org)). Writes under the org are then FAILED_PRECONDITION (`ORG_DELETING`)
+  and reads NOT_FOUND; re-issuing it joins the running delete.
+- **GetDeletionReceipt** returns the receipt of the org's most recent delete (looked up by the hash of the tenant
+  and org id), which outlives the org: `in_progress`, `failed_verification` (still retrying) or `completed` with the
+  verification counts. An org never deleted is NOT_FOUND.
+- **Org-scoped operations.** GetOperation, ListOperations, CancelOperation and RetryOperation take an empty
+  `bank_id` for the org's own operations (`delete_org`); CancelOperation refuses `delete_org`.
 - Orgs are never created on first use, while banks are: a write to an unknown bank of an existing org creates it.
   Bank creation share-locks the org row ([architecture.md](architecture.md#transactions-and-the-change-sequence)).
 

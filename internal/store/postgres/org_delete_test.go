@@ -61,8 +61,9 @@ func newOrgFixture(t *testing.T) orgFixture {
 	for _, b := range []domain.BankRef{f.a, f.b, f.bystander} {
 		insertUnits(t, s, fact(b, "x"), fact(b, "y"))
 		upsertDocs(t, s, b, "d1")
-		enqueueJob(t, s, store.Job{Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate",
-			Payload: json.RawMessage(`{}`)})
+		enqueueJob(t, s, store.Job{
+			Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate", Payload: json.RawMessage(`{}`),
+		})
 	}
 	return f
 }
@@ -105,11 +106,11 @@ func TestOrgDeleteStatements(t *testing.T) {
 	if banks != 2 || cancelled != 2 {
 		t.Fatalf("MarkDeleting tombstoned %d banks and CancelOrg cancelled %d jobs, want 2 and 2", banks, cancelled)
 	}
-	enqueue := func(j store.Job) error {
-		return txErr(t, s, func(tx store.Tx) error { _, _, err := tx.Queue().Enqueue(ctx, j); return err })
+	enqueue := func(j store.Job) error { return enqueueErr(t, s, j) }
+	orgJob := store.Job{
+		Bank: f.org.Scope(), Kind: domain.OperationKindDeleteOrg, SerialKey: "org",
+		Payload: json.RawMessage(`{}`),
 	}
-	orgJob := store.Job{Bank: f.org.Scope(), Kind: domain.OperationKindDeleteOrg, SerialKey: "org",
-		Payload: json.RawMessage(`{}`)}
 	wantErrIs(t, "org-scoped consolidate on a tombstoned org", enqueue(store.Job{
 		Bank: f.org.Scope(), Kind: domain.OperationKindConsolidate, Payload: json.RawMessage(`{}`),
 	}), domain.ErrOrgDeleting)
@@ -140,6 +141,12 @@ func TestOrgDeleteStatements(t *testing.T) {
 		_, err := tx.Orgs().Get(ctx, f.org)
 		return err
 	}), domain.ErrOrgNotFound)
+}
+
+// enqueueErr enqueues j in its own transaction and returns the error.
+func enqueueErr(t *testing.T, s store.DB, j store.Job) error {
+	t.Helper()
+	return txErr(t, s, func(tx store.Tx) error { _, _, err := tx.Queue().Enqueue(t.Context(), j); return err })
 }
 
 // sweep runs DeleteBatch with a small limit until it deletes nothing.
@@ -251,19 +258,16 @@ func TestOrgScopedJobLifecycle(t *testing.T) {
 	o := domain.OrgRef{Tenant: "t", Org: "o"}
 	b := domain.NewBankRef("t", "o", "b")
 	ensureQueueBanks(t, s, b)
-	enqueueJob(t, s, store.Job{Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate",
-		Payload: json.RawMessage(`{}`)})
+	enqueueJob(t, s, store.Job{
+		Bank: b, Kind: domain.OperationKindConsolidate, SerialKey: "consolidate",
+		Payload: json.RawMessage(`{}`),
+	})
 	markOrgDeleting(t, pool, o)
-	id := enqueueJob(t, s, store.Job{Bank: o.Scope(), Kind: domain.OperationKindDeleteOrg, SerialKey: "org",
-		Payload: json.RawMessage(`{}`)})
-	kinds := []domain.OperationKind{domain.OperationKindConsolidate, domain.OperationKindDeleteOrg}
-	js, err := s.Claim(ctx, "w", kinds, 10)
-	if err != nil || len(js) != 1 || js[0].ID != id || !js[0].Bank.OrgScoped() {
-		t.Fatalf("Claim under a tombstoned org = %+v, %v; want only the delete_org", js, err)
-	}
-	if alive, err := s.Alive(ctx, id); err != nil || !alive {
-		t.Fatalf("Alive(delete_org) = %v, %v; want true while its org row exists", alive, err)
-	}
+	id := enqueueJob(t, s, store.Job{
+		Bank: o.Scope(), Kind: domain.OperationKindDeleteOrg, SerialKey: "org",
+		Payload: json.RawMessage(`{}`),
+	})
+	claimOnlyOrgJob(t, s, id)
 	if _, err := pool.Exec(ctx, `UPDATE operations SET heartbeat_at = now() - interval '1 hour',
 		attempts = $2 WHERE id = $1`, id, domain.DefaultMaxAttempts-1); err != nil {
 		t.Fatal(err)
@@ -286,6 +290,19 @@ func TestOrgScopedJobLifecycle(t *testing.T) {
 	}
 	if busy := processingInOrg(t, s, o, ""); busy {
 		t.Error("ProcessingInOrg after the retry: want nothing processing")
+	}
+}
+
+// claimOnlyOrgJob claims under a tombstoned org and checks that only delete_org id comes back, and alive.
+func claimOnlyOrgJob(t *testing.T, s *postgres.DB, id domain.OperationID) {
+	t.Helper()
+	kinds := []domain.OperationKind{domain.OperationKindConsolidate, domain.OperationKindDeleteOrg}
+	js, err := s.Claim(t.Context(), "w", kinds, 10)
+	if err != nil || len(js) != 1 || js[0].ID != id || !js[0].Bank.OrgScoped() {
+		t.Fatalf("Claim under a tombstoned org = %+v, %v; want only the delete_org", js, err)
+	}
+	if alive, err := s.Alive(t.Context(), id); err != nil || !alive {
+		t.Fatalf("Alive(delete_org) = %v, %v; want true while its org row exists", alive, err)
 	}
 }
 
@@ -312,8 +329,10 @@ func TestReceipts(t *testing.T) {
 	var first, second string
 	inTx(t, s, func(tx store.Tx) error {
 		var err error
-		rc := domain.DeletionReceipt{Tenant: "t", OrgIDHash: domain.OrgIDHash(o), Status: domain.ReceiptStatusInProgress,
-			RequestedAt: at}
+		rc := domain.DeletionReceipt{
+			Tenant: "t", OrgIDHash: domain.OrgIDHash(o), Status: domain.ReceiptStatusInProgress,
+			RequestedAt: at,
+		}
 		if first, err = tx.Receipts().Create(ctx, rc); err != nil {
 			return err
 		}

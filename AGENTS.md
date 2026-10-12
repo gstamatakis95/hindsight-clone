@@ -39,7 +39,9 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   - internal/document: DocumentService (ListDocuments, GetDocument, RetagDocument, ReprocessDocument);
     retag_document.
   - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
-  - internal/org: OrgService (create, get, list; DeleteOrg answers UNIMPLEMENTED in this version).
+  - internal/org: OrgService (create, get, list, DeleteOrg, GetDeletionReceipt); delete_org (an org-scoped job:
+    fan out to delete_bank, org-wide sweep, blobs, schema-driven verification); the stalled-org-delete and
+    receipt-prune sweeps.
   - internal/bank: BankService (create, from a template too, get, list, delete, stats, tags, export);
     delete_bank; the stalled-delete sweep.
   - internal/configsvc: ConfigService (tenant, org and bank config views, reset, prompt preview, directives).

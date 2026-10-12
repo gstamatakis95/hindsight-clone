@@ -206,8 +206,8 @@ func wireOperations(c core, d *deps) {
 
 // wireMaintenance builds maintenance.Service, which runs the tick and the graph_maintenance job. It runs last:
 // wireOrg, wireBanks, wireMemory, wireObservations and wireMentalModels set their services' tick steps in
-// d.maintenance first. The cross-bank scans come from store.Maintenance, and the operator settings from the server config file's
-// worker and retention sections.
+// d.maintenance first. The cross-bank scans come from store.Maintenance, and the operator settings from the server
+// config file's worker and retention sections.
 func wireMaintenance(cfg Config, c core, in infra, d *deps) {
 	m := &d.maintenance
 	m.Claimer, m.Store, m.Clock, m.Logger = in.claimer, c.db, c.clock, d.log

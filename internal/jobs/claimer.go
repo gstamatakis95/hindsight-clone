@@ -42,9 +42,9 @@ type Claimer interface {
 	Complete(ctx context.Context, id domain.OperationID, result json.RawMessage, usage []domain.Usage) error
 	// Fail records cause on the job (fenced). retryAt != nil returns it to PENDING with run_at = *retryAt
 	// and attempt+1; nil = terminal FAILED, which also appends an OPERATION_FAILED lifecycle event under a
-	// fresh bank change seq (skipped when the bank is tombstoned or gone, and for an org-scoped job). A failed refresh_mental_model is
-	// paused and recorded as REFRESH_FAILED by an idempotent reconcile in the maintenance tick,
-	// not by the Claimer.
+	// fresh bank change seq (skipped when the bank is tombstoned or gone, and for an org-scoped job). A failed
+	// refresh_mental_model is paused and recorded as REFRESH_FAILED by an idempotent reconcile in the maintenance
+	// tick, not by the Claimer.
 	Fail(ctx context.Context, id domain.OperationID, cause error, retryAt *time.Time) error
 	// ReclaimStale handles PROCESSING jobs whose heartbeat is older than ttl. Below their kind's max
 	// attempts (domain.OperationKind.MaxAttempts; 0 = unbounded) they return to PENDING with attempt+1 and
