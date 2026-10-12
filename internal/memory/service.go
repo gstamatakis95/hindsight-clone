@@ -54,6 +54,11 @@ type Deps struct {
 	// Ingest are the request limits of Retain and RetainBatch and RetainBatch's backlog gate; zero fields take
 	// their defaults.
 	Ingest IngestLimits
+	// MaxResponseBytes ends a ListMemories page early (api.max_response_bytes); 0 = domain.DefaultMaxResponseBytes.
+	MaxResponseBytes int
+	// MaxRecallTokens caps a Recall request's max_tokens and include budgets (api.max_recall_tokens); 0 =
+	// domain.DefaultMaxRecallTokens.
+	MaxRecallTokens int
 }
 
 // Service is MemoryService: Retain, Recall and Reflect, the memory listing and curation, the retain_document
@@ -108,9 +113,33 @@ func (s *Service) RetainBatch(ctx context.Context, req RetainBatchRequest) (Reta
 	return s.ingest.IngestBatch(ctx, req)
 }
 
-// Recall retrieves memories for a query through the recall engine.
+// Recall retrieves memories for a query through the recall engine, after capping the request's packing and
+// include token budgets at Deps.MaxRecallTokens (the engine scales its candidate caps by max_tokens, so the cap
+// applies first).
 func (s *Service) Recall(ctx context.Context, req recall.Request) (recall.Result, error) {
+	limit := s.d.MaxRecallTokens
+	if limit <= 0 {
+		limit = domain.DefaultMaxRecallTokens
+	}
+	capped := func(p *int) *int {
+		if p == nil {
+			return nil
+		}
+		v := min(*p, limit)
+		return &v
+	}
+	req.MaxTokens = min(req.MaxTokens, limit)
+	req.Include.ChunksMaxTokens = capped(req.Include.ChunksMaxTokens)
+	req.Include.SourceFactsMaxTokens = capped(req.Include.SourceFactsMaxTokens)
 	return s.d.Recall.Recall(ctx, req) //nolint:wrapcheck // the engine returns domain error classes
+}
+
+// maxResponseBytes is Deps.MaxResponseBytes, or its default.
+func (s *Service) maxResponseBytes() int {
+	if s.d.MaxResponseBytes > 0 {
+		return s.d.MaxResponseBytes
+	}
+	return domain.DefaultMaxResponseBytes
 }
 
 // ListRecallArms lists the recall engine's registered arms, in fusion order.

@@ -3,23 +3,25 @@
 SELECT * FROM chunks
 WHERE tenant_id = @tenant_id AND org_id = @org_id AND bank_id = @bank_id AND id = ANY(@ids::uuid[]);
 
--- EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the sorted live observations attached to it or citing a live fact attached to it.
+-- EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the count of live observations attached to it or citing a live fact attached to it, and the ids of the cap most recently updated of them (updated_at, then id, descending).
 -- name: EntityStatesOf :many
-SELECT e.id, e.canonical_name,
-    COALESCE(ARRAY(
-        SELECT z.id FROM (
-            SELECT o.id FROM unit_entities x JOIN memory_units o ON o.id = x.unit_id
-            WHERE x.entity_id = e.id AND o.fact_type = 'observation'
-              AND o.tenant_id = @tenant_id AND o.org_id = @org_id AND o.bank_id = @bank_id
-            UNION
-            SELECT o.id FROM unit_entities x
-            JOIN memory_units f ON f.id = x.unit_id AND f.fact_type <> 'observation'
-            JOIN observation_evidence ev ON ev.unit_id = f.id
-            JOIN memory_units o ON o.id = ev.observation_id AND o.fact_type = 'observation'
-            WHERE x.entity_id = e.id AND o.tenant_id = @tenant_id AND o.org_id = @org_id AND o.bank_id = @bank_id
-        ) AS z ORDER BY z.id
-    ), '{}')::uuid[] AS observation_ids
+SELECT e.id, e.canonical_name, obs.n::bigint AS observation_count,
+    COALESCE((obs.ids)[1:@cap::int], '{}')::uuid[] AS observation_ids
 FROM entities e
+CROSS JOIN LATERAL (
+    SELECT count(*) AS n, array_agg(z.id ORDER BY z.updated_at DESC, z.id DESC) AS ids
+    FROM (
+        SELECT o.id, o.updated_at FROM unit_entities x JOIN memory_units o ON o.id = x.unit_id
+        WHERE x.entity_id = e.id AND o.fact_type = 'observation'
+          AND o.tenant_id = @tenant_id AND o.org_id = @org_id AND o.bank_id = @bank_id
+        UNION
+        SELECT o.id, o.updated_at FROM unit_entities x
+        JOIN memory_units f ON f.id = x.unit_id AND f.fact_type <> 'observation'
+        JOIN observation_evidence ev ON ev.unit_id = f.id
+        JOIN memory_units o ON o.id = ev.observation_id AND o.fact_type = 'observation'
+        WHERE x.entity_id = e.id AND o.tenant_id = @tenant_id AND o.org_id = @org_id AND o.bank_id = @bank_id
+    ) AS z
+) AS obs
 WHERE e.tenant_id = @tenant_id AND e.org_id = @org_id AND e.bank_id = @bank_id AND e.id IN (
     SELECT ue.entity_id FROM unit_entities ue JOIN memory_units u ON u.id = ue.unit_id
     WHERE u.tenant_id = @tenant_id AND u.org_id = @org_id AND u.bank_id = @bank_id AND u.id = ANY(@ids::uuid[])

@@ -63,29 +63,32 @@ func (q *Queries) ChunkGetMany(ctx context.Context, arg ChunkGetManyParams) ([]C
 }
 
 const entityStatesOf = `-- name: EntityStatesOf :many
-SELECT e.id, e.canonical_name,
-    COALESCE(ARRAY(
-        SELECT z.id FROM (
-            SELECT o.id FROM unit_entities x JOIN memory_units o ON o.id = x.unit_id
-            WHERE x.entity_id = e.id AND o.fact_type = 'observation'
-              AND o.tenant_id = $1 AND o.org_id = $2 AND o.bank_id = $3
-            UNION
-            SELECT o.id FROM unit_entities x
-            JOIN memory_units f ON f.id = x.unit_id AND f.fact_type <> 'observation'
-            JOIN observation_evidence ev ON ev.unit_id = f.id
-            JOIN memory_units o ON o.id = ev.observation_id AND o.fact_type = 'observation'
-            WHERE x.entity_id = e.id AND o.tenant_id = $1 AND o.org_id = $2 AND o.bank_id = $3
-        ) AS z ORDER BY z.id
-    ), '{}')::uuid[] AS observation_ids
+SELECT e.id, e.canonical_name, obs.n::bigint AS observation_count,
+    COALESCE((obs.ids)[1:$1::int], '{}')::uuid[] AS observation_ids
 FROM entities e
-WHERE e.tenant_id = $1 AND e.org_id = $2 AND e.bank_id = $3 AND e.id IN (
+CROSS JOIN LATERAL (
+    SELECT count(*) AS n, array_agg(z.id ORDER BY z.updated_at DESC, z.id DESC) AS ids
+    FROM (
+        SELECT o.id, o.updated_at FROM unit_entities x JOIN memory_units o ON o.id = x.unit_id
+        WHERE x.entity_id = e.id AND o.fact_type = 'observation'
+          AND o.tenant_id = $2 AND o.org_id = $3 AND o.bank_id = $4
+        UNION
+        SELECT o.id, o.updated_at FROM unit_entities x
+        JOIN memory_units f ON f.id = x.unit_id AND f.fact_type <> 'observation'
+        JOIN observation_evidence ev ON ev.unit_id = f.id
+        JOIN memory_units o ON o.id = ev.observation_id AND o.fact_type = 'observation'
+        WHERE x.entity_id = e.id AND o.tenant_id = $2 AND o.org_id = $3 AND o.bank_id = $4
+    ) AS z
+) AS obs
+WHERE e.tenant_id = $2 AND e.org_id = $3 AND e.bank_id = $4 AND e.id IN (
     SELECT ue.entity_id FROM unit_entities ue JOIN memory_units u ON u.id = ue.unit_id
-    WHERE u.tenant_id = $1 AND u.org_id = $2 AND u.bank_id = $3 AND u.id = ANY($4::uuid[])
+    WHERE u.tenant_id = $2 AND u.org_id = $3 AND u.bank_id = $4 AND u.id = ANY($5::uuid[])
 )
 ORDER BY e.id
 `
 
 type EntityStatesOfParams struct {
+	Cap      int32
 	TenantID string
 	OrgID    string
 	BankID   string
@@ -93,14 +96,16 @@ type EntityStatesOfParams struct {
 }
 
 type EntityStatesOfRow struct {
-	ID             uuid.UUID
-	CanonicalName  string
-	ObservationIds []uuid.UUID
+	ID               uuid.UUID
+	CanonicalName    string
+	ObservationCount int64
+	ObservationIds   []uuid.UUID
 }
 
-// EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the sorted live observations attached to it or citing a live fact attached to it.
+// EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the count of live observations attached to it or citing a live fact attached to it, and the ids of the cap most recently updated of them (updated_at, then id, descending).
 func (q *Queries) EntityStatesOf(ctx context.Context, arg EntityStatesOfParams) ([]EntityStatesOfRow, error) {
 	rows, err := q.db.Query(ctx, entityStatesOf,
+		arg.Cap,
 		arg.TenantID,
 		arg.OrgID,
 		arg.BankID,
@@ -113,7 +118,12 @@ func (q *Queries) EntityStatesOf(ctx context.Context, arg EntityStatesOfParams) 
 	items := []EntityStatesOfRow{}
 	for rows.Next() {
 		var i EntityStatesOfRow
-		if err := rows.Scan(&i.ID, &i.CanonicalName, &i.ObservationIds); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.CanonicalName,
+			&i.ObservationCount,
+			&i.ObservationIds,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

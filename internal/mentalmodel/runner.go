@@ -303,8 +303,15 @@ func (s *Service) full(ctx context.Context, p *refreshPlan) (drafted, error) {
 	return dr, nil
 }
 
-// finish projects structured output onto the spec's response schema when the content changed.
+// finish fails a changed draft over domain.MaxMentalModelContentBytes (permanently, so the stored content stays and
+// the job does not retry), then projects structured output onto the spec's response schema when the content
+// changed.
 func (s *Service) finish(ctx context.Context, p *refreshPlan, dr drafted, err error) (drafted, error) {
+	if n := len(dr.content); err == nil && n > domain.MaxMentalModelContentBytes && dr.content != p.m.ContentMD {
+		dr.content = p.m.ContentMD
+		return dr, fmt.Errorf("%w: %w: mentalmodel: %s: the page is %d bytes, over the %d-byte limit",
+			jobs.ErrPermanent, domain.ErrResourceExhausted, failureContentTooLarge, n, domain.MaxMentalModelContentBytes)
+	}
 	schema := strings.TrimSpace(p.m.Spec.ResponseSchemaJSON)
 	if err != nil || dr.noNewFacts || schema == "" || dr.content == p.m.ContentMD {
 		return dr, err

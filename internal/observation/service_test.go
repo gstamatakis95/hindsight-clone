@@ -320,7 +320,8 @@ func TestRunConsolidateJobResult(t *testing.T) {
 }
 
 // TestStrategyPreview: each draft strategy lists the scopes it wins and those an earlier one shadows, over
-// the scopes Reader.ListObservationScopes returns (every scope that holds an observation).
+// the scopes Reader.ListObservationScopes returns (every scope that holds an observation). The preview pages the
+// scopes, and the pages add up to the whole bank's verdicts.
 func TestStrategyPreview(t *testing.T) {
 	e := newEnv(t, domain.BankConfig{})
 	for i, tags := range [][]string{{"team", "x"}, {"team"}, {"other"}, {}} {
@@ -332,12 +333,22 @@ func TestStrategyPreview(t *testing.T) {
 		{Name: "exact-team", Scopes: []domain.TagFilter{{Tags: []string{"team"}, Match: domain.TagsMatchExact}}},
 		{Name: "team", Scopes: []domain.TagFilter{{Tags: []string{"team"}}}},
 	}
-	p, err := e.service().PreviewConsolidationStrategies(t.Context(), bank, draft)
-	if err != nil {
-		t.Fatal(err)
+	p := StrategyPreview{Matches: make([]StrategyMatch, len(draft))}
+	token, pages := "", 0
+	for ; pages == 0 || token != ""; pages++ {
+		page, err := e.service().PreviewConsolidationStrategies(t.Context(), bank, draft, 1, token)
+		if err != nil || len(page.Matches) != 2 {
+			t.Fatalf("preview page %d = %+v, %v", pages, page, err)
+		}
+		for i, m := range page.Matches {
+			p.Matches[i].Strategy = m.Strategy
+			p.Matches[i].MatchedScopes = append(p.Matches[i].MatchedScopes, m.MatchedScopes...)
+			p.Matches[i].ShadowedScopes = append(p.Matches[i].ShadowedScopes, m.ShadowedScopes...)
+		}
+		token = page.NextPageToken
 	}
-	if !p.Complete || len(p.Matches) != 2 {
-		t.Fatalf("preview = %+v", p)
+	if pages != 4 {
+		t.Errorf("preview took %d pages of one scope, want 4", pages)
 	}
 	keys := func(ss []domain.ScopeKey) []string {
 		var out []string

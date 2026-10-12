@@ -41,17 +41,20 @@ type Options struct {
 	RecallArms []string
 	// MaxRecvBytes is the largest request message the server accepts; 0 = gRPC's default (4 MiB).
 	MaxRecvBytes int
+	// MaxResponseBytes is the largest response a read may return (api.max_response_bytes); a larger one fails with
+	// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE). 0 = unchecked.
+	MaxResponseBytes int
 }
 
 // New returns a gRPC server with the memory.v1 services of h and grpc.health.v1 registered, receiving messages of
-// up to o.MaxRecvBytes. The tenant, default-deadline, paging (negative page_size / limit) and arm-name
-// (RecallConfig names outside o.RecallArms) interceptors run first, in that order; opts are appended (more
-// interceptors chain after them).
+// up to o.MaxRecvBytes. The tenant, default-deadline, paging (negative page_size / limit), arm-name
+// (RecallConfig names outside o.RecallArms) and response-size (a read's response over o.MaxResponseBytes)
+// interceptors run first, in that order; opts are appended (more interceptors chain after them).
 func New(h Handlers, o Options, opts ...grpc.ServerOption) *grpc.Server {
 	base := []grpc.ServerOption{
 		grpc.ChainUnaryInterceptor(
 			TenantInterceptor(), DeadlineInterceptor(o.DefaultDeadline), pagingInterceptor(),
-			armNamesInterceptor(o.RecallArms),
+			armNamesInterceptor(o.RecallArms), responseSizeInterceptor(o.MaxResponseBytes),
 		),
 	}
 	if o.MaxRecvBytes > 0 {

@@ -85,7 +85,10 @@
 //
 // [PageBounds] states a listing's size rule once: [ListPage] (page_size: 0 = 100, at most 1000) for every List RPC
 // and [SearchResults] (max_results: 0 = 10, at most 100) for page search; a negative size is an [InvalidField] error.
-// [EncodePageToken] and [DecodePageToken] make a keyset position an opaque base64url JSON token.
+// [EncodePageToken] and [DecodePageToken] make a keyset position an opaque base64url JSON token. The response size
+// bounds sit beside them: [DefaultMaxResponseBytes] and [DefaultMaxRecallTokens] (the defaults of the api section of
+// the server config file), [MaxEntityObservationIDs] and [MaxMentalModelContentBytes]; [FitBytes] ends a page of
+// large items early under a byte budget.
 //
 // # Testing
 //

@@ -104,7 +104,7 @@ func strategyPreviewToProto(p observation.StrategyPreview) *pb.PreviewConsolidat
 			matches[i] = strategyMatchToProto(p.Matches[i])
 		}
 	}
-	return &pb.PreviewConsolidationStrategiesResponse{Matches: matches, Complete: p.Complete}
+	return &pb.PreviewConsolidationStrategiesResponse{Matches: matches, NextPageToken: p.NextPageToken}
 }
 
 // strategiesFromProto converts a PreviewConsolidationStrategiesRequest's draft strategies.

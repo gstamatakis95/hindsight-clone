@@ -43,8 +43,9 @@ func (r *reader) GetChunks(ctx context.Context, b domain.BankRef, ids []domain.C
 	return out, nil
 }
 
-// EntityStates returns the entities attached to any of b's live units in units, ordered by id, each with
-// the sorted live observations attached to it or citing a live fact attached to it.
+// EntityStates returns the entities attached to any of b's live units in units, ordered by id, each with the
+// count of live observations attached to it or citing a live fact attached to it and the ids of the
+// domain.MaxEntityObservationIDs most recently updated of them.
 func (r *reader) EntityStates(
 	ctx context.Context, b domain.BankRef, units []domain.UnitID,
 ) ([]domain.EntityState, error) {
@@ -53,7 +54,7 @@ func (r *reader) EntityStates(
 		return []domain.EntityState{}, nil
 	}
 	rows, err := r.queries().EntityStatesOf(ctx, db.EntityStatesOfParams{
-		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids, Cap: domain.MaxEntityObservationIDs,
 	})
 	if err != nil {
 		return nil, mapErr("entity states", err)
@@ -62,7 +63,7 @@ func (r *reader) EntityStates(
 	for i, row := range rows {
 		out[i] = domain.EntityState{
 			EntityID: idOf[domain.EntityID](row.ID), CanonicalName: row.CanonicalName,
-			ObservationIDs: idsOf[domain.UnitID](row.ObservationIds),
+			ObservationIDs: idsOf[domain.UnitID](row.ObservationIds), ObservationCount: row.ObservationCount,
 		}
 	}
 	return out, nil

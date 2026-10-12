@@ -45,7 +45,8 @@ type Page struct {
 }
 
 // ListMemories validates req, decodes its page token and reads one page plus one unit to know whether more
-// follow. Units come newest first (created_at, then id); no total is computed.
+// follow. Units come newest first (created_at, then id); no total is computed. The page ends early once its units
+// reach the response size limit (domain.FitBytes over Deps.MaxResponseBytes), with a token after the last one kept.
 func (s *Service) ListMemories(ctx context.Context, req ListRequest) (Page, error) {
 	q, err := unitQuery(req)
 	if err != nil {
@@ -57,16 +58,31 @@ func (s *Service) ListMemories(ctx context.Context, req ListRequest) (Page, erro
 	if err != nil {
 		return Page{}, fmt.Errorf("list memories: %w", err)
 	}
-	page := Page{Items: units}
-	if len(units) > size {
-		page.Items = units[:size]
-		last := page.Items[size-1]
+	keep := domain.FitBytes(units[:min(len(units), size)], s.maxResponseBytes(), unitBytes)
+	page := Page{Items: units[:keep]}
+	if len(units) > keep {
+		last := page.Items[keep-1]
 		page.NextPageToken, err = domain.EncodePageToken(store.UnitCursor{CreatedAt: last.CreatedAt, ID: last.ID})
 		if err != nil {
 			return Page{}, fmt.Errorf("list memories: %w", err)
 		}
 	}
 	return page, nil
+}
+
+// unitBytes estimates the encoded size of a listed unit from its variable-length fields.
+func unitBytes(u domain.Unit) int {
+	n := len(u.Text) + len(u.Context) + len(u.DocumentID) + len(u.ChunkID) + 40*len(u.SourceIDs)
+	for k, v := range u.Metadata {
+		n += len(k) + len(v)
+	}
+	for _, t := range u.Tags {
+		n += len(t)
+	}
+	for _, e := range u.Entities {
+		n += len(e)
+	}
+	return n
 }
 
 // unitQuery turns a request into a UnitQuery, validating enums, the page size (domain.ListPage) and the flat tag

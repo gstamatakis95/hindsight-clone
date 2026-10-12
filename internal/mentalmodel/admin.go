@@ -3,6 +3,7 @@ package mentalmodel
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"memd/internal/domain"
@@ -12,7 +13,6 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -126,8 +126,16 @@ func (s *Service) GetMentalModel(
 	return s.present(ctx, m, view)
 }
 
+// modelToken is the decoded form of a ListMentalModels page token.
+type modelToken struct {
+	// After is the last model id of the previous page.
+	After domain.MentalModelID `json:"a"`
+}
+
 // ListMentalModels returns one page of the bank's models ordered by id, in view (unspecified = basic). The
-// page size follows domain.ListPage and the tag filter must be flat (domain.ErrInvalidArgument otherwise).
+// page size follows domain.ListPage and the tag filter must be flat (domain.ErrInvalidArgument otherwise); the
+// page token is opaque and a malformed one is domain.ErrInvalidArgument. The page ends early once its presented
+// models reach the response size limit (domain.FitBytes), with a token after the last one kept.
 func (s *Service) ListMentalModels(ctx context.Context, req ListRequest) (ModelPage, error) {
 	size, err := domain.ListPage.Size(req.PageSize)
 	if err != nil {
@@ -136,9 +144,15 @@ func (s *Service) ListMentalModels(ctx context.Context, req ListRequest) (ModelP
 	if err := req.Tags.RequireFlat(); err != nil {
 		return ModelPage{}, fmt.Errorf("mentalmodel: list: %w", err)
 	}
+	var tok modelToken
+	if req.PageToken != "" {
+		if err := domain.DecodePageToken(req.PageToken, &tok); err != nil || tok.After == "" {
+			return ModelPage{}, domain.InvalidField("page_token", "malformed page token")
+		}
+	}
 	items, next, err := s.d.DB.Read().ListMentalModels(ctx, store.ModelQuery{
 		Bank: req.Bank, FolderPrefix: normalizeFolder(req.FolderPrefix), Tags: domain.NormalizeTags(req.Tags.Tags),
-		TagsMatch: req.Tags.Match, PageSize: size, PageToken: req.PageToken,
+		TagsMatch: req.Tags.Match, PageSize: size, PageToken: string(tok.After),
 	})
 	if err != nil {
 		return ModelPage{}, fmt.Errorf("mentalmodel: list: %w", err)
@@ -152,7 +166,28 @@ func (s *Service) ListMentalModels(ctx context.Context, req ListRequest) (ModelP
 			return ModelPage{}, err
 		}
 	}
-	return ModelPage{Items: items, NextPageToken: next}, nil
+	keep := domain.FitBytes(items, s.maxResponseBytes(), modelBytes)
+	page := ModelPage{Items: items[:keep]}
+	if keep < len(items) || next != "" {
+		if page.NextPageToken, err = domain.EncodePageToken(modelToken{After: items[keep-1].Spec.ID}); err != nil {
+			return ModelPage{}, fmt.Errorf("mentalmodel: list: %w", err)
+		}
+	}
+	return page, nil
+}
+
+// modelBytes estimates the encoded size of a presented model from its variable-length fields.
+func modelBytes(m domain.MentalModel) int {
+	n := len(m.ContentMD) + len(m.StructuredOutputJSON) + 40*len(m.SourceIDs)
+	if spec, err := json.Marshal(m.Spec); err == nil {
+		n += len(spec)
+	}
+	if m.LastTrace != nil {
+		if trace, err := json.Marshal(m.LastTrace); err == nil {
+			n += len(trace)
+		}
+	}
+	return n
 }
 
 // UpdateMentalModel applies patch in one transaction. A changed source query or scope resets
@@ -216,16 +251,24 @@ func (s *Service) RefreshMentalModel(ctx context.Context, req RefreshRequest) (d
 	return op, joined, nil
 }
 
-// ListMentalModelHistory returns one page of the model's history, newest first, paged with an offset token; the
-// page size follows domain.ListPage.
+// historyToken is the decoded form of a ListMentalModelHistory page token.
+type historyToken struct {
+	// Offset is how many entries the previous pages held.
+	Offset int `json:"o"`
+}
+
+// ListMentalModelHistory returns one page of the model's history, newest first (changed_at, then id), paged with
+// an opaque offset token: the history is short (history_max_entries per kind), and a version written while paging
+// can only repeat an entry at a page boundary, never skip one. The page size follows domain.ListPage, and the page
+// ends early once its entries reach the response size limit (domain.FitBytes).
 func (s *Service) ListMentalModelHistory(ctx context.Context, req HistoryRequest) (HistoryPage, error) {
 	offset := 0
 	if req.PageToken != "" {
-		n, err := strconv.Atoi(req.PageToken)
-		if err != nil || n < 0 {
-			return HistoryPage{}, domain.InvalidField("page_token", "bad page token")
+		var tok historyToken
+		if err := domain.DecodePageToken(req.PageToken, &tok); err != nil || tok.Offset <= 0 {
+			return HistoryPage{}, domain.InvalidField("page_token", "malformed page token")
 		}
-		offset = n
+		offset = tok.Offset
 	}
 	size, err := domain.ListPage.Size(req.PageSize)
 	if err != nil {
@@ -247,10 +290,19 @@ func (s *Service) ListMentalModelHistory(ctx context.Context, req HistoryRequest
 	if offset < len(entries) {
 		page.Items = entries[offset:min(offset+size, len(entries))]
 	}
-	if len(entries) > offset+size {
-		page.NextPageToken = strconv.Itoa(offset + size)
+	keep := domain.FitBytes(page.Items, s.maxResponseBytes(), historyBytes)
+	page.Items = page.Items[:keep]
+	if len(entries) > offset+keep {
+		if page.NextPageToken, err = domain.EncodePageToken(historyToken{Offset: offset + keep}); err != nil {
+			return HistoryPage{}, fmt.Errorf("mentalmodel: history: %w", err)
+		}
 	}
 	return page, nil
+}
+
+// historyBytes estimates the encoded size of a history entry from its variable-length fields.
+func historyBytes(e domain.MentalModelHistoryEntry) int {
+	return len(e.PreviousContent) + len(e.FailureReason) + len(e.ErrorMessage)
 }
 
 // DeleteMentalModel removes the model and its history.

@@ -47,11 +47,23 @@
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
 // poll OperationService.ListEvents with after_seq, passing the previous response's next_after_seq.
 //
-// Paging. Every List RPC takes page_size and page_token and returns next_page_token (empty = no more pages).
-// page_size 0 = 100, larger than 1000 = 1000, negative = INVALID_ARGUMENT. A page token is opaque and only
-// valid for the same request; a malformed one is INVALID_ARGUMENT. ListEvents pages by sequence instead
-// (page_size + after_seq / next_after_seq), and SearchMentalModels takes max_results (0 = 10, larger than
-// 100 = 100, negative = INVALID_ARGUMENT).
+// Paging. Every List RPC (and PreviewConsolidationStrategies) takes page_size and page_token and returns
+// next_page_token (empty = no more pages). page_size 0 = 100, larger than 1000 = 1000, negative =
+// INVALID_ARGUMENT. A page token is opaque and only valid for the same request; a malformed one is
+// INVALID_ARGUMENT. Each list response states its order, which always ends in a unique tiebreak, so paging never
+// skips or repeats an item that did not change meanwhile. page_size is a maximum: a page of large items
+// (ListMemories, ListMentalModels with content, ListMentalModelHistory) ends early once its items reach the
+// server's response size limit (api.max_response_bytes, default 3 MiB), so always follow next_page_token rather
+// than counting items. ListEvents pages by sequence instead (page_size + after_seq / next_after_seq), and
+// SearchMentalModels takes max_results (0 = 10, larger than 100 = 100, negative = INVALID_ARGUMENT).
+//
+// Message sizes. The server accepts requests up to its ingest.max_request_bytes (default 16 MiB); gRPC clients
+// receive at most 4 MiB by default, and every response is kept under that: lists end pages early, a document's
+// stored text is at most ingest.max_document_bytes (default 2 MiB), a mental model's content is at most 1 MiB,
+// and Recall's token budgets are capped by api.max_recall_tokens (default 32000). A read (Get*, List*, Search*,
+// Preview*, Export*, Recall, Reflect) whose response would still pass api.max_response_bytes fails with
+// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE) instead of breaking the client's receive; ExportBankTemplate is the one
+// read that can reach it in practice. A write never fails on its response size.
 //
 // Tag filters. Every request that filters by tag takes one TagFilter: flat tags under a match mode, or
 // boolean tag groups (setting both = INVALID_ARGUMENT). Each TagFilter field states its default match mode.
@@ -76,7 +88,8 @@
 //                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
 //   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens),
 //                        INGEST_BACKLOG (RetainBatch while the retain backlog is over its limit; it also carries a
-//                        google.rpc.RetryInfo with the delay to wait)
+//                        google.rpc.RetryInfo with the delay to wait), RESPONSE_TOO_LARGE (an unpaged response
+//                        would pass the server's response size limit)
 //   ABORTED              OPERATION_CANCELLED (the operation was cancelled or its bank deleted), CONFLICT (a
 //                        concurrent writer won; retry)
 //   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
@@ -150,10 +163,10 @@ type MemoryServiceClient interface {
 	Reflect(ctx context.Context, in *ReflectRequest, opts ...grpc.CallOption) (*ReflectResponse, error)
 	// ListRecallArms lists the recall arms this server has registered, with a one-line description each: the
 	// names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
-	// MinScores.arms accept.
+	// MinScores.arms accept. Not paged: the list is the server's own registry, a handful of entries.
 	ListRecallArms(ctx context.Context, in *ListRecallArmsRequest, opts ...grpc.CallOption) (*ListRecallArmsResponse, error)
 	// ListMemories lists live and invalidated memories (raw facts and observations) with filters and keyset
-	// pagination. Returns no total.
+	// pagination, newest first. Returns no total.
 	ListMemories(ctx context.Context, in *ListMemoriesRequest, opts ...grpc.CallOption) (*ListMemoriesResponse, error)
 	// GetMemory returns one memory, live or invalidated.
 	GetMemory(ctx context.Context, in *GetMemoryRequest, opts ...grpc.CallOption) (*GetMemoryResponse, error)
@@ -304,10 +317,10 @@ type MemoryServiceServer interface {
 	Reflect(context.Context, *ReflectRequest) (*ReflectResponse, error)
 	// ListRecallArms lists the recall arms this server has registered, with a one-line description each: the
 	// names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
-	// MinScores.arms accept.
+	// MinScores.arms accept. Not paged: the list is the server's own registry, a handful of entries.
 	ListRecallArms(context.Context, *ListRecallArmsRequest) (*ListRecallArmsResponse, error)
 	// ListMemories lists live and invalidated memories (raw facts and observations) with filters and keyset
-	// pagination. Returns no total.
+	// pagination, newest first. Returns no total.
 	ListMemories(context.Context, *ListMemoriesRequest) (*ListMemoriesResponse, error)
 	// GetMemory returns one memory, live or invalidated.
 	GetMemory(context.Context, *GetMemoryRequest) (*GetMemoryResponse, error)
@@ -871,7 +884,7 @@ type ObservationServiceClient interface {
 	// their sources for re-consolidation, and optionally re-consolidates at once.
 	ClearObservations(ctx context.Context, in *ClearObservationsRequest, opts ...grpc.CallOption) (*ClearObservationsResponse, error)
 	// PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes without
-	// saving them.
+	// saving them, one page of scopes per call.
 	PreviewConsolidationStrategies(ctx context.Context, in *PreviewConsolidationStrategiesRequest, opts ...grpc.CallOption) (*PreviewConsolidationStrategiesResponse, error)
 }
 
@@ -950,7 +963,7 @@ type ObservationServiceServer interface {
 	// their sources for re-consolidation, and optionally re-consolidates at once.
 	ClearObservations(context.Context, *ClearObservationsRequest) (*ClearObservationsResponse, error)
 	// PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes without
-	// saving them.
+	// saving them, one page of scopes per call.
 	PreviewConsolidationStrategies(context.Context, *PreviewConsolidationStrategiesRequest) (*PreviewConsolidationStrategiesResponse, error)
 	mustEmbedUnimplementedObservationServiceServer()
 }
@@ -1151,7 +1164,8 @@ type MentalModelServiceClient interface {
 	// refresh, joins and upgrades a queued one, and on success clears auto_refresh_paused.
 	RefreshMentalModel(ctx context.Context, in *RefreshMentalModelRequest, opts ...grpc.CallOption) (*RefreshMentalModelResponse, error)
 	// PreviewMentalModelRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes
-	// nothing, not even usage.
+	// nothing, not even usage. A draft over the 1 MiB content limit fails with RESOURCE_EXHAUSTED, as the refresh
+	// would.
 	PreviewMentalModelRefresh(ctx context.Context, in *PreviewMentalModelRefreshRequest, opts ...grpc.CallOption) (*PreviewMentalModelRefreshResponse, error)
 	// ListMentalModelHistory pages through a model's versions and refresh failures, newest first.
 	ListMentalModelHistory(ctx context.Context, in *ListMentalModelHistoryRequest, opts ...grpc.CallOption) (*ListMentalModelHistoryResponse, error)
@@ -1289,7 +1303,8 @@ type MentalModelServiceServer interface {
 	// refresh, joins and upgrades a queued one, and on success clears auto_refresh_paused.
 	RefreshMentalModel(context.Context, *RefreshMentalModelRequest) (*RefreshMentalModelResponse, error)
 	// PreviewMentalModelRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes
-	// nothing, not even usage.
+	// nothing, not even usage. A draft over the 1 MiB content limit fails with RESOURCE_EXHAUSTED, as the refresh
+	// would.
 	PreviewMentalModelRefresh(context.Context, *PreviewMentalModelRefreshRequest) (*PreviewMentalModelRefreshResponse, error)
 	// ListMentalModelHistory pages through a model's versions and refresh failures, newest first.
 	ListMentalModelHistory(context.Context, *ListMentalModelHistoryRequest) (*ListMentalModelHistoryResponse, error)
@@ -1922,7 +1937,9 @@ type BankServiceClient interface {
 	GetBankStats(ctx context.Context, in *GetBankStatsRequest, opts ...grpc.CallOption) (*GetBankStatsResponse, error)
 	// ListTags pages through the bank's tags with usage counts.
 	ListTags(ctx context.Context, in *ListTagsRequest, opts ...grpc.CallOption) (*ListTagsResponse, error)
-	// ExportBankTemplate exports the bank's own config, directives and mental-model specs.
+	// ExportBankTemplate exports the bank's own config, directives and mental-model specs as one object that
+	// CreateBank takes whole, so it is not paged; a template over the server's response size limit fails with
+	// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE).
 	ExportBankTemplate(ctx context.Context, in *ExportBankTemplateRequest, opts ...grpc.CallOption) (*ExportBankTemplateResponse, error)
 }
 
@@ -2032,7 +2049,9 @@ type BankServiceServer interface {
 	GetBankStats(context.Context, *GetBankStatsRequest) (*GetBankStatsResponse, error)
 	// ListTags pages through the bank's tags with usage counts.
 	ListTags(context.Context, *ListTagsRequest) (*ListTagsResponse, error)
-	// ExportBankTemplate exports the bank's own config, directives and mental-model specs.
+	// ExportBankTemplate exports the bank's own config, directives and mental-model specs as one object that
+	// CreateBank takes whole, so it is not paged; a template over the server's response size limit fails with
+	// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE).
 	ExportBankTemplate(context.Context, *ExportBankTemplateRequest) (*ExportBankTemplateResponse, error)
 	mustEmbedUnimplementedBankServiceServer()
 }

@@ -51,6 +51,9 @@ type EntityState struct {
 	EntityID EntityID
 	// CanonicalName is the entity's name.
 	CanonicalName string
-	// ObservationIDs are observations about the entity.
+	// ObservationIDs are the MaxEntityObservationIDs most recently updated live observations about the entity
+	// (updated_at, then id, descending).
 	ObservationIDs []UnitID
+	// ObservationCount is how many live observations about the entity there are in all.
+	ObservationCount int64
 }

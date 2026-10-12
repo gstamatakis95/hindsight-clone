@@ -47,11 +47,23 @@
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
 // poll OperationService.ListEvents with after_seq, passing the previous response's next_after_seq.
 //
-// Paging. Every List RPC takes page_size and page_token and returns next_page_token (empty = no more pages).
-// page_size 0 = 100, larger than 1000 = 1000, negative = INVALID_ARGUMENT. A page token is opaque and only
-// valid for the same request; a malformed one is INVALID_ARGUMENT. ListEvents pages by sequence instead
-// (page_size + after_seq / next_after_seq), and SearchMentalModels takes max_results (0 = 10, larger than
-// 100 = 100, negative = INVALID_ARGUMENT).
+// Paging. Every List RPC (and PreviewConsolidationStrategies) takes page_size and page_token and returns
+// next_page_token (empty = no more pages). page_size 0 = 100, larger than 1000 = 1000, negative =
+// INVALID_ARGUMENT. A page token is opaque and only valid for the same request; a malformed one is
+// INVALID_ARGUMENT. Each list response states its order, which always ends in a unique tiebreak, so paging never
+// skips or repeats an item that did not change meanwhile. page_size is a maximum: a page of large items
+// (ListMemories, ListMentalModels with content, ListMentalModelHistory) ends early once its items reach the
+// server's response size limit (api.max_response_bytes, default 3 MiB), so always follow next_page_token rather
+// than counting items. ListEvents pages by sequence instead (page_size + after_seq / next_after_seq), and
+// SearchMentalModels takes max_results (0 = 10, larger than 100 = 100, negative = INVALID_ARGUMENT).
+//
+// Message sizes. The server accepts requests up to its ingest.max_request_bytes (default 16 MiB); gRPC clients
+// receive at most 4 MiB by default, and every response is kept under that: lists end pages early, a document's
+// stored text is at most ingest.max_document_bytes (default 2 MiB), a mental model's content is at most 1 MiB,
+// and Recall's token budgets are capped by api.max_recall_tokens (default 32000). A read (Get*, List*, Search*,
+// Preview*, Export*, Recall, Reflect) whose response would still pass api.max_response_bytes fails with
+// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE) instead of breaking the client's receive; ExportBankTemplate is the one
+// read that can reach it in practice. A write never fails on its response size.
 //
 // Tag filters. Every request that filters by tag takes one TagFilter: flat tags under a match mode, or
 // boolean tag groups (setting both = INVALID_ARGUMENT). Each TagFilter field states its default match mode.
@@ -76,7 +88,8 @@
 //                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
 //   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens),
 //                        INGEST_BACKLOG (RetainBatch while the retain backlog is over its limit; it also carries a
-//                        google.rpc.RetryInfo with the delay to wait)
+//                        google.rpc.RetryInfo with the delay to wait), RESPONSE_TOO_LARGE (an unpaged response
+//                        would pass the server's response size limit)
 //   ABORTED              OPERATION_CANCELLED (the operation was cancelled or its bank deleted), CONFLICT (a
 //                        concurrent writer won; retry)
 //   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
@@ -2556,7 +2569,8 @@ type RecallRequest struct {
 	Tags *TagFilter `protobuf:"bytes,5,opt,name=tags,proto3" json:"tags,omitempty"`
 	// Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
 	Budget Budget `protobuf:"varint,6,opt,name=budget,proto3,enum=memory.v1.Budget" json:"budget,omitempty"`
-	// Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
+	// Token budget for packed results; 0 = the server's default packing budget (never derived from budget). Larger
+	// than the server's api.max_recall_tokens (default 32000) = that cap.
 	MaxTokens int32 `protobuf:"varint,7,opt,name=max_tokens,json=maxTokens,proto3" json:"max_tokens,omitempty"`
 	// Reference time for relative expressions and recency; unset = now.
 	QueryTime *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=query_time,json=queryTime,proto3" json:"query_time,omitempty"`
@@ -2820,11 +2834,12 @@ type RecallInclude struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Attach the chunks results were extracted from.
 	Chunks *bool `protobuf:"varint,1,opt,name=chunks,proto3,oneof" json:"chunks,omitempty"`
-	// Token budget for attached chunks.
+	// Token budget for attached chunks; unset = 8192, larger than the server's api.max_recall_tokens = that cap.
 	ChunksMaxTokens *int32 `protobuf:"varint,2,opt,name=chunks_max_tokens,json=chunksMaxTokens,proto3,oneof" json:"chunks_max_tokens,omitempty"`
 	// Attach the source facts of returned observations.
 	SourceFacts *bool `protobuf:"varint,3,opt,name=source_facts,json=sourceFacts,proto3,oneof" json:"source_facts,omitempty"`
-	// Token budget for attached source facts.
+	// Token budget for attached source facts; unset = 4096, larger than the server's api.max_recall_tokens = that
+	// cap.
 	SourceFactsMaxTokens *int32 `protobuf:"varint,4,opt,name=source_facts_max_tokens,json=sourceFactsMaxTokens,proto3,oneof" json:"source_facts_max_tokens,omitempty"`
 	// Attach entity state for entities in the results.
 	Entities      *bool `protobuf:"varint,5,opt,name=entities,proto3,oneof" json:"entities,omitempty"`
@@ -2904,10 +2919,13 @@ type EntityState struct {
 	EntityId string `protobuf:"bytes,1,opt,name=entity_id,json=entityId,proto3" json:"entity_id,omitempty"`
 	// Resolved canonical name.
 	CanonicalName string `protobuf:"bytes,2,opt,name=canonical_name,json=canonicalName,proto3" json:"canonical_name,omitempty"`
-	// Observations about the entity.
+	// Observations about the entity: the 50 most recently updated (newest first, then by id), out of
+	// observation_count.
 	ObservationIds []string `protobuf:"bytes,3,rep,name=observation_ids,json=observationIds,proto3" json:"observation_ids,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Live observations about the entity in all; more than observation_ids holds when it passes 50.
+	ObservationCount int64 `protobuf:"varint,4,opt,name=observation_count,json=observationCount,proto3" json:"observation_count,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *EntityState) Reset() {
@@ -2959,6 +2977,13 @@ func (x *EntityState) GetObservationIds() []string {
 		return x.ObservationIds
 	}
 	return nil
+}
+
+func (x *EntityState) GetObservationCount() int64 {
+	if x != nil {
+		return x.ObservationCount
+	}
+	return 0
 }
 
 // ReflectRequest asks the reflect agent a question.
@@ -3635,7 +3660,8 @@ func (x *ListMemoriesRequest) GetPageToken() string {
 // ListMemoriesResponse is one page of memories.
 type ListMemoriesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Memories on this page, newest first.
+	// Memories on this page, newest first (by creation time, then by id, both descending). The page may hold
+	// fewer than page_size when the memories are large (see Paging at the top of this file).
 	Memories []*Memory `protobuf:"bytes,1,rep,name=memories,proto3" json:"memories,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -4655,7 +4681,8 @@ func (x *ListDocumentsRequest) GetPageToken() string {
 // ListDocumentsResponse is one page of documents.
 type ListDocumentsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Documents on this page, without original text.
+	// Documents on this page, without original text, newest first (by creation time, then by id, both
+	// descending).
 	Documents []*Document `protobuf:"bytes,1,rep,name=documents,proto3" json:"documents,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -4717,7 +4744,8 @@ type GetDocumentRequest struct {
 	BankId string `protobuf:"bytes,2,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Document id.
 	DocumentId string `protobuf:"bytes,3,opt,name=document_id,json=documentId,proto3" json:"document_id,omitempty"`
-	// Read and return the original text from the blob store.
+	// Read and return the original text from the blob store. A stored text is at most the server's
+	// ingest.max_document_bytes (default 2 MiB), so it always fits the response.
 	IncludeText   bool `protobuf:"varint,4,opt,name=include_text,json=includeText,proto3" json:"include_text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5401,10 +5429,10 @@ func (x *ListObservationScopesRequest) GetPageToken() string {
 	return ""
 }
 
-// ListObservationScopesResponse is one page of observation scopes, ordered by the scope's tags.
+// ListObservationScopesResponse is one page of observation scopes.
 type ListObservationScopesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Scopes on this page.
+	// Scopes on this page, by the scope's sorted tags (bytewise; each scope appears once), the shared scope first.
 	Scopes []*ObservationScope `protobuf:"bytes,1,rep,name=scopes,proto3" json:"scopes,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -5606,7 +5634,7 @@ func (x *ListObservationHistoryRequest) GetPageToken() string {
 // ListObservationHistoryResponse is one page of an observation's versions.
 type ListObservationHistoryResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Versions on this page, newest first.
+	// Versions on this page, newest first (by version number, unique per observation).
 	Versions []*ObservationVersion `protobuf:"bytes,1,rep,name=versions,proto3" json:"versions,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -5975,7 +6003,11 @@ type PreviewConsolidationStrategiesRequest struct {
 	// Bank whose existing scopes are matched.
 	BankId string `protobuf:"bytes,2,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	// Draft strategies, in priority order (first match wins).
-	Strategies    []*ConsolidationStrategy `protobuf:"bytes,3,rep,name=strategies,proto3" json:"strategies,omitempty"`
+	Strategies []*ConsolidationStrategy `protobuf:"bytes,3,rep,name=strategies,proto3" json:"strategies,omitempty"`
+	// Maximum existing scopes evaluated per page; 0 = 100, at most 1000.
+	PageSize int32 `protobuf:"varint,4,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	// Token from a previous response, for the same strategies; empty = first page.
+	PageToken     string `protobuf:"bytes,5,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6031,13 +6063,28 @@ func (x *PreviewConsolidationStrategiesRequest) GetStrategies() []*Consolidation
 	return nil
 }
 
-// PreviewConsolidationStrategiesResponse reports the matches of every draft strategy.
+func (x *PreviewConsolidationStrategiesRequest) GetPageSize() int32 {
+	if x != nil {
+		return x.PageSize
+	}
+	return 0
+}
+
+func (x *PreviewConsolidationStrategiesRequest) GetPageToken() string {
+	if x != nil {
+		return x.PageToken
+	}
+	return ""
+}
+
+// PreviewConsolidationStrategiesResponse reports the matches of every draft strategy over one page of the bank's
+// scopes, in the order ListObservationScopes lists them. Collect the pages for the whole bank.
 type PreviewConsolidationStrategiesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// One entry per draft strategy, in request order.
+	// One entry per draft strategy, in request order, covering this page's scopes.
 	Matches []*StrategyMatch `protobuf:"bytes,1,rep,name=matches,proto3" json:"matches,omitempty"`
-	// False when the preview stopped before checking every scope of the bank.
-	Complete      bool `protobuf:"varint,2,opt,name=complete,proto3" json:"complete,omitempty"`
+	// Token for the next page of scopes; empty = every scope has been evaluated.
+	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6079,11 +6126,11 @@ func (x *PreviewConsolidationStrategiesResponse) GetMatches() []*StrategyMatch {
 	return nil
 }
 
-func (x *PreviewConsolidationStrategiesResponse) GetComplete() bool {
+func (x *PreviewConsolidationStrategiesResponse) GetNextPageToken() string {
 	if x != nil {
-		return x.Complete
+		return x.NextPageToken
 	}
-	return false
+	return ""
 }
 
 // StrategyMatch reports which scopes one draft strategy would take.
@@ -6347,7 +6394,8 @@ func (x *GetMentalModelRequest) GetView() MentalModelView {
 // GetMentalModelResponse carries the model.
 type GetMentalModelResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The model in the requested view; content is the latest version.
+	// The model in the requested view; content is the latest version (at most 1 MiB: a refresh whose page would be
+	// larger fails and keeps the stored content).
 	MentalModel   *MentalModel `protobuf:"bytes,1,opt,name=mental_model,json=mentalModel,proto3" json:"mental_model,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6495,7 +6543,8 @@ func (x *ListMentalModelsRequest) GetPageToken() string {
 // ListMentalModelsResponse is one page of models.
 type ListMentalModelsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Models on this page.
+	// Models on this page, by id (bytewise). With MENTAL_MODEL_VIEW_CONTENT or FULL the page may hold fewer than
+	// page_size (see Paging at the top of this file).
 	MentalModels []*MentalModel `protobuf:"bytes,1,rep,name=mental_models,json=mentalModels,proto3" json:"mental_models,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -7165,10 +7214,11 @@ func (x *ListMentalModelHistoryRequest) GetPageToken() string {
 	return ""
 }
 
-// ListMentalModelHistoryResponse is one page of history, newest first.
+// ListMentalModelHistoryResponse is one page of history.
 type ListMentalModelHistoryResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Entries on this page.
+	// Entries on this page, newest first (by the time recorded, then by entry, both descending). The page may hold
+	// fewer than page_size when the previous contents are large (see Paging at the top of this file).
 	Entries []*MentalModelHistoryEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -7610,7 +7660,7 @@ func (x *SearchMentalModelsRequest) GetMaxResults() int32 {
 // SearchMentalModelsResponse lists matching models.
 type SearchMentalModelsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Hits, best first.
+	// Hits, best first (by score descending, then by model id).
 	Hits          []*MentalModelHit `protobuf:"bytes,1,rep,name=hits,proto3" json:"hits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -8754,7 +8804,7 @@ func (x *ListOrgsRequest) GetIdPrefix() string {
 // ListOrgsResponse is one page of orgs, in id order.
 type ListOrgsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Orgs on this page; orgs being deleted are left out.
+	// Orgs on this page, by id (bytewise); orgs being deleted are left out.
 	Orgs []*Org `protobuf:"bytes,1,rep,name=orgs,proto3" json:"orgs,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -9595,7 +9645,7 @@ func (x *ListBanksRequest) GetIdPrefix() string {
 // ListBanksResponse is one page of banks, in id order.
 type ListBanksResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Banks on this page; banks being deleted are left out.
+	// Banks on this page, by id (bytewise); banks being deleted are left out.
 	Banks []*Bank `protobuf:"bytes,1,rep,name=banks,proto3" json:"banks,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -9855,7 +9905,7 @@ func (x *GetBankStatsResponse) GetStats() *BankStats {
 type BankStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Live memory counts keyed by lowercase fact type: "world", "experience" and "observation". A type with no
-	// memories is absent.
+	// memories is absent. Not paged: at most one key per fact type.
 	MemoriesByFactType map[string]int64 `protobuf:"bytes,1,rep,name=memories_by_fact_type,json=memoriesByFactType,proto3" json:"memories_by_fact_type,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Memories archived by invalidation (count).
 	InvalidatedMemories int64 `protobuf:"varint,2,opt,name=invalidated_memories,json=invalidatedMemories,proto3" json:"invalidated_memories,omitempty"`
@@ -9866,7 +9916,8 @@ type BankStats struct {
 	// Mental models in the bank (count).
 	MentalModels int64 `protobuf:"varint,5,opt,name=mental_models,json=mentalModels,proto3" json:"mental_models,omitempty"`
 	// Pending and processing operation counts keyed by lowercase operation kind (for example "consolidate",
-	// "retain_document"); a kind with none is absent. Eval barrier: poll until empty.
+	// "retain_document"); a kind with none is absent. Eval barrier: poll until empty. Not paged: at most one key
+	// per operation kind.
 	PendingOperationsByKind map[string]int64 `protobuf:"bytes,6,rep,name=pending_operations_by_kind,json=pendingOperationsByKind,proto3" json:"pending_operations_by_kind,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
 	// Live facts not yet consolidated (count).
 	UnconsolidatedMemories int64 `protobuf:"varint,7,opt,name=unconsolidated_memories,json=unconsolidatedMemories,proto3" json:"unconsolidated_memories,omitempty"`
@@ -10067,7 +10118,7 @@ func (x *ListTagsRequest) GetPageToken() string {
 // ListTagsResponse is one page of tags.
 type ListTagsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Tags on this page.
+	// Tags on this page, bytewise by tag (each tag appears once).
 	Tags []*TagCount `protobuf:"bytes,1,rep,name=tags,proto3" json:"tags,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -12002,10 +12053,10 @@ func (x *ListDirectivesRequest) GetPageToken() string {
 	return ""
 }
 
-// ListDirectivesResponse is one page of directives, oldest first.
+// ListDirectivesResponse is one page of directives.
 type ListDirectivesResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Directives on this page.
+	// Directives on this page, oldest first (by creation time, then by id).
 	Directives []*Directive `protobuf:"bytes,1,rep,name=directives,proto3" json:"directives,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -12514,7 +12565,7 @@ func (x *ListOperationsRequest) GetPageToken() string {
 // ListOperationsResponse is one page of operations.
 type ListOperationsResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Operations on this page.
+	// Operations on this page, newest first (by creation time, then by id, both descending).
 	Operations []*Operation `protobuf:"bytes,1,rep,name=operations,proto3" json:"operations,omitempty"`
 	// Token for the next page; empty = no more.
 	NextPageToken string `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
@@ -16376,11 +16427,12 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\x12_chunks_max_tokensB\x0f\n" +
 	"\r_source_factsB\x1a\n" +
 	"\x18_source_facts_max_tokensB\v\n" +
-	"\t_entities\"z\n" +
+	"\t_entities\"\xa7\x01\n" +
 	"\vEntityState\x12\x1b\n" +
 	"\tentity_id\x18\x01 \x01(\tR\bentityId\x12%\n" +
 	"\x0ecanonical_name\x18\x02 \x01(\tR\rcanonicalName\x12'\n" +
-	"\x0fobservation_ids\x18\x03 \x03(\tR\x0eobservationIds\"\xc2\x04\n" +
+	"\x0fobservation_ids\x18\x03 \x03(\tR\x0eobservationIds\x12+\n" +
+	"\x11observation_count\x18\x04 \x01(\x03R\x10observationCount\"\xc2\x04\n" +
 	"\x0eReflectRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x17\n" +
 	"\abank_id\x18\x02 \x01(\tR\x06bankId\x12\x14\n" +
@@ -16633,16 +16685,19 @@ const file_memory_v1_memory_proto_rawDesc = "" +
 	"\btag_sets\x18\x01 \x03(\v2\x11.memory.v1.TagSetR\atagSets\"i\n" +
 	"\x19ClearObservationsResponse\x12\x18\n" +
 	"\adeleted\x18\x01 \x01(\x03R\adeleted\x122\n" +
-	"\toperation\x18\x02 \x01(\v2\x14.memory.v1.OperationR\toperation\"\x99\x01\n" +
+	"\toperation\x18\x02 \x01(\v2\x14.memory.v1.OperationR\toperation\"\xd5\x01\n" +
 	"%PreviewConsolidationStrategiesRequest\x12\x15\n" +
 	"\x06org_id\x18\x01 \x01(\tR\x05orgId\x12\x17\n" +
 	"\abank_id\x18\x02 \x01(\tR\x06bankId\x12@\n" +
 	"\n" +
 	"strategies\x18\x03 \x03(\v2 .memory.v1.ConsolidationStrategyR\n" +
-	"strategies\"x\n" +
+	"strategies\x12\x1b\n" +
+	"\tpage_size\x18\x04 \x01(\x05R\bpageSize\x12\x1d\n" +
+	"\n" +
+	"page_token\x18\x05 \x01(\tR\tpageToken\"\x84\x01\n" +
 	"&PreviewConsolidationStrategiesResponse\x122\n" +
-	"\amatches\x18\x01 \x03(\v2\x18.memory.v1.StrategyMatchR\amatches\x12\x1a\n" +
-	"\bcomplete\x18\x02 \x01(\bR\bcomplete\"{\n" +
+	"\amatches\x18\x01 \x03(\v2\x18.memory.v1.StrategyMatchR\amatches\x12&\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"{\n" +
 	"\rStrategyMatch\x12\x1a\n" +
 	"\bstrategy\x18\x01 \x01(\tR\bstrategy\x12%\n" +
 	"\x0ematched_scopes\x18\x02 \x03(\tR\rmatchedScopes\x12'\n" +

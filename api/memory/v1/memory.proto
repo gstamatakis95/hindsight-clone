@@ -47,11 +47,23 @@
 // Events. State changes are recorded as lifecycle events numbered by the bank's change sequence; clients
 // poll OperationService.ListEvents with after_seq, passing the previous response's next_after_seq.
 //
-// Paging. Every List RPC takes page_size and page_token and returns next_page_token (empty = no more pages).
-// page_size 0 = 100, larger than 1000 = 1000, negative = INVALID_ARGUMENT. A page token is opaque and only
-// valid for the same request; a malformed one is INVALID_ARGUMENT. ListEvents pages by sequence instead
-// (page_size + after_seq / next_after_seq), and SearchMentalModels takes max_results (0 = 10, larger than
-// 100 = 100, negative = INVALID_ARGUMENT).
+// Paging. Every List RPC (and PreviewConsolidationStrategies) takes page_size and page_token and returns
+// next_page_token (empty = no more pages). page_size 0 = 100, larger than 1000 = 1000, negative =
+// INVALID_ARGUMENT. A page token is opaque and only valid for the same request; a malformed one is
+// INVALID_ARGUMENT. Each list response states its order, which always ends in a unique tiebreak, so paging never
+// skips or repeats an item that did not change meanwhile. page_size is a maximum: a page of large items
+// (ListMemories, ListMentalModels with content, ListMentalModelHistory) ends early once its items reach the
+// server's response size limit (api.max_response_bytes, default 3 MiB), so always follow next_page_token rather
+// than counting items. ListEvents pages by sequence instead (page_size + after_seq / next_after_seq), and
+// SearchMentalModels takes max_results (0 = 10, larger than 100 = 100, negative = INVALID_ARGUMENT).
+//
+// Message sizes. The server accepts requests up to its ingest.max_request_bytes (default 16 MiB); gRPC clients
+// receive at most 4 MiB by default, and every response is kept under that: lists end pages early, a document's
+// stored text is at most ingest.max_document_bytes (default 2 MiB), a mental model's content is at most 1 MiB,
+// and Recall's token budgets are capped by api.max_recall_tokens (default 32000). A read (Get*, List*, Search*,
+// Preview*, Export*, Recall, Reflect) whose response would still pass api.max_response_bytes fails with
+// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE) instead of breaking the client's receive; ExportBankTemplate is the one
+// read that can reach it in practice. A write never fails on its response size.
 //
 // Tag filters. Every request that filters by tag takes one TagFilter: flat tags under a match mode, or
 // boolean tag groups (setting both = INVALID_ARGUMENT). Each TagFilter field states its default match mode.
@@ -76,7 +88,8 @@
 //                        Reflect retrieval tool failed), CONTEXT_OVERFLOW (a prompt exceeded the model's context)
 //   RESOURCE_EXHAUSTED   RESOURCE_EXHAUSTED, MAX_TOTAL_TOKENS_EXCEEDED (Reflect went over max_total_tokens),
 //                        INGEST_BACKLOG (RetainBatch while the retain backlog is over its limit; it also carries a
-//                        google.rpc.RetryInfo with the delay to wait)
+//                        google.rpc.RetryInfo with the delay to wait), RESPONSE_TOO_LARGE (an unpaged response
+//                        would pass the server's response size limit)
 //   ABORTED              OPERATION_CANCELLED (the operation was cancelled or its bank deleted), CONFLICT (a
 //                        concurrent writer won; retry)
 //   DEADLINE_EXCEEDED    DEADLINE_EXCEEDED
@@ -122,10 +135,10 @@ service MemoryService {
   rpc Reflect(ReflectRequest) returns (ReflectResponse);
   // ListRecallArms lists the recall arms this server has registered, with a one-line description each: the
   // names RecallRequest.arms, ReflectRequest.arms, RecallConfig.arms, RecallConfig.arm_boosts and
-  // MinScores.arms accept.
+  // MinScores.arms accept. Not paged: the list is the server's own registry, a handful of entries.
   rpc ListRecallArms(ListRecallArmsRequest) returns (ListRecallArmsResponse);
   // ListMemories lists live and invalidated memories (raw facts and observations) with filters and keyset
-  // pagination. Returns no total.
+  // pagination, newest first. Returns no total.
   rpc ListMemories(ListMemoriesRequest) returns (ListMemoriesResponse);
   // GetMemory returns one memory, live or invalidated.
   rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse);
@@ -167,7 +180,7 @@ service ObservationService {
   // their sources for re-consolidation, and optionally re-consolidates at once.
   rpc ClearObservations(ClearObservationsRequest) returns (ClearObservationsResponse);
   // PreviewConsolidationStrategies evaluates draft strategies against the bank's existing scopes without
-  // saving them.
+  // saving them, one page of scopes per call.
   rpc PreviewConsolidationStrategies(PreviewConsolidationStrategiesRequest) // split: 120-column limit
   returns (PreviewConsolidationStrategiesResponse);
 }
@@ -186,7 +199,8 @@ service MentalModelService {
   // refresh, joins and upgrades a queued one, and on success clears auto_refresh_paused.
   rpc RefreshMentalModel(RefreshMentalModelRequest) returns (RefreshMentalModelResponse);
   // PreviewMentalModelRefresh runs the full refresh pipeline synchronously within the RPC deadline and writes
-  // nothing, not even usage.
+  // nothing, not even usage. A draft over the 1 MiB content limit fails with RESOURCE_EXHAUSTED, as the refresh
+  // would.
   rpc PreviewMentalModelRefresh(PreviewMentalModelRefreshRequest) returns (PreviewMentalModelRefreshResponse);
   // ListMentalModelHistory pages through a model's versions and refresh failures, newest first.
   rpc ListMentalModelHistory(ListMentalModelHistoryRequest) returns (ListMentalModelHistoryResponse);
@@ -248,7 +262,9 @@ service BankService {
   rpc GetBankStats(GetBankStatsRequest) returns (GetBankStatsResponse);
   // ListTags pages through the bank's tags with usage counts.
   rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
-  // ExportBankTemplate exports the bank's own config, directives and mental-model specs.
+  // ExportBankTemplate exports the bank's own config, directives and mental-model specs as one object that
+  // CreateBank takes whole, so it is not paged; a template over the server's response size limit fails with
+  // RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE).
   rpc ExportBankTemplate(ExportBankTemplateRequest) returns (ExportBankTemplateResponse);
 }
 
@@ -496,7 +512,8 @@ message RecallRequest {
   TagFilter tags = 5;
   // Size class: the per-arm candidate cap (budget_low / mid / high, default 100 / 300 / 1000); unset = MID.
   Budget budget = 6;
-  // Token budget for packed results; 0 = the server's default packing budget (never derived from budget).
+  // Token budget for packed results; 0 = the server's default packing budget (never derived from budget). Larger
+  // than the server's api.max_recall_tokens (default 32000) = that cap.
   int32 max_tokens = 7;
   // Reference time for relative expressions and recency; unset = now.
   google.protobuf.Timestamp query_time = 8;
@@ -540,11 +557,12 @@ message RecallResponse {
 message RecallInclude {
   // Attach the chunks results were extracted from.
   optional bool chunks = 1;
-  // Token budget for attached chunks.
+  // Token budget for attached chunks; unset = 8192, larger than the server's api.max_recall_tokens = that cap.
   optional int32 chunks_max_tokens = 2;
   // Attach the source facts of returned observations.
   optional bool source_facts = 3;
-  // Token budget for attached source facts.
+  // Token budget for attached source facts; unset = 4096, larger than the server's api.max_recall_tokens = that
+  // cap.
   optional int32 source_facts_max_tokens = 4;
   // Attach entity state for entities in the results.
   optional bool entities = 5;
@@ -556,8 +574,11 @@ message EntityState {
   string entity_id = 1;
   // Resolved canonical name.
   string canonical_name = 2;
-  // Observations about the entity.
+  // Observations about the entity: the 50 most recently updated (newest first, then by id), out of
+  // observation_count.
   repeated string observation_ids = 3;
+  // Live observations about the entity in all; more than observation_ids holds when it passes 50.
+  int64 observation_count = 4;
 }
 
 // ---- Reflect ----
@@ -708,7 +729,8 @@ message ListMemoriesRequest {
 
 // ListMemoriesResponse is one page of memories.
 message ListMemoriesResponse {
-  // Memories on this page, newest first.
+  // Memories on this page, newest first (by creation time, then by id, both descending). The page may hold
+  // fewer than page_size when the memories are large (see Paging at the top of this file).
   repeated Memory memories = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -936,7 +958,8 @@ message ListDocumentsRequest {
 
 // ListDocumentsResponse is one page of documents.
 message ListDocumentsResponse {
-  // Documents on this page, without original text.
+  // Documents on this page, without original text, newest first (by creation time, then by id, both
+  // descending).
   repeated Document documents = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -953,7 +976,8 @@ message GetDocumentRequest {
   string bank_id = 2;
   // Document id.
   string document_id = 3;
-  // Read and return the original text from the blob store.
+  // Read and return the original text from the blob store. A stored text is at most the server's
+  // ingest.max_document_bytes (default 2 MiB), so it always fits the response.
   bool include_text = 4;
 }
 
@@ -1081,9 +1105,9 @@ message ListObservationScopesRequest {
   string page_token = 4;
 }
 
-// ListObservationScopesResponse is one page of observation scopes, ordered by the scope's tags.
+// ListObservationScopesResponse is one page of observation scopes.
 message ListObservationScopesResponse {
-  // Scopes on this page.
+  // Scopes on this page, by the scope's sorted tags (bytewise; each scope appears once), the shared scope first.
   repeated ObservationScope scopes = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -1118,7 +1142,7 @@ message ListObservationHistoryRequest {
 
 // ListObservationHistoryResponse is one page of an observation's versions.
 message ListObservationHistoryResponse {
-  // Versions on this page, newest first.
+  // Versions on this page, newest first (by version number, unique per observation).
   repeated ObservationVersion versions = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -1185,14 +1209,19 @@ message PreviewConsolidationStrategiesRequest {
   string bank_id = 2;
   // Draft strategies, in priority order (first match wins).
   repeated ConsolidationStrategy strategies = 3;
+  // Maximum existing scopes evaluated per page; 0 = 100, at most 1000.
+  int32 page_size = 4;
+  // Token from a previous response, for the same strategies; empty = first page.
+  string page_token = 5;
 }
 
-// PreviewConsolidationStrategiesResponse reports the matches of every draft strategy.
+// PreviewConsolidationStrategiesResponse reports the matches of every draft strategy over one page of the bank's
+// scopes, in the order ListObservationScopes lists them. Collect the pages for the whole bank.
 message PreviewConsolidationStrategiesResponse {
-  // One entry per draft strategy, in request order.
+  // One entry per draft strategy, in request order, covering this page's scopes.
   repeated StrategyMatch matches = 1;
-  // False when the preview stopped before checking every scope of the bank.
-  bool complete = 2;
+  // Token for the next page of scopes; empty = every scope has been evaluated.
+  string next_page_token = 2;
 }
 
 // StrategyMatch reports which scopes one draft strategy would take.
@@ -1255,7 +1284,8 @@ message GetMentalModelRequest {
 
 // GetMentalModelResponse carries the model.
 message GetMentalModelResponse {
-  // The model in the requested view; content is the latest version.
+  // The model in the requested view; content is the latest version (at most 1 MiB: a refresh whose page would be
+  // larger fails and keeps the stored content).
   MentalModel mental_model = 1;
 }
 
@@ -1295,7 +1325,8 @@ message ListMentalModelsRequest {
 
 // ListMentalModelsResponse is one page of models.
 message ListMentalModelsResponse {
-  // Models on this page.
+  // Models on this page, by id (bytewise). With MENTAL_MODEL_VIEW_CONTENT or FULL the page may hold fewer than
+  // page_size (see Paging at the top of this file).
   repeated MentalModel mental_models = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -1418,9 +1449,10 @@ message ListMentalModelHistoryRequest {
   string page_token = 6;
 }
 
-// ListMentalModelHistoryResponse is one page of history, newest first.
+// ListMentalModelHistoryResponse is one page of history.
 message ListMentalModelHistoryResponse {
-  // Entries on this page.
+  // Entries on this page, newest first (by the time recorded, then by entry, both descending). The page may hold
+  // fewer than page_size when the previous contents are large (see Paging at the top of this file).
   repeated MentalModelHistoryEntry entries = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -1506,7 +1538,7 @@ message SearchMentalModelsRequest {
 
 // SearchMentalModelsResponse lists matching models.
 message SearchMentalModelsResponse {
-  // Hits, best first.
+  // Hits, best first (by score descending, then by model id).
   repeated MentalModelHit hits = 1;
 }
 
@@ -1761,7 +1793,7 @@ message ListOrgsRequest {
 
 // ListOrgsResponse is one page of orgs, in id order.
 message ListOrgsResponse {
-  // Orgs on this page; orgs being deleted are left out.
+  // Orgs on this page, by id (bytewise); orgs being deleted are left out.
   repeated Org orgs = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -1920,7 +1952,7 @@ message ListBanksRequest {
 
 // ListBanksResponse is one page of banks, in id order.
 message ListBanksResponse {
-  // Banks on this page; banks being deleted are left out.
+  // Banks on this page, by id (bytewise); banks being deleted are left out.
   repeated Bank banks = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -1963,7 +1995,7 @@ message GetBankStatsResponse {
 // BankStats summarizes a bank, as a snapshot of its counts.
 message BankStats {
   // Live memory counts keyed by lowercase fact type: "world", "experience" and "observation". A type with no
-  // memories is absent.
+  // memories is absent. Not paged: at most one key per fact type.
   map<string, int64> memories_by_fact_type = 1;
   // Memories archived by invalidation (count).
   int64 invalidated_memories = 2;
@@ -1974,7 +2006,8 @@ message BankStats {
   // Mental models in the bank (count).
   int64 mental_models = 5;
   // Pending and processing operation counts keyed by lowercase operation kind (for example "consolidate",
-  // "retain_document"); a kind with none is absent. Eval barrier: poll until empty.
+  // "retain_document"); a kind with none is absent. Eval barrier: poll until empty. Not paged: at most one key
+  // per operation kind.
   map<string, int64> pending_operations_by_kind = 6;
   // Live facts not yet consolidated (count).
   int64 unconsolidated_memories = 7;
@@ -2018,7 +2051,7 @@ message ListTagsRequest {
 
 // ListTagsResponse is one page of tags.
 message ListTagsResponse {
-  // Tags on this page.
+  // Tags on this page, bytewise by tag (each tag appears once).
   repeated TagCount tags = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -2390,9 +2423,9 @@ message ListDirectivesRequest {
   string page_token = 6;
 }
 
-// ListDirectivesResponse is one page of directives, oldest first.
+// ListDirectivesResponse is one page of directives.
 message ListDirectivesResponse {
-  // Directives on this page.
+  // Directives on this page, oldest first (by creation time, then by id).
   repeated Directive directives = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;
@@ -2489,7 +2522,7 @@ message ListOperationsRequest {
 
 // ListOperationsResponse is one page of operations.
 message ListOperationsResponse {
-  // Operations on this page.
+  // Operations on this page, newest first (by creation time, then by id, both descending).
   repeated Operation operations = 1;
   // Token for the next page; empty = no more.
   string next_page_token = 2;

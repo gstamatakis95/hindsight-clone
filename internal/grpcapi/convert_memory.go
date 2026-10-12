@@ -129,6 +129,7 @@ func recallIncludeFromProto(x *pb.RecallInclude) domain.RecallInclude {
 func entityStateToProto(x domain.EntityState) *pb.EntityState {
 	return &pb.EntityState{
 		EntityId: string(x.EntityID), CanonicalName: x.CanonicalName, ObservationIds: strs[string](x.ObservationIDs),
+		ObservationCount: x.ObservationCount,
 	}
 }
 

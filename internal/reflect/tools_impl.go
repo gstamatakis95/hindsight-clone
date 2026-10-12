@@ -314,6 +314,7 @@ func observationsOutput(st *agentState, query string, res recall.Result) (toolRe
 		for _, e := range res.Entities {
 			ents = append(ents, map[string]any{
 				"id": e.EntityID, "name": e.CanonicalName, "observation_ids": e.ObservationIDs,
+				"observation_count": e.ObservationCount,
 			})
 		}
 		slices.SortFunc(ents, func(a, b map[string]any) int {
