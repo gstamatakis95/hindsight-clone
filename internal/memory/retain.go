@@ -161,8 +161,12 @@ func (i *ingestor) Ingest(ctx context.Context, req RetainRequest) (RetainResult,
 		return RetainResult{}, err
 	}
 	res, err := i.write(ctx, req, plans)
-	if err != nil || req.RunAsync {
+	if err != nil {
+		i.dropBlobs(ctx, plans, err)
 		return res, err
+	}
+	if req.RunAsync {
+		return res, nil
 	}
 	return i.runInline(ctx, req.Bank, plans, res)
 }
@@ -177,7 +181,7 @@ func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.Ban
 		return cfg, true, nil
 	}
 	if !errors.Is(err, domain.ErrBankNotFound) {
-		return cfg, false, fmt.Errorf("retain: %w", err)
+		return cfg, false, fmt.Errorf("retain: %w", i.deletingOrg(ctx, b.OrgRef(), err))
 	}
 	var tenant, org domain.BankConfig
 	err = i.d.Store.InTx(ctx, func(tx store.Tx) error {
@@ -186,9 +190,33 @@ func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.Ban
 		return err //nolint:wrapcheck // wrapped once below, after the transaction
 	})
 	if err != nil {
-		return domain.BankConfig{}, false, fmt.Errorf("retain: %w", err)
+		return domain.BankConfig{}, false, fmt.Errorf("retain: %w", i.deletingOrg(ctx, b.OrgRef(), err))
 	}
 	return config.Merge(tenant, org), false, nil
+}
+
+// deletingOrg turns err, the domain.ErrOrgNotFound a config read returns for an org that is being deleted, into
+// domain.ErrOrgDeleting: a write under such an org is refused as deleting, as Ensure refuses it. Any other error,
+// and the not-found of an org that does not exist, is returned unchanged.
+func (i *ingestor) deletingOrg(ctx context.Context, o domain.OrgRef, err error) error {
+	if !errors.Is(err, domain.ErrOrgNotFound) {
+		return err
+	}
+	var deleting bool
+	if rerr := i.d.Store.InTx(ctx, func(tx store.Tx) error {
+		org, err := tx.Orgs().Get(ctx, o)
+		deleting = err == nil && org.Deleting()
+		if errors.Is(err, domain.ErrOrgNotFound) {
+			return nil
+		}
+		return err
+	}); rerr != nil {
+		return errors.Join(err, rerr)
+	}
+	if deleting {
+		return fmt.Errorf("%w: org %s", domain.ErrOrgDeleting, o)
+	}
+	return err
 }
 
 // plan validates one item and builds its document payload. Nothing is stored.
@@ -275,10 +303,19 @@ func (i *ingestor) checkFanout(b domain.BankRef, tags []string, s domain.Observa
 
 // markUnchanged flags items whose document's last completed retain had the same content and overrides
 // hash (and no force_reextract). It reads before anything is written: Upsert would clear extracted_at. It
-// also rejects a bank being deleted (domain.ErrBankDeleting) before storeBlobs, so a retain racing
-// DeleteBank leaves no blob under the bank's prefix; an unknown bank is fine (the write creates it).
+// also rejects an org being deleted (domain.ErrOrgDeleting), an unknown org (domain.ErrOrgNotFound) and a bank
+// being deleted (domain.ErrBankDeleting) before storeBlobs, so a retain that loses the race with DeleteOrg or
+// DeleteBank stores no blob; an unknown bank is fine (the write creates it). A retain that passes this check just
+// before the tombstone deletes its blobs again when its write is refused (dropBlobs).
 func (i *ingestor) markUnchanged(ctx context.Context, b domain.BankRef, plans []*itemPlan) error {
 	return i.d.Store.InTx(ctx, func(tx store.Tx) error {
+		org, err := tx.Orgs().Get(ctx, b.OrgRef())
+		switch {
+		case err != nil:
+			return err
+		case org.Deleting():
+			return fmt.Errorf("%w: org %s", domain.ErrOrgDeleting, b.OrgRef())
+		}
 		bank, err := tx.Banks().Get(ctx, b)
 		switch {
 		case err == nil && bank.Deleting():
@@ -318,6 +355,23 @@ func (i *ingestor) storeBlobs(ctx context.Context, plans []*itemPlan) error {
 		}
 	}
 	return nil
+}
+
+// dropBlobs deletes the blobs storeBlobs wrote for plans after their write failed with err because the org or bank
+// is being deleted (or the org is gone): the delete may already have swept the prefix, and nothing will reference
+// them. Other failures keep the blobs (a retry writes the same content-addressed keys). It runs even when ctx is
+// done; a failed delete is left to the org or bank delete's own sweep.
+func (i *ingestor) dropBlobs(ctx context.Context, plans []*itemPlan, err error) {
+	if !errors.Is(err, domain.ErrOrgDeleting) && !errors.Is(err, domain.ErrOrgNotFound) &&
+		!errors.Is(err, domain.ErrBankDeleting) {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	for _, p := range plans {
+		if !p.unchanged {
+			_, _ = i.d.Blob.DeletePrefix(ctx, p.payload.BlobKey)
+		}
+	}
 }
 
 // write upserts the changed documents and, for an async retain, enqueues their retain_document jobs (under a

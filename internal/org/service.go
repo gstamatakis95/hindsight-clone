@@ -3,23 +3,43 @@ package org
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"memd/internal/blob"
+	"memd/internal/clock"
 	"memd/internal/domain"
 	"memd/internal/store"
 )
 
-// Deps are the Service's dependencies; every field is required.
+// Deps are the Service's dependencies. DB is always required; the org delete (DeleteOrg, RunDeleteJob and the
+// sweeps) also needs Maintenance, Blob and Clock.
 type Deps struct {
-	// DB reads and writes orgs in short transactions.
+	// DB reads and writes orgs, their deletes and their receipts in short transactions.
 	DB store.DB
+	// Maintenance lists the org deletes that stopped (StalledOrgDeletes).
+	Maintenance store.Maintenance
+	// Blob holds the org's stored documents, deleted page by page under blob.OrgPrefix.
+	Blob blob.Store
+	// Clock dates the tombstone, the receipt and the blob grace.
+	Clock clock.Clock
+	// Delete bounds and paces one delete_org run; zero fields take the defaults.
+	Delete DeleteConfig
+	// ServerVersion is recorded on each deletion receipt the server verifies.
+	ServerVersion string
+	// Logger receives the one line each finished org delete writes (its receipt id); nil = slog.Default().
+	Logger *slog.Logger
 }
 
-// Service serves OrgService: creating, reading and listing a tenant's orgs.
+// Service serves OrgService: creating, reading, listing and deleting a tenant's orgs, and their deletion receipts.
 type Service struct {
 	d Deps
 }
 
-// New returns the Service over d.
+// New returns the Service over d, filling the delete bounds' defaults.
 func New(d Deps) *Service {
+	d.Delete = d.Delete.withDefaults()
+	if d.Logger == nil {
+		d.Logger = slog.Default()
+	}
 	return &Service{d: d}
 }
 

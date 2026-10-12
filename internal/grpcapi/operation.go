@@ -36,7 +36,7 @@ func (h *OperationHandler) GetOperation(
 func (h *OperationHandler) ListOperations(
 	ctx context.Context, req *pb.ListOperationsRequest,
 ) (*pb.ListOperationsResponse, error) {
-	b, err := bankRef(ctx, req)
+	b, err := scopeRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -98,9 +98,19 @@ func (h *OperationHandler) ListEvents(ctx context.Context, req *pb.ListEventsReq
 	return &pb.ListEventsResponse{Events: eventsToProto(events), NextAfterSeq: last}, nil
 }
 
-// operationRef builds the bank ref of a request and checks its required operation id.
+// scopeRef builds the bank ref of an OperationService request, or the org scope (domain.OrgRef.Scope) when its
+// bank_id is empty: org-scoped operations (delete_org) belong to no bank.
+func scopeRef(ctx context.Context, r bankScoped) (domain.BankRef, error) {
+	if r.GetBankId() == "" {
+		o, err := orgRef(ctx, r)
+		return o.Scope(), err
+	}
+	return bankRef(ctx, r)
+}
+
+// operationRef builds the bank ref (or org scope, see scopeRef) of a request and checks its required operation id.
 func operationRef(ctx context.Context, r bankScoped, opID string) (domain.BankRef, domain.OperationID, error) {
-	b, err := bankRef(ctx, r)
+	b, err := scopeRef(ctx, r)
 	if err != nil {
 		return domain.BankRef{}, "", err
 	}

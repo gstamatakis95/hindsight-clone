@@ -2,12 +2,8 @@ package grpcapi
 
 import (
 	"context"
-	"errors"
 	"memd/internal/domain"
 	"memd/internal/org"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	pb "memd/gen/memory/v1"
 )
@@ -15,7 +11,7 @@ import (
 // OrgHandler serves memory.v1.OrgService.
 type OrgHandler struct {
 	pb.UnimplementedOrgServiceServer
-	// Orgs serves CreateOrg, GetOrg and ListOrgs.
+	// Orgs serves every OrgService RPC.
 	Orgs *org.Service
 }
 
@@ -74,17 +70,45 @@ func (h *OrgHandler) ListOrgs(ctx context.Context, req *pb.ListOrgsRequest) (*pb
 	return &pb.ListOrgsResponse{Orgs: orgs, NextPageToken: out.NextPageToken}, nil
 }
 
-// errDeleteOrgUnavailable is DeleteOrg's answer in this version.
-var errDeleteOrgUnavailable = errors.New("DeleteOrg is not available in this server version")
-
-// DeleteOrg is not available in this version: it answers UNIMPLEMENTED (reason UNIMPLEMENTED) after checking the
-// request, so a malformed one is still INVALID_ARGUMENT.
+// DeleteOrg tombstones the org and its banks and enqueues delete_org, returning the operation and the receipt.
 func (h *OrgHandler) DeleteOrg(ctx context.Context, req *pb.DeleteOrgRequest) (*pb.DeleteOrgResponse, error) {
-	if _, err := orgRef(ctx, req); err != nil {
+	o, err := orgRef(ctx, req)
+	if err != nil {
 		return nil, toStatus(err)
 	}
-	st := status.New(codes.Unimplemented, errDeleteOrgUnavailable.Error())
-	return nil, withDetails(st, errDeleteOrgUnavailable).Err() //nolint:wrapcheck // the status goes to the client as is
+	op, rc, err := h.Orgs.DeleteOrg(ctx, o)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &pb.DeleteOrgResponse{Operation: operationToProto(op), Receipt: receiptToProto(rc)}, nil
+}
+
+// GetDeletionReceipt returns the receipt of the org's most recent delete.
+func (h *OrgHandler) GetDeletionReceipt(
+	ctx context.Context, req *pb.GetDeletionReceiptRequest,
+) (*pb.GetDeletionReceiptResponse, error) {
+	o, err := orgRef(ctx, req)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	rc, err := h.Orgs.GetDeletionReceipt(ctx, o)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &pb.GetDeletionReceiptResponse{Receipt: receiptToProto(rc)}, nil
+}
+
+// receiptToProto converts a deletion receipt.
+func receiptToProto(rc domain.DeletionReceipt) *pb.DeletionReceipt {
+	out := &pb.DeletionReceipt{
+		Id: rc.ID, State: toEnum[pb.DeletionReceipt_State](rc.Status), RequestedAt: tsToProto(rc.RequestedAt),
+		CompletedAt: tsPtrToProto(rc.CompletedAt), Banks: i32(rc.Banks),
+	}
+	if v := rc.Verification; v != nil {
+		out.TablesChecked, out.RowsRemaining, out.BlobsRemaining = i32(v.TablesChecked), v.RowsRemaining, v.BlobsRemaining
+		out.VerifiedAt = tsToProto(v.VerifiedAt)
+	}
+	return out
 }
 
 // orgToProto converts an org.

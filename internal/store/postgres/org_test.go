@@ -200,15 +200,16 @@ func TestRejectEmptyOrg(t *testing.T) {
 	}
 }
 
-// TestSchemaOrgColumns: every table but tenants and orgs has an org_id column, so a table added later can't
-// escape the org boundary (org-wide reads, deletes and checks key on it).
+// TestSchemaOrgColumns: every table but tenants, orgs and deletion_receipts has an org_id column, so a table added
+// later can't escape the org boundary (org-wide reads, deletes and checks key on it). A deletion receipt names its
+// org only by a hash and outlives it, so it carries no org_id: no org delete touches it.
 func TestSchemaOrgColumns(t *testing.T) {
 	t.Parallel()
 	pool := pgtest.Pool(t)
 	rows, err := pool.Query(t.Context(), `
 		SELECT t.table_name FROM information_schema.tables t
 		WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE'
-		  AND t.table_name NOT IN ('tenants', 'orgs', 'alembic_version')
+		  AND t.table_name NOT IN ('tenants', 'orgs', 'deletion_receipts', 'alembic_version')
 		  AND NOT EXISTS (SELECT 1 FROM information_schema.columns c
 		                  WHERE c.table_schema = 'public' AND c.table_name = t.table_name AND c.column_name = 'org_id')
 		ORDER BY 1`)

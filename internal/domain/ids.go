@@ -31,6 +31,13 @@ func NewBankRef(tenant, org, bank string) BankRef {
 // OrgRef returns the reference to the bank's org.
 func (b BankRef) OrgRef() OrgRef { return OrgRef{Tenant: b.Tenant, Org: b.Org} }
 
+// Scope returns the org-level scope of o: a BankRef with an empty bank id, which names the org's own operations
+// (delete_org) rather than a bank's.
+func (o OrgRef) Scope() BankRef { return NewBankRef(o.Tenant, o.Org, "") }
+
+// OrgScoped reports whether b is an org-level scope (OrgRef.Scope): an org with no bank.
+func (b BankRef) OrgScoped() bool { return b.Bank == "" && b.Org != "" }
+
 // IsZero reports whether the reference names no bank.
 func (b BankRef) IsZero() bool { return b.Tenant == "" && b.Org == "" && b.Bank == "" }
 

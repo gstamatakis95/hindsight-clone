@@ -1535,10 +1535,11 @@ var MentalModelService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	OrgService_CreateOrg_FullMethodName = "/memory.v1.OrgService/CreateOrg"
-	OrgService_GetOrg_FullMethodName    = "/memory.v1.OrgService/GetOrg"
-	OrgService_ListOrgs_FullMethodName  = "/memory.v1.OrgService/ListOrgs"
-	OrgService_DeleteOrg_FullMethodName = "/memory.v1.OrgService/DeleteOrg"
+	OrgService_CreateOrg_FullMethodName          = "/memory.v1.OrgService/CreateOrg"
+	OrgService_GetOrg_FullMethodName             = "/memory.v1.OrgService/GetOrg"
+	OrgService_ListOrgs_FullMethodName           = "/memory.v1.OrgService/ListOrgs"
+	OrgService_DeleteOrg_FullMethodName          = "/memory.v1.OrgService/DeleteOrg"
+	OrgService_GetDeletionReceipt_FullMethodName = "/memory.v1.OrgService/GetDeletionReceipt"
 )
 
 // OrgServiceClient is the client API for OrgService service.
@@ -1555,9 +1556,17 @@ type OrgServiceClient interface {
 	GetOrg(ctx context.Context, in *GetOrgRequest, opts ...grpc.CallOption) (*GetOrgResponse, error)
 	// ListOrgs pages through the tenant's orgs in id order; orgs being deleted are left out.
 	ListOrgs(ctx context.Context, in *ListOrgsRequest, opts ...grpc.CallOption) (*ListOrgsResponse, error)
-	// DeleteOrg deletes an org with every bank in it. Not available in this server version: it returns
-	// UNIMPLEMENTED.
+	// DeleteOrg deletes an org with every bank in it, for good. At once and atomically it marks the org and its
+	// banks as being deleted, cancels their pending operations, enqueues the org's delete_org operation and starts
+	// a deletion receipt; it returns both. From then on writes under the org fail FAILED_PRECONDITION
+	// (ORG_DELETING or BANK_DELETING) and reads NOT_FOUND, GetOrg included. The delete removes every bank, every
+	// row of the org and every stored blob, then verifies that none is left before it deletes the org and marks the
+	// receipt COMPLETED. Calling it again while the delete runs returns the same operation and receipt. Poll
+	// GetDeletionReceipt for completion: the operation itself is removed with the org.
 	DeleteOrg(ctx context.Context, in *DeleteOrgRequest, opts ...grpc.CallOption) (*DeleteOrgResponse, error)
+	// GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
+	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND.
+	GetDeletionReceipt(ctx context.Context, in *GetDeletionReceiptRequest, opts ...grpc.CallOption) (*GetDeletionReceiptResponse, error)
 }
 
 type orgServiceClient struct {
@@ -1608,6 +1617,16 @@ func (c *orgServiceClient) DeleteOrg(ctx context.Context, in *DeleteOrgRequest, 
 	return out, nil
 }
 
+func (c *orgServiceClient) GetDeletionReceipt(ctx context.Context, in *GetDeletionReceiptRequest, opts ...grpc.CallOption) (*GetDeletionReceiptResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDeletionReceiptResponse)
+	err := c.cc.Invoke(ctx, OrgService_GetDeletionReceipt_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OrgServiceServer is the server API for OrgService service.
 // All implementations must embed UnimplementedOrgServiceServer
 // for forward compatibility.
@@ -1622,9 +1641,17 @@ type OrgServiceServer interface {
 	GetOrg(context.Context, *GetOrgRequest) (*GetOrgResponse, error)
 	// ListOrgs pages through the tenant's orgs in id order; orgs being deleted are left out.
 	ListOrgs(context.Context, *ListOrgsRequest) (*ListOrgsResponse, error)
-	// DeleteOrg deletes an org with every bank in it. Not available in this server version: it returns
-	// UNIMPLEMENTED.
+	// DeleteOrg deletes an org with every bank in it, for good. At once and atomically it marks the org and its
+	// banks as being deleted, cancels their pending operations, enqueues the org's delete_org operation and starts
+	// a deletion receipt; it returns both. From then on writes under the org fail FAILED_PRECONDITION
+	// (ORG_DELETING or BANK_DELETING) and reads NOT_FOUND, GetOrg included. The delete removes every bank, every
+	// row of the org and every stored blob, then verifies that none is left before it deletes the org and marks the
+	// receipt COMPLETED. Calling it again while the delete runs returns the same operation and receipt. Poll
+	// GetDeletionReceipt for completion: the operation itself is removed with the org.
 	DeleteOrg(context.Context, *DeleteOrgRequest) (*DeleteOrgResponse, error)
+	// GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
+	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND.
+	GetDeletionReceipt(context.Context, *GetDeletionReceiptRequest) (*GetDeletionReceiptResponse, error)
 	mustEmbedUnimplementedOrgServiceServer()
 }
 
@@ -1646,6 +1673,9 @@ func (UnimplementedOrgServiceServer) ListOrgs(context.Context, *ListOrgsRequest)
 }
 func (UnimplementedOrgServiceServer) DeleteOrg(context.Context, *DeleteOrgRequest) (*DeleteOrgResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteOrg not implemented")
+}
+func (UnimplementedOrgServiceServer) GetDeletionReceipt(context.Context, *GetDeletionReceiptRequest) (*GetDeletionReceiptResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDeletionReceipt not implemented")
 }
 func (UnimplementedOrgServiceServer) mustEmbedUnimplementedOrgServiceServer() {}
 func (UnimplementedOrgServiceServer) testEmbeddedByValue()                    {}
@@ -1740,6 +1770,24 @@ func _OrgService_DeleteOrg_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OrgService_GetDeletionReceipt_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDeletionReceiptRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OrgServiceServer).GetDeletionReceipt(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OrgService_GetDeletionReceipt_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OrgServiceServer).GetDeletionReceipt(ctx, req.(*GetDeletionReceiptRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OrgService_ServiceDesc is the grpc.ServiceDesc for OrgService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1762,6 +1810,10 @@ var OrgService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteOrg",
 			Handler:    _OrgService_DeleteOrg_Handler,
+		},
+		{
+			MethodName: "GetDeletionReceipt",
+			Handler:    _OrgService_GetDeletionReceipt_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -2790,16 +2842,19 @@ const (
 type OperationServiceClient interface {
 	// GetOperation returns one operation of the bank. For a bank being deleted it answers only for the bank's
 	// delete_bank operations (any other id = NOT_FOUND, BANK_NOT_FOUND); once the delete is done they are
-	// NOT_FOUND too.
+	// NOT_FOUND too. An empty bank_id reads an org-scoped operation (delete_org) instead.
 	GetOperation(ctx context.Context, in *GetOperationRequest, opts ...grpc.CallOption) (*GetOperationResponse, error)
-	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
+	// ListOperations pages through the bank's operations, optionally filtered by status and kind. An empty bank_id
+	// lists the org's own operations (delete_org).
 	ListOperations(ctx context.Context, in *ListOperationsRequest, opts ...grpc.CallOption) (*ListOperationsResponse, error)
 	// CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
 	// A processing one stays PROCESSING with the cancel recorded until it
-	// stops at its next checkpoint, then becomes CANCELLED; committed work stays.
+	// stops at its next checkpoint, then becomes CANCELLED; committed work stays. delete_bank and delete_org
+	// operations can't be cancelled (OPERATION_NOT_CANCELLABLE).
 	CancelOperation(ctx context.Context, in *CancelOperationRequest, opts ...grpc.CallOption) (*CancelOperationResponse, error)
 	// RetryOperation re-queues a FAILED or CANCELLED operation: it sets it back to PENDING to run
-	// again at once. Other states are rejected.
+	// again at once. Other states are rejected. A FAILED delete_org (empty bank_id) may be retried while its org
+	// is being deleted.
 	RetryOperation(ctx context.Context, in *RetryOperationRequest, opts ...grpc.CallOption) (*RetryOperationResponse, error)
 	// ListEvents polls the bank's lifecycle events by sequence number.
 	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
@@ -2871,16 +2926,19 @@ func (c *operationServiceClient) ListEvents(ctx context.Context, in *ListEventsR
 type OperationServiceServer interface {
 	// GetOperation returns one operation of the bank. For a bank being deleted it answers only for the bank's
 	// delete_bank operations (any other id = NOT_FOUND, BANK_NOT_FOUND); once the delete is done they are
-	// NOT_FOUND too.
+	// NOT_FOUND too. An empty bank_id reads an org-scoped operation (delete_org) instead.
 	GetOperation(context.Context, *GetOperationRequest) (*GetOperationResponse, error)
-	// ListOperations pages through the bank's operations, optionally filtered by status and kind.
+	// ListOperations pages through the bank's operations, optionally filtered by status and kind. An empty bank_id
+	// lists the org's own operations (delete_org).
 	ListOperations(context.Context, *ListOperationsRequest) (*ListOperationsResponse, error)
 	// CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
 	// A processing one stays PROCESSING with the cancel recorded until it
-	// stops at its next checkpoint, then becomes CANCELLED; committed work stays.
+	// stops at its next checkpoint, then becomes CANCELLED; committed work stays. delete_bank and delete_org
+	// operations can't be cancelled (OPERATION_NOT_CANCELLABLE).
 	CancelOperation(context.Context, *CancelOperationRequest) (*CancelOperationResponse, error)
 	// RetryOperation re-queues a FAILED or CANCELLED operation: it sets it back to PENDING to run
-	// again at once. Other states are rejected.
+	// again at once. Other states are rejected. A FAILED delete_org (empty bank_id) may be retried while its org
+	// is being deleted.
 	RetryOperation(context.Context, *RetryOperationRequest) (*RetryOperationResponse, error)
 	// ListEvents polls the bank's lifecycle events by sequence number.
 	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)

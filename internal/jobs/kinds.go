@@ -25,6 +25,8 @@ const (
 	SerialKeyGraph = "graph"
 	// SerialKeyDeleteBank serializes a bank's delete.
 	SerialKeyDeleteBank = "bank"
+	// SerialKeyDeleteOrg serializes an org's delete (an org-scoped job: its serial key is per org).
+	SerialKeyDeleteOrg = "org"
 )
 
 // emptyPayload is the payload of the automatic consolidate, graph_maintenance and delete_bank jobs.
@@ -321,6 +323,37 @@ func EnqueueDeleteBankContinuation(
 	return enqueue(ctx, tx, deleteBankJob(b, store.DedupePending, at))
 }
 
+// DeleteOrgPayload is the delete_org job payload.
+type DeleteOrgPayload struct {
+	// ReceiptID is the deletion receipt the delete completes.
+	ReceiptID string `json:"receipt_id"`
+}
+
+// deleteOrgJob builds o's delete_org row (org-scoped) with dedupe d, due at at (zero = now).
+func deleteOrgJob(o domain.OrgRef, receiptID string, d store.DedupePolicy, at time.Time) (store.Job, error) {
+	raw, err := encode(domain.OperationKindDeleteOrg, DeleteOrgPayload{ReceiptID: receiptID})
+	if err != nil {
+		return store.Job{}, err
+	}
+	return store.Job{
+		Bank: o.Scope(), Kind: domain.OperationKindDeleteOrg, SerialKey: SerialKeyDeleteOrg, Payload: raw, RunAt: at,
+		Dedupe: d,
+	}, nil
+}
+
+// EnqueueDeleteOrg enqueues the org's delete_org (payload {"receipt_id"}) or joins a pending or running one
+// (DedupePendingOrRunning). DeleteOrg and the tick's resume of stalled org deletes use it; the org must exist (it is
+// tombstoned by then).
+func EnqueueDeleteOrg(
+	ctx context.Context, tx store.Tx, o domain.OrgRef, receiptID string,
+) (domain.OperationID, bool, error) {
+	j, err := deleteOrgJob(o, receiptID, store.DedupePendingOrRunning, time.Time{})
+	if err != nil {
+		return "", false, err
+	}
+	return enqueue(ctx, tx, j)
+}
+
 // RefreshRequest asks for one refresh of a model.
 type RefreshRequest struct {
 	// Bank owns the model.
@@ -460,15 +493,16 @@ func requeueJob(j store.Job, key string, at time.Time) store.Job {
 // Requeue enqueues a continuation of claimed job j (same kind and payload, serial key key, DedupePending)
 // due at at (zero = now), in its own short transaction. DedupePending joins a continuation already queued
 // (a delete parks one while another job of the bank is still running). It takes no seq. A continuation for
-// a bank that is gone is not needed: ErrNotFound, and ErrBankDeleting for any kind but delete_bank, return
-// nil.
+// a bank or org that is gone is not needed: ErrNotFound (ErrOrgNotFound included), and ErrBankDeleting or
+// ErrOrgDeleting for any kind but the delete of that bank or org, return nil.
 func Requeue(ctx context.Context, db store.DB, j store.Job, key string, at time.Time) error {
 	err := db.InTx(ctx, func(tx store.Tx) error {
 		_, _, err := enqueue(ctx, tx, requeueJob(j, key, at))
 		return err
 	})
 	gone := errors.Is(err, domain.ErrNotFound) ||
-		(errors.Is(err, domain.ErrBankDeleting) && j.Kind != domain.OperationKindDeleteBank)
+		(errors.Is(err, domain.ErrBankDeleting) && j.Kind != domain.OperationKindDeleteBank) ||
+		(errors.Is(err, domain.ErrOrgDeleting) && j.Kind != domain.OperationKindDeleteOrg)
 	if gone {
 		return nil
 	}

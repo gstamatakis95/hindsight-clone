@@ -135,7 +135,7 @@ func (t *tx) missingOrDeleting(ctx context.Context, b domain.BankRef) error {
 }
 
 // Orgs returns the org repository bound to this transaction.
-func (t *tx) Orgs() store.OrgRepo { return &orgRepo{q: t.q} }
+func (t *tx) Orgs() store.OrgRepo { return &orgRepo{q: t.q, conn: t.pgTx} }
 
 // Banks returns the bank repository bound to this transaction.
 func (t *tx) Banks() store.BankRepo { return &bankRepo{q: t.q, tx: t} }
@@ -166,3 +166,6 @@ func (t *tx) Queue() store.Queue { return &queue{q: t.q, tx: t} }
 
 // Events returns the lifecycle-event repository bound to this transaction.
 func (t *tx) Events() store.EventRepo { return &eventRepo{q: t.q, tx: t} }
+
+// Receipts returns the deletion-receipt repository bound to this transaction.
+func (t *tx) Receipts() store.ReceiptRepo { return &receiptRepo{q: t.q} }

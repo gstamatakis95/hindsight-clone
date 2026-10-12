@@ -24,13 +24,14 @@
 //     crashed worker's job is reclaimed in seconds) through these scenarios, each on its own bank and one after another
 //     because emulator faults are global: RetainSync, RetainAsync, ConsolidationRecallReflect,
 //     MentalModelBothStrategies, ConsolidationTriggersRefresh, InvalidateRestore, RetagReprocess, CancelRetry,
-//     WorkerCrashReclaim and BankDelete.
+//     WorkerCrashReclaim, BankDelete and OrgDelete (the config file's deletion.blob_grace is 1s there).
 //   - TestGoldenAgainstMemdAll runs every eval/golden fixture through the eval harness against `memd all`; every check
 //     must pass.
 //   - TestExamples builds every program under examples/ and runs each against `memd all` and the emulated gateway; an
 //     example exits non-zero when the behaviour it demonstrates does not hold.
 //
 // Scenarios wait for background work with the harness's two-quiet-polls barrier on
-// BankStats.pending_operations_by_kind, and inspect MinIO directly where blob state matters (bank delete). Design:
+// BankStats.pending_operations_by_kind, and inspect MinIO and Postgres directly where stored state matters (bank and
+// org delete). Design:
 // docs/design/architecture.md and docs/design/rules-to-tests.md.
 package e2e

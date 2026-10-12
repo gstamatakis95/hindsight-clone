@@ -181,6 +181,49 @@ type OrgRepo interface {
 	// SetConfig) serializes with any other that locks it too (Postgres: pg_advisory_xact_lock). Plain reads never
 	// wait on it.
 	LockConfig(ctx context.Context, o domain.OrgRef) error
+	// LockForDelete locks the org row exclusively until the transaction ends (Postgres: FOR UPDATE) and returns
+	// the org, tombstoned or not; unknown = domain.ErrOrgNotFound. The lock waits for bank creations in flight
+	// (they share-lock the row) and makes new ones wait, so it is the first statement of an org delete.
+	LockForDelete(ctx context.Context, o domain.OrgRef) (domain.Org, error)
+	// MarkDeleting tombstones the org (marking it again keeps the first time) and then, in a later statement,
+	// every live bank of it, and returns how many banks it tombstoned. Call LockForDelete first in the same
+	// transaction: the bank statement then sees every bank committed while that lock waited.
+	MarkDeleting(ctx context.Context, o domain.OrgRef, at time.Time) (int, error)
+	// BanksAwaitingDelete returns up to limit tombstoned banks of o that have no pending or processing
+	// delete_bank operation, in id order.
+	BanksAwaitingDelete(ctx context.Context, o domain.OrgRef, limit int) ([]domain.BankRef, error)
+	// CountBanks returns how many bank rows of o are left, tombstoned or not.
+	CountBanks(ctx context.Context, o domain.OrgRef) (int, error)
+	// DeleteBatch deletes up to limit rows of the tombstoned org's content by org, whatever their bank (rows whose
+	// bank row is already gone included), and returns how many it deleted; 0 means none is left. It covers the
+	// tables BankRepo.DeleteBatch covers, in the same order; operations and lifecycle events go with Delete. An
+	// org that is not tombstoned is domain.ErrFailedPrecondition, an unknown one domain.ErrOrgNotFound.
+	DeleteBatch(ctx context.Context, o domain.OrgRef, limit int) (int, error)
+	// CountRows counts o's rows in every table that has an org_id column, as the database schema lists them at
+	// call time (orgs itself excluded), so a table added later is checked without a code change. It returns how
+	// many tables it counted and the total of rows found.
+	CountRows(ctx context.Context, o domain.OrgRef) (tables int, rows int64, err error)
+	// Delete removes the tombstoned org's operations (the running delete_org's own row included, so its Complete
+	// then reports domain.ErrNotFound, which the runner treats as done) and lifecycle events, then the org row
+	// itself. A bank row still in the org makes it domain.ErrFailedPrecondition; an org that is not tombstoned is
+	// domain.ErrFailedPrecondition and an unknown one domain.ErrOrgNotFound.
+	Delete(ctx context.Context, o domain.OrgRef) error
+}
+
+// ReceiptRepo stores deletion receipts. A receipt outlives its org: no delete path touches it, and only Prune
+// removes it.
+type ReceiptRepo interface {
+	// Create inserts r (a new id when r.ID is empty) and returns its id.
+	Create(ctx context.Context, r domain.DeletionReceipt) (string, error)
+	// Get returns one receipt of tenant; unknown = domain.ErrNotFound.
+	Get(ctx context.Context, tenant, id string) (domain.DeletionReceipt, error)
+	// Latest returns the most recently requested receipt of org o (looked up by domain.OrgIDHash); none =
+	// domain.ErrNotFound.
+	Latest(ctx context.Context, o domain.OrgRef) (domain.DeletionReceipt, error)
+	// Update replaces r's status, completed_at, verification and server version; unknown = domain.ErrNotFound.
+	Update(ctx context.Context, r domain.DeletionReceipt) error
+	// Prune deletes completed receipts whose completed_at is before before and returns how many.
+	Prune(ctx context.Context, before time.Time) (int, error)
 }
 
 // BankRepo stores banks and tenant configuration. A write to an unknown bank creates it with empty overrides

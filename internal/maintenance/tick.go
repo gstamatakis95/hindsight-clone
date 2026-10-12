@@ -13,6 +13,7 @@ import (
 	"memd/internal/memory"
 	"memd/internal/mentalmodel"
 	"memd/internal/observation"
+	"memd/internal/org"
 	"memd/internal/store"
 	"time"
 )
@@ -25,6 +26,8 @@ const (
 	DefaultOperationRetention = 7 * 24 * time.Hour
 	// DefaultEventRetention is how long lifecycle events are kept before pruning.
 	DefaultEventRetention = 30 * 24 * time.Hour
+	// DefaultReceiptRetention is how long the receipt of a completed org delete is kept (3 years).
+	DefaultReceiptRetention = 3 * 365 * 24 * time.Hour
 	// DefaultGraphBudget bounds one graph_maintenance run (240 s); leftover work re-enqueues the
 	// job.
 	DefaultGraphBudget = 240 * time.Second
@@ -46,6 +49,9 @@ type Config struct {
 	OperationRetention time.Duration
 	// EventRetention keeps lifecycle events this long (default DefaultEventRetention).
 	EventRetention time.Duration
+	// ReceiptRetention keeps the receipts of completed org deletes this long after completion (default
+	// DefaultReceiptRetention).
+	ReceiptRetention time.Duration
 	// GraphBudget bounds one graph_maintenance run (default DefaultGraphBudget).
 	GraphBudget time.Duration
 }
@@ -61,6 +67,7 @@ func (c Config) withDefaults() Config {
 	def(&c.StaleAfter, jobs.DefaultStaleAfter)
 	def(&c.OperationRetention, DefaultOperationRetention)
 	def(&c.EventRetention, DefaultEventRetention)
+	def(&c.ReceiptRetention, DefaultReceiptRetention)
 	def(&c.GraphBudget, DefaultGraphBudget)
 	return c
 }
@@ -83,6 +90,9 @@ type Deps struct {
 	Clock clock.Clock
 	// Banks re-enqueues the stopped deletes of tombstoned banks (bank.Service.ResumeStalledDeletes).
 	Banks *bank.Service
+	// Orgs re-enqueues the stopped deletes of tombstoned orgs and prunes old deletion receipts
+	// (org.Service.ResumeStalledDeletes and PruneReceipts).
+	Orgs *org.Service
 	// Graph lists banks with graph maintenance queued (BanksWithGraphWork).
 	Graph store.Maintenance
 	// Memory re-queues the rederives of stranded facts and settles finished retain_batch parents.
@@ -120,11 +130,11 @@ func New(d Deps) *Service {
 	return &Service{d: d}
 }
 
-// Run ticks every Interval in every worker: reclaim stale jobs, resume stalled bank deletes, cron
+// Run ticks every Interval in every worker: reclaim stale jobs, resume stalled bank and org deletes, cron
 // refreshes, consolidation and graph-maintenance reconciles, re-queue rederives of stranded facts, settle
-// retain_batch parents, prune terminal ops and events. No leader: each step is idempotent. The delete resume
-// and the refresh-failure reconcile run right after reclaim, so they see jobs reclaim failed in the same
-// tick. It ticks once at start and returns nil when ctx is done; a failing step is logged and never stops
+// retain_batch parents, prune terminal ops, events and old deletion receipts. No leader: each step is
+// idempotent. The delete resumes and the refresh-failure reconcile run right after reclaim, so they see jobs
+// reclaim failed in the same tick. It ticks once at start and returns nil when ctx is done; a failing step is logged and never stops
 // the others.
 func (s *Service) Run(ctx context.Context) error {
 	if s.d.Claimer == nil || s.d.Store == nil {
@@ -165,6 +175,7 @@ type step struct {
 var steps = []step{
 	{"reclaim_stale", (*Service).reclaimStale},
 	{"resume_bank_deletes", (*Service).resumeBankDeletes},
+	{"resume_org_deletes", (*Service).resumeOrgDeletes},
 	{"refresh_failures", (*Service).reconcileRefreshFailures},
 	{"cron_refresh", (*Service).enqueueCronRefreshes},
 	{"consolidation_reconcile", (*Service).reconcileConsolidation},
@@ -173,6 +184,7 @@ var steps = []step{
 	{"settle_retain_batches", (*Service).settleBatches},
 	{"prune_operations", (*Service).pruneOperations},
 	{"prune_events", (*Service).pruneEvents},
+	{"prune_deletion_receipts", (*Service).pruneReceipts},
 }
 
 // rederiveStranded re-enqueues rederive_memory for facts a failed rederive left without an embedding.
@@ -264,6 +276,23 @@ func (s *Service) resumeBankDeletes(ctx context.Context) (int, error) {
 		return n, fmt.Errorf("resume bank deletes: %w", err)
 	}
 	return n, nil
+}
+
+// resumeOrgDeletes re-enqueues delete_org for every tombstoned org whose delete stopped
+// (org.Service.ResumeStalledDeletes), so an org is never left tombstoned forever.
+func (s *Service) resumeOrgDeletes(ctx context.Context) (int, error) {
+	if s.d.Orgs == nil {
+		return 0, nil
+	}
+	return s.d.Orgs.ResumeStalledDeletes(ctx) //nolint:wrapcheck // the sweep wraps its own errors
+}
+
+// pruneReceipts deletes the receipts of org deletes completed more than ReceiptRetention before now.
+func (s *Service) pruneReceipts(ctx context.Context) (int, error) {
+	if s.d.Orgs == nil {
+		return 0, nil
+	}
+	return s.d.Orgs.PruneReceipts(ctx, s.d.Clock.Now().Add(-s.d.Config.ReceiptRetention)) //nolint:wrapcheck // wrapped
 }
 
 // reconcileGraph enqueues graph_maintenance for every bank with graph_dirty or entity_maintenance rows

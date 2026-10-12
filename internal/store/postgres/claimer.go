@@ -276,7 +276,7 @@ type staleGuard struct {
 // finishFailed ends a PROCESSING job FAILED (CANCELLED if its cancel was requested) in its own transaction
 // and returns the new status. Lock order: it reads the job unlocked, bumps the bank's change seq (bank row
 // first), then runs the fenced UPDATE; a FAILED job gets one OPERATION_FAILED event at that seq. A
-// tombstoned or gone bank takes no seq and gets no event. A fenced update that matches nothing rolls the
+// tombstoned or gone bank, and an org-scoped job (events are per bank), take no seq and get no event. A fenced update that matches nothing rolls the
 // transaction back and returns domain.ErrNotFound or domain.ErrFailedPrecondition.
 func (s *DB) finishFailed(ctx context.Context, id uuid.UUID, errText *string, guard *staleGuard) (string, error) {
 	var status string
@@ -290,7 +290,7 @@ func (s *DB) finishFailed(ctx context.Context, id uuid.UUID, errText *string, gu
 		}
 		bank := domain.NewBankRef(peek.TenantID, peek.OrgID, peek.BankID)
 		var seq int64
-		if !peek.CancelRequested {
+		if !peek.CancelRequested && !bank.OrgScoped() { // events are per bank: an org-scoped job gets none
 			if seq, err = liveSeq(ctx, t, bank); err != nil {
 				return err
 			}

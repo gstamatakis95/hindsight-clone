@@ -13,7 +13,8 @@ import (
 
 // orgRepo is store.OrgRepo over one transaction.
 type orgRepo struct {
-	q *db.Queries
+	q    *db.Queries
+	conn pgx.Tx // runs the org delete's statements over tables named at run time
 }
 
 var _ store.OrgRepo = (*orgRepo)(nil)

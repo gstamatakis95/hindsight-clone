@@ -28,6 +28,9 @@ const (
 	OperationKindGraphMaintenance OperationKind = "graph_maintenance"
 	// OperationKindDeleteBank deletes a tombstoned bank in batches.
 	OperationKindDeleteBank OperationKind = "delete_bank"
+	// OperationKindDeleteOrg deletes a tombstoned org: it drives its banks' deletes, sweeps and verifies. It is the
+	// only org-scoped kind: its operation has an empty bank id.
+	OperationKindDeleteOrg OperationKind = "delete_org"
 )
 
 // DefaultMaxAttempts is the attempt cap of every retried kind except consolidate.

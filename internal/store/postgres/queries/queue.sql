@@ -51,7 +51,21 @@ SET status = 'cancelled', finished_at = now(), joinable = false, updated_at = no
 WHERE tenant_id = @tenant_id AND org_id = @org_id AND bank_id = @bank_id AND status = 'pending'
   AND kind <> 'delete_bank';
 
--- QueueGet returns one operation of a bank.
+-- QueueCancelOrg cancels every pending job of an org, its banks' included, except delete_bank and delete_org.
+-- name: QueueCancelOrg :execrows
+UPDATE operations
+SET status = 'cancelled', finished_at = now(), joinable = false, updated_at = now()
+WHERE tenant_id = @tenant_id AND org_id = @org_id AND status = 'pending'
+  AND kind NOT IN ('delete_bank', 'delete_org');
+
+-- QueueProcessingInOrg reports whether an operation of an org other than except_id is processing.
+-- name: QueueProcessingInOrg :one
+SELECT EXISTS (
+    SELECT 1 FROM operations
+    WHERE tenant_id = @tenant_id AND org_id = @org_id AND status = 'processing' AND id <> @except_id::uuid
+)::bool AS busy;
+
+-- QueueGet returns one operation of a bank (of the org itself when bank_id is '').
 -- name: QueueGet :one
 SELECT * FROM operations WHERE tenant_id = @tenant_id AND org_id = @org_id AND bank_id = @bank_id AND id = @id;
 
@@ -100,13 +114,16 @@ WHERE id = @id AND status = 'pending';
 DELETE FROM operations
 WHERE status IN ('completed', 'failed', 'cancelled') AND finished_at < @before::timestamptz;
 
--- ClaimSelect is the spec's claim query (only $1 gains a ::text[] cast): due jobs of the given kinds whose
--- serial key is free, oldest first.
+-- ClaimSelect is the claim query: due jobs of the given kinds whose serial key is free, oldest first. A bank job
+-- needs its bank row, live unless the job is delete_bank; an org-scoped job (bank_id '') needs only its org row.
+-- A tombstoned org runs only delete_bank and delete_org.
 -- name: ClaimSelect :many
 SELECT o.* FROM operations o
-JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
+JOIN orgs g ON (g.tenant_id, g.id) = (o.tenant_id, o.org_id)
+LEFT JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
 WHERE o.status = 'pending' AND o.run_at <= now() AND o.kind = ANY($1::text[])
-  AND (b.deleting_at IS NULL OR o.kind = 'delete_bank')
+  AND (g.deleting_at IS NULL OR o.kind IN ('delete_bank', 'delete_org'))
+  AND (o.bank_id = '' OR (b.id IS NOT NULL AND (b.deleting_at IS NULL OR o.kind = 'delete_bank')))
   AND NOT EXISTS (
     SELECT 1 FROM operations p
     WHERE (p.tenant_id, p.org_id, p.bank_id, p.serial_key) = (o.tenant_id, o.org_id, o.bank_id, o.serial_key)
@@ -132,11 +149,16 @@ RETURNING id, (cancel_requested_at IS NOT NULL)::bool AS cancel_requested;
 -- name: ClaimProgress :execrows
 UPDATE operations SET progress = @progress, updated_at = now() WHERE id = @id AND status = 'processing';
 
--- ClaimAlive reports whether a job is processing without a cancel request in a live bank.
+-- ClaimAlive reports whether a job is processing without a cancel request, with the same scope rules as
+-- ClaimSelect: a bank job in a live bank (delete_bank in its tombstoned one), an org-scoped job while its org row
+-- exists, and under a tombstoned org only delete_bank and delete_org.
 -- name: ClaimAlive :one
-SELECT (o.status = 'processing' AND o.cancel_requested_at IS NULL AND b.id IS NOT NULL
-        AND (b.deleting_at IS NULL OR o.kind = 'delete_bank'))::bool AS alive
+SELECT (o.status = 'processing' AND o.cancel_requested_at IS NULL AND g.id IS NOT NULL
+        AND (g.deleting_at IS NULL OR o.kind IN ('delete_bank', 'delete_org'))
+        AND (o.bank_id = '' OR (b.id IS NOT NULL AND (b.deleting_at IS NULL OR o.kind = 'delete_bank'))))::bool
+       AS alive
 FROM operations o
+LEFT JOIN orgs g ON (g.tenant_id, g.id) = (o.tenant_id, o.org_id)
 LEFT JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
 WHERE o.id = $1;
 

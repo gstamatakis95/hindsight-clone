@@ -68,7 +68,9 @@ type Querier interface {
 	ChunkGetMany(ctx context.Context, arg ChunkGetManyParams) ([]Chunk, error)
 	// ChunkInsert stores one chunk; a replayed insert of the same id rewrites it in place.
 	ChunkInsert(ctx context.Context, arg ChunkInsertParams) error
-	// ClaimAlive reports whether a job is processing without a cancel request in a live bank.
+	// ClaimAlive reports whether a job is processing without a cancel request, with the same scope rules as
+	// ClaimSelect: a bank job in a live bank (delete_bank in its tombstoned one), an org-scoped job while its org row
+	// exists, and under a tombstoned org only delete_bank and delete_org.
 	ClaimAlive(ctx context.Context, id uuid.UUID) (bool, error)
 	// ClaimAppendFailedEvent appends one OPERATION_FAILED lifecycle event.
 	ClaimAppendFailedEvent(ctx context.Context, arg ClaimAppendFailedEventParams) error
@@ -95,8 +97,9 @@ type Querier interface {
 	// ClaimRetryLater returns a processing job to pending at run_at with attempts+1, or CANCELLED when its
 	// cancel was requested.
 	ClaimRetryLater(ctx context.Context, arg ClaimRetryLaterParams) (string, error)
-	// ClaimSelect is the spec's claim query (only $1 gains a ::text[] cast): due jobs of the given kinds whose
-	// serial key is free, oldest first.
+	// ClaimSelect is the claim query: due jobs of the given kinds whose serial key is free, oldest first. A bank job
+	// needs its bank row, live unless the job is delete_bank; an org-scoped job (bank_id '') needs only its org row.
+	// A tombstoned org runs only delete_bank and delete_org.
 	ClaimSelect(ctx context.Context, arg ClaimSelectParams) ([]Operation, error)
 	// ClaimStale lists processing jobs whose heartbeat is older than the ttl.
 	ClaimStale(ctx context.Context, staleSecs float64) ([]ClaimStaleRow, error)
@@ -226,30 +229,55 @@ type Querier interface {
 	MentalModelUpdate(ctx context.Context, arg MentalModelUpdateParams) (int64, error)
 	// ModelsCitingUnits returns, in byte order, the ids of the bank's mental models whose source_ids include any of the units.
 	ModelsCitingUnits(ctx context.Context, arg ModelsCitingUnitsParams) ([]string, error)
+	// OrgBanksAwaitingDelete returns, in byte order, up to lim tombstoned banks of an org with no pending or processing
+	// delete_bank operation.
+	OrgBanksAwaitingDelete(ctx context.Context, arg OrgBanksAwaitingDeleteParams) ([]string, error)
 	// OrgConfigLock serializes read-modify-writes of one org's config until the tx ends.
 	OrgConfigLock(ctx context.Context, arg OrgConfigLockParams) error
+	// OrgCountBanks counts an org's bank rows, tombstoned or not.
+	OrgCountBanks(ctx context.Context, arg OrgCountBanksParams) (int64, error)
 	// OrgCreate inserts a new org; an existing id is a unique violation.
 	OrgCreate(ctx context.Context, arg OrgCreateParams) error
+	// OrgDeleteEvents deletes every lifecycle event of an org's banks.
+	OrgDeleteEvents(ctx context.Context, arg OrgDeleteEventsParams) error
+	// OrgDeleteOperations deletes every operation of an org, its banks' and its own.
+	OrgDeleteOperations(ctx context.Context, arg OrgDeleteOperationsParams) error
+	// OrgDeleteRow deletes a tombstoned org's row; a live org matches nothing, and a bank left in it fails the foreign
+	// key (RESTRICT).
+	OrgDeleteRow(ctx context.Context, arg OrgDeleteRowParams) (int64, error)
 	// OrgGet returns one org, tombstoned or not.
 	OrgGet(ctx context.Context, arg OrgGetParams) (Org, error)
 	// OrgList returns one keyset page of a tenant's live orgs (tombstoned ones left out) whose id starts with
 	// id_prefix, in byte order of id, after after_id ("" = from the start).
 	OrgList(ctx context.Context, arg OrgListParams) ([]Org, error)
+	// OrgLockForDelete locks the org row FOR UPDATE and returns it: it waits for bank creations in flight (FOR KEY SHARE)
+	// and makes new ones wait, so an org delete runs it first.
+	OrgLockForDelete(ctx context.Context, arg OrgLockForDeleteParams) (Org, error)
 	// OrgLockLive takes FOR KEY SHARE on the org row and returns its tombstone (NULL = live); no row = unknown org.
 	// Bank creation runs it first: it never waits on an org config update (FOR NO KEY UPDATE), but it waits for an
 	// org delete that holds the row FOR UPDATE, and then sees its tombstone.
 	OrgLockLive(ctx context.Context, arg OrgLockLiveParams) (*time.Time, error)
+	// OrgMarkBanksDeleting tombstones every live bank of an org. It runs as its own statement after OrgLockForDelete,
+	// so under READ COMMITTED it sees every bank committed while that lock waited.
+	OrgMarkBanksDeleting(ctx context.Context, arg OrgMarkBanksDeletingParams) (int64, error)
+	// OrgMarkDeleting tombstones an org; marking it again keeps the first time.
+	OrgMarkDeleting(ctx context.Context, arg OrgMarkDeletingParams) (int64, error)
 	// OrgSetConfig replaces a live org's config; a tombstoned or unknown org matches nothing.
 	OrgSetConfig(ctx context.Context, arg OrgSetConfigParams) (int64, error)
+	// OrgTablesWithOrgID lists, in name order, the base tables of the current schema that have an org_id column, orgs
+	// excluded: the tables an org delete verifies are empty for the org.
+	OrgTablesWithOrgID(ctx context.Context) ([]string, error)
 	// QueueCancel cancels a pending job at once or records the cancel request of a processing one.
 	QueueCancel(ctx context.Context, arg QueueCancelParams) (Operation, error)
 	// QueueCancelBank cancels every pending job of a bank except its delete_bank job.
 	QueueCancelBank(ctx context.Context, arg QueueCancelBankParams) (int64, error)
+	// QueueCancelOrg cancels every pending job of an org, its banks' included, except delete_bank and delete_org.
+	QueueCancelOrg(ctx context.Context, arg QueueCancelOrgParams) (int64, error)
 	// QueueDedupeLock serializes dedupe enqueues of one (tenant, org, bank, kind, serial key) until the tx ends.
 	QueueDedupeLock(ctx context.Context, arg QueueDedupeLockParams) error
 	// QueueFindJoinable locks and returns the oldest joinable row an enqueue may join.
 	QueueFindJoinable(ctx context.Context, arg QueueFindJoinableParams) (uuid.UUID, error)
-	// QueueGet returns one operation of a bank.
+	// QueueGet returns one operation of a bank (of the org itself when bank_id is '').
 	QueueGet(ctx context.Context, arg QueueGetParams) (Operation, error)
 	// QueueInsert inserts one pending job; a NULL run_at means the database's now().
 	QueueInsert(ctx context.Context, arg QueueInsertParams) error
@@ -259,6 +287,8 @@ type Querier interface {
 	QueueLockBank(ctx context.Context, arg QueueLockBankParams) (*time.Time, error)
 	// QueueLockOp locks one operation row and returns it.
 	QueueLockOp(ctx context.Context, id uuid.UUID) (Operation, error)
+	// QueueProcessingInOrg reports whether an operation of an org other than except_id is processing.
+	QueueProcessingInOrg(ctx context.Context, arg QueueProcessingInOrgParams) (bool, error)
 	// QueuePrune deletes terminal operations finished before the cutoff.
 	QueuePrune(ctx context.Context, before time.Time) (int64, error)
 	// QueueReschedule sets a pending job's run_at.
@@ -316,6 +346,16 @@ type Querier interface {
 	// 'documents') of a bank carrying it, keeping tags that match prefix_like and sort after after ('' = from the
 	// start), in byte order; a NULL lim returns all.
 	ReadsTagCounts(ctx context.Context, arg ReadsTagCountsParams) ([]ReadsTagCountsRow, error)
+	// ReceiptCreate inserts a deletion receipt.
+	ReceiptCreate(ctx context.Context, arg ReceiptCreateParams) error
+	// ReceiptGet returns one receipt of a tenant.
+	ReceiptGet(ctx context.Context, arg ReceiptGetParams) (DeletionReceipt, error)
+	// ReceiptLatest returns an org's most recently requested receipt, found by the org id hash.
+	ReceiptLatest(ctx context.Context, arg ReceiptLatestParams) (DeletionReceipt, error)
+	// ReceiptPrune deletes the receipts completed before the cutoff.
+	ReceiptPrune(ctx context.Context, before time.Time) (int64, error)
+	// ReceiptUpdate replaces a receipt's status, completion time, verification and server version.
+	ReceiptUpdate(ctx context.Context, arg ReceiptUpdateParams) (int64, error)
 	// ScopeListPage returns up to lim of the bank's observation scopes with a key strictly after after ("" = from the start, so the shared scope "" lists), in byte order, each with its live observation count.
 	ScopeListPage(ctx context.Context, arg ScopeListPageParams) ([]ScopeListPageRow, error)
 	// ScopeObservationCount counts the bank's live observations whose scope key is the given one.
@@ -332,6 +372,9 @@ type Querier interface {
 	// operation: their delete was failed by ReclaimStale or a shutdown release at the attempt cap, or failed for
 	// good, and the maintenance tick re-enqueues it (docs/design/storage.md#bank-deletion).
 	StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesRow, error)
+	// StalledOrgDeletes returns, in byte order, the tombstoned orgs with no pending or processing delete_org operation,
+	// for the tick's resume_org_deletes step (docs/design/storage.md#deleting-an-org).
+	StalledOrgDeletes(ctx context.Context) ([]StalledOrgDeletesRow, error)
 	// StrandedFacts returns live facts left with a NULL embedding by a rederive_memory operation that ended
 	// FAILED or CANCELLED, on banks that are not tombstoned, when no rederive of the unit
 	// is pending or processing and none ended within retry_after_seconds. It walks the operations table (pruned

@@ -25,6 +25,7 @@ import (
 	"memd/internal/store"
 	"memd/internal/timex"
 	"net/http"
+	"runtime/debug"
 	"time"
 )
 
@@ -61,7 +62,7 @@ func wireServices(
 	wireDocuments(c, in, d)
 	wireObservations(c, in, d)
 	wireMentalModels(c, in, d)
-	wireOrg(c, d)
+	wireOrg(cfg, c, in, d)
 	wireBanks(c, in, d)
 	wireConfig(c, d)
 	wireOperations(c, d)
@@ -151,9 +152,35 @@ func wireMentalModels(c core, in infra, d *deps) {
 	d.maintenance.MentalModels = svc
 }
 
-// wireOrg builds org.Service: it serves OrgService (create, get, list; DeleteOrg answers UNIMPLEMENTED).
-func wireOrg(c core, d *deps) {
-	d.api.Org = &grpcapi.OrgHandler{Orgs: org.New(org.Deps{DB: c.db})}
+// wireOrg builds org.Service: it serves OrgService (create, get, list, delete and the deletion receipts), runs the
+// delete_org job and the tick's resume_org_deletes and prune_deletion_receipts steps. The blob grace comes from the
+// server config file's deletion section.
+func wireOrg(cfg Config, c core, in infra, d *deps) {
+	svc := org.New(org.Deps{
+		DB: c.db, Maintenance: in.maint, Blob: in.blob, Clock: c.clock, ServerVersion: serverVersion(), Logger: d.log,
+		Delete: org.DeleteConfig{BlobGrace: time.Duration(*cfg.File.Deletion.BlobGrace)},
+	})
+	d.api.Org = &grpcapi.OrgHandler{Orgs: svc}
+	d.handlers.add(domain.OperationKindDeleteOrg, svc.RunDeleteJob)
+	d.maintenance.Orgs = svc
+}
+
+// serverVersion is the version deletion receipts record: the main module's version, or its VCS revision for a
+// development build ("" when the binary carries neither).
+func serverVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" {
+			return s.Value
+		}
+	}
+	return ""
 }
 
 // wireBanks builds bank.Service: it serves BankService (create, get, list, delete, stats, tags, templates), runs the
@@ -178,8 +205,8 @@ func wireOperations(c core, d *deps) {
 }
 
 // wireMaintenance builds maintenance.Service, which runs the tick and the graph_maintenance job. It runs last:
-// wireBanks, wireMemory, wireObservations and wireMentalModels set their services' tick steps in d.maintenance
-// first. The cross-bank scans come from store.Maintenance, and the operator settings from the server config file's
+// wireOrg, wireBanks, wireMemory, wireObservations and wireMentalModels set their services' tick steps in
+// d.maintenance first. The cross-bank scans come from store.Maintenance, and the operator settings from the server config file's
 // worker and retention sections.
 func wireMaintenance(cfg Config, c core, in infra, d *deps) {
 	m := &d.maintenance
@@ -191,6 +218,7 @@ func wireMaintenance(cfg Config, c core, in infra, d *deps) {
 	m.Config = maintenance.Config{
 		Interval: time.Duration(f.Worker.MaintenanceInterval), StaleAfter: time.Duration(f.Worker.StaleAfter),
 		OperationRetention: time.Duration(f.Retention.Operations), EventRetention: time.Duration(f.Retention.Events),
+		ReceiptRetention: time.Duration(f.Retention.DeletionReceipts),
 	}
 	d.maint = maintenance.New(*m)
 	d.handlers.add(domain.OperationKindGraphMaintenance, d.maint.RunGraphJob)
