@@ -8,6 +8,7 @@ import (
 	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
+	"strings"
 	"testing"
 	"time"
 )
@@ -220,9 +221,11 @@ func checkPayload(e *env, j store.Job, ts time.Time) {
 	}
 }
 
-// TestIngestValidation: bad requests fail with INVALID_ARGUMENT before anything is stored.
+// TestIngestValidation: bad requests fail with INVALID_ARGUMENT before anything is stored. An item over
+// ingest.max_document_bytes names its content field, so no stored text is ever too large for GetDocument.
 func TestIngestValidation(t *testing.T) {
 	e := newEnv(t, 0)
+	e.ingestor.d.Limits.MaxDocumentBytes = 64
 	custom := &domain.BankConfig{Retain: &domain.RetainConfig{ExtractionMode: domain.ExtractionModeCustom}}
 	cases := map[string]RetainRequest{
 		"no items": {Bank: testBank},
@@ -231,10 +234,17 @@ func TestIngestValidation(t *testing.T) {
 			{DocumentID: "a", Content: "x"}, {DocumentID: "a", Content: "y"},
 		}},
 		"custom no prompt": {Bank: testBank, Items: []RetainItem{{Content: "x", Overrides: custom}}},
+		"content too large": {Bank: testBank, Items: []RetainItem{
+			{DocumentID: "a", Content: "x"}, {DocumentID: "b", Content: strings.Repeat("x", 65)},
+		}},
 	}
 	for name, req := range cases {
-		if _, err := e.ingestor.Ingest(e.ctx, req); !errors.Is(err, domain.ErrInvalidArgument) {
+		_, err := e.ingestor.Ingest(e.ctx, req)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("%s: err = %v, want INVALID_ARGUMENT", name, err)
+		}
+		if v := domain.FieldViolations(err); name == "content too large" && (len(v) != 1 || v[0].Field != "items[1].content") {
+			t.Errorf("%s: field violations %+v, want items[1].content", name, v)
 		}
 	}
 	if len(e.blob.Keys()) != 0 {

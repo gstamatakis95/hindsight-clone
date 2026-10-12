@@ -7,6 +7,7 @@ import (
 	"memd/internal/blob"
 	"memd/internal/domain"
 	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"testing"
 )
@@ -21,6 +22,7 @@ func TestReads(t *testing.T) {
 		{"get_chunks", testRdGetChunks},
 		{"entity_states", testRdEntityStates},
 		{"entity_states_id_order", testRdEntityStatesIDOrder},
+		{"entity_states_observation_cap", testRdEntityStatesObservationCap},
 		{"stale_scopes", testRdStaleScopes},
 		{"tag_counts", testRdTagCounts},
 		{"count_observations", testRdCountObservations},
@@ -214,7 +216,8 @@ func rdEntityStates(t *testing.T, s store.DB, b domain.BankRef, units ...domain.
 	return rdMust(t, fmt.Sprintf("EntityStates(%v)", b), es, err)
 }
 
-// rdWantEntityStates fails the test unless got equals want in order (ObservationIDs compared in order).
+// rdWantEntityStates fails the test unless got equals want in order (ObservationIDs compared as sets, and
+// ObservationCount against their number).
 func rdWantEntityStates(t *testing.T, what string, got, want []domain.EntityState) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -228,8 +231,12 @@ func rdWantEntityStates(t *testing.T, what string, got, want []domain.EntityStat
 				w.CanonicalName)
 			continue
 		}
-		wantSeq(t, fmt.Sprintf("%s[%d] %s ObservationIDs", what, i, w.CanonicalName), g.ObservationIDs,
+		wantSet(t, fmt.Sprintf("%s[%d] %s ObservationIDs", what, i, w.CanonicalName), g.ObservationIDs,
 			w.ObservationIDs)
+		if g.ObservationCount != int64(len(w.ObservationIDs)) {
+			t.Errorf("%s[%d] %s ObservationCount = %d, want %d", what, i, w.CanonicalName, g.ObservationCount,
+				len(w.ObservationIDs))
+		}
 	}
 }
 
@@ -264,6 +271,38 @@ func testRdEntityStates(t *testing.T, s store.DB) {
 		return err
 	})
 	rdWantEntityStates(t, "Tx.EntityStates(bank A)", inTxStates, want)
+}
+
+// testRdEntityStatesObservationCap: an entity with more live observations than domain.MaxEntityObservationIDs
+// lists only the most recently updated ones, newest first, and counts them all.
+func testRdEntityStatesObservationCap(t *testing.T, s store.DB) {
+	ensureBanks(t, s, bankA)
+	f := rdFact(bankA, "f", 0)
+	n := domain.MaxEntityObservationIDs + 10
+	obs := make([]domain.Unit, n)
+	for i := range obs {
+		obs[i] = rdObs(bankA, fmt.Sprintf("obs %d", i), i+1)
+	}
+	insertUnits(t, s, append([]domain.Unit{f}, obs...)...)
+	ann := rdPerson(t, s, bankA, "Ann")
+	rdAttach(t, s, f.ID, ann)
+	for _, o := range obs {
+		rdAttach(t, s, o.ID, ann)
+	}
+	// The inserts share one updated_at; spread them out so obs[n-1] is the most recently updated.
+	if _, err := pgtest.Pool(t).Exec(t.Context(),
+		`UPDATE memory_units SET updated_at = created_at WHERE fact_type = 'observation'`); err != nil {
+		t.Fatal(err)
+	}
+	got := rdEntityStates(t, s, bankA, f.ID)
+	if len(got) != 1 || got[0].ObservationCount != int64(n) {
+		t.Fatalf("EntityStates = %+v, want Ann with ObservationCount %d", got, n)
+	}
+	want := make([]domain.UnitID, 0, domain.MaxEntityObservationIDs)
+	for i := n - 1; i >= n-domain.MaxEntityObservationIDs; i-- {
+		want = append(want, obs[i].ID)
+	}
+	wantSeq(t, "capped ObservationIDs", got[0].ObservationIDs, want)
 }
 
 // testRdEntityStatesIDOrder: five entities with explicit ids, created out of order and named so that name

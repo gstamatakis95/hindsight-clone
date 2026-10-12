@@ -130,6 +130,37 @@ func TestPagingInterceptor(t *testing.T) {
 	}
 }
 
+// TestResponseSizeInterceptor: a read whose response passes the limit fails with RESOURCE_EXHAUSTED
+// (RESPONSE_TOO_LARGE); a write with the same response, or a read within the limit, passes untouched.
+func TestResponseSizeInterceptor(t *testing.T) {
+	big := &pb.ExportBankTemplateResponse{Template: &pb.BankTemplate{
+		Directives: []*pb.Directive{{Name: "d", Rules: []string{strings.Repeat("r", 2000)}}},
+	}}
+	tests := []struct {
+		method string
+		limit  int
+		want   codes.Code
+	}{
+		{"/memory.v1.BankService/ExportBankTemplate", 1000, codes.ResourceExhausted},
+		{"/memory.v1.MemoryService/Recall", 1000, codes.ResourceExhausted},
+		{"/memory.v1.BankService/ExportBankTemplate", 4000, codes.OK},
+		{"/memory.v1.BankService/ExportBankTemplate", 0, codes.OK}, // no limit
+		{"/memory.v1.ConfigService/CreateDirective", 1000, codes.OK},
+	}
+	for _, tc := range tests {
+		resp, err := responseSizeInterceptor(tc.limit)(context.Background(), nil,
+			&grpc.UnaryServerInfo{FullMethod: tc.method}, func(context.Context, any) (any, error) { return big, nil })
+		if got := status.Code(err); got != tc.want || (err == nil) != (resp != nil) {
+			t.Errorf("%s limit %d: code %v, response %v; want %v", tc.method, tc.limit, got, resp != nil, tc.want)
+		}
+		if tc.want == codes.ResourceExhausted {
+			if r := errorInfo(t, status.Convert(err)).GetReason(); r != "RESPONSE_TOO_LARGE" {
+				t.Errorf("%s: reason %q, want RESPONSE_TOO_LARGE", tc.method, r)
+			}
+		}
+	}
+}
+
 // ref is a bank-scoped request for bankRef tests.
 type ref struct{ org, bank string }
 

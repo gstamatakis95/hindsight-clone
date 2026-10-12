@@ -6,6 +6,7 @@ import (
 	"errors"
 	"memd/internal/ai"
 	"memd/internal/domain"
+	"memd/internal/jobs"
 	"memd/internal/prompts"
 	"memd/internal/store"
 	"slices"
@@ -220,6 +221,25 @@ func TestDeltaAllOpsRejectedKeepsDocument(t *testing.T) {
 				t.Fatal("runner wrote history on failure; the reconcile owns failure entries")
 			}
 		})
+	}
+}
+
+// TestOversizedPageKeepsDocument: a drafted page over domain.MaxMentalModelContentBytes fails the refresh for good
+// (RESOURCE_EXHAUSTED, no retry, failure reason content_too_large) and keeps the stored document, so one model
+// always fits a response.
+func TestOversizedPageKeepsDocument(t *testing.T) {
+	e := newEnv(t)
+	before, _ := builtModel(e, domain.RefreshStrategySingleShot)
+	e.addUnit(domain.FactTypeWorld, "Bob joined", "proj")
+	e.scriptSynthesize("## Status\n\n" + strings.Repeat("x", domain.MaxMentalModelContentBytes))
+	out, err := e.svc.refresh(e.ctx, e.bank, "status", refreshOptions{Manual: true, ForceFull: true})
+	if !errors.Is(err, domain.ErrResourceExhausted) || !jobs.IsPermanent(err) ||
+		out.Trace.Outcome != domain.RefreshOutcomeFailed || failureReason(err.Error()) != failureContentTooLarge {
+		t.Fatalf("err %v outcome %s, want a permanent RESOURCE_EXHAUSTED content_too_large failure", err,
+			out.Trace.Outcome)
+	}
+	if after := e.model("status"); after.ContentMD != before.ContentMD || after.Version != before.Version {
+		t.Fatalf("document changed: v%d, %d bytes", after.Version, len(after.ContentMD))
 	}
 }
 
