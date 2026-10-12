@@ -90,7 +90,7 @@
 // that time redelivers those acked records as well. The source also keeps every record behind the unsettled head
 // in memory until the head settles; once a partition holds Config.MaxBuffered records (default 10 000) the source
 // pauses fetching it, which blocks every key of that partition until the head is acked or dead-lettered, and
-// resumes it below half. The consumer bounds this: it dead-letters a record after its maximum attempts.
+// resumes it at half. The consumer bounds this: it dead-letters a record after its maximum attempts.
 //
 // # Rebalances and Close
 //
@@ -119,8 +119,9 @@
 //   - Partitioning: key records by document id and give the topic at least as many partitions as memd ingest
 //     processes, since a partition is read by one member of the group at a time. Adding partitions later moves
 //     keys to other partitions, which breaks per-key order for the documents in flight at that moment.
-//   - The dead-letter topic must exist (or the brokers must auto-create it) with at least the topic's retention.
-//     It holds full document content, so its retention is also how long a deleted org's content can survive
+//   - The dead-letter topic must exist, with at least the topic's retention: the client never asks the brokers to
+//     auto-create it, so a missing one fails every DeadLetter with domain.ErrUnavailable after a few metadata
+//     retries. It holds full document content, so its retention is also how long a deleted org's content can survive
 //     there: set it to what the deployment's data-deletion policy allows, and replay or purge it from there.
 //   - Errors: a broker or transport failure is domain.ErrUnavailable with the franz-go error in the chain;
 //     retriable fetch errors are retried by the client and never surface.

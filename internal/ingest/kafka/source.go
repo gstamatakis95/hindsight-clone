@@ -229,14 +229,14 @@ func (s *Source) settle(e *entry) {
 	s.flow(e.p)
 }
 
-// flow pauses fetching a partition that holds MaxBuffered records and resumes it once it holds fewer than half.
+// flow pauses fetching a partition that holds MaxBuffered records and resumes it once it holds half or fewer.
 // The caller holds mu.
 func (s *Source) flow(p *partition) {
 	switch n := len(p.entries); {
 	case !p.paused && n >= s.cfg.MaxBuffered:
 		p.paused = true
 		s.cl.PauseFetchPartitions(map[string][]int32{s.cfg.Topic: {p.id}})
-	case p.paused && n < s.cfg.MaxBuffered/2:
+	case p.paused && n <= s.cfg.MaxBuffered/2:
 		p.paused = false
 		s.cl.ResumeFetchPartitions(map[string][]int32{s.cfg.Topic: {p.id}})
 	}
