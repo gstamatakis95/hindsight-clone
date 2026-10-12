@@ -1,0 +1,61 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+life: "Life of a job: the operations table is the queue" {
+  grid-columns: 4
+  grid-gap: 40
+  enqueue: "Enqueue\nin the cause's own\ntransaction; dedupe\non (bank, kind, key)" {class: tx}
+  claim: "Claim\nSKIP LOCKED, one\nrunning job per\nserial key" {class: job}
+  run: "Run\nhandler in a slot,\nheartbeat every 15 s,\nre-reads Postgres" {class: svc}
+  settle: "Settle\ncomplete, fail, retry\nwith backoff, or\ncancel at a checkpoint" {class: job}
+  enqueue -> claim -> run -> settle
+}
+life.*.width: 215
+life.*.height: 130
+
+states: "Operation status moves" {
+  grid-columns: 2
+  grid-gap: 10
+  t1: "pending to processing\na worker claims the row" {class: step}
+  t2: "processing to pending\ntransient error, shutdown,\nor stale heartbeat (reclaim)" {class: step}
+  t3: "processing to completed\nthe handler succeeded" {class: step}
+  t4: "processing to failed\npermanent error, or 3 runs used" {class: step}
+  t5: "processing to cancelled\nthe handler stops at a checkpoint" {class: step}
+  t6: "failed or cancelled to pending\nRetryOperation; CancelOperation\ncancels a pending row at once" {class: step}
+}
+states.*.width: 400
+states.*.height: 90
+
+tick: "Maintenance tick: every 60 s on every worker, no leader, each step idempotent" {
+  grid-columns: 2
+  grid-gap: 10
+  s1: "1  reclaim_stale rows" {class: step}
+  s2: "2  resume_bank_deletes" {class: step}
+  s3: "3  refresh_failures" {class: step}
+  s4: "4  cron_refresh" {class: step}
+  s5: "5  consolidation_reconcile" {class: step}
+  s6: "6  graph_reconcile" {class: step}
+  s7: "7  rederive_stranded" {class: step}
+  s8: "8  settle_retain_batches" {class: step}
+  s9: "9  prune_operations (7 d)" {class: step}
+  s10: "10  prune_events (30 d)" {class: step}
+}
+tick.*.width: 400
+tick.*.height: 50
+
+life -> states
+states -> tick: "the tick repairs and prunes" {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: "DB transaction" {class: tx; width: 170; height: 50}
+  b: Queue {class: job; width: 110; height: 50}
+  c: Worker {class: svc; width: 110; height: 50}
+  d: Step {class: step; width: 110; height: 50}
+  e: "dashed: periodic repair" {shape: text; width: 260; height: 50}
+}

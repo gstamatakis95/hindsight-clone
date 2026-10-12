@@ -1,0 +1,49 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+parse: "Parse the query: embed it, derive the time window, compile the tag filter once" {class: model}
+
+arms: "Arms run concurrently, each its own query" {
+  grid-columns: 4
+  grid-gap: 12
+  vector: "vector\nHNSW cosine" {class: step}
+  text: "text\nBM25" {class: step}
+  graph: "graph\nlinks, 1-2 hops" {class: step}
+  temporal: "temporal\ntime window" {class: step}
+}
+arms.*.width: 205
+arms.*.height: 80
+
+rank: "Rank in order: down the left column, then the right" {
+  grid-columns: 2
+  grid-gap: 12
+  fuse: "1  RRF fusion, k = 60\ncut to the rerank window (300)" {class: step}
+  recheck: "2  Hydrate and re-check\nlive, same bank, types, tags" {class: boundary}
+  rerank: "3  Cross-encoder rerank\nor the RRF order passed through" {class: model}
+  score: "4  Boosts and floors\nrecency, temporal, proof" {class: step}
+  prefer: "5  prefer_observations\ncited facts yield to observations" {class: step}
+  pack: "6  Pack into max_tokens\nin rank order" {class: step}
+}
+rank.*.width: 420
+rank.*.height: 80
+
+include: "Includes: chunks, source facts, entities; stale flag on observations" {class: boundary}
+out: "RecallResponse: memories, scores, optional trace" {class: ext}
+
+parse -> arms
+arms -> rank
+rank -> include -> out
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: Step {class: step; width: 110; height: 50}
+  b: "Store read" {class: boundary; width: 190; height: 50}
+  c: "Model call" {class: model; width: 150; height: 50}
+  d: Result {class: ext; width: 110; height: 50}
+  e: "recall never writes" {shape: text; width: 230; height: 50}
+}

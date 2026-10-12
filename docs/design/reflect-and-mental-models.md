@@ -10,6 +10,8 @@ query over a scope, refreshed by the same loop (agentic strategy) or by one reca
 
 ### Loop
 
+![Reflect: the tool loop, the evidence guard, closing and overflow paths, citations and structured output](diagrams/reflect-loop.svg)
+
 - **Iterations.** `max_iterations = max(1, base × {low 0.5, mid 1, high 2})`, base = `reflect.max_iterations`
   (default 10); an unset request budget means **low**. The loop makes at most that many tool-calling turns
   (`tool_choice = required` until the model's first tool call, then `auto`).
@@ -151,6 +153,8 @@ reprocess or upsert).
   ListMentalModels to basic), so listing runs no per-model scope queries.
 
 ### Refresh pipeline
+
+![Mental-model refresh: triggers, scheduling, the run, the strategies and the write transaction](diagrams/mental-model-refresh.svg)
 
 One pipeline serves RefreshMentalModel, triggered refreshes and PreviewMentalModelRefresh.
 

@@ -16,7 +16,7 @@ linters:
       # errors crossing a boundary are already domain error classes (the jobs catalogue returns the store's);
       # the examples' helper package wraps its own errors
       ignore-package-globs: ["memd/internal/store", "memd/internal/graph", "memd/internal/ai", "memd/internal/blob",
-        "memd/internal/jobs", "memd/examples/internal/*"]
+        "memd/internal/ingest", "memd/internal/jobs", "memd/examples/internal/*"]
       # wrapcheck's defaults plus domain.InvalidField, the constructor of a field-naming invalid-argument error
       ignore-sigs: [".Errorf(", "errors.New(", "errors.Unwrap(", "errors.Join(", ".Wrap(", ".Wrapf(", ".WithMessage(",
         ".WithMessagef(", ".WithStack(", "domain.InvalidField("]
@@ -32,7 +32,8 @@ linters:
             - pkg: "github.com/DataDog"
               desc: domain stays vendor-free
         contracts:
-          files: ["**/internal/store/*.go", "**/internal/ai/*.go", "**/internal/blob/*.go", "**/internal/clock/*.go"]
+          files: ["**/internal/store/*.go", "**/internal/ai/*.go", "**/internal/blob/*.go", "**/internal/ingest/*.go",
+            "**/internal/clock/*.go"]
           deny:
             - pkg: "memd/internal/store/postgres"
               desc: contracts never see adapters
@@ -89,6 +90,8 @@ linters:
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/blob"
               desc: the graph boundary imports only domain
+            - pkg: "memd/internal/ingest"
+              desc: the graph boundary imports only domain
             - pkg: "memd/internal/recall"
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/reflect"
@@ -120,7 +123,8 @@ linters:
             - pkg: "github.com/DataDog"
               desc: the graph boundary stays vendor-free
         adapters:
-          files: ["**/internal/store/postgres/**", "**/internal/ai/gateway/**", "**/internal/blob/s3/**", "!$test"]
+          files: ["**/internal/store/postgres/**", "**/internal/ai/gateway/**", "**/internal/blob/s3/**",
+            "**/internal/ingest/memq/**", "!$test"]
           deny:
             - pkg: "memd/internal/config"
               desc: adapters translate; they never decide (this also covers configsvc)
@@ -237,6 +241,8 @@ linters:
               desc: no model calls in the job runtime
             - pkg: "memd/internal/blob"
               desc: no blob calls in the job runtime
+            - pkg: "memd/internal/ingest"
+              desc: no queue calls in the job runtime
             - pkg: "memd/gen"
               desc: no proto types in jobs
             - pkg: "github.com/jackc/pgx"

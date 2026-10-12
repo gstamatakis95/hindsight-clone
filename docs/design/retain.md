@@ -8,15 +8,7 @@ RetagDocument are `internal/document`.
 
 ## Flow
 
-```
-Retain RPC ── validate ── no-op check ── bank check ── blob Put ── write tx (Ensure, Seq, upsert documents)
-                                                                     ├─ sync:  run each changed document inline
-                                                                     └─ async: enqueue retain_document jobs
-retain run: re-read document ── ownership / no-op check ── chunk ── per batch of 4 chunks:
-            extract (LLM) → time-normalize → embed (outside any tx) → batch tx (Seq, owner check,
-            [first batch: replace old units], insert chunks + units, labels, entities, links)
-         ── completing tx (Seq, owner check, stamp hashes + extracted_at, RETAIN_COMPLETED, enqueue consolidate)
-```
+![Retain: the RPC, the write transaction, the retain run and its batches](diagrams/retain-flow.svg)
 
 ## Ingest
 

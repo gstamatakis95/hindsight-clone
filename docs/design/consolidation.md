@@ -38,6 +38,8 @@ tags) holds every fact. Each observation belongs to exactly one scope (its `scop
 
 ## Run shape
 
+![Consolidation: plan, per-scope decide and apply, finish and the continuation](diagrams/consolidation-flow.svg)
+
 A run is `plan` → per scope, per LLM batch: `decide` (model calls, no transaction) → `apply` (one short
 transaction) → `finish`.
 
