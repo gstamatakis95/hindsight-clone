@@ -333,22 +333,9 @@ func TestStrategyPreview(t *testing.T) {
 		{Name: "exact-team", Scopes: []domain.TagFilter{{Tags: []string{"team"}, Match: domain.TagsMatchExact}}},
 		{Name: "team", Scopes: []domain.TagFilter{{Tags: []string{"team"}}}},
 	}
-	p := StrategyPreview{Matches: make([]StrategyMatch, len(draft))}
-	token, pages := "", 0
-	for ; pages == 0 || token != ""; pages++ {
-		page, err := e.service().PreviewConsolidationStrategies(t.Context(), bank, draft, 1, token)
-		if err != nil || len(page.Matches) != 2 {
-			t.Fatalf("preview page %d = %+v, %v", pages, page, err)
-		}
-		for i, m := range page.Matches {
-			p.Matches[i].Strategy = m.Strategy
-			p.Matches[i].MatchedScopes = append(p.Matches[i].MatchedScopes, m.MatchedScopes...)
-			p.Matches[i].ShadowedScopes = append(p.Matches[i].ShadowedScopes, m.ShadowedScopes...)
-		}
-		token = page.NextPageToken
-	}
-	if pages != 4 {
-		t.Errorf("preview took %d pages of one scope, want 4", pages)
+	p, pages := previewAll(t, e.service(), draft)
+	if pages != 4 || len(p.Matches) != 2 {
+		t.Fatalf("preview took %d pages of one scope, want 4: %+v", pages, p)
 	}
 	keys := func(ss []domain.ScopeKey) []string {
 		var out []string
@@ -367,4 +354,25 @@ func TestStrategyPreview(t *testing.T) {
 	if got := keys(p.Matches[1].ShadowedScopes); len(got) != 1 || got[0] != scopeOf("team").String() {
 		t.Errorf("team shadowed = %v", got)
 	}
+}
+
+// previewAll runs the strategy preview one scope per page and merges the pages, returning the merged preview and the
+// number of pages.
+func previewAll(t *testing.T, s *Service, draft []domain.ConsolidationStrategy) (StrategyPreview, int) {
+	t.Helper()
+	p := StrategyPreview{Matches: make([]StrategyMatch, len(draft))}
+	token, pages := "", 0
+	for ; pages == 0 || token != ""; pages++ {
+		page, err := s.PreviewConsolidationStrategies(t.Context(), bank, draft, 1, token)
+		if err != nil || len(page.Matches) != len(draft) || pages > 10 {
+			t.Fatalf("preview page %d = %+v, %v", pages, page, err)
+		}
+		for i, m := range page.Matches {
+			p.Matches[i].Strategy = m.Strategy
+			p.Matches[i].MatchedScopes = append(p.Matches[i].MatchedScopes, m.MatchedScopes...)
+			p.Matches[i].ShadowedScopes = append(p.Matches[i].ShadowedScopes, m.ShadowedScopes...)
+		}
+		token = page.NextPageToken
+	}
+	return p, pages
 }

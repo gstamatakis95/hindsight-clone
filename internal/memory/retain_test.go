@@ -243,7 +243,8 @@ func TestIngestValidation(t *testing.T) {
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("%s: err = %v, want INVALID_ARGUMENT", name, err)
 		}
-		if v := domain.FieldViolations(err); name == "content too large" && (len(v) != 1 || v[0].Field != "items[1].content") {
+		v := domain.FieldViolations(err)
+		if name == "content too large" && (len(v) != 1 || v[0].Field != "items[1].content") {
 			t.Errorf("%s: field violations %+v, want items[1].content", name, v)
 		}
 	}

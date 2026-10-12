@@ -35,7 +35,7 @@ type pagedMethod struct {
 func TestListPaging(t *testing.T) {
 	w := startWired(t)
 	ctx := w.ctx(t)
-	obs := w.seedPaging(t, ctx)
+	obs := w.seedPaging(t)
 	methods := pagedMethods()
 	if len(methods) < 10 {
 		t.Fatalf("found %d RPCs with page_size, want every list RPC", len(methods))
@@ -72,8 +72,9 @@ func pagedMethods() []pagedMethod {
 // seedPaging fills pagedBank (and the tenant's orgs and testOrg's banks) so that every listing has items: three
 // orgs and banks, three tagged documents with their memories, observations and scopes, directives, two mental
 // models with a refreshed version, and the operations of all that. It returns an observation id.
-func (w *wiredStack) seedPaging(t *testing.T, ctx context.Context) string {
+func (w *wiredStack) seedPaging(t *testing.T) string {
 	t.Helper()
+	ctx := w.ctx(t)
 	for _, org := range []string{"paging-a", "paging-b"} {
 		if _, err := pb.NewOrgServiceClient(w.conn).CreateOrg(ctx, &pb.CreateOrgRequest{OrgId: org}); err != nil {
 			t.Fatal(err)
@@ -81,12 +82,13 @@ func (w *wiredStack) seedPaging(t *testing.T, ctx context.Context) string {
 	}
 	w.bank(t, "paged-2")
 	w.bank(t, "paged-3")
-	w.retainTagged(t, ctx, "first", []string{"a"}, []string{"b"}, []string{"a", "b"})
+	w.retainTagged(t, "first", []string{"a"}, []string{"b"}, []string{"a", "b"})
 	cfg := pb.NewConfigServiceClient(w.conn)
 	for i := range 3 {
-		if _, err := cfg.CreateDirective(ctx, &pb.CreateDirectiveRequest{OrgId: testOrg, BankId: pagedBank,
-			Directive: &pb.Directive{Name: fmt.Sprintf("d%d", i), Rules: []string{"be brief"}, Active: true}},
-		); err != nil {
+		d := &pb.Directive{Name: fmt.Sprintf("d%d", i), Rules: []string{"be brief"}, Active: true}
+		if _, err := cfg.CreateDirective(ctx, &pb.CreateDirectiveRequest{
+			OrgId: testOrg, BankId: pagedBank, Directive: d,
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -100,7 +102,7 @@ func (w *wiredStack) seedPaging(t *testing.T, ctx context.Context) string {
 		}
 	}
 	w.idle(t, pagedBank)
-	w.retainTagged(t, ctx, "second", []string{"a"}) // in pm1's scope, so its refresh writes a version
+	w.retainTagged(t, "second", []string{"a"}) // in pm1's scope, so its refresh writes a version
 	if _, err := mms.RefreshMentalModel(ctx, &pb.RefreshMentalModelRequest{
 		OrgId: testOrg, BankId: pagedBank, MentalModelId: "pm1",
 	}); err != nil {
@@ -118,8 +120,9 @@ func (w *wiredStack) seedPaging(t *testing.T, ctx context.Context) string {
 
 // retainTagged retains one document per tag set into pagedBank, synchronously; batch names the call, so its
 // document ids are new.
-func (w *wiredStack) retainTagged(t *testing.T, ctx context.Context, batch string, tagSets ...[]string) {
+func (w *wiredStack) retainTagged(t *testing.T, batch string, tagSets ...[]string) {
 	t.Helper()
+	ctx := w.ctx(t)
 	items := make([]*pb.RetainItem, len(tagSets))
 	for i, tags := range tagSets {
 		id := fmt.Sprintf("%s-%d", batch, i)
