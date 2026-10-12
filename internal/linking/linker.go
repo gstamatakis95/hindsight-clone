@@ -259,7 +259,8 @@ func tuningOf(cfg domain.BankConfig) tuning {
 		r = *cfg.Retain
 	}
 	return tuning{
-		temporalWindow: time.Duration(domain.PositiveOr(r.TemporalLinkWindowHours, DefaultTemporalLinkWindowHours)) * time.Hour,
+		temporalWindow: time.Hour *
+			time.Duration(domain.PositiveOr(r.TemporalLinkWindowHours, DefaultTemporalLinkWindowHours)),
 		temporalCap:    domain.NonNegativeOr(r.TemporalLinkCap, DefaultTemporalLinkCap),
 		semanticK:      domain.NonNegativeOr(r.SemanticLinkK, DefaultSemanticLinkK),
 		semanticMinSim: domain.ValueOr(r.SemanticLinkMinSimilarity, DefaultSemanticLinkMinSimilarity),

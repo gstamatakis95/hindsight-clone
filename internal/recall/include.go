@@ -56,7 +56,8 @@ func (in *includer) Enrich(
 	var e enrichment
 	var err error
 	if isSet(inc.Chunks) {
-		if e.Chunks, err = in.chunks(ctx, b, results, domain.ValueOr(inc.ChunksMaxTokens, DefaultChunksMaxTokens)); err != nil {
+		chunkBudget := domain.ValueOr(inc.ChunksMaxTokens, DefaultChunksMaxTokens)
+		if e.Chunks, err = in.chunks(ctx, b, results, chunkBudget); err != nil {
 			return enrichment{}, err
 		}
 	}

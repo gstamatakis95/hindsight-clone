@@ -309,7 +309,8 @@ func testOaListObservationScopes(t *testing.T, s store.DB) {
 	for _, limit := range []int{1, 2} {
 		wantSeq(t, fmt.Sprintf("ListObservationScopes paged by %d", limit), oaPageAll(t, s, bankA, limit), keys)
 	}
-	wantSeq(t, "ListObservationScopes after the shared scope", oaKeys(oaMustListObservationScopes(t, s, bankA, oaAfterShared, 10)),
+	wantSeq(t, "ListObservationScopes after the shared scope",
+		oaKeys(oaMustListObservationScopes(t, s, bankA, oaAfterShared, 10)),
 		keys[1:])
 	wantSeq(t, "ListObservationScopes after {x}", oaKeys(oaMustListObservationScopes(t, s, bankA, "1:x", 10)), keys[2:])
 	for _, limit := range []int{0, -1} {
@@ -324,8 +325,8 @@ func testOaListObservationScopes(t *testing.T, s store.DB) {
 		oaCounts{"": {1, 4}, "1:x": {2, 2}, "1:x,1:y": {1, 1}, "1:z": {0, 1}})
 }
 
-// testOaListObservationScopesUnknown: an unknown and a tombstoned bank are ErrNotFound; a live bank without scopes lists
-// none.
+// testOaListObservationScopesUnknown: an unknown and a tombstoned bank are ErrNotFound; a live bank without scopes
+// lists none.
 func testOaListObservationScopesUnknown(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA, bankB)
 	if got := oaMustListObservationScopes(t, s, bankB, "", 10); len(got) != 0 {
@@ -563,7 +564,8 @@ func testOaTenantIsolation(t *testing.T, s store.DB) {
 		units[b] = unitIDs(us)
 		obs[b] = []domain.UnitID{oaObserve(t, s, b, units[b], "x")}
 	}
-	oaWantCounts(t, "ListObservationScopes(bank A)", oaMustListObservationScopes(t, s, bankA, "", 10), oaCounts{"1:x": {1, 1}})
+	oaWantCounts(t, "ListObservationScopes(bank A)", oaMustListObservationScopes(t, s, bankA, "", 10),
+		oaCounts{"1:x": {1, 1}})
 	oaWantCounts(t, "ListObservationScopes(other tenant)", oaMustListObservationScopes(t, s, bankOtherTenant, "", 10),
 		oaCounts{"1:x": {1, 2}})
 	oaWantSorted(t, "IDsByDocument(bank A)", oaIDsByDocument(t, s, bankA, "doc-1"), units[bankA])

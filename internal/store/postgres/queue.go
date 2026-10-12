@@ -253,7 +253,7 @@ func (r *queue) List(
 	if f.PageToken != "" {
 		var c opsCursor
 		if err := domain.DecodePageToken(f.PageToken, &c); err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("list operations: %w", err)
 		}
 		at := time.UnixMicro(c.At).UTC()
 		arg.AfterCreatedAt, arg.AfterID = &at, c.ID
@@ -267,7 +267,7 @@ func (r *queue) List(
 		rows = rows[:size]
 		last := rows[size-1]
 		if next, err = domain.EncodePageToken(opsCursor{At: last.CreatedAt.UnixMicro(), ID: last.ID}); err != nil {
-			return nil, "", err
+			return nil, "", fmt.Errorf("list operations: %w", err)
 		}
 	}
 	ops := make([]domain.Operation, 0, len(rows))
