@@ -130,7 +130,7 @@ State: `content_md`, `structured_output_json`, `version`, `last_refreshed_at`, `
 
 ### Configuration merge
 
-A refresh's effective config is server < tenant < bank < the model's stored overrides < the call's overrides
+A refresh's effective config is server < tenant < org < bank < the model's stored overrides < the call's overrides
 (`RefreshMentalModelRequest.overrides`). The spec's own run settings and interval floor are read from the spec
 directly; the call's `strategy` and `force_full` win for one refresh. Refreshes enqueued inside another
 transaction (invalidate, edit, templates) compute debounce and floor from the bank's own config, then defaults,

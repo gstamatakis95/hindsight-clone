@@ -46,6 +46,7 @@ SET default_table_access_method = heap;
 
 CREATE TABLE public.banks (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     id text NOT NULL,
     name text DEFAULT ''::text NOT NULL,
     config jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -63,6 +64,7 @@ CREATE TABLE public.banks (
 CREATE TABLE public.chunks (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     document_id text NOT NULL,
     chunk_index integer NOT NULL,
@@ -79,6 +81,7 @@ CREATE TABLE public.chunks (
 
 CREATE TABLE public.directives (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     id text NOT NULL,
     name text DEFAULT ''::text NOT NULL,
@@ -95,6 +98,7 @@ CREATE TABLE public.directives (
 
 CREATE TABLE public.documents (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     id text NOT NULL,
     content_hash text DEFAULT ''::text NOT NULL,
@@ -115,6 +119,7 @@ CREATE TABLE public.documents (
 CREATE TABLE public.entities (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     canonical_name text NOT NULL,
     kind text DEFAULT ''::text NOT NULL,
@@ -132,6 +137,7 @@ CREATE TABLE public.entities (
 
 CREATE TABLE public.entity_cooccurrences (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     entity_a uuid NOT NULL,
     entity_b uuid NOT NULL,
@@ -146,6 +152,7 @@ CREATE TABLE public.entity_cooccurrences (
 
 CREATE TABLE public.entity_maintenance (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     entity_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
@@ -157,6 +164,7 @@ CREATE TABLE public.entity_maintenance (
 
 CREATE TABLE public.graph_dirty (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     unit_id uuid NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL
@@ -169,6 +177,7 @@ CREATE TABLE public.graph_dirty (
 CREATE TABLE public.lifecycle_events (
     id bigint NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     seq bigint NOT NULL,
     type text NOT NULL,
@@ -201,6 +210,7 @@ ALTER SEQUENCE public.lifecycle_events_id_seq OWNED BY public.lifecycle_events.i
 CREATE TABLE public.memory_audit (
     id bigint NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     unit_id uuid NOT NULL,
     action text NOT NULL,
@@ -235,6 +245,7 @@ ALTER SEQUENCE public.memory_audit_id_seq OWNED BY public.memory_audit.id;
 
 CREATE TABLE public.memory_links (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     from_unit_id uuid NOT NULL,
     to_unit_id uuid NOT NULL,
@@ -252,6 +263,7 @@ CREATE TABLE public.memory_links (
 CREATE TABLE public.memory_units (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     document_id text,
     chunk_id uuid,
@@ -285,6 +297,7 @@ CREATE TABLE public.memory_units (
 CREATE TABLE public.memory_units_archive (
     id uuid NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     document_id text,
     chunk_id uuid,
@@ -315,6 +328,7 @@ CREATE TABLE public.memory_units_archive (
 CREATE TABLE public.mental_model_history (
     id bigint NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     mental_model_id text NOT NULL,
     kind text NOT NULL,
@@ -350,6 +364,7 @@ ALTER SEQUENCE public.mental_model_history_id_seq OWNED BY public.mental_model_h
 
 CREATE TABLE public.mental_models (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     id text NOT NULL,
     name text DEFAULT ''::text NOT NULL,
@@ -380,6 +395,7 @@ CREATE TABLE public.mental_models (
 
 CREATE TABLE public.observation_evidence (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     observation_id uuid NOT NULL,
     unit_id uuid NOT NULL,
@@ -393,6 +409,7 @@ CREATE TABLE public.observation_evidence (
 
 CREATE TABLE public.observation_scopes (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     scope_key text NOT NULL,
     tags text[] DEFAULT '{}'::text[] NOT NULL,
@@ -407,6 +424,7 @@ CREATE TABLE public.observation_scopes (
 CREATE TABLE public.observation_versions (
     id bigint NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     observation_id uuid NOT NULL,
     version bigint NOT NULL,
@@ -439,6 +457,7 @@ ALTER SEQUENCE public.observation_versions_id_seq OWNED BY public.observation_ve
 CREATE TABLE public.operations (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     kind text NOT NULL,
     status text DEFAULT 'pending'::text NOT NULL,
@@ -466,6 +485,20 @@ CREATE TABLE public.operations (
 );
 
 --
+-- Name: orgs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.orgs (
+    tenant_id text NOT NULL,
+    id text NOT NULL,
+    name text DEFAULT ''::text NOT NULL,
+    config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    deleting_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--
 -- Name: tenants; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -482,6 +515,7 @@ CREATE TABLE public.tenants (
 
 CREATE TABLE public.unit_entities (
     tenant_id text NOT NULL,
+    org_id text NOT NULL,
     bank_id text NOT NULL,
     unit_id uuid NOT NULL,
     entity_id uuid NOT NULL
@@ -516,7 +550,7 @@ ALTER TABLE ONLY public.observation_versions ALTER COLUMN id SET DEFAULT nextval
 --
 
 ALTER TABLE ONLY public.banks
-    ADD CONSTRAINT banks_pkey PRIMARY KEY (tenant_id, id);
+    ADD CONSTRAINT banks_pkey PRIMARY KEY (tenant_id, org_id, id);
 
 --
 -- Name: chunks chunks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -526,25 +560,25 @@ ALTER TABLE ONLY public.chunks
     ADD CONSTRAINT chunks_pkey PRIMARY KEY (id);
 
 --
--- Name: chunks chunks_tenant_id_bank_id_document_id_chunk_index_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: chunks chunks_tenant_id_org_id_bank_id_document_id_chunk_index_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.chunks
-    ADD CONSTRAINT chunks_tenant_id_bank_id_document_id_chunk_index_key UNIQUE (tenant_id, bank_id, document_id, chunk_index);
+    ADD CONSTRAINT chunks_tenant_id_org_id_bank_id_document_id_chunk_index_key UNIQUE (tenant_id, org_id, bank_id, document_id, chunk_index);
 
 --
 -- Name: directives directives_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.directives
-    ADD CONSTRAINT directives_pkey PRIMARY KEY (tenant_id, bank_id, id);
+    ADD CONSTRAINT directives_pkey PRIMARY KEY (tenant_id, org_id, bank_id, id);
 
 --
 -- Name: documents documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.documents
-    ADD CONSTRAINT documents_pkey PRIMARY KEY (tenant_id, bank_id, id);
+    ADD CONSTRAINT documents_pkey PRIMARY KEY (tenant_id, org_id, bank_id, id);
 
 --
 -- Name: entities entities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -565,14 +599,14 @@ ALTER TABLE ONLY public.entity_cooccurrences
 --
 
 ALTER TABLE ONLY public.entity_maintenance
-    ADD CONSTRAINT entity_maintenance_pkey PRIMARY KEY (tenant_id, bank_id, entity_id);
+    ADD CONSTRAINT entity_maintenance_pkey PRIMARY KEY (tenant_id, org_id, bank_id, entity_id);
 
 --
 -- Name: graph_dirty graph_dirty_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.graph_dirty
-    ADD CONSTRAINT graph_dirty_pkey PRIMARY KEY (tenant_id, bank_id, unit_id);
+    ADD CONSTRAINT graph_dirty_pkey PRIMARY KEY (tenant_id, org_id, bank_id, unit_id);
 
 --
 -- Name: lifecycle_events lifecycle_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -621,7 +655,7 @@ ALTER TABLE ONLY public.mental_model_history
 --
 
 ALTER TABLE ONLY public.mental_models
-    ADD CONSTRAINT mental_models_pkey PRIMARY KEY (tenant_id, bank_id, id);
+    ADD CONSTRAINT mental_models_pkey PRIMARY KEY (tenant_id, org_id, bank_id, id);
 
 --
 -- Name: observation_evidence observation_evidence_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -635,7 +669,7 @@ ALTER TABLE ONLY public.observation_evidence
 --
 
 ALTER TABLE ONLY public.observation_scopes
-    ADD CONSTRAINT observation_scopes_pkey PRIMARY KEY (tenant_id, bank_id, scope_key);
+    ADD CONSTRAINT observation_scopes_pkey PRIMARY KEY (tenant_id, org_id, bank_id, scope_key);
 
 --
 -- Name: observation_versions observation_versions_observation_id_version_key; Type: CONSTRAINT; Schema: public; Owner: -
@@ -659,6 +693,13 @@ ALTER TABLE ONLY public.operations
     ADD CONSTRAINT operations_pkey PRIMARY KEY (id);
 
 --
+-- Name: orgs orgs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.orgs
+    ADD CONSTRAINT orgs_pkey PRIMARY KEY (tenant_id, id);
+
+--
 -- Name: tenants tenants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -676,13 +717,13 @@ ALTER TABLE ONLY public.unit_entities
 -- Name: directives_bank_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX directives_bank_created_idx ON public.directives USING btree (tenant_id, bank_id, created_at, id COLLATE "C");
+CREATE INDEX directives_bank_created_idx ON public.directives USING btree (tenant_id, org_id, bank_id, created_at, id COLLATE "C");
 
 --
 -- Name: directives_bank_name_key; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX directives_bank_name_key ON public.directives USING btree (tenant_id, bank_id, name);
+CREATE UNIQUE INDEX directives_bank_name_key ON public.directives USING btree (tenant_id, org_id, bank_id, name);
 
 --
 -- Name: documents_tags_gin; Type: INDEX; Schema: public; Owner: -
@@ -694,13 +735,13 @@ CREATE INDEX documents_tags_gin ON public.documents USING gin (tags);
 -- Name: entities_label_uniq; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX entities_label_uniq ON public.entities USING btree (tenant_id, bank_id, kind, label_value) WHERE (label_value IS NOT NULL);
+CREATE UNIQUE INDEX entities_label_uniq ON public.entities USING btree (tenant_id, org_id, bank_id, kind, label_value) WHERE (label_value IS NOT NULL);
 
 --
 -- Name: entities_name_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX entities_name_idx ON public.entities USING btree (tenant_id, bank_id, lower(canonical_name));
+CREATE INDEX entities_name_idx ON public.entities USING btree (tenant_id, org_id, bank_id, lower(canonical_name));
 
 --
 -- Name: entities_name_trgm; Type: INDEX; Schema: public; Owner: -
@@ -724,7 +765,7 @@ CREATE INDEX lifecycle_events_at_idx ON public.lifecycle_events USING btree (at)
 -- Name: lifecycle_events_seq_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX lifecycle_events_seq_idx ON public.lifecycle_events USING btree (tenant_id, bank_id, seq);
+CREATE INDEX lifecycle_events_seq_idx ON public.lifecycle_events USING btree (tenant_id, org_id, bank_id, seq);
 
 --
 -- Name: memory_audit_operation_idx; Type: INDEX; Schema: public; Owner: -
@@ -736,7 +777,7 @@ CREATE INDEX memory_audit_operation_idx ON public.memory_audit USING btree (oper
 -- Name: memory_audit_unit_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_audit_unit_idx ON public.memory_audit USING btree (tenant_id, bank_id, unit_id, at);
+CREATE INDEX memory_audit_unit_idx ON public.memory_audit USING btree (tenant_id, org_id, bank_id, unit_id, at);
 
 --
 -- Name: memory_links_to_unit_idx; Type: INDEX; Schema: public; Owner: -
@@ -748,13 +789,13 @@ CREATE INDEX memory_links_to_unit_idx ON public.memory_links USING btree (to_uni
 -- Name: memory_units_archive_bank_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_archive_bank_idx ON public.memory_units_archive USING btree (tenant_id, bank_id, archived_at);
+CREATE INDEX memory_units_archive_bank_idx ON public.memory_units_archive USING btree (tenant_id, org_id, bank_id, archived_at);
 
 --
 -- Name: memory_units_archive_document_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_archive_document_idx ON public.memory_units_archive USING btree (tenant_id, bank_id, document_id);
+CREATE INDEX memory_units_archive_document_idx ON public.memory_units_archive USING btree (tenant_id, org_id, bank_id, document_id);
 
 --
 -- Name: memory_units_archive_operation_idx; Type: INDEX; Schema: public; Owner: -
@@ -766,7 +807,7 @@ CREATE INDEX memory_units_archive_operation_idx ON public.memory_units_archive U
 -- Name: memory_units_bm25; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_bm25 ON public.memory_units USING bm25 (id, text, context, ((tenant_id)::pdb.literal), ((bank_id)::pdb.literal), ((fact_type)::pdb.literal));
+CREATE INDEX memory_units_bm25 ON public.memory_units USING bm25 (id, text, context, ((tenant_id)::pdb.literal), ((org_id)::pdb.literal), ((bank_id)::pdb.literal), ((fact_type)::pdb.literal));
 
 --
 -- Name: memory_units_chunk_idx; Type: INDEX; Schema: public; Owner: -
@@ -778,13 +819,13 @@ CREATE INDEX memory_units_chunk_idx ON public.memory_units USING btree (chunk_id
 -- Name: memory_units_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_created_at_idx ON public.memory_units USING btree (tenant_id, bank_id, created_at);
+CREATE INDEX memory_units_created_at_idx ON public.memory_units USING btree (tenant_id, org_id, bank_id, created_at);
 
 --
 -- Name: memory_units_document_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_document_idx ON public.memory_units USING btree (tenant_id, bank_id, document_id);
+CREATE INDEX memory_units_document_idx ON public.memory_units USING btree (tenant_id, org_id, bank_id, document_id);
 
 --
 -- Name: memory_units_embedding_hnsw; Type: INDEX; Schema: public; Owner: -
@@ -796,19 +837,19 @@ CREATE INDEX memory_units_embedding_hnsw ON public.memory_units USING hnsw (embe
 -- Name: memory_units_observation_scope_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_observation_scope_idx ON public.memory_units USING btree (tenant_id, bank_id, scope_key) WHERE (fact_type = 'observation'::text);
+CREATE INDEX memory_units_observation_scope_idx ON public.memory_units USING btree (tenant_id, org_id, bank_id, scope_key) WHERE (fact_type = 'observation'::text);
 
 --
 -- Name: memory_units_occurred_start_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_occurred_start_idx ON public.memory_units USING btree (tenant_id, bank_id, occurred_start);
+CREATE INDEX memory_units_occurred_start_idx ON public.memory_units USING btree (tenant_id, org_id, bank_id, occurred_start);
 
 --
 -- Name: memory_units_seq_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_seq_idx ON public.memory_units USING btree (tenant_id, bank_id, seq);
+CREATE INDEX memory_units_seq_idx ON public.memory_units USING btree (tenant_id, org_id, bank_id, seq);
 
 --
 -- Name: memory_units_tags_gin; Type: INDEX; Schema: public; Owner: -
@@ -820,13 +861,13 @@ CREATE INDEX memory_units_tags_gin ON public.memory_units USING gin (tags);
 -- Name: memory_units_unconsolidated_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX memory_units_unconsolidated_idx ON public.memory_units USING btree (tenant_id, bank_id, created_at) WHERE ((consolidated_at IS NULL) AND (consolidation_failed_at IS NULL) AND (fact_type <> 'observation'::text));
+CREATE INDEX memory_units_unconsolidated_idx ON public.memory_units USING btree (tenant_id, org_id, bank_id, created_at) WHERE ((consolidated_at IS NULL) AND (consolidation_failed_at IS NULL) AND (fact_type <> 'observation'::text));
 
 --
 -- Name: mental_model_history_model_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX mental_model_history_model_idx ON public.mental_model_history USING btree (tenant_id, bank_id, mental_model_id, kind, changed_at);
+CREATE INDEX mental_model_history_model_idx ON public.mental_model_history USING btree (tenant_id, org_id, bank_id, mental_model_id, kind, changed_at);
 
 --
 -- Name: mental_models_embedding_hnsw; Type: INDEX; Schema: public; Owner: -
@@ -856,19 +897,19 @@ CREATE INDEX observation_evidence_unit_idx ON public.observation_evidence USING 
 -- Name: observation_versions_bank_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX observation_versions_bank_idx ON public.observation_versions USING btree (tenant_id, bank_id);
+CREATE INDEX observation_versions_bank_idx ON public.observation_versions USING btree (tenant_id, org_id, bank_id);
 
 --
 -- Name: operations_active_serial_key_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX operations_active_serial_key_idx ON public.operations USING btree (tenant_id, bank_id, serial_key, kind) WHERE (status = ANY (ARRAY['pending'::text, 'processing'::text]));
+CREATE INDEX operations_active_serial_key_idx ON public.operations USING btree (tenant_id, org_id, bank_id, serial_key, kind) WHERE (status = ANY (ARRAY['pending'::text, 'processing'::text]));
 
 --
 -- Name: operations_bank_created_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX operations_bank_created_idx ON public.operations USING btree (tenant_id, bank_id, created_at);
+CREATE INDEX operations_bank_created_idx ON public.operations USING btree (tenant_id, org_id, bank_id, created_at);
 
 --
 -- Name: operations_parent_idx; Type: INDEX; Schema: public; Owner: -
@@ -892,7 +933,7 @@ CREATE INDEX operations_processing_heartbeat_idx ON public.operations USING btre
 -- Name: operations_processing_serial_key_uniq; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX operations_processing_serial_key_uniq ON public.operations USING btree (tenant_id, bank_id, serial_key) WHERE (status = 'processing'::text);
+CREATE UNIQUE INDEX operations_processing_serial_key_uniq ON public.operations USING btree (tenant_id, org_id, bank_id, serial_key) WHERE (status = 'processing'::text);
 
 --
 -- Name: operations_terminal_finished_idx; Type: INDEX; Schema: public; Owner: -
@@ -907,32 +948,39 @@ CREATE INDEX operations_terminal_finished_idx ON public.operations USING btree (
 CREATE INDEX unit_entities_entity_idx ON public.unit_entities USING btree (entity_id);
 
 --
--- Name: chunks chunks_tenant_id_bank_id_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: banks banks_tenant_id_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.banks
+    ADD CONSTRAINT banks_tenant_id_org_id_fkey FOREIGN KEY (tenant_id, org_id) REFERENCES public.orgs(tenant_id, id) ON DELETE RESTRICT;
+
+--
+-- Name: chunks chunks_tenant_id_org_id_bank_id_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.chunks
-    ADD CONSTRAINT chunks_tenant_id_bank_id_document_id_fkey FOREIGN KEY (tenant_id, bank_id, document_id) REFERENCES public.documents(tenant_id, bank_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT chunks_tenant_id_org_id_bank_id_document_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id, document_id) REFERENCES public.documents(tenant_id, org_id, bank_id, id) ON DELETE CASCADE;
 
 --
--- Name: directives directives_tenant_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: directives directives_tenant_id_org_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.directives
-    ADD CONSTRAINT directives_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT directives_tenant_id_org_id_bank_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES public.banks(tenant_id, org_id, id) ON DELETE CASCADE;
 
 --
--- Name: documents documents_tenant_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: documents documents_tenant_id_org_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.documents
-    ADD CONSTRAINT documents_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT documents_tenant_id_org_id_bank_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES public.banks(tenant_id, org_id, id) ON DELETE CASCADE;
 
 --
--- Name: entities entities_tenant_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: entities entities_tenant_id_org_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.entities
-    ADD CONSTRAINT entities_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT entities_tenant_id_org_id_bank_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES public.banks(tenant_id, org_id, id) ON DELETE CASCADE;
 
 --
 -- Name: entity_cooccurrences entity_cooccurrences_entity_a_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -970,32 +1018,32 @@ ALTER TABLE ONLY public.memory_units
     ADD CONSTRAINT memory_units_chunk_id_fkey FOREIGN KEY (chunk_id) REFERENCES public.chunks(id) ON DELETE SET NULL;
 
 --
--- Name: memory_units memory_units_tenant_id_bank_id_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: memory_units memory_units_tenant_id_org_id_bank_id_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.memory_units
-    ADD CONSTRAINT memory_units_tenant_id_bank_id_document_id_fkey FOREIGN KEY (tenant_id, bank_id, document_id) REFERENCES public.documents(tenant_id, bank_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT memory_units_tenant_id_org_id_bank_id_document_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id, document_id) REFERENCES public.documents(tenant_id, org_id, bank_id, id) ON DELETE CASCADE;
 
 --
--- Name: memory_units memory_units_tenant_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: memory_units memory_units_tenant_id_org_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.memory_units
-    ADD CONSTRAINT memory_units_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT memory_units_tenant_id_org_id_bank_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES public.banks(tenant_id, org_id, id) ON DELETE CASCADE;
 
 --
--- Name: mental_model_history mental_model_history_tenant_id_bank_id_mental_model_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: mental_model_history mental_model_history_tenant_id_org_id_bank_id_mental_model_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.mental_model_history
-    ADD CONSTRAINT mental_model_history_tenant_id_bank_id_mental_model_id_fkey FOREIGN KEY (tenant_id, bank_id, mental_model_id) REFERENCES public.mental_models(tenant_id, bank_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT mental_model_history_tenant_id_org_id_bank_id_mental_model_fkey FOREIGN KEY (tenant_id, org_id, bank_id, mental_model_id) REFERENCES public.mental_models(tenant_id, org_id, bank_id, id) ON DELETE CASCADE;
 
 --
--- Name: mental_models mental_models_tenant_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: mental_models mental_models_tenant_id_org_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.mental_models
-    ADD CONSTRAINT mental_models_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT mental_models_tenant_id_org_id_bank_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES public.banks(tenant_id, org_id, id) ON DELETE CASCADE;
 
 --
 -- Name: observation_evidence observation_evidence_observation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
@@ -1012,11 +1060,11 @@ ALTER TABLE ONLY public.observation_evidence
     ADD CONSTRAINT observation_evidence_unit_id_fkey FOREIGN KEY (unit_id) REFERENCES public.memory_units(id) ON DELETE CASCADE;
 
 --
--- Name: observation_scopes observation_scopes_tenant_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: observation_scopes observation_scopes_tenant_id_org_id_bank_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.observation_scopes
-    ADD CONSTRAINT observation_scopes_tenant_id_bank_id_fkey FOREIGN KEY (tenant_id, bank_id) REFERENCES public.banks(tenant_id, id) ON DELETE CASCADE;
+    ADD CONSTRAINT observation_scopes_tenant_id_org_id_bank_id_fkey FOREIGN KEY (tenant_id, org_id, bank_id) REFERENCES public.banks(tenant_id, org_id, id) ON DELETE CASCADE;
 
 --
 -- Name: unit_entities unit_entities_entity_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -

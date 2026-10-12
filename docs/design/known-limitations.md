@@ -102,7 +102,7 @@ says so.
   refresh. Cancellation still reaches them through the heartbeat.
 
 ### The tick resolves the config of every bank with a waiting fact
-- **What:** the consolidation reconcile resolves the effective config (tenant and bank read) of every bank that has
+- **What:** the consolidation reconcile resolves the effective config (tenant, org and bank read) of every bank that has
   an unconsolidated fact, once per tick, to apply its `auto_consolidation`, `enabled` and grace settings.
 - **Impact:** with very many such banks the tick does one short read per bank per minute on every worker.
 - **Workaround:** none needed at current scales.
@@ -133,12 +133,16 @@ says so.
   check the pause.
 - **Impact:** one extra automatic refresh after a failure.
 
-### In-transaction refresh scheduling ignores tenant-level knobs
+### In-transaction refresh scheduling ignores tenant- and org-level knobs
 - **What:** refreshes queued from inside another transaction (invalidate, edit, CreateBank from a template) take
   debounce and interval floor from the model's schedule and the bank's own config, then the defaults, skipping
-  the tenant level.
-- **Impact:** a tenant-level `mental_models.refresh_debounce_seconds` or `min_refresh_interval_seconds` does not
-  apply to those refreshes.
+  the tenant and org levels.
+- **Impact:** a tenant- or org-level `mental_models.refresh_debounce_seconds` or `min_refresh_interval_seconds`
+  does not apply to those refreshes.
+
+### Orgs can't be deleted
+- **What:** OrgService.DeleteOrg answers UNIMPLEMENTED. An org, once created, stays, and so does its config level.
+- **Workaround:** delete the org's banks one by one with DeleteBank; the empty org row remains.
 
 ### Models whose every source was retracted stay stale
 - **What:** they keep the dead source ids and re-run (with no model call) at each interval floor until new

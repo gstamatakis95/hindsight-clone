@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	memoryv1 "memd/gen/memory/v1"
 )
@@ -22,6 +24,10 @@ type Client struct {
 	Conn *grpc.ClientConn
 	// Tenant is the tenant id every call sends.
 	Tenant string
+	// Org is the org (Org) Dial created in the tenant; bank-scoped requests send it as org_id.
+	Org string
+	// Orgs is OrgService.
+	Orgs memoryv1.OrgServiceClient
 	// Memory is MemoryService (Retain, Recall, Reflect, memory listing and curation).
 	Memory memoryv1.MemoryServiceClient
 	// Documents is DocumentService.
@@ -34,11 +40,15 @@ type Client struct {
 	Observations memoryv1.ObservationServiceClient
 	// Operations is OperationService.
 	Operations memoryv1.OperationServiceClient
-	// Config is ConfigService (tenant and bank config, prompt preview, directives).
+	// Config is ConfigService (tenant, org and bank config, prompt preview, directives).
 	Config memoryv1.ConfigServiceClient
 }
 
-// Dial connects to a memd api at addr (plaintext) on behalf of tenant; the connection closes with the test.
+// Org is the org every e2e client works in. Orgs are never created on first use, so Dial creates it.
+const Org = "e2e-org"
+
+// Dial connects to a memd api at addr (plaintext) on behalf of tenant and creates the tenant's Org (an existing one
+// is fine); the connection closes with the test.
 func Dial(t testing.TB, addr, tenant string) *Client {
 	t.Helper()
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -46,14 +56,21 @@ func Dial(t testing.TB, addr, tenant string) *Client {
 		t.Fatalf("harness: dial %s: %v", addr, err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return newClient(conn, tenant)
+	c := newClient(conn, tenant)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err = c.Orgs.CreateOrg(ctx, &memoryv1.CreateOrgRequest{OrgId: c.Org})
+	if err != nil && status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("harness: create org %s/%s: %v", tenant, c.Org, err)
+	}
+	return c
 }
 
 // newClient builds the service clients over a tenant-stamping connection.
 func newClient(conn *grpc.ClientConn, tenant string) *Client {
 	cc := tenantConn{cc: conn, tenant: tenant}
 	return &Client{
-		Conn: conn, Tenant: tenant,
+		Conn: conn, Tenant: tenant, Org: Org, Orgs: memoryv1.NewOrgServiceClient(cc),
 		Memory: memoryv1.NewMemoryServiceClient(cc), Documents: memoryv1.NewDocumentServiceClient(cc),
 		Banks:        memoryv1.NewBankServiceClient(cc),
 		MentalModels: memoryv1.NewMentalModelServiceClient(cc), Observations: memoryv1.NewObservationServiceClient(cc),
@@ -88,7 +105,7 @@ func (c tenantConn) out(ctx context.Context) context.Context {
 
 // Pending returns the bank's BankStats.pending_operations_by_kind without zero counts.
 func (c *Client) Pending(ctx context.Context, bank string) (map[string]int64, error) {
-	resp, err := c.Banks.GetBankStats(ctx, &memoryv1.GetBankStatsRequest{BankId: bank})
+	resp, err := c.Banks.GetBankStats(ctx, &memoryv1.GetBankStatsRequest{OrgId: c.Org, BankId: bank})
 	if err != nil {
 		return nil, fmt.Errorf("bank stats %s: %w", bank, err)
 	}

@@ -48,11 +48,14 @@ func refine(parent *Error, reason, msg string) *Error {
 // Error values shared by every layer. Wrap them with fmt.Errorf("%w: ...", ErrX) to add context; callers test
 // with errors.Is. The server maps each root class to one gRPC code and sends the most specific reason.
 var (
-	// ErrNotFound: the bank, document, unit, model, directive or operation does not exist (also any read of a
+	// ErrNotFound: the org, bank, document, unit, model, directive or operation does not exist (also any read of a
 	// deleting bank). gRPC NOT_FOUND.
 	ErrNotFound = newClass("NOT_FOUND", "not found")
 	// ErrBankNotFound: the bank does not exist, or a read hit a bank being deleted. Refines ErrNotFound.
 	ErrBankNotFound = refine(ErrNotFound, "BANK_NOT_FOUND", "bank")
+	// ErrOrgNotFound: the org does not exist, or it is being deleted. Orgs are never created on first use, so a
+	// write under an unknown org fails with it too. Refines ErrNotFound.
+	ErrOrgNotFound = refine(ErrNotFound, "ORG_NOT_FOUND", "org")
 	// ErrAlreadyExists: a create collided with an existing id. gRPC ALREADY_EXISTS.
 	ErrAlreadyExists = newClass("ALREADY_EXISTS", "already exists")
 	// ErrInvalidArgument: the request is malformed or uses a field the RPC can't use. gRPC INVALID_ARGUMENT.
@@ -68,6 +71,8 @@ var (
 	ErrFailedPrecondition = newClass("FAILED_PRECONDITION", "failed precondition")
 	// ErrBankDeleting: a write to a tombstoned bank. Refines ErrFailedPrecondition.
 	ErrBankDeleting = refine(ErrFailedPrecondition, "BANK_DELETING", "bank is being deleted")
+	// ErrOrgDeleting: a write under an org that is being deleted. Refines ErrFailedPrecondition.
+	ErrOrgDeleting = refine(ErrFailedPrecondition, "ORG_DELETING", "org is being deleted")
 	// ErrModelUnbound: an LLM slot has no model bound in the effective config (the deployment or the tenant or bank
 	// config lacks a binding; the request itself is fine). Refines ErrFailedPrecondition; a job that hits it fails at
 	// once instead of retrying.

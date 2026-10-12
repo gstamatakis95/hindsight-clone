@@ -91,11 +91,11 @@ func (s *Service) CreateBank(ctx context.Context, req CreateRequest) (domain.Ban
 // store's (no SQL text reaches the client).
 func createRow(ctx context.Context, tx store.Tx, bank domain.Bank) error {
 	b := bank.Ref
-	exists := fmt.Errorf("%w: bank %s/%s already exists", domain.ErrAlreadyExists, b.Tenant, b.Bank)
+	exists := fmt.Errorf("%w: bank %s already exists", domain.ErrAlreadyExists, b)
 	cur, err := tx.Banks().Get(ctx, b)
 	switch {
 	case err == nil && cur.Deleting():
-		return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: bank %s", domain.ErrBankDeleting, b)
 	case err == nil:
 		return exists
 	case !errors.Is(err, domain.ErrNotFound):
@@ -125,8 +125,8 @@ func (s *Service) GetBank(ctx context.Context, b domain.BankRef) (domain.Bank, e
 
 // ListBanksRequest mirrors memory.v1.ListBanksRequest.
 type ListBanksRequest struct {
-	// Tenant is the tenant listed.
-	Tenant string
+	// Org is the org listed.
+	Org domain.OrgRef
 	// IDPrefix keeps banks whose id starts with it; empty = all.
 	IDPrefix string
 	// PageSize caps the page (domain.ListPage); 0 = the default.
@@ -143,9 +143,9 @@ type Page struct {
 	NextPageToken string
 }
 
-// ListBanks returns one keyset page of the tenant's live banks in byte order of id (tombstoned banks are left out).
+// ListBanks returns one keyset page of the org's live banks in byte order of id (tombstoned banks are left out).
 // The page size follows domain.ListPage, and the page token carries the last id of the previous page; a malformed
-// one is domain.ErrInvalidArgument.
+// one is domain.ErrInvalidArgument. An unknown or tombstoned org is domain.ErrOrgNotFound.
 func (s *Service) ListBanks(ctx context.Context, req ListBanksRequest) (Page, error) {
 	size, err := domain.ListPage.Size(req.PageSize)
 	if err != nil {
@@ -157,8 +157,11 @@ func (s *Service) ListBanks(ctx context.Context, req ListBanksRequest) (Page, er
 			return Page{}, fmt.Errorf("list banks: %w", err)
 		}
 	}
+	if err := s.d.DB.InTx(ctx, func(tx store.Tx) error { return liveOrg(ctx, tx, req.Org) }); err != nil {
+		return Page{}, fmt.Errorf("list banks: %w", err)
+	}
 	banks, err := s.d.DB.Read().ListBanks(ctx, store.BankQuery{
-		Tenant: req.Tenant, IDPrefix: req.IDPrefix, After: tok.After, Limit: size + 1,
+		Org: req.Org, IDPrefix: req.IDPrefix, After: tok.After, Limit: size + 1,
 	})
 	if err != nil {
 		return Page{}, fmt.Errorf("list banks: %w", err)
@@ -179,6 +182,18 @@ type bankToken struct {
 	After string `json:"a"`
 }
 
+// liveOrg checks org o for a read: unknown or tombstoned is domain.ErrOrgNotFound.
+func liveOrg(ctx context.Context, tx store.Tx, o domain.OrgRef) error {
+	org, err := tx.Orgs().Get(ctx, o)
+	if err != nil {
+		return err
+	}
+	if org.Deleting() {
+		return fmt.Errorf("%w %s is being deleted", domain.ErrOrgNotFound, o)
+	}
+	return nil
+}
+
 // liveBank returns bank b for a read: unknown or tombstoned is domain.ErrNotFound (SPEC: every read of a
 // deleting bank returns NOT_FOUND).
 func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) (domain.Bank, error) {
@@ -187,7 +202,7 @@ func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) (domain.Bank, 
 		return domain.Bank{}, err
 	}
 	if bank.Deleting() {
-		return domain.Bank{}, fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return domain.Bank{}, fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b)
 	}
 	return bank, nil
 }

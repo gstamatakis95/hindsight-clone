@@ -166,17 +166,38 @@ type DirectiveRepo interface {
 	Delete(ctx context.Context, b domain.BankRef, id domain.DirectiveID) error
 }
 
-// BankRepo stores banks and tenant configuration. A write to an unknown bank creates it with tenant
-// defaults (Ensure); every read of an unknown bank is domain.ErrNotFound.
+// OrgRepo stores orgs and their config level. Orgs are never created on first use: a bank can only be created
+// in an org that exists and is not being deleted.
+type OrgRepo interface {
+	// Get returns the org, including a tombstoned one (DeletingAt set); unknown = domain.ErrOrgNotFound.
+	Get(ctx context.Context, o domain.OrgRef) (domain.Org, error)
+	// Create inserts a new org with its name and config; an existing id is domain.ErrAlreadyExists, a tombstoned
+	// one domain.ErrOrgDeleting.
+	Create(ctx context.Context, org domain.Org) error
+	// SetConfig replaces the org's own config level. Unknown = domain.ErrOrgNotFound; tombstoned =
+	// domain.ErrOrgDeleting. It never blocks bank creation in the org.
+	SetConfig(ctx context.Context, o domain.OrgRef, cfg domain.BankConfig) error
+	// LockConfig locks the org's config for the rest of the transaction, so a read-modify-write (LockConfig, Get,
+	// SetConfig) serializes with any other that locks it too (Postgres: pg_advisory_xact_lock). Plain reads never
+	// wait on it.
+	LockConfig(ctx context.Context, o domain.OrgRef) error
+}
+
+// BankRepo stores banks and tenant configuration. A write to an unknown bank creates it with empty overrides
+// (Ensure), but only in an existing org; every read of an unknown bank is domain.ErrNotFound. Every method
+// rejects a BankRef without a tenant, org or bank id as domain.ErrInvalidArgument (a programming error).
 type BankRepo interface {
 	// Get returns the bank, including a tombstoned one (DeletingAt set); unknown = domain.ErrNotFound.
 	Get(ctx context.Context, b domain.BankRef) (domain.Bank, error)
-	// Ensure returns the bank, creating it with empty overrides when it does not exist. A tombstoned
-	// bank returns domain.ErrBankDeleting.
+	// Ensure returns the bank, creating it with empty overrides when it does not exist. It first share-locks the
+	// org row, so it waits for an org delete in progress: an unknown org is domain.ErrOrgNotFound and a
+	// tombstoned one domain.ErrOrgDeleting. A tombstoned bank returns domain.ErrBankDeleting.
 	Ensure(ctx context.Context, b domain.BankRef) (domain.Bank, error)
-	// Create inserts a new bank with its name and config; an existing id is domain.ErrAlreadyExists.
+	// Create inserts a new bank with its name and config; an existing id is domain.ErrAlreadyExists. The org
+	// checks are Ensure's.
 	Create(ctx context.Context, bank domain.Bank) error
-	// SetConfig replaces the bank's own overrides.
+	// SetConfig replaces the bank's own overrides, creating the bank when it does not exist (the org checks are
+	// Ensure's); a tombstoned bank is domain.ErrBankDeleting.
 	SetConfig(ctx context.Context, b domain.BankRef, cfg domain.BankConfig) error
 	// MarkDeleting tombstones the bank by setting deleting_at; marking it again keeps the first time.
 	MarkDeleting(ctx context.Context, b domain.BankRef, at time.Time) error

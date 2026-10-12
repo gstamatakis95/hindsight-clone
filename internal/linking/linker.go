@@ -33,9 +33,13 @@ func NewLinker() *Linker { return &Linker{} }
 
 // Link adds temporal + semantic (kNN >= threshold) + causal edges for freshly inserted units, within the per-unit
 // caps (temporal_link_cap, semantic_link_k). It runs in the caller's transaction and reads the tuning from the
-// bank's stored config (tenant < bank; per-request overrides need LinkWith).
+// bank's stored config (tenant < org < bank; per-request overrides need LinkWith).
 func (l *Linker) Link(ctx context.Context, tx store.Tx, b domain.BankRef, units []domain.Unit, causes CauseMap) error {
 	tenant, err := tx.Banks().TenantConfig(ctx, b.Tenant)
+	if err != nil {
+		return err
+	}
+	org, err := tx.Orgs().Get(ctx, b.OrgRef())
 	if err != nil {
 		return err
 	}
@@ -43,7 +47,7 @@ func (l *Linker) Link(ctx context.Context, tx store.Tx, b domain.BankRef, units 
 	if err != nil {
 		return err
 	}
-	cfg := domain.BankConfig{Retain: mergeTuning(tenant.Retain, bank.Config.Retain)}
+	cfg := domain.BankConfig{Retain: mergeTuning(tenant.Retain, org.Config.Retain, bank.Config.Retain)}
 	return l.LinkWith(ctx, tx, b, units, causes, cfg)
 }
 

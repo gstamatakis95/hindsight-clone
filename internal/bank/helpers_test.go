@@ -25,7 +25,9 @@ type env struct {
 func newEnv(t *testing.T) env {
 	t.Helper()
 	clock := clock.NewManual(time.Time{})
-	return env{ctx: context.Background(), clock: clock, store: pgtest.NewStore(t), blob: fake.NewBlob()}
+	s := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, s, domain.NewBankRef("t", "org", ""), domain.NewBankRef("u", "org", ""))
+	return env{ctx: context.Background(), clock: clock, store: s, blob: fake.NewBlob()}
 }
 
 // svc returns the Service over e's store, blob store and clock, with the delete bounds cfg.
@@ -46,13 +48,10 @@ func (e env) tx(t *testing.T, fn func(tx store.Tx) error) {
 	}
 }
 
-// ensure creates bank b.
+// ensure creates bank b and its org.
 func (e env) ensure(t *testing.T, b domain.BankRef) {
 	t.Helper()
-	e.tx(t, func(tx store.Tx) error {
-		_, err := tx.Banks().Ensure(e.ctx, b)
-		return err
-	})
+	pgtest.EnsureBanks(t, e.store, b)
 }
 
 // getOp reads one operation.

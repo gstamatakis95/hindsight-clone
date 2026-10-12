@@ -16,16 +16,17 @@ import (
 
 const mentalModelAppendHistory = `-- name: MentalModelAppendHistory :exec
 INSERT INTO mental_model_history (
-    tenant_id, bank_id, mental_model_id, kind, version, previous_content, outcome, failure_reason, error_message,
+    tenant_id, org_id, bank_id, mental_model_id, kind, version, previous_content, outcome, failure_reason, error_message,
     changed_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    $9, COALESCE($10::timestamptz, now())
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    $10, COALESCE($11::timestamptz, now())
 )
 `
 
 type MentalModelAppendHistoryParams struct {
 	TenantID        string
+	OrgID           string
 	BankID          string
 	MentalModelID   string
 	Kind            string
@@ -41,6 +42,7 @@ type MentalModelAppendHistoryParams struct {
 func (q *Queries) MentalModelAppendHistory(ctx context.Context, arg MentalModelAppendHistoryParams) error {
 	_, err := q.db.Exec(ctx, mentalModelAppendHistory,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.MentalModelID,
 		arg.Kind,
@@ -56,18 +58,19 @@ func (q *Queries) MentalModelAppendHistory(ctx context.Context, arg MentalModelA
 
 const mentalModelCreate = `-- name: MentalModelCreate :exec
 INSERT INTO mental_models (
-    tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md,
+    tenant_id, org_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md,
     structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at,
     auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-    $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22
 )
 `
 
 type MentalModelCreateParams struct {
 	TenantID             string
+	OrgID                string
 	BankID               string
 	ID                   string
 	Name                 string
@@ -94,6 +97,7 @@ type MentalModelCreateParams struct {
 func (q *Queries) MentalModelCreate(ctx context.Context, arg MentalModelCreateParams) error {
 	_, err := q.db.Exec(ctx, mentalModelCreate,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ID,
 		arg.Name,
@@ -119,18 +123,24 @@ func (q *Queries) MentalModelCreate(ctx context.Context, arg MentalModelCreatePa
 }
 
 const mentalModelDelete = `-- name: MentalModelDelete :execrows
-DELETE FROM mental_models WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+DELETE FROM mental_models WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4
 `
 
 type MentalModelDeleteParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 }
 
 // MentalModelDelete removes a mental model; its history cascades.
 func (q *Queries) MentalModelDelete(ctx context.Context, arg MentalModelDeleteParams) (int64, error) {
-	result, err := q.db.Exec(ctx, mentalModelDelete, arg.TenantID, arg.BankID, arg.ID)
+	result, err := q.db.Exec(ctx, mentalModelDelete,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -138,21 +148,28 @@ func (q *Queries) MentalModelDelete(ctx context.Context, arg MentalModelDeletePa
 }
 
 const mentalModelGet = `-- name: MentalModelGet :one
-SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+SELECT tenant_id, org_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4
 `
 
 type MentalModelGetParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       string
 }
 
 // MentalModelGet returns one mental model of a bank.
 func (q *Queries) MentalModelGet(ctx context.Context, arg MentalModelGetParams) (MentalModel, error) {
-	row := q.db.QueryRow(ctx, mentalModelGet, arg.TenantID, arg.BankID, arg.ID)
+	row := q.db.QueryRow(ctx, mentalModelGet,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	var i MentalModel
 	err := row.Scan(
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.ID,
 		&i.Name,
@@ -180,15 +197,16 @@ func (q *Queries) MentalModelGet(ctx context.Context, arg MentalModelGetParams) 
 }
 
 const mentalModelHistory = `-- name: MentalModelHistory :many
-SELECT id, tenant_id, bank_id, mental_model_id, kind, version, previous_content, outcome, failure_reason, error_message, changed_at FROM mental_model_history
-WHERE tenant_id = $1 AND bank_id = $2 AND mental_model_id = $3
-  AND ($4::text = '' OR kind = $4::text)
+SELECT id, tenant_id, org_id, bank_id, mental_model_id, kind, version, previous_content, outcome, failure_reason, error_message, changed_at FROM mental_model_history
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND mental_model_id = $4
+  AND ($5::text = '' OR kind = $5::text)
 ORDER BY changed_at DESC, id DESC
-LIMIT CASE WHEN $5::int > 0 THEN $5::int END
+LIMIT CASE WHEN $6::int > 0 THEN $6::int END
 `
 
 type MentalModelHistoryParams struct {
 	TenantID      string
+	OrgID         string
 	BankID        string
 	MentalModelID string
 	Kind          string
@@ -200,6 +218,7 @@ type MentalModelHistoryParams struct {
 func (q *Queries) MentalModelHistory(ctx context.Context, arg MentalModelHistoryParams) ([]MentalModelHistory, error) {
 	rows, err := q.db.Query(ctx, mentalModelHistory,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.MentalModelID,
 		arg.Kind,
@@ -215,6 +234,7 @@ func (q *Queries) MentalModelHistory(ctx context.Context, arg MentalModelHistory
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.MentalModelID,
 			&i.Kind,
@@ -237,18 +257,19 @@ func (q *Queries) MentalModelHistory(ctx context.Context, arg MentalModelHistory
 
 const mentalModelTrimHistory = `-- name: MentalModelTrimHistory :exec
 DELETE FROM mental_model_history h
-WHERE h.tenant_id = $1 AND h.bank_id = $2 AND h.mental_model_id = $3 AND h.kind = $4
+WHERE h.tenant_id = $1 AND h.org_id = $2 AND h.bank_id = $3 AND h.mental_model_id = $4 AND h.kind = $5
   AND h.id NOT IN (
     SELECT k.id FROM mental_model_history k
-    WHERE k.tenant_id = $1 AND k.bank_id = $2 AND k.mental_model_id = $3
-      AND k.kind = $4
+    WHERE k.tenant_id = $1 AND k.org_id = $2 AND k.bank_id = $3 AND k.mental_model_id = $4
+      AND k.kind = $5
     ORDER BY k.changed_at DESC, k.id DESC
-    LIMIT $5::int
+    LIMIT $6::int
   )
 `
 
 type MentalModelTrimHistoryParams struct {
 	TenantID      string
+	OrgID         string
 	BankID        string
 	MentalModelID string
 	Kind          string
@@ -259,6 +280,7 @@ type MentalModelTrimHistoryParams struct {
 func (q *Queries) MentalModelTrimHistory(ctx context.Context, arg MentalModelTrimHistoryParams) error {
 	_, err := q.db.Exec(ctx, mentalModelTrimHistory,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.MentalModelID,
 		arg.Kind,
@@ -275,7 +297,7 @@ UPDATE mental_models SET
     last_seq_seen = $12, last_refresh_failed_at = $13,
     auto_refresh_paused = $14, source_ids = $15, last_trace = $16,
     embedding = $17, refresh_cron = $18, updated_at = now()
-WHERE tenant_id = $19 AND bank_id = $20 AND id = $21
+WHERE tenant_id = $19 AND org_id = $20 AND bank_id = $21 AND id = $22
 `
 
 type MentalModelUpdateParams struct {
@@ -298,6 +320,7 @@ type MentalModelUpdateParams struct {
 	Embedding            *pgvector_go.Vector
 	RefreshCron          *string
 	TenantID             string
+	OrgID                string
 	BankID               string
 	ID                   string
 }
@@ -324,6 +347,7 @@ func (q *Queries) MentalModelUpdate(ctx context.Context, arg MentalModelUpdatePa
 		arg.Embedding,
 		arg.RefreshCron,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ID,
 	)

@@ -18,7 +18,7 @@ const claimAlive = `-- name: ClaimAlive :one
 SELECT (o.status = 'processing' AND o.cancel_requested_at IS NULL AND b.id IS NOT NULL
         AND (b.deleting_at IS NULL OR o.kind = 'delete_bank'))::bool AS alive
 FROM operations o
-LEFT JOIN banks b ON (b.tenant_id, b.id) = (o.tenant_id, o.bank_id)
+LEFT JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
 WHERE o.id = $1
 `
 
@@ -31,12 +31,13 @@ func (q *Queries) ClaimAlive(ctx context.Context, id uuid.UUID) (bool, error) {
 }
 
 const claimAppendFailedEvent = `-- name: ClaimAppendFailedEvent :exec
-INSERT INTO lifecycle_events (tenant_id, bank_id, seq, type, operation_id, subject_id)
-VALUES ($1, $2, $3, 'operation_failed', $4, '')
+INSERT INTO lifecycle_events (tenant_id, org_id, bank_id, seq, type, operation_id, subject_id)
+VALUES ($1, $2, $3, $4, 'operation_failed', $5, '')
 `
 
 type ClaimAppendFailedEventParams struct {
 	TenantID    string
+	OrgID       string
 	BankID      string
 	Seq         int64
 	OperationID uuid.NullUUID
@@ -46,6 +47,7 @@ type ClaimAppendFailedEventParams struct {
 func (q *Queries) ClaimAppendFailedEvent(ctx context.Context, arg ClaimAppendFailedEventParams) error {
 	_, err := q.db.Exec(ctx, claimAppendFailedEvent,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Seq,
 		arg.OperationID,
@@ -199,12 +201,13 @@ func (q *Queries) ClaimMark(ctx context.Context, arg ClaimMarkParams) error {
 }
 
 const claimPeek = `-- name: ClaimPeek :one
-SELECT tenant_id, bank_id, kind, status, attempts, (cancel_requested_at IS NOT NULL)::bool AS cancel_requested
+SELECT tenant_id, org_id, bank_id, kind, status, attempts, (cancel_requested_at IS NOT NULL)::bool AS cancel_requested
 FROM operations WHERE id = $1
 `
 
 type ClaimPeekRow struct {
 	TenantID        string
+	OrgID           string
 	BankID          string
 	Kind            string
 	Status          string
@@ -218,6 +221,7 @@ func (q *Queries) ClaimPeek(ctx context.Context, id uuid.UUID) (ClaimPeekRow, er
 	var i ClaimPeekRow
 	err := row.Scan(
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.Kind,
 		&i.Status,
@@ -295,13 +299,13 @@ func (q *Queries) ClaimRetryLater(ctx context.Context, arg ClaimRetryLaterParams
 }
 
 const claimSelect = `-- name: ClaimSelect :many
-SELECT o.id, o.tenant_id, o.bank_id, o.kind, o.status, o.serial_key, o.payload, o.overrides, o.joinable, o.parent_id, o.attempts, o.run_at, o.worker_id, o.heartbeat_at, o.progress, o.usage, o.result, o.error, o.created_at, o.updated_at, o.finished_at, o.cancel_requested_at FROM operations o
-JOIN banks b ON (b.tenant_id, b.id) = (o.tenant_id, o.bank_id)
+SELECT o.id, o.tenant_id, o.org_id, o.bank_id, o.kind, o.status, o.serial_key, o.payload, o.overrides, o.joinable, o.parent_id, o.attempts, o.run_at, o.worker_id, o.heartbeat_at, o.progress, o.usage, o.result, o.error, o.created_at, o.updated_at, o.finished_at, o.cancel_requested_at FROM operations o
+JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
 WHERE o.status = 'pending' AND o.run_at <= now() AND o.kind = ANY($1::text[])
   AND (b.deleting_at IS NULL OR o.kind = 'delete_bank')
   AND NOT EXISTS (
     SELECT 1 FROM operations p
-    WHERE (p.tenant_id, p.bank_id, p.serial_key) = (o.tenant_id, o.bank_id, o.serial_key)
+    WHERE (p.tenant_id, p.org_id, p.bank_id, p.serial_key) = (o.tenant_id, o.org_id, o.bank_id, o.serial_key)
       AND (p.status = 'processing'
            OR (p.status = 'pending' AND p.run_at <= now()
                AND (p.created_at, p.id) < (o.created_at, o.id))))
@@ -329,6 +333,7 @@ func (q *Queries) ClaimSelect(ctx context.Context, arg ClaimSelectParams) ([]Ope
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.Kind,
 			&i.Status,
@@ -407,23 +412,31 @@ SET status = CASE WHEN status = 'pending' THEN 'cancelled' ELSE status END,
     cancel_requested_at = CASE WHEN status = 'processing' THEN COALESCE(cancel_requested_at, now())
                                ELSE cancel_requested_at END,
     joinable = false, updated_at = now()
-WHERE tenant_id = $1 AND bank_id = $2 AND id = $3 AND status IN ('pending', 'processing')
-RETURNING id, tenant_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4
+  AND status IN ('pending', 'processing')
+RETURNING id, tenant_id, org_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at
 `
 
 type QueueCancelParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       uuid.UUID
 }
 
 // QueueCancel cancels a pending job at once or records the cancel request of a processing one.
 func (q *Queries) QueueCancel(ctx context.Context, arg QueueCancelParams) (Operation, error) {
-	row := q.db.QueryRow(ctx, queueCancel, arg.TenantID, arg.BankID, arg.ID)
+	row := q.db.QueryRow(ctx, queueCancel,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	var i Operation
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.Kind,
 		&i.Status,
@@ -451,17 +464,19 @@ func (q *Queries) QueueCancel(ctx context.Context, arg QueueCancelParams) (Opera
 const queueCancelBank = `-- name: QueueCancelBank :execrows
 UPDATE operations
 SET status = 'cancelled', finished_at = now(), joinable = false, updated_at = now()
-WHERE tenant_id = $1 AND bank_id = $2 AND status = 'pending' AND kind <> 'delete_bank'
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND status = 'pending'
+  AND kind <> 'delete_bank'
 `
 
 type QueueCancelBankParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 }
 
 // QueueCancelBank cancels every pending job of a bank except its delete_bank job.
 func (q *Queries) QueueCancelBank(ctx context.Context, arg QueueCancelBankParams) (int64, error) {
-	result, err := q.db.Exec(ctx, queueCancelBank, arg.TenantID, arg.BankID)
+	result, err := q.db.Exec(ctx, queueCancelBank, arg.TenantID, arg.OrgID, arg.BankID)
 	if err != nil {
 		return 0, err
 	}
@@ -470,20 +485,23 @@ func (q *Queries) QueueCancelBank(ctx context.Context, arg QueueCancelBankParams
 
 const queueDedupeLock = `-- name: QueueDedupeLock :exec
 SELECT pg_advisory_xact_lock(hashtextextended(
-    $1::text || '/' || $2::text || '/' || $3::text || '/' || $4::text, 0))
+    $1::text || '/' || $2::text || '/' || $3::text || '/' || $4::text || '/'
+    || $5::text, 0))
 `
 
 type QueueDedupeLockParams struct {
 	TenantID  string
+	OrgID     string
 	BankID    string
 	Kind      string
 	SerialKey string
 }
 
-// QueueDedupeLock serializes dedupe enqueues of one (tenant, bank, kind, serial key) until the tx ends.
+// QueueDedupeLock serializes dedupe enqueues of one (tenant, org, bank, kind, serial key) until the tx ends.
 func (q *Queries) QueueDedupeLock(ctx context.Context, arg QueueDedupeLockParams) error {
 	_, err := q.db.Exec(ctx, queueDedupeLock,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Kind,
 		arg.SerialKey,
@@ -493,9 +511,9 @@ func (q *Queries) QueueDedupeLock(ctx context.Context, arg QueueDedupeLockParams
 
 const queueFindJoinable = `-- name: QueueFindJoinable :one
 SELECT id FROM operations
-WHERE tenant_id = $1 AND bank_id = $2 AND kind = $3 AND serial_key = $4::text
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND kind = $4 AND serial_key = $5::text
   AND joinable
-  AND (status = 'pending' OR ($5::bool AND status = 'processing'))
+  AND (status = 'pending' OR ($6::bool AND status = 'processing'))
 ORDER BY created_at, id
 LIMIT 1
 FOR UPDATE
@@ -503,6 +521,7 @@ FOR UPDATE
 
 type QueueFindJoinableParams struct {
 	TenantID       string
+	OrgID          string
 	BankID         string
 	Kind           string
 	SerialKey      string
@@ -513,6 +532,7 @@ type QueueFindJoinableParams struct {
 func (q *Queries) QueueFindJoinable(ctx context.Context, arg QueueFindJoinableParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, queueFindJoinable,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Kind,
 		arg.SerialKey,
@@ -524,22 +544,29 @@ func (q *Queries) QueueFindJoinable(ctx context.Context, arg QueueFindJoinablePa
 }
 
 const queueGet = `-- name: QueueGet :one
-SELECT id, tenant_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at FROM operations WHERE tenant_id = $1 AND bank_id = $2 AND id = $3
+SELECT id, tenant_id, org_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at FROM operations WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4
 `
 
 type QueueGetParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       uuid.UUID
 }
 
 // QueueGet returns one operation of a bank.
 func (q *Queries) QueueGet(ctx context.Context, arg QueueGetParams) (Operation, error) {
-	row := q.db.QueryRow(ctx, queueGet, arg.TenantID, arg.BankID, arg.ID)
+	row := q.db.QueryRow(ctx, queueGet,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	var i Operation
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.Kind,
 		&i.Status,
@@ -566,17 +593,18 @@ func (q *Queries) QueueGet(ctx context.Context, arg QueueGetParams) (Operation, 
 
 const queueInsert = `-- name: QueueInsert :exec
 INSERT INTO operations (
-    id, tenant_id, bank_id, kind, serial_key, payload, overrides, joinable, parent_id, attempts, run_at,
+    id, tenant_id, org_id, bank_id, kind, serial_key, payload, overrides, joinable, parent_id, attempts, run_at,
     created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-    COALESCE($11::timestamptz, now()), clock_timestamp(), clock_timestamp()
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+    COALESCE($12::timestamptz, now()), clock_timestamp(), clock_timestamp()
 )
 `
 
 type QueueInsertParams struct {
 	ID        uuid.UUID
 	TenantID  string
+	OrgID     string
 	BankID    string
 	Kind      string
 	SerialKey *string
@@ -593,6 +621,7 @@ func (q *Queries) QueueInsert(ctx context.Context, arg QueueInsertParams) error 
 	_, err := q.db.Exec(ctx, queueInsert,
 		arg.ID,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Kind,
 		arg.SerialKey,
@@ -607,19 +636,20 @@ func (q *Queries) QueueInsert(ctx context.Context, arg QueueInsertParams) error 
 }
 
 const queueList = `-- name: QueueList :many
-SELECT id, tenant_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at FROM operations
-WHERE tenant_id = $1 AND bank_id = $2
-  AND ($3::text IS NULL OR status = $3::text)
-  AND ($4::text IS NULL OR kind = $4::text)
-  AND (NOT $5::bool OR kind <> 'retain_batch')
-  AND ($6::timestamptz IS NULL
-       OR (created_at, id) < ($6::timestamptz, $7::uuid))
+SELECT id, tenant_id, org_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at FROM operations
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3
+  AND ($4::text IS NULL OR status = $4::text)
+  AND ($5::text IS NULL OR kind = $5::text)
+  AND (NOT $6::bool OR kind <> 'retain_batch')
+  AND ($7::timestamptz IS NULL
+       OR (created_at, id) < ($7::timestamptz, $8::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $8
+LIMIT $9
 `
 
 type QueueListParams struct {
 	TenantID       string
+	OrgID          string
 	BankID         string
 	Status         *string
 	Kind           *string
@@ -633,6 +663,7 @@ type QueueListParams struct {
 func (q *Queries) QueueList(ctx context.Context, arg QueueListParams) ([]Operation, error) {
 	rows, err := q.db.Query(ctx, queueList,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Status,
 		arg.Kind,
@@ -651,6 +682,7 @@ func (q *Queries) QueueList(ctx context.Context, arg QueueListParams) ([]Operati
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.Kind,
 			&i.Status,
@@ -683,24 +715,25 @@ func (q *Queries) QueueList(ctx context.Context, arg QueueListParams) ([]Operati
 }
 
 const queueLockBank = `-- name: QueueLockBank :one
-SELECT deleting_at FROM banks WHERE tenant_id = $1 AND id = $2 FOR KEY SHARE
+SELECT deleting_at FROM banks WHERE tenant_id = $1 AND org_id = $2 AND id = $3 FOR KEY SHARE
 `
 
 type QueueLockBankParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
 // QueueLockBank takes FOR KEY SHARE on the bank row and returns its tombstone (NULL = live).
 func (q *Queries) QueueLockBank(ctx context.Context, arg QueueLockBankParams) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, queueLockBank, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, queueLockBank, arg.TenantID, arg.OrgID, arg.ID)
 	var deleting_at *time.Time
 	err := row.Scan(&deleting_at)
 	return deleting_at, err
 }
 
 const queueLockOp = `-- name: QueueLockOp :one
-SELECT id, tenant_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at FROM operations WHERE id = $1 FOR UPDATE
+SELECT id, tenant_id, org_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at FROM operations WHERE id = $1 FOR UPDATE
 `
 
 // QueueLockOp locks one operation row and returns it.
@@ -710,6 +743,7 @@ func (q *Queries) QueueLockOp(ctx context.Context, id uuid.UUID) (Operation, err
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.Kind,
 		&i.Status,
@@ -771,23 +805,31 @@ UPDATE operations
 SET status = 'pending', run_at = now(), attempts = 0, error = NULL, finished_at = NULL,
     cancel_requested_at = NULL, worker_id = NULL, heartbeat_at = NULL,
     joinable = joinable OR kind = 'refresh_mental_model', updated_at = now()
-WHERE tenant_id = $1 AND bank_id = $2 AND id = $3 AND status IN ('failed', 'cancelled')
-RETURNING id, tenant_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = $4
+  AND status IN ('failed', 'cancelled')
+RETURNING id, tenant_id, org_id, bank_id, kind, status, serial_key, payload, overrides, joinable, parent_id, attempts, run_at, worker_id, heartbeat_at, progress, usage, result, error, created_at, updated_at, finished_at, cancel_requested_at
 `
 
 type QueueRetryParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ID       uuid.UUID
 }
 
 // QueueRetry re-queues a failed or cancelled job as a fresh pending row due now.
 func (q *Queries) QueueRetry(ctx context.Context, arg QueueRetryParams) (Operation, error) {
-	row := q.db.QueryRow(ctx, queueRetry, arg.TenantID, arg.BankID, arg.ID)
+	row := q.db.QueryRow(ctx, queueRetry,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ID,
+	)
 	var i Operation
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
+		&i.OrgID,
 		&i.BankID,
 		&i.Kind,
 		&i.Status,

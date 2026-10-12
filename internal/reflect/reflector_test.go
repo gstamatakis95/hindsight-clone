@@ -562,7 +562,7 @@ func TestReflectRequestValidation(t *testing.T) {
 	if _, err := h.reflect(func(r *rf.Request) { r.Query = " " }); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("empty query: %v", err)
 	}
-	_, err := h.reflect(func(r *rf.Request) { r.Bank = domain.BankRef{Tenant: "t1", Bank: "nope"} })
+	_, err := h.reflect(func(r *rf.Request) { r.Bank = domain.NewBankRef("t1", "org", "nope") })
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("unknown bank: %v", err)
 	}

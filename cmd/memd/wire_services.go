@@ -18,6 +18,7 @@ import (
 	"memd/internal/observability"
 	"memd/internal/observation"
 	"memd/internal/operation"
+	"memd/internal/org"
 	"memd/internal/recall"
 	"memd/internal/recall/arms"
 	"memd/internal/reflect"
@@ -60,6 +61,7 @@ func wireServices(
 	wireDocuments(c, in, d)
 	wireObservations(c, in, d)
 	wireMentalModels(c, in, d)
+	wireOrg(c, d)
 	wireBanks(c, in, d)
 	wireConfig(c, d)
 	wireOperations(c, d)
@@ -149,6 +151,11 @@ func wireMentalModels(c core, in infra, d *deps) {
 	d.maintenance.MentalModels = svc
 }
 
+// wireOrg builds org.Service: it serves OrgService (create, get, list; DeleteOrg answers UNIMPLEMENTED).
+func wireOrg(c core, d *deps) {
+	d.api.Org = &grpcapi.OrgHandler{Orgs: org.New(org.Deps{DB: c.db})}
+}
+
 // wireBanks builds bank.Service: it serves BankService (create, get, list, delete, stats, tags, templates), runs the
 // delete_bank job and the tick's resume_bank_deletes sweep.
 func wireBanks(c core, in infra, d *deps) {
@@ -158,7 +165,7 @@ func wireBanks(c core, in infra, d *deps) {
 	d.maintenance.Banks = svc
 }
 
-// wireConfig builds configsvc.Service: it serves ConfigService (the tenant and bank config levels, the prompt
+// wireConfig builds configsvc.Service: it serves ConfigService (the tenant, org and bank config levels, the prompt
 // preview and the directives).
 func wireConfig(c core, d *deps) {
 	svc := configsvc.New(configsvc.Deps{DB: c.db, Config: c.resolver})

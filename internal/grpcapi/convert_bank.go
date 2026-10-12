@@ -12,14 +12,14 @@ import (
 
 // bankToProto converts a Bank; its config is not on the wire (ConfigService serves it).
 func bankToProto(b domain.Bank) *pb.Bank {
-	return &pb.Bank{Id: b.Ref.Bank, Name: b.Name, CreatedAt: tsToProto(b.CreatedAt)}
+	return &pb.Bank{OrgId: b.Ref.Org, Id: b.Ref.Bank, Name: b.Name, CreatedAt: tsToProto(b.CreatedAt)}
 }
 
 // createBankFromProto converts a CreateBankRequest: its initial oneof sets either the bank's config or the
 // template. The tenant is set by the caller.
 func createBankFromProto(r *pb.CreateBankRequest) (bank.CreateRequest, error) {
 	var d decoder
-	out := bank.CreateRequest{Bank: domain.Bank{Ref: domain.BankRef{Bank: r.GetBankId()}, Name: r.GetName()}}
+	out := bank.CreateRequest{Bank: domain.Bank{Name: r.GetName()}}
 	switch x := r.GetInitial().(type) {
 	case *pb.CreateBankRequest_Config:
 		out.Bank.Config = d.config(x.Config)
@@ -56,7 +56,6 @@ func bankStatsToProto(s domain.BankStats) *pb.BankStats {
 func listTagsFromProto(r *pb.ListTagsRequest) (bank.ListTagsRequest, error) {
 	var d decoder
 	out := bank.ListTagsRequest{
-		Bank:      domain.BankRef{Bank: r.GetBankId()},
 		Source:    fromEnum[domain.TagSource](&d, r.GetSource()),
 		Prefix:    r.GetPrefix(),
 		PageSize:  int(r.GetPageSize()),

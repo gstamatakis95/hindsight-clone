@@ -248,8 +248,8 @@ func TestQueueGoneBank(t *testing.T) {
 	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
 	ctx := t.Context()
-	gone := domain.BankRef{Tenant: "t-gone", Bank: "gone"}
-	live := domain.BankRef{Tenant: "t-gone", Bank: "live"}
+	gone := domain.NewBankRef("t-gone", "org", "gone")
+	live := domain.NewBankRef("t-gone", "org", "live")
 	ensureQueueBanks(t, s, gone, live)
 	retain := domain.OperationKindRetainDocument
 	failNow := enqueueJob(t, s, store.Job{Bank: gone, Kind: retain, SerialKey: "doc:a", Payload: json.RawMessage(`{}`)})
@@ -260,7 +260,8 @@ func TestQueueGoneBank(t *testing.T) {
 	if js, err := s.Claim(ctx, "w", []domain.OperationKind{retain}, 10); err != nil || len(js) != 3 {
 		t.Fatalf("Claim = %d jobs, %v; want 3", len(js), err)
 	}
-	if _, err := pool.Exec(ctx, `DELETE FROM banks WHERE tenant_id = $1 AND id = $2`, gone.Tenant, gone.Bank); err != nil {
+	if _, err := pool.Exec(ctx, `DELETE FROM banks WHERE tenant_id = $1 AND org_id = $2 AND id = $3`,
+		gone.Tenant, gone.Org, gone.Bank); err != nil {
 		t.Fatalf("delete bank row: %v", err)
 	}
 	if err := s.Fail(ctx, failNow, errors.New("fatal"), nil); err != nil {
@@ -284,16 +285,7 @@ func TestQueueGoneBank(t *testing.T) {
 // ensureQueueBanks creates the banks with Ensure.
 func ensureQueueBanks(t *testing.T, s *postgres.DB, banks ...domain.BankRef) {
 	t.Helper()
-	if err := s.InTx(t.Context(), func(tx store.Tx) error {
-		for _, b := range banks {
-			if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
+	pgtest.EnsureBanks(t, s, banks...)
 }
 
 // enqueueJob enqueues j in its own transaction and returns its id.

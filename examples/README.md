@@ -9,7 +9,7 @@ scenario: a goal, the calls that reach it, and output you can read. They use onl
 |---|---|---|
 | [chat-assistant](chat-assistant) | An assistant that remembers a conversation, recalls what is relevant and answers with citations | `Retain`, `Recall`, `Reflect` |
 | [model-per-step](model-per-step) | A cheap model for extraction and consolidation, a strong one for reflect and mental models, a reranker; bank-level routing, per-request overrides, and the usage that proves which model ran | `UpdateBankConfig`, `Retain`, `Consolidate`, `Recall`, `Reflect`, `CreateMentalModel`, `GetOperation` |
-| [multi-tenant](multi-tenant) | Tenants (`x-tenant-id`) with their own defaults, banks created from a template, a mission and disposition per bank, isolation | `UpdateTenantConfig`, `GetTenantConfig`, `CreateBank`, `ExportBankTemplate`, `UpdateBankConfig`, `CreateDirective`, `GetBankStats` |
+| [multi-tenant](multi-tenant) | Tenants (`x-tenant-id`) with their own orgs and defaults, banks created from a template, a mission and disposition per bank, isolation | `CreateOrg`, `UpdateTenantConfig`, `GetTenantConfig`, `CreateBank`, `ExportBankTemplate`, `UpdateBankConfig`, `CreateDirective`, `GetBankStats` |
 | [async-ingest](async-ingest) | A batch retained with `run_async`, polled through operations, followed through the event feed, with cancel and retry | `Retain`, `GetOperation`, `ListOperations`, `ListEvents`, `CancelOperation`, `RetryOperation` |
 | [mental-models](mental-models) | Pages that refresh after consolidation or on a cron schedule, agentic versus single-shot, preview, search, history | `CreateMentalModel`, `PreviewMentalModelRefresh`, `GetMentalModel`, `ListMentalModelHistory`, `SearchMentalModels`, `ListMentalModels` |
 | [curation](curation) | Fixing memory: edit a fact, invalidate and restore it, retag and reprocess a document, rebuild observations | `UpdateMemory`, `InvalidateMemory`, `RestoreMemory`, `ListMemories`, `RetagDocument`, `ReprocessDocument`, `ClearObservations` |
@@ -22,8 +22,9 @@ Each folder holds:
 - `main.go`: the program, commented with the intent of each step;
 - `commands.md`: the same calls as grpcurl commands (needs `grpcurl` and `jq`).
 
-`internal/exampleutil` is the small helper they share: the `-addr` and `-tenant` flags, a connection that sends the
-tenant header, and polling helpers.
+`internal/exampleutil` is the small helper they share: the `-addr`, `-tenant` and `-org` flags, a connection that
+sends the tenant header, the org every example creates before it starts (banks live in an org, and a write never
+creates one), and polling helpers.
 
 ## Shared setup
 
@@ -53,9 +54,9 @@ make examples                      # builds everything, then runs every scenario
 make examples ADDR=host:50051 TENANT=demo
 ```
 
-`-addr` (default `localhost:50051`) and `-tenant` (default `examples`) can also come from the `MEMD_ADDR` and
-`MEMD_TENANT` environment variables. An example creates banks with fresh names on every run, so running it twice is
-fine. It exits 1 with a `FAILED:` line when the behaviour it demonstrates does not hold.
+`-addr` (default `localhost:50051`), `-tenant` and `-org` (both default `examples`) can also come from the
+`MEMD_ADDR`, `MEMD_TENANT` and `MEMD_ORG` environment variables. An example first creates its org (an org that
+already exists is fine) and then banks with fresh names on every run, so running it twice is fine. It exits 1 with a `FAILED:` line when the behaviour it demonstrates does not hold.
 
 ### With a real gateway
 

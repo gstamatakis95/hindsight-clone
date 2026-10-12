@@ -14,8 +14,8 @@ import (
 // manyKeys is the volume tests' key count: more than one provider listing page or delete batch (1,000 on S3).
 const manyKeys = 1050
 
-// blobBank is the bank whose keys the blob tests use: prefix "t/b/".
-var blobBank = domain.BankRef{Tenant: "t", Bank: "b"}
+// blobBank is the bank whose keys the blob tests use: prefix "t/o/b/".
+var blobBank = domain.NewBankRef("t", "o", "b")
 
 // Run runs the contract suite: each case gets its own fresh, empty store from newStore and runs in parallel with the
 // others. It covers Put/Get round trips (non-seekable and empty bodies included), overwrite, missing keys, the size
@@ -125,15 +125,15 @@ func testOverwrite(t *testing.T, b blob.Store) {
 	wantContent(t, b, key, []byte("second"))
 }
 
-// testDeletePrefix: DeletePrefix("t/b/") removes exactly the keys under it and counts them; "t/b2/..."
-// and "t/bb/..." keys sharing the leading characters survive.
+// testDeletePrefix: DeletePrefix("t/o/b/") removes exactly the keys under it and counts them; "t/o/b2/..."
+// and "t/o/bb/..." keys sharing the leading characters survive.
 func testDeletePrefix(t *testing.T, b blob.Store) {
 	prefix := blob.BankPrefix(blobBank)
-	if prefix != "t/b/" {
-		t.Fatalf("BankPrefix = %q, want t/b/", prefix)
+	if prefix != "t/o/b/" {
+		t.Fatalf("BankPrefix = %q, want t/o/b/", prefix)
 	}
-	gone := []string{"t/b/docs/d1/h1", "t/b/docs/d2/h2", "t/b/other"}
-	kept := []string{"t/b2/docs/d1/h1", "t/bb/docs/d1/h1", "u/b/docs/d1/h1", "t/bx"}
+	gone := []string{"t/o/b/docs/d1/h1", "t/o/b/docs/d2/h2", "t/o/b/other"}
+	kept := []string{"t/o/b2/docs/d1/h1", "t/o/bb/docs/d1/h1", "u/o/b/docs/d1/h1", "t/o/bx"}
 	for _, k := range append(append([]string{}, gone...), kept...) {
 		put(t, b, k, []byte("data of "+k))
 	}
@@ -181,8 +181,8 @@ func list(t *testing.T, b blob.Store, prefix, after string, limit int) []string 
 // returns another prefix's keys, and returns an empty page once no key is left.
 func testListPaging(t *testing.T, b blob.Store) {
 	// Byte order: "A" < "a" < "docs" < "é".
-	mine := []string{"t/b/A", "t/b/a", "t/b/docs/d1/h1", "t/b/docs/d2/h2", "t/b/é"}
-	for _, k := range append([]string{"t/bb/docs/d1/h1", "t/b2/x", "u/b/docs/d1/h1", "t/a"}, mine...) {
+	mine := []string{"t/o/b/A", "t/o/b/a", "t/o/b/docs/d1/h1", "t/o/b/docs/d2/h2", "t/o/b/é"}
+	for _, k := range append([]string{"t/o/bb/docs/d1/h1", "t/o/b2/x", "u/o/b/docs/d1/h1", "t/o/a"}, mine...) {
 		put(t, b, k, []byte(k))
 	}
 	var got []string
@@ -201,11 +201,11 @@ func testListPaging(t *testing.T, b blob.Store) {
 	if fmt.Sprint(got) != fmt.Sprint(mine) {
 		t.Errorf("paged List = %v, want %v", got, mine)
 	}
-	if page := list(t, b, "t/b/", "t/b/é", 10); len(page) != 0 {
+	if page := list(t, b, "t/o/b/", "t/o/b/é", 10); len(page) != 0 {
 		t.Errorf("List after the last key = %v, want empty", page)
 	}
-	if page := list(t, b, "t/b/", "t/b/a", 1); fmt.Sprint(page) != "[t/b/docs/d1/h1]" {
-		t.Errorf("List after t/b/a limit 1 = %v, want [t/b/docs/d1/h1]", page)
+	if page := list(t, b, "t/o/b/", "t/o/b/a", 1); fmt.Sprint(page) != "[t/o/b/docs/d1/h1]" {
+		t.Errorf("List after t/o/b/a limit 1 = %v, want [t/o/b/docs/d1/h1]", page)
 	}
 }
 
@@ -238,11 +238,11 @@ func testListManyKeys(t *testing.T, b blob.Store) {
 // testListRejects: an empty prefix or a limit <= 0 is ErrInvalidArgument, never the whole store or an
 // empty page that reads as "nothing left".
 func testListRejects(t *testing.T, b blob.Store) {
-	put(t, b, "t/b/docs/d1/h1", []byte("x"))
+	put(t, b, "t/o/b/docs/d1/h1", []byte("x"))
 	for _, c := range []struct {
 		prefix string
 		limit  int
-	}{{"", 10}, {"t/b/", 0}, {"t/b/", -1}} {
+	}{{"", 10}, {"t/o/b/", 0}, {"t/o/b/", -1}} {
 		if _, err := b.List(t.Context(), c.prefix, "", c.limit); !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("List(%q, limit %d) err = %v, want ErrInvalidArgument", c.prefix, c.limit, err)
 		}
@@ -252,7 +252,7 @@ func testListRejects(t *testing.T, b blob.Store) {
 // testNonSeekable: Put stores bodies from readers that are not io.Seekers, including an empty one, and rejects a
 // body whose length disagrees with size with ErrInvalidArgument.
 func testNonSeekable(t *testing.T, b blob.Store) {
-	for key, want := range map[string]string{"t/b/docs/d/h": "streamed body, café ☕", "t/b/docs/e/h": ""} {
+	for key, want := range map[string]string{"t/o/b/docs/d/h": "streamed body, café ☕", "t/o/b/docs/e/h": ""} {
 		r := struct{ io.Reader }{io.MultiReader(strings.NewReader(want))}
 		if err := b.Put(t.Context(), key, r, int64(len(want)), "text/plain; charset=utf-8"); err != nil {
 			t.Fatalf("Put(%q): %v", key, err)
@@ -260,16 +260,16 @@ func testNonSeekable(t *testing.T, b blob.Store) {
 		wantContent(t, b, key, []byte(want))
 	}
 	short := struct{ io.Reader }{strings.NewReader("abc")}
-	if err := b.Put(t.Context(), "t/b/short", short, 10, "text/plain"); !errors.Is(err, domain.ErrInvalidArgument) {
+	if err := b.Put(t.Context(), "t/o/b/short", short, 10, "text/plain"); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("Put with size mismatch error = %v, want ErrInvalidArgument", err)
 	}
 }
 
 // testDeletePrefixEmpty: DeletePrefix("") is ErrInvalidArgument and deletes nothing.
 func testDeletePrefixEmpty(t *testing.T, b blob.Store) {
-	put(t, b, "t/b/x", []byte("x"))
+	put(t, b, "t/o/b/x", []byte("x"))
 	if _, err := b.DeletePrefix(t.Context(), ""); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("DeletePrefix(\"\") error = %v, want ErrInvalidArgument", err)
 	}
-	wantContent(t, b, "t/b/x", []byte("x"))
+	wantContent(t, b, "t/o/b/x", []byte("x"))
 }

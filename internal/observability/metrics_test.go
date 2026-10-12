@@ -188,7 +188,7 @@ func TestJobAndGatewayMetricsCarryNoIDs(t *testing.T) {
 	defer mt.Stop()
 	stats := &fakeStats{}
 	tel := NewMetrics(nil, stats)
-	j := store.Job{ID: "op-1", Kind: domain.OperationKindRetainDocument, Bank: domain.BankRef{Tenant: "acme", Bank: "b-1"}}
+	j := store.Job{ID: "op-1", Kind: domain.OperationKindRetainDocument, Bank: domain.NewBankRef("acme", "org", "b-1")}
 	_, end := tel.JobHook()(context.Background(), j)
 	end("retry", errors.New("boom"))
 	_, done := tel.GatewayHook()(context.Background(), domain.ModelSlotExtract, "m1", "/chat/completions")

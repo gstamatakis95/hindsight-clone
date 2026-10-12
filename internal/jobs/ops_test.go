@@ -68,6 +68,10 @@ func newOps(t testing.TB) *opsDB {
 	t.Helper()
 	d := pgtest.New(t)
 	o := &opsDB{DB: d.Store(), t: t, pool: d.Pool}
+	pgtest.CreateOrgs(t, o.DB,
+		domain.NewBankRef("t", "org", ""), domain.NewBankRef("t1", "org", ""), domain.NewBankRef("t2", "org", ""),
+		domain.NewBankRef("t9", "org", ""))
+
 	if err := o.InTx(t.Context(), func(tx store.Tx) error {
 		for _, b := range []domain.BankRef{bankA, bankB, bankC} {
 			if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
@@ -125,14 +129,14 @@ func (o *opsDB) add(j store.Job) domain.OperationID {
 func (o *opsDB) row(id domain.OperationID) opRow {
 	o.t.Helper()
 	var r opRow
-	var tenant, bank, kind, key, status, worker string
-	err := o.pool.QueryRow(o.t.Context(), `SELECT tenant_id, bank_id, kind, coalesce(serial_key, ''), status,
+	var tenant, org, bank, kind, key, status, worker string
+	err := o.pool.QueryRow(o.t.Context(), `SELECT tenant_id, org_id, bank_id, kind, coalesce(serial_key, ''), status,
 		coalesce(worker_id, ''), attempts, run_at FROM operations WHERE id = $1`, string(id)).
-		Scan(&tenant, &bank, &kind, &key, &status, &worker, &r.attempt, &r.runAt)
+		Scan(&tenant, &org, &bank, &kind, &key, &status, &worker, &r.attempt, &r.runAt)
 	if err != nil {
 		o.t.Fatalf("row %s: %v", id, err)
 	}
-	r.bank, r.kind, r.key = domain.BankRef{Tenant: tenant, Bank: bank}, domain.OperationKind(kind), key
+	r.bank, r.kind, r.key = domain.NewBankRef(tenant, org, bank), domain.OperationKind(kind), key
 	r.status, r.worker = domain.OperationStatus(status), worker
 	var op domain.Operation
 	if err := o.InTx(o.t.Context(), func(tx store.Tx) error {
@@ -158,14 +162,14 @@ func (o *opsDB) count(where string, args ...any) int {
 }
 
 // countBank counts bank b's operations of kind, with an extra SQL condition when where is not empty; its
-// placeholders start at $4.
+// placeholders start at $5.
 func (o *opsDB) countBank(b domain.BankRef, kind domain.OperationKind, where string, args ...any) int {
 	o.t.Helper()
-	cond := `tenant_id = $1 AND bank_id = $2 AND kind = $3`
+	cond := `tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND kind = $4`
 	if where != "" {
 		cond += " AND " + where
 	}
-	return o.count(cond, append([]any{b.Tenant, b.Bank, string(kind)}, args...)...)
+	return o.count(cond, append([]any{b.Tenant, b.Org, b.Bank, string(kind)}, args...)...)
 }
 
 // exec runs a SQL statement on the test's database.
@@ -202,16 +206,16 @@ func (o *opsDB) cancel(b domain.BankRef, id domain.OperationID) (domain.Operatio
 // markDeleting tombstones bank b, creating it if needed.
 func (o *opsDB) markDeleting(b domain.BankRef) {
 	o.t.Helper()
-	o.exec(`INSERT INTO banks (tenant_id, id, deleting_at) VALUES ($1, $2, now())
-		ON CONFLICT (tenant_id, id) DO UPDATE SET deleting_at = now()`, b.Tenant, b.Bank)
+	o.exec(`INSERT INTO banks (tenant_id, org_id, id, deleting_at) VALUES ($1, $2, $3, now())
+		ON CONFLICT (tenant_id, org_id, id) DO UPDATE SET deleting_at = now()`, b.Tenant, b.Org, b.Bank)
 }
 
 // ---------- helpers ----------
 
 var (
-	bankA = domain.BankRef{Tenant: "t1", Bank: "a"}
-	bankB = domain.BankRef{Tenant: "t1", Bank: "b"}
-	bankC = domain.BankRef{Tenant: "t2", Bank: "c"}
+	bankA = domain.NewBankRef("t1", "org", "a")
+	bankB = domain.NewBankRef("t1", "org", "b")
+	bankC = domain.NewBankRef("t2", "org", "c")
 )
 
 // retainJob is a retain_document job for document doc of bankA.

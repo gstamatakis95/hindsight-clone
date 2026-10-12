@@ -20,7 +20,8 @@ import (
 
 // RetainRequest mirrors memory.v1.RetainRequest with domain types.
 type RetainRequest struct {
-	// Bank receives the items; an unknown bank is created with tenant defaults.
+	// Bank receives the items; an unknown bank of an existing org is created (an unknown org is
+	// domain.ErrOrgNotFound).
 	Bank domain.BankRef
 	// Items are the documents to retain.
 	Items []RetainItem
@@ -167,23 +168,27 @@ func (i *ingestor) Ingest(ctx context.Context, req RetainRequest) (RetainResult,
 }
 
 // bankConfig returns the bank's effective config, and whether the bank exists. An unknown bank is not created
-// here (validation must store nothing); its config for validation is the tenant level, and the write
-// transaction creates it. The server level only adds defaults that cannot fail validation.
+// here (validation must store nothing); its config for validation is tenant < org, and the write transaction
+// creates it. The server level only adds defaults that cannot fail validation. Orgs are never created on first
+// use: an unknown or tombstoned org is domain.ErrOrgNotFound.
 func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.BankConfig, bool, error) {
 	cfg, err := i.d.Config.Effective(ctx, b)
 	if err == nil {
 		return cfg, true, nil
 	}
-	if !errors.Is(err, domain.ErrNotFound) {
+	if !errors.Is(err, domain.ErrBankNotFound) {
 		return cfg, false, fmt.Errorf("retain: %w", err)
 	}
-	var tenant domain.BankConfig
+	var tenant, org domain.BankConfig
 	err = i.d.Store.InTx(ctx, func(tx store.Tx) error {
 		var err error
-		tenant, err = tx.Banks().TenantConfig(ctx, b.Tenant)
-		return err
+		tenant, org, err = config.StoredOrgLevels(ctx, tx, b.OrgRef())
+		return err //nolint:wrapcheck // wrapped once below, after the transaction
 	})
-	return tenant, false, err
+	if err != nil {
+		return domain.BankConfig{}, false, fmt.Errorf("retain: %w", err)
+	}
+	return config.Merge(tenant, org), false, nil
 }
 
 // plan validates one item and builds its document payload. Nothing is stored.
@@ -277,7 +282,7 @@ func (i *ingestor) markUnchanged(ctx context.Context, b domain.BankRef, plans []
 		bank, err := tx.Banks().Get(ctx, b)
 		switch {
 		case err == nil && bank.Deleting():
-			return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+			return fmt.Errorf("%w: bank %s", domain.ErrBankDeleting, b)
 		case err != nil && !errors.Is(err, domain.ErrNotFound):
 			return err
 		}

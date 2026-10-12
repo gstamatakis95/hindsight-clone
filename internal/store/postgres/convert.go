@@ -180,7 +180,7 @@ func unmarshalPtr[T any](what string, raw json.RawMessage) (*T, error) {
 // bankOf builds a domain.Bank from its row.
 func bankOf(r db.Bank) (domain.Bank, error) {
 	b := domain.Bank{
-		Ref:  domain.BankRef{Tenant: r.TenantID, Bank: r.ID},
+		Ref:  domain.NewBankRef(r.TenantID, r.OrgID, r.ID),
 		Name: r.Name, ChangeSeq: r.ChangeSeq, DeletingAt: r.DeletingAt, LastMemoryWriteAt: r.LastMemoryWriteAt,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -190,7 +190,7 @@ func bankOf(r db.Bank) (domain.Bank, error) {
 // unitOf builds a domain.Unit from its row, with the reader-filled entity names and sources.
 func unitOf(r db.MemoryUnit, entities []string, sources []uuid.UUID) (domain.Unit, error) {
 	u := domain.Unit{
-		ID: idOf[domain.UnitID](r.ID), Bank: domain.BankRef{Tenant: r.TenantID, Bank: r.BankID},
+		ID: idOf[domain.UnitID](r.ID), Bank: domain.NewBankRef(r.TenantID, r.OrgID, r.BankID),
 		DocumentID: textOf[domain.DocumentID](r.DocumentID), ChunkID: nullIDOf[domain.ChunkID](r.ChunkID),
 		Type: domain.FactType(r.FactType), Text: r.Text, Context: r.Context, Tags: r.Tags,
 		Entities: entities, Embedding: vecOf(r.Embedding),

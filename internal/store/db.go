@@ -29,6 +29,8 @@ type Tx interface {
 	// for the same bank returns the same value. An unknown bank returns domain.ErrNotFound and a
 	// tombstoned one domain.ErrBankDeleting.
 	Seq(ctx context.Context, b domain.BankRef) (int64, error)
+	// Orgs returns the org repository bound to this transaction.
+	Orgs() OrgRepo
 	// Banks returns the bank repository bound to this transaction.
 	Banks() BankRepo
 	// Documents returns the document repository bound to this transaction.
@@ -92,9 +94,12 @@ type Search interface {
 	CountObservations(ctx context.Context, s domain.ScopeKey) (int, error)
 }
 
-// Catalog serves the listing and admin reads: a tenant's banks, and one bank's contents.
+// Catalog serves the listing and admin reads: a tenant's orgs, an org's banks, and one bank's contents.
 type Catalog interface {
-	// ListBanks returns up to q.Limit of q.Tenant's banks whose id starts with q.IDPrefix, ordered by id in byte
+	// ListOrgs returns up to q.Limit of q.Tenant's orgs whose id starts with q.IDPrefix, ordered by id in byte
+	// order and strictly after q.After; tombstoned orgs are left out.
+	ListOrgs(ctx context.Context, q OrgQuery) ([]domain.Org, error)
+	// ListBanks returns up to q.Limit of q.Org's banks whose id starts with q.IDPrefix, ordered by id in byte
 	// order and strictly after q.After; tombstoned banks are left out.
 	ListBanks(ctx context.Context, q BankQuery) ([]domain.Bank, error)
 	// GetUnit returns one unit of b, live (State valid) or archived (State invalidated), with Entities,

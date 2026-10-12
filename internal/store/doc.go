@@ -65,8 +65,9 @@
 // # Data-safety rules
 //
 // There is no per-memory delete: UnitRepo.Archive invalidates a unit into memory_units_archive and Restore brings it
-// back; a document's units are replaced through DeleteByDocument and re-insertion. A write to an unknown bank creates
-// it with tenant defaults ([BankRepo.Ensure]); a tombstoned bank refuses writes and enqueues with
-// domain.ErrBankDeleting (except its delete_bank job). [EventRepo.List] treats limit <= 0 as no limit; API callers
+// back; a document's units are replaced through DeleteByDocument and re-insertion. A write to an unknown bank of an
+// existing org creates it ([BankRepo.Ensure], which share-locks the org row first; orgs are never created on first
+// use, see [OrgRepo]); a tombstoned bank refuses writes and enqueues with domain.ErrBankDeleting (except its
+// delete_bank job). [EventRepo.List] treats limit <= 0 as no limit; API callers
 // bound it themselves (the ListEvents RPC defaults to 100 and caps at 1000).
 package store

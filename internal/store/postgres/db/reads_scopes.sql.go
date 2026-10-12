@@ -13,19 +13,25 @@ import (
 )
 
 const chunkGetMany = `-- name: ChunkGetMany :many
-SELECT id, tenant_id, bank_id, document_id, chunk_index, text, content_hash, token_count, truncated, created_at FROM chunks
-WHERE tenant_id = $1 AND bank_id = $2 AND id = ANY($3::uuid[])
+SELECT id, tenant_id, org_id, bank_id, document_id, chunk_index, text, content_hash, token_count, truncated, created_at FROM chunks
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = ANY($4::uuid[])
 `
 
 type ChunkGetManyParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // ChunkGetMany returns the bank's chunks with the given ids.
 func (q *Queries) ChunkGetMany(ctx context.Context, arg ChunkGetManyParams) ([]Chunk, error) {
-	rows, err := q.db.Query(ctx, chunkGetMany, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, chunkGetMany,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -36,6 +42,7 @@ func (q *Queries) ChunkGetMany(ctx context.Context, arg ChunkGetManyParams) ([]C
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.DocumentID,
 			&i.ChunkIndex,
@@ -61,25 +68,26 @@ SELECT e.id, e.canonical_name,
         SELECT z.id FROM (
             SELECT o.id FROM unit_entities x JOIN memory_units o ON o.id = x.unit_id
             WHERE x.entity_id = e.id AND o.fact_type = 'observation'
-              AND o.tenant_id = $1 AND o.bank_id = $2
+              AND o.tenant_id = $1 AND o.org_id = $2 AND o.bank_id = $3
             UNION
             SELECT o.id FROM unit_entities x
             JOIN memory_units f ON f.id = x.unit_id AND f.fact_type <> 'observation'
             JOIN observation_evidence ev ON ev.unit_id = f.id
             JOIN memory_units o ON o.id = ev.observation_id AND o.fact_type = 'observation'
-            WHERE x.entity_id = e.id AND o.tenant_id = $1 AND o.bank_id = $2
+            WHERE x.entity_id = e.id AND o.tenant_id = $1 AND o.org_id = $2 AND o.bank_id = $3
         ) AS z ORDER BY z.id
     ), '{}')::uuid[] AS observation_ids
 FROM entities e
-WHERE e.tenant_id = $1 AND e.bank_id = $2 AND e.id IN (
+WHERE e.tenant_id = $1 AND e.org_id = $2 AND e.bank_id = $3 AND e.id IN (
     SELECT ue.entity_id FROM unit_entities ue JOIN memory_units u ON u.id = ue.unit_id
-    WHERE u.tenant_id = $1 AND u.bank_id = $2 AND u.id = ANY($3::uuid[])
+    WHERE u.tenant_id = $1 AND u.org_id = $2 AND u.bank_id = $3 AND u.id = ANY($4::uuid[])
 )
 ORDER BY e.id
 `
 
 type EntityStatesOfParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
@@ -92,7 +100,12 @@ type EntityStatesOfRow struct {
 
 // EntityStatesOf returns, ordered by id, the entities attached to the bank's live units with the given ids, each with the sorted live observations attached to it or citing a live fact attached to it.
 func (q *Queries) EntityStatesOf(ctx context.Context, arg EntityStatesOfParams) ([]EntityStatesOfRow, error) {
-	rows, err := q.db.Query(ctx, entityStatesOf, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, entityStatesOf,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -113,21 +126,27 @@ func (q *Queries) EntityStatesOf(ctx context.Context, arg EntityStatesOfParams) 
 
 const evidenceCitingScopes = `-- name: EvidenceCitingScopes :many
 SELECT o.scope_key::text AS scope_key FROM memory_units o
-WHERE o.tenant_id = $1 AND o.bank_id = $2 AND o.fact_type = 'observation'
-  AND EXISTS (SELECT 1 FROM observation_evidence ev WHERE ev.observation_id = o.id AND ev.unit_id = ANY($3::uuid[]))
+WHERE o.tenant_id = $1 AND o.org_id = $2 AND o.bank_id = $3 AND o.fact_type = 'observation'
+  AND EXISTS (SELECT 1 FROM observation_evidence ev WHERE ev.observation_id = o.id AND ev.unit_id = ANY($4::uuid[]))
 GROUP BY o.scope_key
 ORDER BY o.scope_key COLLATE "C"
 `
 
 type EvidenceCitingScopesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // EvidenceCitingScopes returns, in byte order, the distinct scope keys of the bank's live observations citing any of the units.
 func (q *Queries) EvidenceCitingScopes(ctx context.Context, arg EvidenceCitingScopesParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, evidenceCitingScopes, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, evidenceCitingScopes,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -148,18 +167,19 @@ func (q *Queries) EvidenceCitingScopes(ctx context.Context, arg EvidenceCitingSc
 
 const evidenceLockAll = `-- name: EvidenceLockAll :many
 SELECT id FROM memory_units
-WHERE tenant_id = $1 AND bank_id = $2 AND fact_type = 'observation'
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND fact_type = 'observation'
 ORDER BY id FOR UPDATE
 `
 
 type EvidenceLockAllParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 }
 
 // EvidenceLockAll locks, in id order, every live observation of the bank and returns their ids.
 func (q *Queries) EvidenceLockAll(ctx context.Context, arg EvidenceLockAllParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, evidenceLockAll, arg.TenantID, arg.BankID)
+	rows, err := q.db.Query(ctx, evidenceLockAll, arg.TenantID, arg.OrgID, arg.BankID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,19 +200,25 @@ func (q *Queries) EvidenceLockAll(ctx context.Context, arg EvidenceLockAllParams
 
 const evidenceLockScopes = `-- name: EvidenceLockScopes :many
 SELECT id FROM memory_units
-WHERE tenant_id = $1 AND bank_id = $2 AND fact_type = 'observation' AND scope_key = ANY($3::text[])
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND fact_type = 'observation' AND scope_key = ANY($4::text[])
 ORDER BY id FOR UPDATE
 `
 
 type EvidenceLockScopesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Keys     []string
 }
 
 // EvidenceLockScopes locks, in id order, the bank's live observations whose scope key is one of keys and returns their ids.
 func (q *Queries) EvidenceLockScopes(ctx context.Context, arg EvidenceLockScopesParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, evidenceLockScopes, arg.TenantID, arg.BankID, arg.Keys)
+	rows, err := q.db.Query(ctx, evidenceLockScopes,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Keys,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -213,19 +239,25 @@ func (q *Queries) EvidenceLockScopes(ctx context.Context, arg EvidenceLockScopes
 
 const modelsCitingUnits = `-- name: ModelsCitingUnits :many
 SELECT id FROM mental_models
-WHERE tenant_id = $1 AND bank_id = $2 AND source_ids && $3::uuid[]
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND source_ids && $4::uuid[]
 ORDER BY id COLLATE "C"
 `
 
 type ModelsCitingUnitsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // ModelsCitingUnits returns, in byte order, the ids of the bank's mental models whose source_ids include any of the units.
 func (q *Queries) ModelsCitingUnits(ctx context.Context, arg ModelsCitingUnitsParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, modelsCitingUnits, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, modelsCitingUnits,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -247,18 +279,19 @@ func (q *Queries) ModelsCitingUnits(ctx context.Context, arg ModelsCitingUnitsPa
 const scopeListPage = `-- name: ScopeListPage :many
 SELECT s.scope_key, s.tags, (
     SELECT count(*) FROM memory_units o
-    WHERE o.tenant_id = s.tenant_id AND o.bank_id = s.bank_id AND o.fact_type = 'observation'
+    WHERE o.tenant_id = s.tenant_id AND o.org_id = s.org_id AND o.bank_id = s.bank_id AND o.fact_type = 'observation'
       AND o.scope_key = s.scope_key
 )::bigint AS observations
 FROM observation_scopes s
-WHERE s.tenant_id = $1 AND s.bank_id = $2
-  AND ($3::text = '' OR s.scope_key COLLATE "C" > $3::text)
+WHERE s.tenant_id = $1 AND s.org_id = $2 AND s.bank_id = $3
+  AND ($4::text = '' OR s.scope_key COLLATE "C" > $4::text)
 ORDER BY s.scope_key COLLATE "C"
-LIMIT $4
+LIMIT $5
 `
 
 type ScopeListPageParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	After    string
 	Lim      int32
@@ -274,6 +307,7 @@ type ScopeListPageRow struct {
 func (q *Queries) ScopeListPage(ctx context.Context, arg ScopeListPageParams) ([]ScopeListPageRow, error) {
 	rows, err := q.db.Query(ctx, scopeListPage,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.After,
 		arg.Lim,
@@ -298,18 +332,24 @@ func (q *Queries) ScopeListPage(ctx context.Context, arg ScopeListPageParams) ([
 
 const scopeObservationCount = `-- name: ScopeObservationCount :one
 SELECT count(*) FROM memory_units
-WHERE tenant_id = $1 AND bank_id = $2 AND fact_type = 'observation' AND scope_key = $3::text
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND fact_type = 'observation' AND scope_key = $4::text
 `
 
 type ScopeObservationCountParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	ScopeKey string
 }
 
 // ScopeObservationCount counts the bank's live observations whose scope key is the given one.
 func (q *Queries) ScopeObservationCount(ctx context.Context, arg ScopeObservationCountParams) (int64, error) {
-	row := q.db.QueryRow(ctx, scopeObservationCount, arg.TenantID, arg.BankID, arg.ScopeKey)
+	row := q.db.QueryRow(ctx, scopeObservationCount,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.ScopeKey,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -318,16 +358,17 @@ func (q *Queries) ScopeObservationCount(ctx context.Context, arg ScopeObservatio
 const scopeUnconsolidated = `-- name: ScopeUnconsolidated :many
 SELECT s.ord::int AS ord, (
     SELECT count(*) FROM memory_units u
-    WHERE u.tenant_id = $1 AND u.bank_id = $2
+    WHERE u.tenant_id = $1 AND u.org_id = $2 AND u.bank_id = $3
       AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
       AND u.tags @> ARRAY(SELECT jsonb_array_elements_text(s.tags))
 )::bigint AS n
-FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS s(tags, ord)
+FROM jsonb_array_elements($4::jsonb) WITH ORDINALITY AS s(tags, ord)
 ORDER BY s.ord
 `
 
 type ScopeUnconsolidatedParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Scopes   json.RawMessage
 }
@@ -339,7 +380,12 @@ type ScopeUnconsolidatedRow struct {
 
 // ScopeUnconsolidated counts, for each tag set in scopes (a JSON array of arrays), the bank's unconsolidated facts (CCR §0) whose tags contain it; ord is the tag set's 1-based position. It is the one scope-wise rendering of the §0 predicate (StaleScopes and ListObservationScopes use it), written exactly like the partial index memory_units_unconsolidated_idx so the planner serves it from there.
 func (q *Queries) ScopeUnconsolidated(ctx context.Context, arg ScopeUnconsolidatedParams) ([]ScopeUnconsolidatedRow, error) {
-	rows, err := q.db.Query(ctx, scopeUnconsolidated, arg.TenantID, arg.BankID, arg.Scopes)
+	rows, err := q.db.Query(ctx, scopeUnconsolidated,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Scopes,
+	)
 	if err != nil {
 		return nil, err
 	}

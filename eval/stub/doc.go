@@ -8,7 +8,7 @@
 //	addr, stop, err := stub.Start(stub.Options{PendingPolls: 2}) // serves on a 127.0.0.1 port
 //	defer stop()
 //	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-//	tgt := target.NewMemd(conn, "tenant")
+//	tgt := target.NewMemd(conn, "tenant", "org")
 //
 // [Start] serves a new [Server] on a loopback port and returns the address and a stop function that waits for the
 // server to exit; [New] and [Server.Register] put the stub on a caller's *grpc.Server. The stub implements the

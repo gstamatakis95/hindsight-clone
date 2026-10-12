@@ -31,11 +31,12 @@ tiers: "" {
     ingestapi: "ingestapi\nqueue consumer" {class: planned}
   }
   services: "Services: one Service per gRPC service, never import each other" {
-    grid-columns: 7
+    grid-columns: 8
     memory: memory {class: svc}
     document: document {class: svc}
     observation: observation {class: svc}
     mentalmodel: mentalmodel {class: svc}
+    org: org {class: svc}
     bank: bank {class: svc}
     configsvc: configsvc {class: svc}
     operation: operation {class: svc}
@@ -77,7 +78,8 @@ tiers.*.*.height: 60
 tiers.root.*.width: 940
 tiers.adapters.*.width: 143
 tiers.transports.*.width: 305
-tiers.services.*.width: 124
+tiers.services.*.width: 107
+tiers.services.*.style.font-size: 16
 tiers.libs.*.width: 226
 tiers.infra.*.width: 464
 tiers.bounds.*.width: 178

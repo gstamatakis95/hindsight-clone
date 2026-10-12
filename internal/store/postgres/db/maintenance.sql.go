@@ -11,16 +11,17 @@ import (
 )
 
 const banksWithGraphWork = `-- name: BanksWithGraphWork :many
-SELECT b.tenant_id, b.id FROM banks b
+SELECT b.tenant_id, b.org_id, b.id FROM banks b
 WHERE b.deleting_at IS NULL AND (
-    EXISTS (SELECT 1 FROM graph_dirty g WHERE g.tenant_id = b.tenant_id AND g.bank_id = b.id)
-    OR EXISTS (SELECT 1 FROM entity_maintenance e WHERE e.tenant_id = b.tenant_id AND e.bank_id = b.id)
+    EXISTS (SELECT 1 FROM graph_dirty g WHERE g.tenant_id = b.tenant_id AND g.org_id = b.org_id AND g.bank_id = b.id)
+    OR EXISTS (SELECT 1 FROM entity_maintenance e WHERE e.tenant_id = b.tenant_id AND e.org_id = b.org_id AND e.bank_id = b.id)
 )
-ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C"
+ORDER BY b.tenant_id COLLATE "C", b.org_id COLLATE "C", b.id COLLATE "C"
 `
 
 type BanksWithGraphWorkRow struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
@@ -35,7 +36,7 @@ func (q *Queries) BanksWithGraphWork(ctx context.Context) ([]BanksWithGraphWorkR
 	items := []BanksWithGraphWorkRow{}
 	for rows.Next() {
 		var i BanksWithGraphWorkRow
-		if err := rows.Scan(&i.TenantID, &i.ID); err != nil {
+		if err := rows.Scan(&i.TenantID, &i.OrgID, &i.ID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -93,17 +94,18 @@ func (q *Queries) QueueStats(ctx context.Context) ([]QueueStatsRow, error) {
 }
 
 const stalledBankDeletes = `-- name: StalledBankDeletes :many
-SELECT b.tenant_id, b.id FROM banks b
+SELECT b.tenant_id, b.org_id, b.id FROM banks b
 WHERE b.deleting_at IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM operations o
-    WHERE o.tenant_id = b.tenant_id AND o.bank_id = b.id AND o.kind = 'delete_bank'
+    WHERE o.tenant_id = b.tenant_id AND o.org_id = b.org_id AND o.bank_id = b.id AND o.kind = 'delete_bank'
       AND o.status IN ('pending', 'processing')
 )
-ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C"
+ORDER BY b.tenant_id COLLATE "C", b.org_id COLLATE "C", b.id COLLATE "C"
 `
 
 type StalledBankDeletesRow struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
@@ -119,7 +121,7 @@ func (q *Queries) StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesR
 	items := []StalledBankDeletesRow{}
 	for rows.Next() {
 		var i StalledBankDeletesRow
-		if err := rows.Scan(&i.TenantID, &i.ID); err != nil {
+		if err := rows.Scan(&i.TenantID, &i.OrgID, &i.ID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -131,21 +133,22 @@ func (q *Queries) StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesR
 }
 
 const unconsolidatedBanks = `-- name: UnconsolidatedBanks :many
-SELECT b.tenant_id, b.id, o.created_at AS oldest FROM banks b
+SELECT b.tenant_id, b.org_id, b.id, o.created_at AS oldest FROM banks b
 CROSS JOIN LATERAL (
     SELECT u.created_at FROM memory_units u
-    WHERE u.tenant_id = b.tenant_id AND u.bank_id = b.id
+    WHERE u.tenant_id = b.tenant_id AND u.org_id = b.org_id AND u.bank_id = b.id
       AND u.consolidated_at IS NULL AND u.consolidation_failed_at IS NULL AND u.fact_type <> 'observation'
       AND u.embedding IS NOT NULL AND u.created_at < $1::timestamptz
     ORDER BY u.created_at
     LIMIT 1
 ) o
 WHERE b.deleting_at IS NULL
-ORDER BY b.tenant_id COLLATE "C", b.id COLLATE "C"
+ORDER BY b.tenant_id COLLATE "C", b.org_id COLLATE "C", b.id COLLATE "C"
 `
 
 type UnconsolidatedBanksRow struct {
 	TenantID string
+	OrgID    string
 	ID       string
 	Oldest   time.Time
 }
@@ -153,7 +156,7 @@ type UnconsolidatedBanksRow struct {
 // UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
 // with an embedding created before @before, each with its oldest such fact's created_at (the caller compares it
 // with the bank's own reconcile grace): the §0 predicate as in ScopeUnconsolidated, over the partial index
-// (tenant_id, bank_id, created_at).
+// (tenant_id, org_id, bank_id, created_at).
 func (q *Queries) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBanksRow, error) {
 	rows, err := q.db.Query(ctx, unconsolidatedBanks, before)
 	if err != nil {
@@ -163,7 +166,12 @@ func (q *Queries) UnconsolidatedBanks(ctx context.Context, before time.Time) ([]
 	items := []UnconsolidatedBanksRow{}
 	for rows.Next() {
 		var i UnconsolidatedBanksRow
-		if err := rows.Scan(&i.TenantID, &i.ID, &i.Oldest); err != nil {
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.OrgID,
+			&i.ID,
+			&i.Oldest,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

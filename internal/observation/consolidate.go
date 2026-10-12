@@ -140,7 +140,7 @@ func payloadScopes(b domain.BankRef, p jobs.ConsolidatePayload) []domain.ScopeKe
 type run struct {
 	c       *consolidator
 	job     store.Job
-	cfg     domain.BankConfig // effective run config (server < tenant < bank < request)
+	cfg     domain.BankConfig // effective run config (server < tenant < org < bank < request)
 	payload jobs.ConsolidatePayload
 	filter  []domain.ScopeKey    // a manual run's scopes; empty = every unit
 	check   *jobs.Run            // progress and the cancel check

@@ -15,11 +15,10 @@ import (
 
 // ---------- retain ----------
 
-// retainRequestFromProto converts a RetainRequest; Bank carries only bank_id (the handler sets the tenant).
+// retainRequestFromProto converts a RetainRequest; the handler sets Bank.
 func retainRequestFromProto(r *pb.RetainRequest) (memory.RetainRequest, error) {
 	var d decoder
 	out := memory.RetainRequest{
-		Bank:              domain.BankRef{Bank: r.GetBankId()},
 		Items:             d.retainItems(r.GetItems()),
 		DocumentTags:      r.GetDocumentTags(),
 		Overrides:         d.retainOverrides(r.GetOverrides()),
@@ -84,11 +83,10 @@ func retainResultToProto(r memory.RetainResult) *pb.RetainResponse {
 
 // ---------- recall ----------
 
-// recallRequestFromProto converts a RecallRequest; Bank carries only bank_id (the handler sets the tenant).
+// recallRequestFromProto converts a RecallRequest; the handler sets Bank.
 func recallRequestFromProto(r *pb.RecallRequest) (recall.Request, error) {
 	var d decoder
 	out := recall.Request{
-		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
 		FactTypes:          fromEnums[domain.FactType](&d, r.GetFactTypes()),
 		Tags:               d.tagFilter(r.GetTags()),
@@ -180,7 +178,6 @@ func memoriesToProto(in []recall.Memory) []*pb.Memory {
 func reflectRequestFromProto(r *pb.ReflectRequest) (reflecteng.Request, error) {
 	var d decoder
 	out := reflecteng.Request{
-		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		Query:              r.GetQuery(),
 		Tags:               d.tagFilter(r.GetTags()),
 		Budget:             fromEnum[domain.Budget](&d, r.GetBudget()),

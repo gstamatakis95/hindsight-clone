@@ -72,9 +72,9 @@ func observationsConfig(o domain.ObservationConfig) domain.BankConfig {
 // consolidation and observations on; a bank that doesn't exist is skipped silently, and a second sweep joins
 // the queued job.
 func TestReconcileSkipsDisabledBanks(t *testing.T) {
-	a, b, c := domain.BankRef{Tenant: "t", Bank: "a"}, domain.BankRef{Tenant: "t", Bank: "b"},
-		domain.BankRef{Tenant: "t", Bank: "c"}
-	gone := domain.BankRef{Tenant: "t", Bank: "gone"}
+	a, b, c := domain.NewBankRef("t", "org", "a"), domain.NewBankRef("t", "org", "b"),
+		domain.NewBankRef("t", "org", "c")
+	gone := domain.NewBankRef("t", "org", "gone")
 	e, s := reconcileEnv(t, time.Time{}, map[domain.BankRef]domain.BankConfig{
 		a: observationsConfig(domain.ObservationConfig{AutoConsolidation: ptr(true), Enabled: ptr(true)}),
 		b: observationsConfig(domain.ObservationConfig{AutoConsolidation: ptr(false)}),
@@ -97,8 +97,8 @@ func TestReconcileSkipsDisabledBanks(t *testing.T) {
 // own observations.reconcile_grace_seconds (default 10 min), so a skip_consolidation retain followed by a
 // manual Consolidate within the grace is not pre-empted.
 func TestReconcileGrace(t *testing.T) {
-	a, b, c := domain.BankRef{Tenant: "t", Bank: "a"}, domain.BankRef{Tenant: "t", Bank: "b"},
-		domain.BankRef{Tenant: "t", Bank: "c"}
+	a, b, c := domain.NewBankRef("t", "org", "a"), domain.NewBankRef("t", "org", "b"),
+		domain.NewBankRef("t", "org", "c")
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	e, s := reconcileEnv(t, now.Add(-5*time.Minute), map[domain.BankRef]domain.BankConfig{
 		a: observationsConfig(domain.ObservationConfig{ReconcileGraceSeconds: ptr(180)}),

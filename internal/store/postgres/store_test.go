@@ -32,7 +32,6 @@ func TestStore(t *testing.T) {
 		{"SearchText", testSearchText},
 		{"SearchTemporal", testSearchTemporal},
 		{"ReaderReusedAcrossCommits", testReaderReuse},
-		{"TenantIsolation", testTenantIsolation},
 	}
 	cases = append(cases, armCases()...)
 	cases = append(cases, repoCases()...)

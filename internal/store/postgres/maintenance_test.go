@@ -27,16 +27,7 @@ func mtEmbeddedAt(b domain.BankRef, text string, created time.Time) domain.Unit 
 // mtEnsure creates banks bs.
 func mtEnsure(t *testing.T, s *postgres.DB, bs ...domain.BankRef) {
 	t.Helper()
-	if err := fuTx(t, s, func(tx store.Tx) error {
-		for _, b := range bs {
-			if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	pgtest.EnsureBanks(t, s, bs...)
 }
 
 // TestUnconsolidatedBanks checks the consolidation reconcile's read: only units created before the cut-off
@@ -127,18 +118,19 @@ func TestBanksWithGraphWork(t *testing.T) {
 	pool := pgtest.Pool(t)
 	s := postgres.New(pool)
 	ctx := t.Context()
-	third := domain.BankRef{Tenant: "tenant-fu-3", Bank: "bank-fu"}
+	third := domain.NewBankRef("tenant-fu-3", "org", "bank-fu")
 	mtEnsure(t, s, fuBank, fuOther, third)
 	if got, err := s.BanksWithGraphWork(ctx); err != nil || len(got) != 0 {
 		t.Fatalf("no graph work: %v %v", got, err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO graph_dirty (tenant_id, bank_id, unit_id) VALUES ($1, $2, gen_random_uuid())`,
-		fuBank.Tenant, fuBank.Bank); err != nil {
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO graph_dirty (tenant_id, org_id, bank_id, unit_id) VALUES ($1, $2, $3, gen_random_uuid())`,
+		fuBank.Tenant, fuBank.Org, fuBank.Bank); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO entity_maintenance (tenant_id, bank_id, entity_id) VALUES ($1, $2, gen_random_uuid())`,
-		fuOther.Tenant, fuOther.Bank); err != nil {
+		`INSERT INTO entity_maintenance (tenant_id, org_id, bank_id, entity_id) VALUES ($1, $2, $3, gen_random_uuid())`,
+		fuOther.Tenant, fuOther.Org, fuOther.Bank); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.BanksWithGraphWork(ctx)
@@ -182,6 +174,7 @@ func TestStrandedFacts(t *testing.T) {
 	healthy := fuUnit(fuBank, "healthy fact")
 	healthy.Embedding = make([]float32, domain.EmbeddingDim)
 	healthy.Embedding[0] = 1
+	pgtest.CreateOrgs(t, s, fuBank)
 	if err := fuTx(t, s, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(ctx, fuBank); err != nil {
 			return err
@@ -226,6 +219,7 @@ func settleBatch(t *testing.T, s *postgres.DB, n int) (domain.OperationID, []dom
 	t.Helper()
 	var parent domain.OperationID
 	kids := make([]domain.OperationID, n)
+	pgtest.CreateOrgs(t, s, fuBank)
 	if err := fuTx(t, s, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(t.Context(), fuBank); err != nil {
 			return err

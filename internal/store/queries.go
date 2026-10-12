@@ -218,13 +218,25 @@ type DocumentCursor struct {
 	ID domain.DocumentID `json:"i"`
 }
 
-// BankQuery selects one page of a tenant's live banks (Catalog.ListBanks).
+// BankQuery selects one page of an org's live banks (Catalog.ListBanks).
 type BankQuery struct {
-	// Tenant is the tenant listed.
-	Tenant string
+	// Org is the org listed.
+	Org domain.OrgRef
 	// IDPrefix keeps banks whose id starts with it; empty = all.
 	IDPrefix string
 	// After continues a listing: only banks whose id sorts strictly after it in byte order; empty = first page.
+	After string
+	// Limit caps the result (> 0).
+	Limit int
+}
+
+// OrgQuery selects one page of a tenant's live orgs (Catalog.ListOrgs).
+type OrgQuery struct {
+	// Tenant is the tenant listed.
+	Tenant string
+	// IDPrefix keeps orgs whose id starts with it; empty = all.
+	IDPrefix string
+	// After continues a listing: only orgs whose id sorts strictly after it in byte order; empty = first page.
 	After string
 	// Limit caps the result (> 0).
 	Limit int

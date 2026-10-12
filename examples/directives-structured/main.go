@@ -36,7 +36,7 @@ type scenario struct {
 }
 
 func (s *scenario) retain(ctx context.Context) error {
-	if _, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{BankId: s.bank, Items: []*pb.RetainItem{{
+	if _, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{OrgId: s.c.Org, BankId: s.bank, Items: []*pb.RetainItem{{
 		DocumentId: "incident-77",
 		Content: "Incident 77: the payments service returned errors for 20 minutes. " +
 			"The checkout service retried too aggressively and made the outage worse. " +
@@ -49,7 +49,7 @@ func (s *scenario) retain(ctx context.Context) error {
 
 // ask runs the same question with the extra settings of req.
 func (s *scenario) ask(ctx context.Context, req *pb.ReflectRequest) (*pb.ReflectResponse, error) {
-	req.BankId, req.Query = s.bank, "What happened in incident 77?"
+	req.OrgId, req.BankId, req.Query = s.c.Org, s.bank, "What happened in incident 77?"
 	resp, err := s.c.Memory.Reflect(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("reflect: %w", err)
@@ -61,14 +61,16 @@ func (s *scenario) ask(ctx context.Context, req *pb.ReflectRequest) (*pb.Reflect
 // answer come back in based_on, and PreviewPrompt shows how the rule reaches the model without calling it.
 func (s *scenario) standingDirective(ctx context.Context) error {
 	exampleutil.Section("a standing directive")
-	created, err := s.c.Config.CreateDirective(ctx, &pb.CreateDirectiveRequest{BankId: s.bank, Directive: &pb.Directive{
-		Name: "blameless",
-		Rules: []string{
-			"Describe what happened to systems, never blame a person.",
-			"Mention the rollback if there was one.",
+	created, err := s.c.Config.CreateDirective(ctx, &pb.CreateDirectiveRequest{
+		OrgId: s.c.Org, BankId: s.bank, Directive: &pb.Directive{
+			Name: "blameless",
+			Rules: []string{
+				"Describe what happened to systems, never blame a person.",
+				"Mention the rollback if there was one.",
+			},
+			Active: true,
 		},
-		Active: true,
-	}})
+	})
 	if err != nil {
 		return fmt.Errorf("create directive: %w", err)
 	}
@@ -82,7 +84,7 @@ func (s *scenario) standingDirective(ctx context.Context) error {
 		return fmt.Errorf("expected the directive to be applied")
 	}
 	preview, err := s.c.Config.PreviewPrompt(ctx, &pb.PreviewPromptRequest{
-		BankId: s.bank, Operation: pb.PreviewPromptRequest_PROMPT_OPERATION_REFLECT,
+		OrgId: s.c.Org, BankId: s.bank, Operation: pb.PreviewPromptRequest_PROMPT_OPERATION_REFLECT,
 	})
 	if err != nil {
 		return fmt.Errorf("preview prompt: %w", err)
@@ -102,7 +104,7 @@ func (s *scenario) standingDirective(ctx context.Context) error {
 func (s *scenario) switchOff(ctx context.Context) error {
 	exampleutil.Section("switch the directive off, add one for a single call")
 	if _, err := s.c.Config.UpdateDirective(ctx, &pb.UpdateDirectiveRequest{
-		BankId: s.bank, DirectiveId: s.directiveID, Directive: &pb.Directive{Active: false},
+		OrgId: s.c.Org, BankId: s.bank, DirectiveId: s.directiveID, Directive: &pb.Directive{Active: false},
 		UpdateMask: exampleutil.Paths("active"),
 	}); err != nil {
 		return fmt.Errorf("update directive: %w", err)

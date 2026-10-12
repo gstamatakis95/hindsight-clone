@@ -54,7 +54,7 @@ func (s *Service) retag(
 			return err
 		}
 		if bank.Deleting() {
-			return fmt.Errorf("%w: retag in bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+			return fmt.Errorf("%w: retag in bank %s", domain.ErrBankDeleting, b)
 		}
 		d, err := tx.Documents().Get(ctx, b, doc)
 		if err != nil {

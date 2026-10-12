@@ -1,13 +1,13 @@
 // Package blob declares [Store], the provider-neutral boundary to object storage, where memd keeps the original text
-// of every retained document, plus the key layout ([Key], [BankPrefix]).
+// of every retained document, plus the key layout ([Key], [BankPrefix], [OrgPrefix]).
 //
 // # The contract
 //
 // Store has exactly the four operations memd needs: Put an original under a key, Get it back, List a prefix page by
 // page, and DeletePrefix when a bank is deleted. It uses no provider types or terms; keys are plain strings, and the
-// only layout is the one [Key] and [BankPrefix] build:
+// only layout is the one [Key], [BankPrefix] and [OrgPrefix] build:
 //
-//	{tenant}/{bank}/docs/{document_id}/{content_hash}
+//	{tenant}/{org}/{bank}/docs/{document_id}/{content_hash}
 //
 // Errors are domain error classes: a missing key is domain.ErrNotFound, a bad argument domain.ErrInvalidArgument and
 // any provider or transport failure domain.ErrUnavailable, wrapped with %w so callers test them with errors.Is. The

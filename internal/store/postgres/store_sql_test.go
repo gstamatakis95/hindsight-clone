@@ -19,8 +19,8 @@ import (
 // Store behaviour that needs direct SQL to set up or observe.
 
 var (
-	fuBank  = domain.BankRef{Tenant: "tenant-fu", Bank: "bank-fu"}
-	fuOther = domain.BankRef{Tenant: "tenant-fu-2", Bank: "bank-fu"}
+	fuBank  = domain.NewBankRef("tenant-fu", "org", "bank-fu")
+	fuOther = domain.NewBankRef("tenant-fu-2", "org", "bank-fu")
 )
 
 // fuUnit returns a world fact of b with a fresh id.
@@ -124,16 +124,16 @@ func TestDeleteBatchLocksTombstone(t *testing.T) {
 
 // unkeyedTables are the bank-keyed tables without a foreign key to banks, with an insert of one row.
 var unkeyedTables = map[string]string{
-	"graph_dirty": `INSERT INTO graph_dirty (tenant_id, bank_id, unit_id)
-		VALUES ($1, $2, gen_random_uuid())`,
-	"entity_maintenance": `INSERT INTO entity_maintenance (tenant_id, bank_id, entity_id)
-		VALUES ($1, $2, gen_random_uuid())`,
-	"observation_versions": `INSERT INTO observation_versions (tenant_id, bank_id, observation_id, version, text)
-		VALUES ($1, $2, gen_random_uuid(), 1, 'v1')`,
-	"memory_audit": `INSERT INTO memory_audit (tenant_id, bank_id, unit_id, action)
-		VALUES ($1, $2, gen_random_uuid(), 'edit')`,
-	"memory_units_archive": `INSERT INTO memory_units_archive (id, tenant_id, bank_id, fact_type, text, seq)
-		VALUES (gen_random_uuid(), $1, $2, 'world', 'gone', 1)`,
+	"graph_dirty": `INSERT INTO graph_dirty (tenant_id, org_id, bank_id, unit_id)
+		VALUES ($1, $2, $3, gen_random_uuid())`,
+	"entity_maintenance": `INSERT INTO entity_maintenance (tenant_id, org_id, bank_id, entity_id)
+		VALUES ($1, $2, $3, gen_random_uuid())`,
+	"observation_versions": `INSERT INTO observation_versions (tenant_id, org_id, bank_id, observation_id, version, text)
+		VALUES ($1, $2, $3, gen_random_uuid(), 1, 'v1')`,
+	"memory_audit": `INSERT INTO memory_audit (tenant_id, org_id, bank_id, unit_id, action)
+		VALUES ($1, $2, $3, gen_random_uuid(), 'edit')`,
+	"memory_units_archive": `INSERT INTO memory_units_archive (id, tenant_id, org_id, bank_id, fact_type, text, seq)
+		VALUES (gen_random_uuid(), $1, $2, $3, 'world', 'gone', 1)`,
 }
 
 // TestDeleteRemovesUnkeyedTables: Delete without a prior DeleteBatch also removes the bank's rows
@@ -145,7 +145,7 @@ func TestDeleteRemovesUnkeyedTables(t *testing.T) {
 	ensureQueueBanks(t, s, fuBank, fuOther)
 	for table, ins := range unkeyedTables {
 		for _, b := range []domain.BankRef{fuBank, fuOther} {
-			if _, err := pool.Exec(t.Context(), ins, b.Tenant, b.Bank); err != nil {
+			if _, err := pool.Exec(t.Context(), ins, b.Tenant, b.Org, b.Bank); err != nil {
 				t.Fatalf("fill %s: %v", table, err)
 			}
 		}
@@ -161,8 +161,8 @@ func TestDeleteRemovesUnkeyedTables(t *testing.T) {
 	for table := range unkeyedTables {
 		for b, want := range map[domain.BankRef]int{fuBank: 0, fuOther: 1} {
 			var n int
-			q := fmt.Sprintf(`SELECT count(*) FROM %s WHERE tenant_id = $1 AND bank_id = $2`, table)
-			if err := pool.QueryRow(t.Context(), q, b.Tenant, b.Bank).Scan(&n); err != nil || n != want {
+			q := fmt.Sprintf(`SELECT count(*) FROM %s WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3`, table)
+			if err := pool.QueryRow(t.Context(), q, b.Tenant, b.Org, b.Bank).Scan(&n); err != nil || n != want {
 				t.Errorf("%s rows of %v after Delete = %d (%v), want %d", table, b, n, err, want)
 			}
 		}
@@ -284,7 +284,7 @@ func TestSearchTemporalEdges(t *testing.T) {
 func TestInTxRetriesDeadlock(t *testing.T) {
 	t.Parallel()
 	s := pgtest.NewStore(t)
-	x, y := domain.BankRef{Tenant: "t", Bank: "x"}, domain.BankRef{Tenant: "t", Bank: "y"}
+	x, y := domain.NewBankRef("t", "org", "x"), domain.NewBankRef("t", "org", "y")
 	ensureQueueBanks(t, s, x, y)
 	var calls atomic.Int64
 	ready := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
@@ -322,7 +322,7 @@ func TestInTxRetriesDeadlock(t *testing.T) {
 func TestSearchTextSmallBank(t *testing.T) {
 	t.Parallel()
 	s := pgtest.NewStore(t)
-	big := domain.BankRef{Tenant: fuBank.Tenant, Bank: "big"}
+	big := domain.NewBankRef(fuBank.Tenant, fuBank.Org, "big")
 	ensureQueueBanks(t, s, fuBank, big)
 	var bigUnits []domain.Unit
 	for i := range 2000 {

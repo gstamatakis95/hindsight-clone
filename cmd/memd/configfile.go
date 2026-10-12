@@ -21,7 +21,7 @@ import (
 
 // The server config file (MEMD_CONFIG, default ./memd.yaml): every behaviour and operator setting, where the
 // environment holds only deployment, infrastructure and secrets. Its defaults block is the server level of the
-// config hierarchy (server < tenant < bank < request), written as the API's BankConfig message (proto field
+// config hierarchy (server < tenant < org < bank < request), written as the API's BankConfig message (proto field
 // names, enum value names); the other sections are operator settings that are not per bank. memd.example.yaml
 // documents every key.
 

@@ -73,6 +73,8 @@ type MemdConfig struct {
 	Addr string `yaml:"addr"`
 	// Tenant is sent as x-tenant-id.
 	Tenant string `yaml:"tenant"`
+	// Org is the org the run's banks live in; the run creates it (an existing one is fine).
+	Org string `yaml:"org"`
 	// Stub runs memd's side against the in-process stub server instead of Addr.
 	Stub bool `yaml:"stub,omitempty"`
 	// Skip leaves memd out (with a Hindsight URL, to run Hindsight alone).
@@ -127,7 +129,7 @@ type BarrierConfig struct {
 func defaultConfig() Config {
 	return Config{
 		Mode: harness.ModeReflect, OutDir: "eval-results", Parallel: 4, CallTimeout: 5 * time.Minute,
-		Memd:    MemdConfig{Addr: "localhost:50051", Tenant: "eval"},
+		Memd:    MemdConfig{Addr: "localhost:50051", Tenant: "eval", Org: "eval"},
 		Judge:   JudgeConfig{Kind: "llm", URL: os.Getenv(envJudgeURL), Model: os.Getenv(envJudgeModel)},
 		Answer:  ModelConfig{URL: os.Getenv(envAnswerURL), Model: os.Getenv(envAnswerModel)},
 		Barrier: BarrierConfig{Poll: time.Second, QuietPolls: 2, SettleTimeout: 15 * time.Minute},
@@ -192,6 +194,7 @@ func bindFlags(fs *flag.FlagSet, c *Config, rf *runFlags) {
 	fs.DurationVar(&c.CallTimeout, "call-timeout", c.CallTimeout, "timeout of each target, answer or judge call")
 	fs.StringVar(&c.Memd.Addr, "addr", c.Memd.Addr, "memd gRPC address")
 	fs.StringVar(&c.Memd.Tenant, "tenant", c.Memd.Tenant, "tenant sent as x-tenant-id")
+	fs.StringVar(&c.Memd.Org, "org", c.Memd.Org, "org the run's banks live in (created when missing)")
 	fs.BoolVar(&c.Memd.Stub, "stub", c.Memd.Stub, "run memd's side against an in-process stub server")
 	fs.BoolVar(&c.Memd.Skip, "skip-memd", c.Memd.Skip, "do not run against memd (use with -hindsight-url)")
 	fs.StringVar(&c.Hindsight.URL, "hindsight-url", c.Hindsight.URL, "also run against stock Hindsight at this URL")

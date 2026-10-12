@@ -332,7 +332,7 @@ func testOaListObservationScopesUnknown(t *testing.T, s store.DB) {
 	if got := oaMustListObservationScopes(t, s, bankB, "", 10); len(got) != 0 {
 		t.Errorf("ListObservationScopes(bank without observations) = %q, want none", oaKeys(got))
 	}
-	_, err := oaListObservationScopes(t, s, domain.BankRef{Tenant: "tenant-1", Bank: "unknown"}, "", 10)
+	_, err := oaListObservationScopes(t, s, domain.NewBankRef("tenant-1", "org", "unknown"), "", 10)
 	wantErrIs(t, "ListObservationScopes(unknown bank)", err, domain.ErrNotFound)
 	_, err = oaListObservationScopes(t, s, bankOtherTenant, "", 10)
 	wantErrIs(t, "ListObservationScopes(bank id known only under another tenant)", err, domain.ErrNotFound)

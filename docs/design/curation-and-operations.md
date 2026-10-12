@@ -11,14 +11,18 @@ explains the behaviour behind them.
 | DocumentService | `document` | ListDocuments, GetDocument, RetagDocument, ReprocessDocument |
 | ObservationService | `observation` | Consolidate, ListObservationScopes, ListObservationHistory, ClearObservations, PreviewConsolidationStrategies |
 | MentalModelService | `mentalmodel` | CreateMentalModel, GetMentalModel, ListMentalModels, UpdateMentalModel, RefreshMentalModel, PreviewMentalModelRefresh, ListMentalModelHistory, DeleteMentalModel, DeleteMentalModelFolder, SearchMentalModels |
+| OrgService | `org` | CreateOrg, GetOrg, ListOrgs, DeleteOrg (UNIMPLEMENTED in this version) |
 | BankService | `bank` | CreateBank, GetBank, ListBanks, DeleteBank, GetBankStats, ListTags, ExportBankTemplate |
-| ConfigService | `configsvc` | GetTenantConfig, UpdateTenantConfig, ResetTenantConfig, GetBankConfig, UpdateBankConfig, ResetBankConfig, PreviewPrompt, CreateDirective, UpdateDirective, ListDirectives, DeleteDirective |
+| ConfigService | `configsvc` | GetTenantConfig, UpdateTenantConfig, ResetTenantConfig, GetOrgConfig, UpdateOrgConfig, ResetOrgConfig, GetBankConfig, UpdateBankConfig, ResetBankConfig, PreviewPrompt, CreateDirective, UpdateDirective, ListDirectives, DeleteDirective |
 | OperationService | `operation` | GetOperation, ListOperations, CancelOperation, RetryOperation, ListEvents |
 
 ## Common rules
 
-- **Unknown and deleting banks.** A write to an unknown bank creates it with tenant defaults (Retain, Consolidate,
-  CreateMentalModel, UpdateBankConfig, ResetBankConfig, CreateDirective). Every read of an unknown bank is
+- **Orgs must exist.** Every bank-scoped request names `org_id` and `bank_id`. An org is created only by
+  CreateOrg; any request under an unknown org is NOT_FOUND (`ORG_NOT_FOUND`), so a typo'd org id never creates
+  anything.
+- **Unknown and deleting banks.** A write to an unknown bank of an existing org creates it with no config of its
+  own (Retain, Consolidate, CreateMentalModel, UpdateBankConfig, ResetBankConfig, CreateDirective). Every read of an unknown bank is
   NOT_FOUND (`BANK_NOT_FOUND`), never an empty result. Once a bank is tombstoned, writes are FAILED_PRECONDITION
   (`BANK_DELETING`) and reads are NOT_FOUND, operations and events included. The one exception is GetOperation of
   the bank's `delete_bank` operations, which answers until the delete removes the bank (the completion signal).
@@ -40,6 +44,7 @@ explains the behaviour behind them.
 | ListObservationScopes | scope key, bytewise; the shared scope first |
 | ListObservationHistory | version descending (newest first) |
 | ListTags | tag, bytewise |
+| ListOrgs | id, bytewise |
 | ListBanks | id, bytewise |
 | ListMentalModels | id |
 | ListMentalModelHistory | newest first |
@@ -156,6 +161,16 @@ problems through missions and reprocess; curate the residue. Audit and archive r
 - **ReprocessDocument** re-runs retain over the stored text ([retain.md](retain.md#reprocess)); new overrides
   replace the stored ones.
 
+## Orgs
+
+- **CreateOrg** creates an org of the tenant, optionally with its own config level (`config`, validated as a whole
+  level). An existing org is ALREADY_EXISTS; one being deleted FAILED_PRECONDITION (`ORG_DELETING`).
+- **GetOrg** returns a live org; unknown or deleting = NOT_FOUND (`ORG_NOT_FOUND`).
+- **ListOrgs** pages the tenant's live orgs by id, optionally under an `id_prefix`; orgs being deleted are left out.
+- **DeleteOrg** is not available in this version: it answers UNIMPLEMENTED (reason `UNIMPLEMENTED`).
+- Orgs are never created on first use, while banks are: a write to an unknown bank of an existing org creates it.
+  Bank creation share-locks the org row ([architecture.md](architecture.md#transactions-and-the-change-sequence)).
+
 ## Banks
 
 - **CreateBank** creates the bank with a `config` (initial own overrides) or a `template` (the oneof `initial`).
@@ -168,8 +183,8 @@ problems through missions and reprocess; curate the residue. Audit and archive r
   and enqueues its first build; it returns the build operations (`mental_model_operations`) in template order. Any
   failure rolls the whole bank back.
 - **GetBank** returns a live bank; unknown or deleting = NOT_FOUND (`BANK_NOT_FOUND`).
-- **ListBanks** pages the tenant's live banks by id, optionally under an `id_prefix`; banks being deleted are left
-  out.
+- **ListBanks** pages an org's live banks by id, optionally under an `id_prefix`; banks being deleted are left
+  out. An unknown org is NOT_FOUND (`ORG_NOT_FOUND`).
 - **GetBankStats**: live memories per fact type, invalidated memories, documents, entities, mental models,
   pending and processing operations per kind (the eval barrier: poll until empty), unconsolidated memories,
   `last_memory_write_at` and `change_seq`. Map keys are the lowercase domain strings (`"world"`,
@@ -181,19 +196,21 @@ problems through missions and reprocess; curate the residue. Audit and archive r
 
 ## Configuration levels
 
-ConfigService reads and writes the tenant and bank levels of the config hierarchy
+ConfigService reads and writes the tenant, org and bank levels of the config hierarchy
 ([configuration.md](configuration.md)). Every config RPC returns a `ConfigView`: `own` (what the level itself
 stores) and `effective` (the level merged over the less specific ones, read in the same transaction).
 
-- **GetTenantConfig / GetBankConfig** read a level. GetBankConfig of an unknown or deleting bank is NOT_FOUND.
-- **UpdateTenantConfig / UpdateBankConfig** patch a level with a FieldMask
+- **GetTenantConfig / GetOrgConfig / GetBankConfig** read a level. GetOrgConfig of an unknown or deleting org,
+  and GetBankConfig of an unknown or deleting org or bank, are NOT_FOUND.
+- **UpdateTenantConfig / UpdateOrgConfig / UpdateBankConfig** patch a level with a FieldMask
   ([configuration.md](configuration.md#writing-a-level-fieldmask)). The patch is a pure function applied inside
   the write transaction, so read-modify-writes serialize and concurrent patches of different fields both land:
   the bank level after `Banks().Ensure`, `tx.Seq` (the bank row lock) and a re-read; the tenant level under a
   per-tenant advisory lock (a row lock would serialize every request of the tenant, and locks nothing before the
-  first write). A bank config write therefore bumps `change_seq` and `last_memory_write_at` but stales no model.
+  first write); the org level under a per-org advisory lock and a plain update of the org row, which never blocks
+  bank creation in the org. UpdateOrgConfig never creates an org: an unknown one is NOT_FOUND (`ORG_NOT_FOUND`). A bank config write therefore bumps `change_seq` and `last_memory_write_at` but stales no model.
   The patched level is validated.
-- **ResetTenantConfig / ResetBankConfig** unset the paths of a required `reset_mask`, so they inherit again; the
+- **ResetTenantConfig / ResetOrgConfig / ResetBankConfig** unset the paths of a required `reset_mask`, so they inherit again; the
   single path `"*"` resets the whole level, and an empty mask is INVALID_ARGUMENT. A reset is not validated, so it
   can always repair a stored level that no longer validates.
 

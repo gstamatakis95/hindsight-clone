@@ -30,7 +30,7 @@ func TestCurationReads(t *testing.T) {
 }
 
 // crUnknownBank is a bank no subtest creates.
-var crUnknownBank = domain.BankRef{Tenant: "tenant-1", Bank: "bank-unknown"}
+var crUnknownBank = domain.NewBankRef("tenant-1", "org", "bank-unknown")
 
 // ---------- shared helpers ----------
 

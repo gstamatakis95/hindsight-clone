@@ -5,8 +5,8 @@
 # MEMD_GATEWAY_API_KEY, MEMD_S3_*, ...; run `memd` without a mode for the list). Everything else is here.
 # Unknown keys are errors. Durations are Go durations ("500ms", "90s", "2m", "168h").
 
-# defaults is the server level of the config hierarchy: server < tenant < bank < consolidation strategy <
-# request. It has the shape of the API's BankConfig; tenants, banks and requests override any field. Every
+# defaults is the server level of the config hierarchy: server < tenant < org < bank < consolidation strategy <
+# request. It has the shape of the API's BankConfig; tenants, orgs, banks and requests override any field. Every
 # value below is the built-in default unless marked "example".
 defaults:
   # Model routing. models.default binds every chat step (extract, time_parse, consolidate, dedup_check, reflect,

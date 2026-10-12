@@ -12,18 +12,19 @@ import (
 )
 
 const getUnits = `-- name: GetUnits :many
-SELECT u.id, u.tenant_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata, u.tags, u.embedding, u.occurred_start, u.occurred_end, u.mentioned_at, u.timeless, u.proof_count, u.scope_key, u.version, u.seq, u.consolidated_at, u.consolidation_failed_at, u.edited_at, u.created_at, u.updated_at,
+SELECT u.id, u.tenant_id, u.org_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata, u.tags, u.embedding, u.occurred_start, u.occurred_end, u.mentioned_at, u.timeless, u.proof_count, u.scope_key, u.version, u.seq, u.consolidated_at, u.consolidation_failed_at, u.edited_at, u.created_at, u.updated_at,
     COALESCE((SELECT array_agg(e.canonical_name ORDER BY e.canonical_name)
               FROM unit_entities ue JOIN entities e ON e.id = ue.entity_id
               WHERE ue.unit_id = u.id), '{}')::text[] AS entity_names,
     COALESCE((SELECT array_agg(ev.unit_id ORDER BY ev.unit_id)
               FROM observation_evidence ev WHERE ev.observation_id = u.id), '{}')::uuid[] AS source_ids
 FROM memory_units u
-WHERE u.tenant_id = $1 AND u.bank_id = $2 AND u.id = ANY($3::uuid[])
+WHERE u.tenant_id = $1 AND u.org_id = $2 AND u.bank_id = $3 AND u.id = ANY($4::uuid[])
 `
 
 type GetUnitsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
@@ -36,7 +37,12 @@ type GetUnitsRow struct {
 
 // GetUnits returns the live units of a bank with the given ids, with their entity names and cited sources.
 func (q *Queries) GetUnits(ctx context.Context, arg GetUnitsParams) ([]GetUnitsRow, error) {
-	rows, err := q.db.Query(ctx, getUnits, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, getUnits,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -47,6 +53,7 @@ func (q *Queries) GetUnits(ctx context.Context, arg GetUnitsParams) ([]GetUnitsR
 		if err := rows.Scan(
 			&i.MemoryUnit.ID,
 			&i.MemoryUnit.TenantID,
+			&i.MemoryUnit.OrgID,
 			&i.MemoryUnit.BankID,
 			&i.MemoryUnit.DocumentID,
 			&i.MemoryUnit.ChunkID,

@@ -32,10 +32,11 @@ type unitFilter struct {
 }
 
 // render returns one WHERE fragment over memory_units columns prefixed with col (e.g. "u." or ""): the bank
-// (tenant and bank), the fact types, the tag predicate and the seq range.
+// (tenant, org and bank), the fact types, the tag predicate and the seq range.
 func (f unitFilter) render(col string, a *sqlArgs) string {
 	var b strings.Builder
 	b.WriteString(col + "tenant_id = " + a.add(f.bank.Tenant, "::text"))
+	b.WriteString(" AND " + col + "org_id = " + a.add(f.bank.Org, "::text"))
 	b.WriteString(" AND " + col + "bank_id = " + a.add(f.bank.Bank, "::text"))
 	if len(f.types) > 0 {
 		types := make([]string, len(f.types))

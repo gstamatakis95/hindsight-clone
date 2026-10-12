@@ -1,6 +1,6 @@
 // Package configsvc owns the stored config levels and what they feed. Its one type, [Service], built by [New] from
-// [Deps], serves memory.v1.ConfigService: the tenant's config and the bank's own config, each as a [View] (own and
-// effective), the prompt preview and the bank's directives.
+// [Deps], serves memory.v1.ConfigService: the tenant's config, the org's config and the bank's own config, each as a
+// [View] (own and effective), the prompt preview and the bank's directives.
 //
 // # Where it sits
 //
@@ -12,6 +12,7 @@
 // The public surface:
 //
 //   - Config: [Service.GetTenantConfig], [Service.UpdateTenantConfig], [Service.ResetTenantConfig],
+//     [Service.GetOrgConfig], [Service.UpdateOrgConfig], [Service.ResetOrgConfig],
 //     [Service.GetBankConfig], [Service.UpdateBankConfig], [Service.ResetBankConfig]. Each returns a [View]: Own
 //     is what the level stores, Effective is it merged over the less specific levels (config.Resolver.Resolve),
 //     from the levels read in the same transaction.
@@ -21,8 +22,9 @@
 //
 // # Bank existence rules
 //
-// Reads of an unknown or tombstoned bank are domain.ErrNotFound. Writes call BankRepo.Ensure, which creates an unknown
-// bank with tenant defaults, or reports domain.ErrBankDeleting (FAILED_PRECONDITION) for a tombstoned one;
+// Reads of an unknown or tombstoned org or bank are domain.ErrNotFound. Writes call BankRepo.Ensure, which creates an
+// unknown bank with empty overrides in its org, or reports domain.ErrOrgNotFound for an unknown org (orgs are never
+// created on first use), domain.ErrOrgDeleting or domain.ErrBankDeleting (FAILED_PRECONDITION) for a tombstoned one;
 // UpdateDirective and DeleteDirective must not create a bank, so they report an unknown bank as domain.ErrNotFound
 // instead (docs/design/curation-and-operations.md#common-rules).
 //
@@ -40,6 +42,10 @@
 //     over UpdateTenantConfig.
 //   - UpdateTenantConfig: Banks().LockTenantConfig(tenant) (a transaction-scoped advisory lock in Postgres, which
 //     also works before the tenant's first config row exists), then read, patch and SetTenantConfig.
+//   - UpdateOrgConfig: Orgs().LockConfig(org) (an advisory lock), then read, patch and Orgs().SetConfig, a plain
+//     update of the org row that never blocks bank creation in the org (which only share-locks the org's key).
+//     Orgs are never created here: an unknown org is domain.ErrOrgNotFound. ResetOrgConfig runs it with the reset
+//     patch.
 //
 // # Directives
 //

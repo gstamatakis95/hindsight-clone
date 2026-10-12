@@ -17,28 +17,29 @@ const readsBankStats = `-- name: ReadsBankStats :one
 SELECT b.deleting_at, b.last_memory_write_at, b.change_seq,
     COALESCE((SELECT jsonb_object_agg(c.fact_type, c.n) FROM (
         SELECT u.fact_type, count(*) AS n FROM memory_units u
-        WHERE u.tenant_id = b.tenant_id AND u.bank_id = b.id GROUP BY u.fact_type) c),
+        WHERE u.tenant_id = b.tenant_id AND u.org_id = b.org_id AND u.bank_id = b.id GROUP BY u.fact_type) c),
         '{}')::jsonb AS units_by_fact_type,
     (SELECT count(*) FROM memory_units_archive a
-     WHERE a.tenant_id = b.tenant_id AND a.bank_id = b.id)::bigint AS invalidated_units,
-    (SELECT count(*) FROM documents d WHERE d.tenant_id = b.tenant_id AND d.bank_id = b.id)::bigint AS documents,
-    (SELECT count(*) FROM entities e WHERE e.tenant_id = b.tenant_id AND e.bank_id = b.id)::bigint AS entities,
+     WHERE a.tenant_id = b.tenant_id AND a.org_id = b.org_id AND a.bank_id = b.id)::bigint AS invalidated_units,
+    (SELECT count(*) FROM documents d WHERE d.tenant_id = b.tenant_id AND d.org_id = b.org_id AND d.bank_id = b.id)::bigint AS documents,
+    (SELECT count(*) FROM entities e WHERE e.tenant_id = b.tenant_id AND e.org_id = b.org_id AND e.bank_id = b.id)::bigint AS entities,
     (SELECT count(*) FROM mental_models m
-     WHERE m.tenant_id = b.tenant_id AND m.bank_id = b.id)::bigint AS mental_models,
+     WHERE m.tenant_id = b.tenant_id AND m.org_id = b.org_id AND m.bank_id = b.id)::bigint AS mental_models,
     COALESCE((SELECT jsonb_object_agg(c.kind, c.n) FROM (
         SELECT o.kind, count(*) AS n FROM operations o
-        WHERE o.tenant_id = b.tenant_id AND o.bank_id = b.id AND o.status IN ('pending', 'processing')
+        WHERE o.tenant_id = b.tenant_id AND o.org_id = b.org_id AND o.bank_id = b.id AND o.status IN ('pending', 'processing')
         GROUP BY o.kind) c),
         '{}')::jsonb AS pending_operations_by_kind,
     (SELECT count(*) FROM memory_units f
-     WHERE f.tenant_id = b.tenant_id AND f.bank_id = b.id AND f.fact_type <> 'observation'
+     WHERE f.tenant_id = b.tenant_id AND f.org_id = b.org_id AND f.bank_id = b.id AND f.fact_type <> 'observation'
        AND f.consolidated_at IS NULL AND f.consolidation_failed_at IS NULL)::bigint AS unconsolidated_units
 FROM banks b
-WHERE b.tenant_id = $1 AND b.id = $2
+WHERE b.tenant_id = $1 AND b.org_id = $2 AND b.id = $3
 `
 
 type ReadsBankStatsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 }
 
@@ -58,7 +59,7 @@ type ReadsBankStatsRow struct {
 // ReadsBankStats returns a bank row with its counts in one statement (one snapshot). The per-type maps are JSON
 // objects (type -> count). No row means the bank is unknown.
 func (q *Queries) ReadsBankStats(ctx context.Context, arg ReadsBankStatsParams) (ReadsBankStatsRow, error) {
-	row := q.db.QueryRow(ctx, readsBankStats, arg.TenantID, arg.BankID)
+	row := q.db.QueryRow(ctx, readsBankStats, arg.TenantID, arg.OrgID, arg.BankID)
 	var i ReadsBankStatsRow
 	err := row.Scan(
 		&i.DeletingAt,
@@ -76,19 +77,19 @@ func (q *Queries) ReadsBankStats(ctx context.Context, arg ReadsBankStatsParams) 
 }
 
 const readsCronModels = `-- name: ReadsCronModels :many
-SELECT m.tenant_id, m.bank_id, m.id, m.name, m.source_query, m.folder_path, m.tags, m.max_tokens, m.refresh_settings, m.overrides, m.content_md, m.structured_output_json, m.version, m.last_refreshed_at, m.last_seq_seen, m.last_refresh_failed_at, m.auto_refresh_paused, m.source_ids, m.last_trace, m.embedding, m.refresh_cron, m.created_at, m.updated_at, (lo.created_at IS NOT NULL)::bool AS enqueued,
+SELECT m.tenant_id, m.org_id, m.bank_id, m.id, m.name, m.source_query, m.folder_path, m.tags, m.max_tokens, m.refresh_settings, m.overrides, m.content_md, m.structured_output_json, m.version, m.last_refreshed_at, m.last_seq_seen, m.last_refresh_failed_at, m.auto_refresh_paused, m.source_ids, m.last_trace, m.embedding, m.refresh_cron, m.created_at, m.updated_at, (lo.created_at IS NOT NULL)::bool AS enqueued,
     COALESCE(lo.created_at, 'epoch'::timestamptz)::timestamptz AS last_enqueued_at
 FROM mental_models m
-JOIN banks b ON b.tenant_id = m.tenant_id AND b.id = m.bank_id
+JOIN banks b ON b.tenant_id = m.tenant_id AND b.org_id = m.org_id AND b.id = m.bank_id
 LEFT JOIN LATERAL (
     SELECT o.created_at FROM operations o
-    WHERE o.tenant_id = m.tenant_id AND o.bank_id = m.bank_id AND o.kind = 'refresh_mental_model'
+    WHERE o.tenant_id = m.tenant_id AND o.org_id = m.org_id AND o.bank_id = m.bank_id AND o.kind = 'refresh_mental_model'
       AND o.serial_key = 'mm:' || m.id
     ORDER BY o.created_at DESC
     LIMIT 1
 ) lo ON TRUE
 WHERE b.deleting_at IS NULL AND m.refresh_cron IS NOT NULL AND m.refresh_cron <> ''
-ORDER BY m.tenant_id COLLATE "C", m.bank_id COLLATE "C", m.id COLLATE "C"
+ORDER BY m.tenant_id COLLATE "C", m.org_id COLLATE "C", m.bank_id COLLATE "C", m.id COLLATE "C"
 `
 
 type ReadsCronModelsRow struct {
@@ -111,6 +112,7 @@ func (q *Queries) ReadsCronModels(ctx context.Context) ([]ReadsCronModelsRow, er
 		var i ReadsCronModelsRow
 		if err := rows.Scan(
 			&i.MentalModel.TenantID,
+			&i.MentalModel.OrgID,
 			&i.MentalModel.BankID,
 			&i.MentalModel.ID,
 			&i.MentalModel.Name,
@@ -147,23 +149,24 @@ func (q *Queries) ReadsCronModels(ctx context.Context) ([]ReadsCronModelsRow, er
 }
 
 const readsFailedRefreshes = `-- name: ReadsFailedRefreshes :many
-SELECT m.tenant_id, m.bank_id, m.id AS model_id, l.id AS operation_id, l.finished_at,
+SELECT m.tenant_id, m.org_id, m.bank_id, m.id AS model_id, l.id AS operation_id, l.finished_at,
     COALESCE(l.error, '')::text AS error
 FROM (
-    SELECT DISTINCT ON (o.tenant_id, o.bank_id, o.serial_key)
-        o.tenant_id, o.bank_id, o.serial_key, o.id, o.status, o.finished_at, o.error
+    SELECT DISTINCT ON (o.tenant_id, o.org_id, o.bank_id, o.serial_key)
+        o.tenant_id, o.org_id, o.bank_id, o.serial_key, o.id, o.status, o.finished_at, o.error
     FROM operations o
     WHERE o.kind = 'refresh_mental_model' AND o.status IN ('completed', 'failed') AND o.serial_key LIKE 'mm:%'
-    ORDER BY o.tenant_id, o.bank_id, o.serial_key, o.finished_at DESC NULLS LAST, o.created_at DESC, o.id DESC
+    ORDER BY o.tenant_id, o.org_id, o.bank_id, o.serial_key, o.finished_at DESC NULLS LAST, o.created_at DESC, o.id DESC
 ) l
-JOIN mental_models m ON m.tenant_id = l.tenant_id AND m.bank_id = l.bank_id AND l.serial_key = 'mm:' || m.id
-JOIN banks b ON b.tenant_id = m.tenant_id AND b.id = m.bank_id
+JOIN mental_models m ON m.tenant_id = l.tenant_id AND m.org_id = l.org_id AND m.bank_id = l.bank_id AND l.serial_key = 'mm:' || m.id
+JOIN banks b ON b.tenant_id = m.tenant_id AND b.org_id = m.org_id AND b.id = m.bank_id
 WHERE l.status = 'failed' AND b.deleting_at IS NULL
-ORDER BY m.tenant_id COLLATE "C", m.bank_id COLLATE "C", m.id COLLATE "C"
+ORDER BY m.tenant_id COLLATE "C", m.org_id COLLATE "C", m.bank_id COLLATE "C", m.id COLLATE "C"
 `
 
 type ReadsFailedRefreshesRow struct {
 	TenantID    string
+	OrgID       string
 	BankID      string
 	ModelID     string
 	OperationID uuid.UUID
@@ -185,6 +188,7 @@ func (q *Queries) ReadsFailedRefreshes(ctx context.Context) ([]ReadsFailedRefres
 		var i ReadsFailedRefreshesRow
 		if err := rows.Scan(
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.ModelID,
 			&i.OperationID,
@@ -202,38 +206,39 @@ func (q *Queries) ReadsFailedRefreshes(ctx context.Context) ([]ReadsFailedRefres
 }
 
 const readsListDocuments = `-- name: ReadsListDocuments :many
-SELECT d.tenant_id, d.bank_id, d.id, d.content_hash, d.overrides_hash, d.overrides, d.tags, d.blob_key, d.extracted_at, d.created_at, d.updated_at, d.observation_scope_modes,
+SELECT d.tenant_id, d.org_id, d.bank_id, d.id, d.content_hash, d.overrides_hash, d.overrides, d.tags, d.blob_key, d.extracted_at, d.created_at, d.updated_at, d.observation_scope_modes,
     COALESCE((SELECT jsonb_object_agg(c.fact_type, c.n) FROM (
         SELECT u.fact_type, count(*) AS n FROM memory_units u
-        WHERE u.tenant_id = d.tenant_id AND u.bank_id = d.bank_id AND u.document_id = d.id
+        WHERE u.tenant_id = d.tenant_id AND u.org_id = d.org_id AND u.bank_id = d.bank_id AND u.document_id = d.id
         GROUP BY u.fact_type) c),
         '{}')::jsonb AS units_by_fact_type
 FROM documents d
-WHERE d.tenant_id = $1 AND d.bank_id = $2
-  AND ($3::text = '' OR d.id ILIKE $3::text)
-  AND (CASE $4::text
-      WHEN 'exact' THEN d.tags @> $5::text[] AND d.tags <@ $5::text[]
-      WHEN 'any_strict' THEN cardinality($5::text[]) = 0 OR d.tags && $5::text[]
-      WHEN 'all_strict' THEN d.tags @> $5::text[]
-      WHEN 'all' THEN cardinality($5::text[]) = 0 OR cardinality(d.tags) = 0
-          OR d.tags @> $5::text[]
-      ELSE cardinality($5::text[]) = 0 OR cardinality(d.tags) = 0 OR d.tags && $5::text[]
+WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3
+  AND ($4::text = '' OR d.id ILIKE $4::text)
+  AND (CASE $5::text
+      WHEN 'exact' THEN d.tags @> $6::text[] AND d.tags <@ $6::text[]
+      WHEN 'any_strict' THEN cardinality($6::text[]) = 0 OR d.tags && $6::text[]
+      WHEN 'all_strict' THEN d.tags @> $6::text[]
+      WHEN 'all' THEN cardinality($6::text[]) = 0 OR cardinality(d.tags) = 0
+          OR d.tags @> $6::text[]
+      ELSE cardinality($6::text[]) = 0 OR cardinality(d.tags) = 0 OR d.tags && $6::text[]
   END)
-  AND ($6::timestamptz IS NULL
-      OR (CASE WHEN $7::text = 'updated_at' THEN d.updated_at ELSE d.created_at END)
-          >= $6::timestamptz)
-  AND ($8::timestamptz IS NULL
-      OR (CASE WHEN $7::text = 'updated_at' THEN d.updated_at ELSE d.created_at END)
-          < $8::timestamptz)
+  AND ($7::timestamptz IS NULL
+      OR (CASE WHEN $8::text = 'updated_at' THEN d.updated_at ELSE d.created_at END)
+          >= $7::timestamptz)
   AND ($9::timestamptz IS NULL
-      OR d.created_at < $9::timestamptz
-      OR (d.created_at = $9::timestamptz AND d.id COLLATE "C" < $10::text))
+      OR (CASE WHEN $8::text = 'updated_at' THEN d.updated_at ELSE d.created_at END)
+          < $9::timestamptz)
+  AND ($10::timestamptz IS NULL
+      OR d.created_at < $10::timestamptz
+      OR (d.created_at = $10::timestamptz AND d.id COLLATE "C" < $11::text))
 ORDER BY d.created_at DESC, d.id COLLATE "C" DESC
-LIMIT $11::int
+LIMIT $12::int
 `
 
 type ReadsListDocumentsParams struct {
 	TenantID       string
+	OrgID          string
 	BankID         string
 	IDLike         string
 	TagsMatch      string
@@ -258,6 +263,7 @@ type ReadsListDocumentsRow struct {
 func (q *Queries) ReadsListDocuments(ctx context.Context, arg ReadsListDocumentsParams) ([]ReadsListDocumentsRow, error) {
 	rows, err := q.db.Query(ctx, readsListDocuments,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.IDLike,
 		arg.TagsMatch,
@@ -278,6 +284,7 @@ func (q *Queries) ReadsListDocuments(ctx context.Context, arg ReadsListDocuments
 		var i ReadsListDocumentsRow
 		if err := rows.Scan(
 			&i.Document.TenantID,
+			&i.Document.OrgID,
 			&i.Document.BankID,
 			&i.Document.ID,
 			&i.Document.ContentHash,
@@ -302,24 +309,25 @@ func (q *Queries) ReadsListDocuments(ctx context.Context, arg ReadsListDocuments
 }
 
 const readsListMentalModels = `-- name: ReadsListMentalModels :many
-SELECT tenant_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models
-WHERE tenant_id = $1 AND bank_id = $2
-  AND ($3::text = '' OR folder_path = $3::text OR folder_path LIKE $4::text)
-  AND (NOT $5::bool OR COALESCE((refresh_settings -> 'schedule' ->> 'after_consolidation')::boolean, false))
-  AND ($6::text = '' OR id COLLATE "C" > $6::text)
-  AND (CASE $7::text
-      WHEN 'exact' THEN tags @> $8::text[] AND tags <@ $8::text[]
-      WHEN 'any_strict' THEN cardinality($8::text[]) = 0 OR tags && $8::text[]
-      WHEN 'all_strict' THEN tags @> $8::text[]
-      WHEN 'all' THEN cardinality($8::text[]) = 0 OR cardinality(tags) = 0 OR tags @> $8::text[]
-      ELSE cardinality($8::text[]) = 0 OR cardinality(tags) = 0 OR tags && $8::text[]
+SELECT tenant_id, org_id, bank_id, id, name, source_query, folder_path, tags, max_tokens, refresh_settings, overrides, content_md, structured_output_json, version, last_refreshed_at, last_seq_seen, last_refresh_failed_at, auto_refresh_paused, source_ids, last_trace, embedding, refresh_cron, created_at, updated_at FROM mental_models
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3
+  AND ($4::text = '' OR folder_path = $4::text OR folder_path LIKE $5::text)
+  AND (NOT $6::bool OR COALESCE((refresh_settings -> 'schedule' ->> 'after_consolidation')::boolean, false))
+  AND ($7::text = '' OR id COLLATE "C" > $7::text)
+  AND (CASE $8::text
+      WHEN 'exact' THEN tags @> $9::text[] AND tags <@ $9::text[]
+      WHEN 'any_strict' THEN cardinality($9::text[]) = 0 OR tags && $9::text[]
+      WHEN 'all_strict' THEN tags @> $9::text[]
+      WHEN 'all' THEN cardinality($9::text[]) = 0 OR cardinality(tags) = 0 OR tags @> $9::text[]
+      ELSE cardinality($9::text[]) = 0 OR cardinality(tags) = 0 OR tags && $9::text[]
   END)
 ORDER BY id COLLATE "C"
-LIMIT $9::int
+LIMIT $10::int
 `
 
 type ReadsListMentalModelsParams struct {
 	TenantID     string
+	OrgID        string
 	BankID       string
 	Folder       string
 	FolderLike   string
@@ -337,6 +345,7 @@ type ReadsListMentalModelsParams struct {
 func (q *Queries) ReadsListMentalModels(ctx context.Context, arg ReadsListMentalModelsParams) ([]MentalModel, error) {
 	rows, err := q.db.Query(ctx, readsListMentalModels,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Folder,
 		arg.FolderLike,
@@ -355,6 +364,7 @@ func (q *Queries) ReadsListMentalModels(ctx context.Context, arg ReadsListMental
 		var i MentalModel
 		if err := rows.Scan(
 			&i.TenantID,
+			&i.OrgID,
 			&i.BankID,
 			&i.ID,
 			&i.Name,
@@ -391,14 +401,15 @@ func (q *Queries) ReadsListMentalModels(ctx context.Context, arg ReadsListMental
 const readsObservationHistory = `-- name: ReadsObservationHistory :many
 SELECT v.version, v.text, v.source_ids, v.at
 FROM observation_versions v
-WHERE v.tenant_id = $1 AND v.bank_id = $2 AND v.observation_id = $3
-  AND ($4::bigint IS NULL OR v.version < $4::bigint)
+WHERE v.tenant_id = $1 AND v.org_id = $2 AND v.bank_id = $3 AND v.observation_id = $4
+  AND ($5::bigint IS NULL OR v.version < $5::bigint)
 ORDER BY v.version DESC
-LIMIT $5::int
+LIMIT $6::int
 `
 
 type ReadsObservationHistoryParams struct {
 	TenantID      string
+	OrgID         string
 	BankID        string
 	ObservationID uuid.UUID
 	BeforeVersion *int64
@@ -417,6 +428,7 @@ type ReadsObservationHistoryRow struct {
 func (q *Queries) ReadsObservationHistory(ctx context.Context, arg ReadsObservationHistoryParams) ([]ReadsObservationHistoryRow, error) {
 	rows, err := q.db.Query(ctx, readsObservationHistory,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ObservationID,
 		arg.BeforeVersion,
@@ -449,13 +461,13 @@ const readsTagCounts = `-- name: ReadsTagCounts :many
 
 WITH items AS (
     SELECT u.tags FROM memory_units u
-    WHERE $4::text = 'memories' AND u.tenant_id = $5 AND u.bank_id = $6
+    WHERE $4::text = 'memories' AND u.tenant_id = $5 AND u.org_id = $6 AND u.bank_id = $7
     UNION ALL
     SELECT m.tags FROM mental_models m
-    WHERE $4::text = 'mental_models' AND m.tenant_id = $5 AND m.bank_id = $6
+    WHERE $4::text = 'mental_models' AND m.tenant_id = $5 AND m.org_id = $6 AND m.bank_id = $7
     UNION ALL
     SELECT d.tags FROM documents d
-    WHERE $4::text = 'documents' AND d.tenant_id = $5 AND d.bank_id = $6
+    WHERE $4::text = 'documents' AND d.tenant_id = $5 AND d.org_id = $6 AND d.bank_id = $7
 )
 SELECT t.tag::text AS tag, count(*)::bigint AS n
 FROM items i CROSS JOIN LATERAL unnest(i.tags) AS t(tag)
@@ -472,6 +484,7 @@ type ReadsTagCountsParams struct {
 	Lim        *int32
 	Source     string
 	TenantID   string
+	OrgID      string
 	BankID     string
 }
 
@@ -493,6 +506,7 @@ func (q *Queries) ReadsTagCounts(ctx context.Context, arg ReadsTagCountsParams) 
 		arg.Lim,
 		arg.Source,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 	)
 	if err != nil {

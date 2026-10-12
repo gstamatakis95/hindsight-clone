@@ -20,11 +20,13 @@ import (
 // Shared fixtures. Every case gets its own empty database, so fixed names never collide.
 var (
 	// bankA is the main bank of most subtests.
-	bankA = domain.BankRef{Tenant: "tenant-1", Bank: "bank-a"}
+	bankA = domain.NewBankRef("tenant-1", "org", "bank-a")
 	// bankB is a second bank of the same tenant, for isolation checks.
-	bankB = domain.BankRef{Tenant: "tenant-1", Bank: "bank-b"}
+	bankB = domain.NewBankRef("tenant-1", "org", "bank-b")
 	// bankOtherTenant has bankA's bank id under another tenant.
-	bankOtherTenant = domain.BankRef{Tenant: "tenant-2", Bank: "bank-a"}
+	bankOtherTenant = domain.NewBankRef("tenant-2", "org", "bank-a")
+	// bankOtherOrg has bankA's bank id under another org of the same tenant.
+	bankOtherOrg = domain.NewBankRef("tenant-1", "org-2", "bank-a")
 	// epoch anchors fixed timestamps: whole seconds in UTC, so microsecond storage round-trips exactly.
 	epoch = time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 	// errRollback is returned from InTx callbacks that must roll back.
@@ -123,17 +125,10 @@ func txErr(t *testing.T, s store.DB, fn func(tx store.Tx) error) error {
 	return s.InTx(t.Context(), fn)
 }
 
-// ensureBanks creates the given banks with Ensure.
+// ensureBanks creates the given banks (and their orgs) with Ensure.
 func ensureBanks(t *testing.T, s store.DB, banks ...domain.BankRef) {
 	t.Helper()
-	inTx(t, s, func(tx store.Tx) error {
-		for _, b := range banks {
-			if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	pgtest.EnsureBanks(t, s, banks...)
 }
 
 // fact builds a world fact of bank b with a fresh id. Callers set embeddings, tags and times as needed.

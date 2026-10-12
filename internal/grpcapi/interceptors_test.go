@@ -2,6 +2,7 @@ package grpcapi
 
 import (
 	"context"
+	"memd/internal/domain"
 	"strings"
 	"testing"
 	"time"
@@ -129,18 +130,35 @@ func TestPagingInterceptor(t *testing.T) {
 	}
 }
 
-// TestBankRef checks the bank id rules.
+// ref is a bank-scoped request for bankRef tests.
+type ref struct{ org, bank string }
+
+// GetOrgId returns the org id.
+func (r ref) GetOrgId() string { return r.org }
+
+// GetBankId returns the bank id.
+func (r ref) GetBankId() string { return r.bank }
+
+// TestBankRef checks the org and bank id rules: both are required and follow checkName, and the violation names
+// the field.
 func TestBankRef(t *testing.T) {
 	ctx := WithTenant(context.Background(), "acme")
-	if b, err := bankRef(ctx, "main"); err != nil || b.Tenant != "acme" || b.Bank != "main" {
+	if b, err := bankRef(ctx, ref{"o", "main"}); err != nil || b != domain.NewBankRef("acme", "o", "main") {
 		t.Fatalf("bankRef = %v, %v", b, err)
 	}
 	for _, id := range []string{"", "a/b", "a\x00", "a\x7f", strings.Repeat("b", 257)} {
-		if _, err := bankRef(ctx, id); status.Code(toStatus(err)) != codes.InvalidArgument {
-			t.Fatalf("bank %q: err = %v, want INVALID_ARGUMENT", id, err)
+		_, err := bankRef(ctx, ref{"o", id})
+		if got := fieldsOf(toStatus(err)); status.Code(toStatus(err)) != codes.InvalidArgument || len(got) != 1 ||
+			got[0] != "bank_id" {
+			t.Fatalf("bank %q: err = %v, want INVALID_ARGUMENT on bank_id", id, err)
+		}
+		_, err = bankRef(ctx, ref{id, "main"})
+		if got := fieldsOf(toStatus(err)); status.Code(toStatus(err)) != codes.InvalidArgument || len(got) != 1 ||
+			got[0] != "org_id" {
+			t.Fatalf("org %q: err = %v, want INVALID_ARGUMENT on org_id", id, err)
 		}
 	}
-	if _, err := bankRef(context.Background(), "main"); status.Code(toStatus(err)) != codes.InvalidArgument {
+	if _, err := bankRef(context.Background(), ref{"o", "main"}); status.Code(toStatus(err)) != codes.InvalidArgument {
 		t.Fatalf("no tenant: err = %v", err)
 	}
 }
@@ -150,7 +168,7 @@ func TestBankRef(t *testing.T) {
 func TestCheckNameRejectsDotIDs(t *testing.T) {
 	acme := WithTenant(context.Background(), "acme")
 	for _, id := range []string{".", ".."} {
-		if _, err := bankRef(acme, id); status.Code(toStatus(err)) != codes.InvalidArgument {
+		if _, err := bankRef(acme, ref{"o", id}); status.Code(toStatus(err)) != codes.InvalidArgument {
 			t.Errorf("bank %q: err = %v, want INVALID_ARGUMENT", id, err)
 		}
 		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(TenantHeader, id))
@@ -161,7 +179,7 @@ func TestCheckNameRejectsDotIDs(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"...", ".a", "a.b", "a.."} {
-		if _, err := bankRef(acme, id); err != nil {
+		if _, err := bankRef(acme, ref{"o", id}); err != nil {
 			t.Errorf("bank %q rejected: %v", id, err)
 		}
 	}

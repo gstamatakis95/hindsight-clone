@@ -204,7 +204,7 @@ type Querier interface {
 	LinkDirty(ctx context.Context, arg LinkDirtyParams) ([]uuid.UUID, error)
 	// LinkInsert stores one edge; an existing (from, to, kind) edge keeps its row with the new weight.
 	LinkInsert(ctx context.Context, arg LinkInsertParams) error
-	// ListBanks returns one keyset page of a tenant's live banks (tombstoned ones left out) whose id starts with
+	// ListBanks returns one keyset page of an org's live banks (tombstoned ones left out) whose id starts with
 	// id_prefix, in byte order of id, after after_id ("" = from the start).
 	ListBanks(ctx context.Context, arg ListBanksParams) ([]Bank, error)
 	// MarkBankDeleting sets deleting_at unless already set.
@@ -226,11 +226,26 @@ type Querier interface {
 	MentalModelUpdate(ctx context.Context, arg MentalModelUpdateParams) (int64, error)
 	// ModelsCitingUnits returns, in byte order, the ids of the bank's mental models whose source_ids include any of the units.
 	ModelsCitingUnits(ctx context.Context, arg ModelsCitingUnitsParams) ([]string, error)
+	// OrgConfigLock serializes read-modify-writes of one org's config until the tx ends.
+	OrgConfigLock(ctx context.Context, arg OrgConfigLockParams) error
+	// OrgCreate inserts a new org; an existing id is a unique violation.
+	OrgCreate(ctx context.Context, arg OrgCreateParams) error
+	// OrgGet returns one org, tombstoned or not.
+	OrgGet(ctx context.Context, arg OrgGetParams) (Org, error)
+	// OrgList returns one keyset page of a tenant's live orgs (tombstoned ones left out) whose id starts with
+	// id_prefix, in byte order of id, after after_id ("" = from the start).
+	OrgList(ctx context.Context, arg OrgListParams) ([]Org, error)
+	// OrgLockLive takes FOR KEY SHARE on the org row and returns its tombstone (NULL = live); no row = unknown org.
+	// Bank creation runs it first: it never waits on an org config update (FOR NO KEY UPDATE), but it waits for an
+	// org delete that holds the row FOR UPDATE, and then sees its tombstone.
+	OrgLockLive(ctx context.Context, arg OrgLockLiveParams) (*time.Time, error)
+	// OrgSetConfig replaces a live org's config; a tombstoned or unknown org matches nothing.
+	OrgSetConfig(ctx context.Context, arg OrgSetConfigParams) (int64, error)
 	// QueueCancel cancels a pending job at once or records the cancel request of a processing one.
 	QueueCancel(ctx context.Context, arg QueueCancelParams) (Operation, error)
 	// QueueCancelBank cancels every pending job of a bank except its delete_bank job.
 	QueueCancelBank(ctx context.Context, arg QueueCancelBankParams) (int64, error)
-	// QueueDedupeLock serializes dedupe enqueues of one (tenant, bank, kind, serial key) until the tx ends.
+	// QueueDedupeLock serializes dedupe enqueues of one (tenant, org, bank, kind, serial key) until the tx ends.
 	QueueDedupeLock(ctx context.Context, arg QueueDedupeLockParams) error
 	// QueueFindJoinable locks and returns the oldest joinable row an enqueue may join.
 	QueueFindJoinable(ctx context.Context, arg QueueFindJoinableParams) (uuid.UUID, error)
@@ -328,7 +343,7 @@ type Querier interface {
 	// UnconsolidatedBanks returns, in byte order, the banks that are not tombstoned and hold an unconsolidated fact
 	// with an embedding created before @before, each with its oldest such fact's created_at (the caller compares it
 	// with the bank's own reconcile grace): the §0 predicate as in ScopeUnconsolidated, over the partial index
-	// (tenant_id, bank_id, created_at).
+	// (tenant_id, org_id, bank_id, created_at).
 	UnconsolidatedBanks(ctx context.Context, before time.Time) ([]UnconsolidatedBanksRow, error)
 	// UnitAppendAudit writes one memory_audit row; a NULL at takes now().
 	UnitAppendAudit(ctx context.Context, arg UnitAppendAuditParams) error

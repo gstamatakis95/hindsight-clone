@@ -10,7 +10,7 @@ import (
 
 // CreateDirective adds d to its bank with a new id and returns it as stored, with normalized tags. The name is
 // required (empty = domain.ErrInvalidArgument) and must be new in the bank (taken = domain.ErrAlreadyExists). It is
-// a write: an unknown bank is created with tenant defaults, a tombstoned one is domain.ErrBankDeleting.
+// a write: an unknown bank of an existing org is created, a tombstoned one is domain.ErrBankDeleting.
 func (s *Service) CreateDirective(ctx context.Context, d domain.Directive) (domain.Directive, error) {
 	if err := checkDirective(d); err != nil {
 		return domain.Directive{}, err
@@ -190,7 +190,7 @@ func writableBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 		return err
 	}
 	if bank.Deleting() {
-		return fmt.Errorf("%w: bank %s/%s", domain.ErrBankDeleting, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: bank %s", domain.ErrBankDeleting, b)
 	}
 	return nil
 }
@@ -221,7 +221,7 @@ func liveBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 		return err
 	}
 	if bank.Deleting() {
-		return fmt.Errorf("%w %s/%s is being deleted", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b)
 	}
 	return nil
 }

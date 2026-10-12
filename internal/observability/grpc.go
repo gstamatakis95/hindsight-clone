@@ -117,7 +117,13 @@ type bankRequest interface {
 	GetBankId() string
 }
 
-// tagInterceptor tags the RPC's span with the tenant and bank id. It runs after the tenant interceptor,
+// orgRequest is a request that names an org.
+type orgRequest interface {
+	// GetOrgId returns the request's org id.
+	GetOrgId() string
+}
+
+// tagInterceptor tags the RPC's span with the tenant, org and bank id. It runs after the tenant interceptor,
 // so the tenant is the validated one.
 func tagInterceptor(tenant func(context.Context) string) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
@@ -126,6 +132,9 @@ func tagInterceptor(tenant func(context.Context) string) grpc.UnaryServerInterce
 				if v := tenant(ctx); v != "" {
 					span.SetTag(TagTenant, v)
 				}
+			}
+			if r, ok := req.(orgRequest); ok && r.GetOrgId() != "" {
+				span.SetTag(TagOrg, r.GetOrgId())
 			}
 			if r, ok := req.(bankRequest); ok && r.GetBankId() != "" {
 				span.SetTag(TagBank, r.GetBankId())

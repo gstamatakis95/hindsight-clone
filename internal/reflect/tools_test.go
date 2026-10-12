@@ -19,7 +19,7 @@ import (
 )
 
 // toolBank is the bank the tool tests read.
-var toolBank = domain.BankRef{Tenant: "t1", Bank: "b1"}
+var toolBank = domain.NewBankRef("t1", "org", "b1")
 
 // toolVector embeds every unit, page and query alike, so recall and page search return everything.
 var toolVector = func() []float32 {
@@ -39,6 +39,7 @@ type toolEnv struct {
 func newToolEnv(t *testing.T, units ...domain.Unit) *toolEnv {
 	t.Helper()
 	e := &toolEnv{t: t, store: pgtest.NewStore(t)}
+	pgtest.CreateOrgs(t, e.store, domain.NewBankRef("t1", "org", ""))
 	e.tx(func(ctx context.Context, tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(ctx, toolBank); err != nil {
 			return err

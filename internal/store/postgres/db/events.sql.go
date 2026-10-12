@@ -13,14 +13,15 @@ import (
 )
 
 const eventAppend = `-- name: EventAppend :exec
-INSERT INTO lifecycle_events (tenant_id, bank_id, seq, type, at, operation_id, subject_id)
+INSERT INTO lifecycle_events (tenant_id, org_id, bank_id, seq, type, at, operation_id, subject_id)
 VALUES (
-    $1, $2, $3, $4, COALESCE($5::timestamptz, now()), $6, $7
+    $1, $2, $3, $4, $5, COALESCE($6::timestamptz, now()), $7, $8
 )
 `
 
 type EventAppendParams struct {
 	TenantID    string
+	OrgID       string
 	BankID      string
 	Seq         int64
 	Type        string
@@ -33,6 +34,7 @@ type EventAppendParams struct {
 func (q *Queries) EventAppend(ctx context.Context, arg EventAppendParams) error {
 	_, err := q.db.Exec(ctx, eventAppend,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Seq,
 		arg.Type,
@@ -45,16 +47,17 @@ func (q *Queries) EventAppend(ctx context.Context, arg EventAppendParams) error 
 
 const eventList = `-- name: EventList :many
 WITH p AS (
-    SELECT $1::text AS tenant_id, $2::text AS bank_id, $3::bigint AS after_seq,
-           $4::int AS lim, $5::text[] AS types
+    SELECT $1::text AS tenant_id, $2::text AS org_id, $3::text AS bank_id,
+           $4::bigint AS after_seq,
+           $5::int AS lim, $6::text[] AS types
 ), bound AS (
     SELECT COALESCE(
         (SELECT m.seq FROM lifecycle_events m, p
-         WHERE m.tenant_id = p.tenant_id AND m.bank_id = p.bank_id AND m.seq > p.after_seq AND p.lim > 0
+         WHERE m.tenant_id = p.tenant_id AND m.org_id = p.org_id AND m.bank_id = p.bank_id AND m.seq > p.after_seq AND p.lim > 0
            AND (cardinality(p.types) = 0 OR m.type = ANY(p.types))
          ORDER BY m.seq, m.id OFFSET (SELECT GREATEST(lim - 1, 0) FROM p) LIMIT 1),
         (SELECT max(a.seq) FROM lifecycle_events a, p
-         WHERE a.tenant_id = p.tenant_id AND a.bank_id = p.bank_id AND a.seq > p.after_seq),
+         WHERE a.tenant_id = p.tenant_id AND a.org_id = p.org_id AND a.bank_id = p.bank_id AND a.seq > p.after_seq),
         (SELECT after_seq FROM p)
     )::bigint AS seq
 )
@@ -62,13 +65,14 @@ SELECT bound.seq AS bound_seq, e.id AS event_id, e.seq AS event_seq, e.type AS e
        e.operation_id AS event_operation_id, e.subject_id AS event_subject_id
 FROM p CROSS JOIN bound
 LEFT JOIN lifecycle_events e
-  ON e.tenant_id = p.tenant_id AND e.bank_id = p.bank_id AND e.seq > p.after_seq AND e.seq <= bound.seq
+  ON e.tenant_id = p.tenant_id AND e.org_id = p.org_id AND e.bank_id = p.bank_id AND e.seq > p.after_seq AND e.seq <= bound.seq
  AND (cardinality(p.types) = 0 OR e.type = ANY(p.types))
 ORDER BY e.seq, e.id
 `
 
 type EventListParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	AfterSeq int64
 	Lim      int32
@@ -92,6 +96,7 @@ type EventListRow struct {
 func (q *Queries) EventList(ctx context.Context, arg EventListParams) ([]EventListRow, error) {
 	rows, err := q.db.Query(ctx, eventList,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.AfterSeq,
 		arg.Lim,

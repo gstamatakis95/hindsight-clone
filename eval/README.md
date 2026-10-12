@@ -192,7 +192,7 @@ API keys come only from `MEMD_EVAL_JUDGE_API_KEY`, `MEMD_EVAL_ANSWER_API_KEY` (f
 | `benchmark` | `-benchmark` | (required) |
 | `mode` | `-mode` | the benchmark's (`reflect` otherwise) |
 | `data`, `data_dir` | `-data`, `-data-dir` | download into `~/.cache/memd-eval` |
-| `memd.addr`, `memd.tenant`, `memd.stub`, `memd.skip` | `-addr`, `-tenant`, `-stub`, `-skip-memd` | `localhost:50051`, `eval` |
+| `memd.addr`, `memd.tenant`, `memd.org`, `memd.stub`, `memd.skip` | `-addr`, `-tenant`, `-org`, `-stub`, `-skip-memd` | `localhost:50051`, `eval`, `eval` (the run creates the org when missing) |
 | `hindsight.url` | `-hindsight-url` | none (adds stock Hindsight as a second target) |
 | `judge.kind`, `judge.url`, `judge.model` | `-judge`, `-judge-url`, `-judge-model` | `llm` (golden: `contains`) |
 | `answer.url`, `answer.model` | `-answer-url`, `-answer-model` | judge's URL; model required in `rag` mode |

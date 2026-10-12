@@ -71,7 +71,8 @@ func unitInsertParams(u domain.Unit) (db.UnitInsertParams, error) {
 		version = 1
 	}
 	return db.UnitInsertParams{
-		ID: id, TenantID: u.Bank.Tenant, BankID: u.Bank.Bank, DocumentID: textPtr(u.DocumentID), ChunkID: chunk,
+		ID: id, TenantID: u.Bank.Tenant, OrgID: u.Bank.Org, BankID: u.Bank.Bank,
+		DocumentID: textPtr(u.DocumentID), ChunkID: chunk,
 		FactType: string(u.Type), Text: u.Text, Context: u.Context, Metadata: rawMeta, Tags: tagsOrEmpty(u.Tags),
 		Embedding: vec(u.Embedding), OccurredStart: u.OccurredStart, OccurredEnd: u.OccurredEnd,
 		MentionedAt: u.MentionedAt, Timeless: u.Timeless, ProofCount: int32(u.ProofCount), //nolint:gosec // counts are small
@@ -84,7 +85,7 @@ func unitInsertParams(u domain.Unit) (db.UnitInsertParams, error) {
 func upsertScope(ctx context.Context, q *db.Queries, b domain.BankRef, tags []string) error {
 	key := domain.NewScopeKey(b, tags)
 	err := q.UnitScopeUpsert(ctx, db.UnitScopeUpsertParams{
-		TenantID: b.Tenant, BankID: b.Bank, ScopeKey: key.String(), Tags: tagsOrEmpty(key.Tags),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ScopeKey: key.String(), Tags: tagsOrEmpty(key.Tags),
 	})
 	return mapErr("upsert observation scope", err)
 }
@@ -103,8 +104,7 @@ func (r *unitRepo) UpsertObservation(ctx context.Context, o domain.Unit) error {
 		return mapErr("upsert observation", err)
 	}
 	if n == 0 {
-		return fmt.Errorf("%w: unit %s is not an observation of bank %s/%s", domain.ErrAlreadyExists, o.ID,
-			o.Bank.Tenant, o.Bank.Bank)
+		return fmt.Errorf("%w: unit %s is not an observation of bank %s", domain.ErrAlreadyExists, o.ID, o.Bank)
 	}
 	return upsertScope(ctx, r.q, o.Bank, o.Tags)
 }
@@ -119,7 +119,7 @@ func (r *unitRepo) RecordObservationVersion(
 		return err
 	}
 	err = r.q.UnitRecordObservationVersion(ctx, db.UnitRecordObservationVersionParams{
-		TenantID: b.Tenant, BankID: b.Bank, ObservationID: id, Version: v.Version, Text: v.Text,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ObservationID: id, Version: v.Version, Text: v.Text,
 		SourceIds: parseIDs(v.SourceFactIDs), At: orNow(v.CreatedAt),
 	})
 	return mapErr("record observation version", err)
@@ -136,7 +136,7 @@ func (r *unitRepo) Update(ctx context.Context, u domain.Unit) error {
 	n, err := r.q.UnitUpdate(ctx, db.UnitUpdateParams{
 		Text: u.Text, Context: u.Context, OccurredStart: u.OccurredStart, OccurredEnd: u.OccurredEnd,
 		Timeless: u.Timeless, FactType: string(u.Type), EditedAt: u.EditedAt, Seq: u.Seq,
-		Embedding: vec(u.Embedding), ID: id, TenantID: u.Bank.Tenant, BankID: u.Bank.Bank,
+		Embedding: vec(u.Embedding), ID: id, TenantID: u.Bank.Tenant, OrgID: u.Bank.Org, BankID: u.Bank.Bank,
 	})
 	if err != nil {
 		return mapErr("update unit", err)
@@ -162,14 +162,14 @@ func (r *unitRepo) SetDocumentTags(
 	}
 	err := r.q.UnitSetArchivedDocumentTags(ctx, db.UnitSetArchivedDocumentTagsParams{
 		OldTags: tagsOrEmpty(oldTags), NewTags: tagsOrEmpty(newTags),
-		TenantID: b.Tenant, BankID: b.Bank, DocumentID: textPtr(doc),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, DocumentID: textPtr(doc),
 	})
 	if err != nil {
 		return nil, mapErr("set archived document tags", err)
 	}
 	ids, err := r.q.UnitSetDocumentTags(ctx, db.UnitSetDocumentTagsParams{
 		OldTags: tagsOrEmpty(oldTags), NewTags: tagsOrEmpty(newTags), Seq: seq,
-		TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, DocumentID: string(doc),
 	})
 	if err != nil {
 		return nil, mapErr("set document tags", err)
@@ -189,7 +189,8 @@ func (r *unitRepo) AppendAudit(ctx context.Context, a domain.AuditEntry) error {
 		return err
 	}
 	p := db.UnitAppendAuditParams{
-		TenantID: a.Bank.Tenant, BankID: a.Bank.Bank, UnitID: unit, Action: string(a.Action), Reason: a.Reason,
+		TenantID: a.Bank.Tenant, OrgID: a.Bank.Org, BankID: a.Bank.Bank,
+		UnitID: unit, Action: string(a.Action), Reason: a.Reason,
 		OperationID: op, At: orNow(a.At),
 	}
 	if len(a.Before) > 0 {
@@ -206,7 +207,7 @@ func (r *unitRepo) IDsByDocument(
 	ctx context.Context, b domain.BankRef, doc domain.DocumentID,
 ) ([]domain.UnitID, error) {
 	ids, err := r.q.UnitIDsByDocument(ctx, db.UnitIDsByDocumentParams{
-		TenantID: b.Tenant, BankID: b.Bank, DocumentID: string(doc),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, DocumentID: string(doc),
 	})
 	if err != nil {
 		return nil, mapErr("unit ids of document", err)
@@ -234,7 +235,7 @@ func (r *unitRepo) Unconsolidated(
 		return nil, err
 	}
 	rows, err := r.q.UnitUnconsolidated(ctx, db.UnitUnconsolidatedParams{
-		TenantID: b.Tenant, BankID: b.Bank, FilterScopes: len(scopes) > 0, Scopes: raw,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, FilterScopes: len(scopes) > 0, Scopes: raw,
 		Lim: contentLimit(limit),
 	})
 	if err != nil {
@@ -284,6 +285,6 @@ func removeUnits(ctx context.Context, q *db.Queries, b domain.BankRef, ids []uui
 	if err := q.UnitQueueEntities(ctx, ids); err != nil {
 		return mapErr("queue entity maintenance", err)
 	}
-	err := q.UnitDeleteIDs(ctx, db.UnitDeleteIDsParams{TenantID: b.Tenant, BankID: b.Bank, Ids: ids})
+	err := q.UnitDeleteIDs(ctx, db.UnitDeleteIDsParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: ids})
 	return mapErr("delete units", err)
 }

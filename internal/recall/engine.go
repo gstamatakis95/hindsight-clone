@@ -42,7 +42,7 @@ type Deps struct {
 	// Arms are the registered recall arms, in fusion order; cmd/memd/wire_services.go registers the built-in vector, text,
 	// graph and temporal arms (internal/recall/arms). Names must be unique and non-empty.
 	Arms []Arm
-	// Config merges server < tenant < bank < request.
+	// Config merges server < tenant < org < bank < request.
 	Config *config.Resolver
 	// Embedder embeds the query and page searches.
 	Embedder ai.Embedder

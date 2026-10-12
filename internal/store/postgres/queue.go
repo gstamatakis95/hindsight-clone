@@ -27,12 +27,15 @@ var _ store.Queue = (*queue)(nil)
 // lookup. A deadlock with another enqueuer surfaces as domain.ErrConflict.
 func (r *queue) Enqueue(ctx context.Context, j store.Job) (domain.OperationID, bool, error) {
 	b := j.Bank
-	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, ID: b.Bank})
+	if err := checkRef(b); err != nil {
+		return "", false, err
+	}
+	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
-		return "", false, mapErr(fmt.Sprintf("enqueue: bank %s/%s", b.Tenant, b.Bank), err)
+		return "", false, mapErr(fmt.Sprintf("enqueue: bank %s", b), err)
 	}
 	if deletingAt != nil && j.Kind != domain.OperationKindDeleteBank {
-		return "", false, fmt.Errorf("%w: enqueue %s on %s/%s", domain.ErrBankDeleting, j.Kind, b.Tenant, b.Bank)
+		return "", false, fmt.Errorf("%w: enqueue %s on %s", domain.ErrBankDeleting, j.Kind, b)
 	}
 	policy := effectiveDedupe(j)
 	if policy != store.DedupeNone {
@@ -67,12 +70,12 @@ func (r *queue) findJoinable(
 ) (domain.OperationID, bool, error) {
 	b := j.Bank
 	if err := r.q.QueueDedupeLock(ctx, db.QueueDedupeLockParams{
-		TenantID: b.Tenant, BankID: b.Bank, Kind: string(j.Kind), SerialKey: j.SerialKey,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Kind: string(j.Kind), SerialKey: j.SerialKey,
 	}); err != nil {
 		return "", false, mapErr("enqueue: dedupe lock", err)
 	}
 	id, err := r.q.QueueFindJoinable(ctx, db.QueueFindJoinableParams{
-		TenantID: b.Tenant, BankID: b.Bank, Kind: string(j.Kind), SerialKey: j.SerialKey,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Kind: string(j.Kind), SerialKey: j.SerialKey,
 		IncludeRunning: policy == store.DedupePendingOrRunning,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -103,7 +106,7 @@ func (r *queue) insert(ctx context.Context, j store.Job, joinable bool) (domain.
 		payload = json.RawMessage(`{}`)
 	}
 	err = r.q.QueueInsert(ctx, db.QueueInsertParams{
-		ID: id, TenantID: j.Bank.Tenant, BankID: j.Bank.Bank, Kind: string(j.Kind),
+		ID: id, TenantID: j.Bank.Tenant, OrgID: j.Bank.Org, BankID: j.Bank.Bank, Kind: string(j.Kind),
 		SerialKey: textPtr(j.SerialKey), Payload: payload, Overrides: overrides, Joinable: joinable,
 		ParentID: parent, Attempts: int32(j.Attempt), RunAt: orNow(j.RunAt), //nolint:gosec // attempts are small
 	})
@@ -216,9 +219,9 @@ func (r *queue) notPending(ctx context.Context, id uuid.UUID, what string) error
 
 // CancelBank cancels every PENDING job of b except its delete_bank job.
 func (r *queue) CancelBank(ctx context.Context, b domain.BankRef) (int, error) {
-	n, err := r.q.QueueCancelBank(ctx, db.QueueCancelBankParams{TenantID: b.Tenant, BankID: b.Bank})
+	n, err := r.q.QueueCancelBank(ctx, db.QueueCancelBankParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank})
 	if err != nil {
-		return 0, mapErr(fmt.Sprintf("cancel bank %s/%s", b.Tenant, b.Bank), err)
+		return 0, mapErr(fmt.Sprintf("cancel bank %s", b), err)
 	}
 	return int(n), nil
 }
@@ -229,7 +232,7 @@ func (r *queue) Get(ctx context.Context, b domain.BankRef, id domain.OperationID
 	if err != nil {
 		return domain.Operation{}, err
 	}
-	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, BankID: b.Bank, ID: uid})
+	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: uid})
 	if err != nil {
 		return domain.Operation{}, mapErr(fmt.Sprintf("operation %s", id), err)
 	}
@@ -247,7 +250,7 @@ func (r *queue) List(
 	}
 	size = min(size, domain.ListPage.Max)
 	arg := db.QueueListParams{
-		TenantID: b.Tenant, BankID: b.Bank, Status: textPtr(f.Status), Kind: textPtr(f.Kind),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Status: textPtr(f.Status), Kind: textPtr(f.Kind),
 		ExcludeParents: f.ExcludeParents, Lim: int32(size + 1), //nolint:gosec // size <= domain.ListPage.Max
 	}
 	if f.PageToken != "" {
@@ -287,7 +290,7 @@ func (r *queue) Cancel(ctx context.Context, b domain.BankRef, id domain.Operatio
 	if err != nil {
 		return domain.Operation{}, err
 	}
-	row, err := r.q.QueueCancel(ctx, db.QueueCancelParams{TenantID: b.Tenant, BankID: b.Bank, ID: uid})
+	row, err := r.q.QueueCancel(ctx, db.QueueCancelParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: uid})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Operation{}, r.wrongStatus(ctx, b, uid, "cancel", domain.ErrOperationNotCancellable)
 	}
@@ -306,7 +309,7 @@ func (r *queue) Retry(ctx context.Context, b domain.BankRef, id domain.Operation
 	if err := r.lockForRetry(ctx, b, uid); err != nil {
 		return domain.Operation{}, err
 	}
-	row, err := r.q.QueueRetry(ctx, db.QueueRetryParams{TenantID: b.Tenant, BankID: b.Bank, ID: uid})
+	row, err := r.q.QueueRetry(ctx, db.QueueRetryParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: uid})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Operation{}, r.wrongStatus(ctx, b, uid, "retry", domain.ErrOperationNotRetryable)
 	}
@@ -320,22 +323,22 @@ func (r *queue) Retry(ctx context.Context, b domain.BankRef, id domain.Operation
 // FOR KEY SHARE on the bank row, refusing a tombstoned bank (domain.ErrBankDeleting) except for its
 // delete_bank job, then the row's dedupe advisory lock, so a concurrent Enqueue can't insert a duplicate.
 func (r *queue) lockForRetry(ctx context.Context, b domain.BankRef, id uuid.UUID) error {
-	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, BankID: b.Bank, ID: id})
+	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: id})
 	if err != nil {
 		return mapErr(fmt.Sprintf("retry %s", id), err)
 	}
-	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, ID: b.Bank})
+	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
 	if err != nil {
-		return mapErr(fmt.Sprintf("retry: bank %s/%s", b.Tenant, b.Bank), err)
+		return mapErr(fmt.Sprintf("retry: bank %s", b), err)
 	}
 	if deletingAt != nil && row.Kind != string(domain.OperationKindDeleteBank) {
-		return fmt.Errorf("%w: retry %s on %s/%s", domain.ErrBankDeleting, id, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: retry %s on %s", domain.ErrBankDeleting, id, b)
 	}
 	if row.SerialKey == nil {
 		return nil
 	}
 	err = r.q.QueueDedupeLock(ctx, db.QueueDedupeLockParams{
-		TenantID: b.Tenant, BankID: b.Bank, Kind: row.Kind, SerialKey: *row.SerialKey,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Kind: row.Kind, SerialKey: *row.SerialKey,
 	})
 	return mapErr("retry: dedupe lock", err)
 }
@@ -343,7 +346,7 @@ func (r *queue) lockForRetry(ctx context.Context, b domain.BankRef, id uuid.UUID
 // wrongStatus explains why a bank-scoped status update (cancel or retry) matched nothing: domain.ErrNotFound
 // when b has no such operation, else class (domain.ErrOperationNotCancellable or ErrOperationNotRetryable).
 func (r *queue) wrongStatus(ctx context.Context, b domain.BankRef, id uuid.UUID, what string, class error) error {
-	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, BankID: b.Bank, ID: id})
+	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: id})
 	if err != nil {
 		return mapErr(fmt.Sprintf("%s %s", what, id), err)
 	}
@@ -362,7 +365,7 @@ func (r *queue) Prune(ctx context.Context, before time.Time) (int, error) {
 // operationOf builds a domain.Operation from its row. NextRunAt is set only on pending rows.
 func operationOf(r db.Operation) (domain.Operation, error) {
 	op := domain.Operation{
-		ID: idOf[domain.OperationID](r.ID), Bank: domain.BankRef{Tenant: r.TenantID, Bank: r.BankID},
+		ID: idOf[domain.OperationID](r.ID), Bank: domain.NewBankRef(r.TenantID, r.OrgID, r.BankID),
 		Kind: domain.OperationKind(r.Kind), Status: domain.OperationStatus(r.Status),
 		SerialKey: textOf[string](r.SerialKey), Error: textOf[string](r.Error), Result: r.Result,
 		ParentID: nullIDOf[domain.OperationID](r.ParentID), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -391,7 +394,7 @@ func operationOf(r db.Operation) (domain.Operation, error) {
 // jobOf builds the store.Job a worker receives from a claimed row.
 func jobOf(r db.Operation) (store.Job, error) {
 	j := store.Job{
-		ID: idOf[domain.OperationID](r.ID), Bank: domain.BankRef{Tenant: r.TenantID, Bank: r.BankID},
+		ID: idOf[domain.OperationID](r.ID), Bank: domain.NewBankRef(r.TenantID, r.OrgID, r.BankID),
 		Kind: domain.OperationKind(r.Kind), SerialKey: textOf[string](r.SerialKey), Payload: r.Payload,
 		ParentID: nullIDOf[domain.OperationID](r.ParentID), RunAt: r.RunAt, Attempt: int(r.Attempts),
 	}

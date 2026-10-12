@@ -22,7 +22,8 @@
 // # Bank existence rules
 //
 // Reads of an unknown or tombstoned bank are domain.ErrNotFound. Writes call BankRepo.Ensure, which creates an
-// unknown bank with tenant defaults, or reports domain.ErrBankDeleting (FAILED_PRECONDITION) for a tombstoned one.
+// unknown bank in its existing org, or reports domain.ErrOrgNotFound for an unknown org (orgs are never created on
+// first use) and domain.ErrBankDeleting (FAILED_PRECONDITION) for a tombstoned bank.
 // (docs/design/curation-and-operations.md#common-rules).
 //
 // # Create
@@ -69,7 +70,7 @@
 //     still holds its operation, else domain.ErrCancelled) and that the bank is still tombstoned; if another job
 //     of the bank is still PROCESSING (a handler winding down after the tombstone) it enqueues its own
 //     continuation [DeleteBlockedDelay] (5 s) later and stops; otherwise it deletes the blobs under
-//     {tenant}/{bank}/, then in a last transaction re-checks for processing jobs and calls BankRepo.Delete,
+//     {tenant}/{org}/{bank}/, then in a last transaction re-checks for processing jobs and calls BankRepo.Delete,
 //     which removes the bank row with its remaining events and operations.
 //
 // While work is left (the batch budget ran out, or a processing job blocked the finish) the job re-enqueues

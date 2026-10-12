@@ -12,7 +12,7 @@ import (
 // overrides, parent and run_at. These are part of the stored operations rows (dedupe and serial keys decide
 // which jobs join or overlap), so a change here is a behaviour change.
 func TestCatalogueRows(t *testing.T) {
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	ov := &domain.BankConfig{Retain: &domain.RetainConfig{Mission: "m"}}
 	must := func(j store.Job, err error) store.Job {

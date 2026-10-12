@@ -109,7 +109,7 @@ func TestConsolidate(t *testing.T) {
 	if len(payload.Scopes) != 1 || !slices.Equal(payload.Scopes[0].Tags, []string{"a", "b"}) {
 		t.Errorf("scoped payload = %+v", payload)
 	}
-	fresh := domain.BankRef{Tenant: "acme", Bank: "new"}
+	fresh := domain.NewBankRef("acme", "org", "new")
 	if _, err := s.Consolidate(ctx, fresh, nil, nil); err != nil {
 		t.Errorf("consolidate on an unknown bank should create it: %v", err)
 	}

@@ -21,7 +21,7 @@ var _ pb.OperationServiceServer = (*OperationHandler)(nil)
 func (h *OperationHandler) GetOperation(
 	ctx context.Context, req *pb.GetOperationRequest,
 ) (*pb.GetOperationResponse, error) {
-	b, id, err := operationRef(ctx, req.GetBankId(), req.GetOperationId())
+	b, id, err := operationRef(ctx, req, req.GetOperationId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -36,7 +36,7 @@ func (h *OperationHandler) GetOperation(
 func (h *OperationHandler) ListOperations(
 	ctx context.Context, req *pb.ListOperationsRequest,
 ) (*pb.ListOperationsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -55,7 +55,7 @@ func (h *OperationHandler) ListOperations(
 func (h *OperationHandler) CancelOperation(
 	ctx context.Context, req *pb.CancelOperationRequest,
 ) (*pb.CancelOperationResponse, error) {
-	b, id, err := operationRef(ctx, req.GetBankId(), req.GetOperationId())
+	b, id, err := operationRef(ctx, req, req.GetOperationId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -70,7 +70,7 @@ func (h *OperationHandler) CancelOperation(
 func (h *OperationHandler) RetryOperation(
 	ctx context.Context, req *pb.RetryOperationRequest,
 ) (*pb.RetryOperationResponse, error) {
-	b, id, err := operationRef(ctx, req.GetBankId(), req.GetOperationId())
+	b, id, err := operationRef(ctx, req, req.GetOperationId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -83,7 +83,7 @@ func (h *OperationHandler) RetryOperation(
 
 // ListEvents returns the bank's lifecycle events after a sequence number.
 func (h *OperationHandler) ListEvents(ctx context.Context, req *pb.ListEventsRequest) (*pb.ListEventsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -99,8 +99,8 @@ func (h *OperationHandler) ListEvents(ctx context.Context, req *pb.ListEventsReq
 }
 
 // operationRef builds the bank ref of a request and checks its required operation id.
-func operationRef(ctx context.Context, bankID, opID string) (domain.BankRef, domain.OperationID, error) {
-	b, err := bankRef(ctx, bankID)
+func operationRef(ctx context.Context, r bankScoped, opID string) (domain.BankRef, domain.OperationID, error) {
+	b, err := bankRef(ctx, r)
 	if err != nil {
 		return domain.BankRef{}, "", err
 	}

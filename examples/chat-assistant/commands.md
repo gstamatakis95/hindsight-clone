@@ -1,19 +1,26 @@
 # chat-assistant: the same calls with grpcurl
 
 Needs [grpcurl](https://github.com/fullstorydev/grpcurl) and [jq](https://jqlang.org/), and a running memd (see
-[../README.md](../README.md)). The `g` helper adds the tenant header and replaces `BANK_ID` in the JSON with
-`$BANK`, so every command below can be pasted as it is.
+[../README.md](../README.md)). The `g` helper adds the tenant header and replaces `BANK_ID` and `ORG_ID` in the JSON
+with `$BANK` and `$ORG`, so every command below can be pasted as it is.
 
 ```sh
-export MEMD=${MEMD:-localhost:50051} TENANT=${TENANT:-examples} BANK=chat-assistant-$RANDOM
-g() { grpcurl -plaintext -H "x-tenant-id: $TENANT" -d "${2//BANK_ID/$BANK}" "$MEMD" "memory.v1.$1"; }
+export MEMD=${MEMD:-localhost:50051} TENANT=${TENANT:-examples} ORG=${ORG:-examples} BANK=chat-assistant-$RANDOM
+g() { local d="${2//BANK_ID/$BANK}"; grpcurl -plaintext -H "x-tenant-id: $TENANT" -d "${d//ORG_ID/$ORG}" "$MEMD" "memory.v1.$1"; }
+```
+
+Create the org first: banks live in an org, and a write never creates one. On a rerun this answers
+ALREADY_EXISTS, which is fine.
+
+```sh
+g OrgService/CreateOrg '{"org_id": "ORG_ID"}'
 ```
 
 Retain the conversation. The bank is created by this first write.
 
 ```sh
 g MemoryService/Retain '{
-  "bank_id": "BANK_ID",
+  "org_id": "ORG_ID", "bank_id": "BANK_ID",
   "items": [{
     "document_id": "chat-2026-10-04",
     "context": "A chat between the assistant and the user Dana",
@@ -26,19 +33,19 @@ g MemoryService/Retain '{
 Wait until consolidation has finished: `pending_operations_by_kind` is empty when nothing is queued or running.
 
 ```sh
-until [ "$(g BankService/GetBankStats '{"bank_id":"BANK_ID"}' | jq '.stats.pendingOperationsByKind // {} | length')" = 0 ]; do sleep 1; done
+until [ "$(g BankService/GetBankStats '{"org_id": "ORG_ID", "bank_id":"BANK_ID"}' | jq '.stats.pendingOperationsByKind // {} | length')" = 0 ]; do sleep 1; done
 ```
 
 Recall the memories relevant to the next user message.
 
 ```sh
-g MemoryService/Recall '{"bank_id": "BANK_ID", "query": "Where should I take Dana for dinner?", "max_tokens": 1024}' |
+g MemoryService/Recall '{"org_id": "ORG_ID", "bank_id": "BANK_ID", "query": "Where should I take Dana for dinner?", "max_tokens": 1024}' |
   jq -r '.results[] | "\(.factType)  \(.text)"'
 ```
 
 Reflect: memd searches the memories itself and answers. `basedOn` lists the memories the answer cites.
 
 ```sh
-g MemoryService/Reflect '{"bank_id": "BANK_ID", "query": "What should I keep in mind when I plan a dinner for Dana and her sister?"}' |
+g MemoryService/Reflect '{"org_id": "ORG_ID", "bank_id": "BANK_ID", "query": "What should I keep in mind when I plan a dinner for Dana and her sister?"}' |
   jq '{answer: .text, basedOn: [.basedOn.memories[]?.text], usage}'
 ```
