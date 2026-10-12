@@ -18,7 +18,7 @@
 // to retain.temporal_link_cap ([DefaultTemporalLinkCap] 20), with a weight falling from 1 to 0.3 across the window.
 // Both kinds are written in both directions; the cap bounds only the linked unit's own pass. Causal links run
 // cause -> effect from the [CauseMap] and are not capped. Observations are never linked. Link reads the tuning from
-// the bank's stored config (tenant < bank); LinkWith takes the caller's effective config.
+// the bank's stored config (tenant < org < bank); LinkWith takes the caller's effective config.
 //
 // # Resolver
 //

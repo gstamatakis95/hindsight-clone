@@ -50,7 +50,7 @@ func (s *scenario) retain(ctx context.Context) error {
 
 // recall asks the same question with the settings of req and prints what came back.
 func (s *scenario) recall(ctx context.Context, label string, req *pb.RecallRequest) (*pb.RecallResponse, error) {
-	req.BankId, req.Query = s.bank, "What happened with the ledger?"
+	req.OrgId, req.BankId, req.Query = s.c.Org, s.bank, "What happened with the ledger?"
 	resp, err := s.c.Memory.Recall(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("recall (%s): %w", label, err)

@@ -278,7 +278,7 @@ type MentalModelConfig struct {
 }
 
 // BankConfig is the one configuration shape used at every level, grouped by phase:
-// server < tenant < bank < strategy < request (< item). Scalars: set replaces unset. Groups merge field by field.
+// server < tenant < org < bank < strategy < request (< item). Scalars: set replaces unset. Groups merge field by field.
 // A ModelBinding is atomic. Lists: set replaces (no append); a non-nil empty slice clears.
 type BankConfig struct {
 	// Retain holds extraction, labels, chunking and linking.

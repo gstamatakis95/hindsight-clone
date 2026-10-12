@@ -14,10 +14,10 @@
 //
 // # Model routing
 //
-// Code never chooses a model itself. It resolves the effective config (server < tenant < bank < strategy < request,
-// merged by package config: per slot, the most specific level yielding a binding, its own or its models.default,
-// wins), asks [Router.Resolve] for its slot's binding and passes that binding to the LLM
-// or the reranker:
+// Code never chooses a model itself. It resolves the effective config (server < tenant < org < bank < strategy <
+// request, merged by package config: per slot, the most specific level yielding a binding, its own or its
+// models.default, wins), asks [Router.Resolve] for its slot's binding and passes that binding to the LLM or the
+// reranker:
 //
 //	b, err := router.Resolve(cfg, domain.ModelSlotExtract)
 //	if err != nil {

@@ -16,7 +16,7 @@ type Deps struct {
 	DB store.DB
 	// Maintenance lists the cron models and the failed refreshes for the maintenance sweeps.
 	Maintenance store.Maintenance
-	// Config merges server < tenant < bank < model overrides < call overrides.
+	// Config merges server < tenant < org < bank < model overrides < call overrides.
 	Config *config.Resolver
 	// Recall runs the single-shot recall, resolves fuzzy scope tags and serves SearchMentalModels.
 	Recall *recall.Engine

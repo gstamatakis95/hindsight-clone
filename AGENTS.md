@@ -38,9 +38,10 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   - internal/document: DocumentService (ListDocuments, GetDocument, RetagDocument, ReprocessDocument);
     retag_document.
   - internal/mentalmodel: MentalModelService; refresh_mental_model; the cron and failed-refresh sweeps.
+  - internal/org: OrgService (create, get, list; DeleteOrg answers UNIMPLEMENTED in this version).
   - internal/bank: BankService (create, from a template too, get, list, delete, stats, tags, export);
     delete_bank; the stalled-delete sweep.
-  - internal/configsvc: ConfigService (tenant and bank config views, reset, prompt preview, directives).
+  - internal/configsvc: ConfigService (tenant, org and bank config views, reset, prompt preview, directives).
   - internal/operation: OperationService (operation and event reads, cancel, retry).
 - internal/maintenance: the 60 s tick (ordered steps calling the services' sweeps) and the graph_maintenance job.
 - internal/grpcapi: thin gRPC handlers, one file and handler struct per proto service (holding only the services it
@@ -93,6 +94,11 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
 - Never call an LLM, embedder, reranker, recall, reflect or timex inside DB.InTx: read, call, then write in a
   short tx. tools/txcheck enforces the lexical case (a model call written inside the InTx literal).
 - Any tx that changes memory content calls tx.Seq(bank) first and stamps the rows it writes with it.
+- Every bank lives in an org: a bank is named by domain.BankRef (tenant, org, bank). Build one with
+  domain.NewBankRef, never a keyed literal (grpcapi's TestNoBankRefLiterals fails on one), and name org_id next to
+  bank_id in every statement that touches a bank (the store's TestSQLNamesOrg). Orgs are never created on first use:
+  bank creation share-locks the org row (BankRepo.Ensure, Create, SetConfig), and a new bank-scoped table carries
+  org_id (TestSchemaOrgColumns).
   tools/txcheck flags an Enqueue before tx.Seq in the same InTx literal.
 - InTx bodies must be re-runnable: InTx retries on deadlock, serialization failure and pruned-entity conflicts,
   so reset every captured output at the top of the closure and do no side effects outside the tx.

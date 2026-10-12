@@ -31,7 +31,7 @@ func modelOf(t *testing.T, cfg domain.BankConfig, slot domain.ModelSlot) string 
 	return b.Model
 }
 
-// TestMergePrecedence is the precedence table: server < tenant < bank < strategy < request (< item), one row
+// TestMergePrecedence is the precedence table: server < tenant < org < bank < strategy < request (< item), one row
 // per field shape.
 func TestMergePrecedence(t *testing.T) {
 	server := domain.BankConfig{

@@ -49,7 +49,7 @@ func (s *scenario) retain(ctx context.Context) error {
 
 // ask runs the same question with the extra settings of req.
 func (s *scenario) ask(ctx context.Context, req *pb.ReflectRequest) (*pb.ReflectResponse, error) {
-	req.BankId, req.Query = s.bank, "What happened in incident 77?"
+	req.OrgId, req.BankId, req.Query = s.c.Org, s.bank, "What happened in incident 77?"
 	resp, err := s.c.Memory.Reflect(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("reflect: %w", err)

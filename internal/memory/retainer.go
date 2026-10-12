@@ -51,7 +51,7 @@ type retainerDeps struct {
 	Store store.DB
 	// Blob holds the original text.
 	Blob blob.Store
-	// Config resolves the effective config (server < tenant < bank < job overrides).
+	// Config resolves the effective config (server < tenant < org < bank < job overrides).
 	Config *config.Resolver
 	// Extractor turns chunks into facts.
 	Extractor extractor

@@ -20,7 +20,8 @@ import (
 
 // RetainRequest mirrors memory.v1.RetainRequest with domain types.
 type RetainRequest struct {
-	// Bank receives the items; an unknown bank is created with tenant defaults.
+	// Bank receives the items; an unknown bank of an existing org is created (an unknown org is
+	// domain.ErrOrgNotFound).
 	Bank domain.BankRef
 	// Items are the documents to retain.
 	Items []RetainItem

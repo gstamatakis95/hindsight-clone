@@ -27,7 +27,7 @@ type Deps struct {
 	// DB reads the bank's name and stored directives (a short read-only transaction), and serves expand through
 	// DB.Read.
 	DB store.DB
-	// Config resolves the effective config (server < tenant < bank < request).
+	// Config resolves the effective config (server < tenant < org < bank < request).
 	Config *config.Resolver
 	// Router picks the REFLECT and STRUCTURED_OUTPUT bindings.
 	Router *ai.Router

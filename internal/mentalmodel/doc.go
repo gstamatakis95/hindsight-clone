@@ -35,8 +35,8 @@
 // all_strict for a tagged model and any for an untagged one; the scope's tag groups override the flat tags (a
 // scope's tag filter never carries flat tags of its own: they are the model's), and fuzzy tag leaves are resolved to
 // the bank's exact tags (recall.Engine.CompileTags) before the scope query, at the effective
-// recall.fuzzy_tag_min_similarity of the model (server < tenant < bank < the model's overrides), so staleness sees
-// exactly what recall would retrieve.
+// recall.fuzzy_tag_min_similarity of the model (server < tenant < org < bank < the model's overrides), so staleness
+// sees exactly what recall would retrieve.
 //
 // # Refresh pipeline
 //
@@ -44,7 +44,7 @@
 //
 //  1. Plan: load the model; read BankSeq = S (the snapshot bound: everything the refresh reads has seq <= S,
 //     so a writer that commits late carries a seq above S and is seen next time); resolve the config as
-//     server < tenant < bank < model overrides < call overrides; pick the synthesizer by strategy (call, else
+//     server < tenant < org < bank < model overrides < call overrides; pick the synthesizer by strategy (call, else
 //     spec, else mental_models.default_strategy, else agentic) and the mode (spec, else
 //     mental_models.default_mode, else full). A requested delta runs in full with a recorded reason
 //     when the call forces full, the model has no content yet, the source query or scope changed (the

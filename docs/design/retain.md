@@ -30,7 +30,7 @@ RetagDocument are `internal/document`.
      so a tag-only change on unchanged content is a no-op (RetagDocument changes tags).
 4. **Bank check.** The pre-write read rejects a tombstoned bank (FAILED_PRECONDITION, `BANK_DELETING`) before the
    blob is written. An unknown bank is fine; the write creates it.
-5. **Blob Put** at `blob.Key(...)` = `{tenant}/{bank}/docs/{document}/{content_hash}`, outside any transaction
+5. **Blob Put** at `blob.Key(...)` = `{tenant}/{org}/{bank}/docs/{document}/{content_hash}`, outside any transaction
    (a repeated Put of the same key is harmless).
 6. **Write transaction.** `Banks().Ensure`, `tx.Seq`, then upsert each changed document with its stored
    overrides, tags, blob key and item observation scopes. Upsert clears `extracted_at`, so the document is "in
@@ -229,7 +229,7 @@ units.
   pair, so later units in a dense cluster are never starved, and old units can exceed the cap. Observations are
   never linked.
 - Retain and rederive link with their effective config; graph maintenance relinks with the bank's stored tuning
-  (tenant < bank), read inside its transaction.
+  (tenant < org < bank), read inside its transaction.
 
 ## Graph maintenance
 

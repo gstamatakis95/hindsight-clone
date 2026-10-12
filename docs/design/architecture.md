@@ -74,7 +74,7 @@ tiers, and depguard (in `.golangci.yml`) enforces it.
 | Boundaries | `store`, `graph`, `ai`, `blob`, `ingest` | The interfaces to I/O (below). |
 | Infrastructure | `config`, `jobs` | Config resolution, merge, defaults, validation and patches; the job runner and the job catalogue. |
 | Libraries | `timex`, `linking`, `recall` (with `recall/arms`), `reflect` | One concrete main type each and no RPCs: `timex.Normalizer`, `linking.Linker` / `Resolver` / `LabelResolver`, `recall.Engine`, `reflect.Agent`. |
-| Services | `memory`, `document`, `observation`, `mentalmodel`, `bank`, `configsvc`, `operation` | One package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC logic, its job handlers (`RunXJob`) and its maintenance sweeps. |
+| Services | `memory`, `document`, `observation`, `mentalmodel`, `org`, `bank`, `configsvc`, `operation` | One package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC logic, its job handlers (`RunXJob`) and its maintenance sweeps. |
 | Top | `maintenance`, `grpcapi` | The 60 s tick and the graph_maintenance job; the thin gRPC handlers, interceptors, conversion and error mapping. |
 | Adapters | `store/postgres`, `ai/gateway`, `blob/s3`, `ingest/memq`, `observability` | The concrete Postgres, gateway, S3 and Datadog code. |
 | Composition root | `cmd/memd` | Wiring only: the one place concrete types meet. |
@@ -143,12 +143,18 @@ so that a graph database can be adopted later as an adapter plus a sync job, wit
 
 - The tenant comes from the `x-tenant-id` gRPC metadata header, never from a request body. Exactly one non-empty
   value is required; anything else is INVALID_ARGUMENT naming `x-tenant-id`. Health methods need no tenant.
-- Tenant and bank ids must be non-empty, at most 256 bytes, contain no `/` and no control characters, and not
-  be `.` or `..`. These rules keep the blob prefix `{tenant}/{bank}/` unique per bank: a `/` in an id would let
-  one bank's delete remove another bank's blobs.
-- Every table carries `tenant_id`, and every store call takes `(tenant, bank)`. Ids of one bank never leak to
-  another tenant or bank.
-- Client-chosen ids (bank, document, mental model) are text, unique per bank. Server ids (units, chunks,
+- Orgs group a tenant's banks: every bank belongs to exactly one org, bank ids are unique within their org, and
+  every bank-scoped request names `org_id` and `bank_id`. Orgs are created explicitly (OrgService.CreateOrg) and
+  never on first use, so a typo'd org id fails (NOT_FOUND, `ORG_NOT_FOUND`) instead of scattering data outside
+  the org; banks are still created by the first write, inside an existing org.
+- Tenant, org and bank ids must be non-empty, at most 256 bytes, contain no `/` and no control characters, and
+  not be `.` or `..`. These rules keep the blob prefixes `{tenant}/{org}/` and `{tenant}/{org}/{bank}/` unique per
+  org and per bank: a `/` in an id would let one bank's delete remove another bank's blobs.
+- Every table but `tenants` carries `tenant_id`, and every table but `tenants` and `orgs` carries `org_id`; every
+  store call takes a `domain.BankRef` (tenant, org, bank), built with `domain.NewBankRef`, and the store refuses
+  one without an org. Ids of one bank never leak to another tenant, org or bank.
+- Client-chosen ids (org, bank, document, mental model) are text: org ids unique per tenant, the others unique per
+  bank (bank ids per org). Server ids (units, chunks,
   entities, operations, directives) are UUIDs; operation ids are UUIDv7.
 
 ## Transactions and the change sequence
@@ -177,7 +183,11 @@ These invariants keep memory consistent under concurrency. Every write path foll
 5. **Unknown and deleting banks.** `tx.Seq` on an unknown bank is NOT_FOUND and on a tombstoned bank
    FAILED_PRECONDITION (`BANK_DELETING`), so no write (and no queued job) can resurrect a deleted bank. Write
    paths that may create a bank call `Banks().Ensure` (insert-if-absent, never waits on the bank lock) before
-   `Seq`.
+   `Seq`. Ensure first takes `FOR KEY SHARE` on the org row: an unknown org is NOT_FOUND (`ORG_NOT_FOUND`), a
+   tombstoned one FAILED_PRECONDITION (`ORG_DELETING`). An org delete locks the org row `FOR UPDATE` before it
+   tombstones the org's banks, so a bank created concurrently either commits first (and is tombstoned with the
+   others) or waits and then fails. Org config writes (an advisory lock and a plain update) never block it, and
+   `tx.Seq` needs no org lock: it row-locks the bank, which an org delete's bank tombstoning also locks.
 6. **What does not take Seq.** Non-content writes skip it so they never make mental models stale: graph
    maintenance (links, entity pruning), bank tombstoning, job continuations, and the maintenance tick's
    automatic enqueues. Bank config writes do take it (for the lock; tenant config writes take a per-tenant
@@ -232,9 +242,10 @@ key, dedupe policy and Enqueue helper is decided there once.
 ### Claim and serial keys
 
 The claim selects pending, due rows of the kinds the worker handles, skips rows of tombstoned banks (except
-`delete_bank`), and skips a row when another row with the same (tenant, bank, serial key) is processing or is an
-older due pending row; oldest first, `FOR UPDATE SKIP LOCKED`, then marks them processing with the worker id and
-a heartbeat. A unique partial index on `(tenant_id, bank_id, serial_key) WHERE status = 'processing'` enforces
+`delete_bank`), and skips a row when another row with the same (tenant, org, bank, serial key) is processing or is
+an older due pending row; oldest first, `FOR UPDATE SKIP LOCKED`, then marks them processing with the worker id
+and a heartbeat. A unique partial index on `(tenant_id, org_id, bank_id, serial_key) WHERE status = 'processing'`
+enforces
 **at most one processing job per key**; a lost race (unique violation or deadlock) retries the whole claim up to
 5 times and then returns an empty batch, never an error. Retains of different documents run in parallel;
 consolidation, graph maintenance and bank deletion run one at a time per bank; refreshes one at a time per model.
@@ -444,8 +455,8 @@ operator guide; this section is the design.
 
 | Span | Resource | Tags |
 |---|---|---|
-| `grpc.server` | full method | `memd.tenant`, `memd.bank` (health and reflection are not traced) |
-| `memd.job` | job kind | operation id, tenant, bank, attempt, outcome (completed, retry, failed, released, lost) |
+| `grpc.server` | full method | `memd.tenant`, `memd.org`, `memd.bank` (health and reflection are not traced) |
+| `memd.job` | job kind | operation id, tenant, org, bank, attempt, outcome (completed, retry, failed, released, lost) |
 | `memd.maintenance.tick` | `maintenance` | — |
 | `postgres.query` | SQL text | `db.system`, row count; only under an existing span (claim polls and heartbeats are not traced) |
 | `memd.gateway.call` (with `http.request` per attempt) | route | model slot, model name |

@@ -24,7 +24,7 @@ type Org struct {
 func (o Org) Deleting() bool { return o.DeletingAt != nil }
 
 // Bank is one memory bank. Its Config holds only the bank's own overrides; the effective view comes
-// from merging server < tenant < bank.
+// from merging server < tenant < org < bank.
 type Bank struct {
 	// Ref is the bank's tenant, org and id.
 	Ref BankRef

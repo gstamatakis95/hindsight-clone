@@ -4,10 +4,12 @@ A SaaS product serving several customers. Each customer is a tenant (the `x-tena
 
 ## What it does
 
-1. `UpdateTenantConfig` / `GetTenantConfig`: one tenant sets a skeptical disposition, another keeps the server defaults (`own` versus `effective`).
-2. `CreateBank` with its own mission and disposition, `CreateDirective`, then `ExportBankTemplate`.
-3. `CreateBank` from that template in the other tenant, then `UpdateBankConfig` for a per-bank mission.
-4. Isolation: the same bank id holds different documents per tenant, an unknown bank is `NOT_FOUND`, and a call without `x-tenant-id` is `INVALID_ARGUMENT`.
+1. `CreateOrg` in each tenant: banks live in an org, and an org must exist before anything is written under it. A
+   write under an org that was never created is `NOT_FOUND`.
+2. `UpdateTenantConfig` / `GetTenantConfig`: one tenant sets a skeptical disposition, another keeps the server defaults (`own` versus `effective`).
+3. `CreateBank` with its own mission and disposition, `CreateDirective`, then `ExportBankTemplate`.
+4. `CreateBank` from that template in the other tenant, then `UpdateBankConfig` for a per-bank mission.
+5. Isolation: the same bank id holds different documents per tenant, an unknown bank is `NOT_FOUND`, and a call without `x-tenant-id` is `INVALID_ARGUMENT`.
 
 ## Setup
 
@@ -28,6 +30,11 @@ The example exits 1 with `FAILED: ...` when the behaviour it demonstrates does n
 From a run against the emulator (ids, counts and tokens differ between runs; the emulator's answers quote the retained text, a real gateway writes real answers):
 
 ```text
+
+== orgs ==
+acme-51975405: org "examples" created
+globex-51975405: org "examples" created
+a write under an org that does not exist: NotFound
 
 == tenant config ==
 acme-51975405: own skepticism=5, effective skepticism=5
