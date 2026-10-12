@@ -7,6 +7,7 @@
 #   make up       docker compose: postgres, minio
 #   make migrate  alembic upgrade head, then dump schema/schema.sql
 #   make run      memd all
+#   make diagrams render docs/design/diagrams (needs d2 v0.9.0)
 #   make examples build and run every example against a running memd (examples/README.md)
 #   make bench    run a benchmark against memd (eval/README.md)
 
@@ -142,6 +143,14 @@ examples: ## build and run every example against a running memd (ADDR=host:port 
 		echo "==> $$dir"; \
 		go run ./$$dir -addr $(ADDR) -tenant $(TENANT) || exit 1; \
 	done
+
+# ---------- diagrams (docs/design/diagrams; d2 v0.9.0, pinned in scripts/diagrams.sh) ----------
+
+diagrams: ## render docs/design/diagrams/src/*.d2 to SVG (light and dark theme in one file)
+	scripts/diagrams.sh render
+
+diagrams-check: ## fail if a committed diagram SVG is stale (not part of make lint: lint needs no d2)
+	scripts/diagrams.sh check
 
 # ---------- benchmarks (eval/README.md) ----------
 

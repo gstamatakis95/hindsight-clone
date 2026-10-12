@@ -1,0 +1,50 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+producers: "Producers\none document per message, key = document_id" {class: planned}
+broker: "Message broker\nat-least-once delivery, a dead-letter destination" {class: planned}
+
+source: "ingest.Source\nReceive, Ack, Nack, DeadLetter" {class: boundary}
+
+consumer: "memd ingest: the consumer loop" {
+  decode: "Decode the envelope\nprotojson or binary proto" {class: planned}
+  group: "Group by tenant and bank" {class: planned}
+  retain: "Retain a batch\nthe same code path as the RetainBatch RPC" {class: planned}
+  decode -> group -> retain
+}
+
+stores: "Commit point: the Postgres write transaction\ndocument row and retain_document job, plus the blob Put" {class: store}
+worker: "memd worker\nretain_document job: extract, embed, link" {class: svc}
+
+outcomes: "Outcome of each message" {
+  grid-columns: 2
+  grid-gap: 10
+  ack: "Ack, only after the commit\naccepted, unchanged, stale, superseded" {class: planned}
+  dead: "DeadLetter\nrejected or undecodable" {class: planned}
+  nack: "Nack with backoff\nfailed, unavailable, aborted;\nDeadLetter after max attempts" {class: planned}
+  pause: "Nack all, pause Receive\nbacklog gate: RESOURCE_EXHAUSTED" {class: planned}
+}
+outcomes.*.width: 430
+outcomes.*.height: 100
+
+producers -> broker {class: async}
+broker -> source: deliveries {class: async}
+source -> consumer.decode: Receive
+consumer.retain -> stores
+stores -> worker: job claimed later {class: async}
+consumer.retain -> outcomes: per-item results
+outcomes -> source: settle {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: "Boundary (built)" {class: boundary; width: 200; height: 50}
+  b: Datastore {class: store; width: 130; height: 60}
+  c: "memd process" {class: svc; width: 150; height: 50}
+  d: "Planned" {class: planned; width: 110; height: 50}
+  e: "dashed edge: async" {shape: text; width: 220; height: 50}
+}

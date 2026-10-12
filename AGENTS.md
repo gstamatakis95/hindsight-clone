@@ -13,6 +13,8 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
     internal/store/postgres (sqlc in postgres/db, test harness in postgres/pgtest; also implements jobs.Claimer)
   - internal/ai (LLM, Embedder, Reranker; Router and Tokenizer are concrete) — internal/ai/gateway
   - internal/blob (Store, Key; contract suite in blob/blobtest) — internal/blob/s3, chosen by MEMD_BLOB_PROVIDER
+  - internal/ingest (Source: Receive, Ack, Nack, DeadLetter; the message-queue boundary with at-least-once delivery;
+    contract suite in ingest/ingesttest, in-memory source ingest/memq; doc.go has the recipe for a broker adapter)
   - internal/graph (Reader, Writer, Tx: the memory links; contract suite in graph/graphtest) — served by
     internal/store/postgres through store.Tx.Graph (writes, in the caller's transaction) and postgres.DB.Graph
     (the recall graph arm's Reader); graph/doc.go explains how a graph database would plug in
@@ -54,10 +56,11 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
   behaviour it shows does not hold: test/e2e TestExamples runs them all.
 - eval/: the benchmark harness (LoCoMo, LongMemEval, golden fixtures; eval/README.md). test/e2e: the end-to-end
   suites, their harness and the gateway emulator. tools/: ifacedoc, txcheck (its own module) and the mockery pin.
-- docs/design: the design documents, known limitations and the rules-to-tests map.
+- docs/design: the design documents, known limitations and the rules-to-tests map; docs/design/diagrams holds the
+  D2 sources (src/, with the shared _style.d2) and their rendered SVGs, embedded in the README and the design documents.
 
 ## Rules
-- Interfaces exist only at I/O boundaries (store, graph, ai, blob, clock, jobs.Claimer, grpcapi.ReadinessProbe) and
+- Interfaces exist only at I/O boundaries (store, graph, ai, blob, ingest, clock, jobs.Claimer, grpcapi.ReadinessProbe) and
   for in-package polymorphism (recall.Arm, reflect's tools, retain's extraction modes, the mental-model
   synthesizers). Put `var _ Iface = (*impl)(nil)` next to each implementation. Accept
   interfaces, return structs: ai.Router, ai.Tokenizer, clock.System, config.Resolver, the libraries and the
@@ -105,6 +108,8 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
 - make e2e      # compose stack + gateway emulator + memd processes + every example; run it alone
 - make examples # build and run every example against a running memd (ADDR=, TENANT=)
 - make migrate-check  # fail if schema/schema.sql is stale
+- make diagrams # re-render docs/design/diagrams from src/*.d2; needs d2 v0.9.0 (pinned in scripts/diagrams.sh)
+- make diagrams-check  # fail if a committed SVG is stale; run it after editing a .d2 file (not part of make lint)
 - make bench    # run a benchmark against memd (eval/README.md)
 
 ## Before you finish
@@ -117,6 +122,8 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
 - Each _test.go sits next to the code it tests. API behaviour through the real services is tested in cmd/memd on
   the wired stack (stack_test.go: pgtest, the gateway emulator, the worker).
 - A proto change comments every new element.
+- A diagram change edits the .d2 source and re-renders: never edit an SVG by hand. In a diagram, give containers and
+  plain nodes no fill or font colour (d2 recolours only those for the dark theme) and use the classes of _style.d2.
 - A behaviour change updates its docs/design section and its row in docs/design/rules-to-tests.md. Update
   README.md and these agent files (CLAUDE.md is a symlink to AGENTS.md) where your change makes them stale.
 

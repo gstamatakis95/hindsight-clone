@@ -1,0 +1,45 @@
+...@_style
+
+direction: down
+
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+clients: "Clients\nagents, admin tools,\neval harness" {class: ext}
+
+memd: "memd: stateless, scale by replicas" {
+  api: "memd api\ngRPC: Retain, Recall, Reflect,\nadmin and curation RPCs" {class: svc}
+  worker: "memd worker\njob runner, heartbeats,\nmaintenance tick" {class: svc}
+  ingest: "memd ingest\nqueue consumer" {class: planned}
+}
+
+pg: "Postgres\npgvector, pg_search, pg_trgm\ntables and the job queue" {class: store}
+blob: "Object storage\nS3 or MinIO\ndocument originals" {class: store}
+gw: "AI gateway\nOpenAI-compatible:\nLLMs, embedder, reranker" {class: ext}
+dd: "Datadog agent\n(optional)" {class: ext}
+migrate: "Migrations\nalembic upgrade head,\nrun before memd" {class: job}
+
+producers: "Producers" {class: planned}
+broker: "Message broker\nKafka first; SQS, Pub/Sub,\nNATS behind the same boundary" {class: planned}
+
+clients -> memd.api: gRPC
+producers -> broker {class: async}
+broker -> memd.ingest: at-least-once {class: async}
+
+memd -> pg: "state and jobs\n(SKIP LOCKED claims)"
+memd -> blob: originals
+memd -> gw: model calls
+memd -> dd: "traces, metrics, logs" {class: async}
+migrate -> pg: DDL
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 6
+  grid-gap: 12
+  a: memd process {class: svc; width: 130; height: 50}
+  b: Datastore {class: store; width: 130; height: 60}
+  c: External {class: ext; width: 130; height: 50}
+  d: One-off task {class: job; width: 130; height: 50}
+  e: Planned {class: planned; width: 130; height: 50}
+  f: "dashed edge: optional or async" {shape: text; width: 300; height: 50}
+}

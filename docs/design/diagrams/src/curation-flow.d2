@@ -1,0 +1,41 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+rpcs: "Curation RPCs: each is one transaction, Seq first" {
+  grid-columns: 3
+  grid-gap: 12
+  update: "UpdateMemory\nedit a live fact,\nclear its embedding" {class: tx}
+  invalidate: "InvalidateMemory\narchive a live fact\nwith snapshots" {class: tx}
+  restore: "RestoreMemory\nbring an archived\nfact back" {class: tx}
+}
+rpcs.*.width: 280
+rpcs.*.height: 100
+
+common: "In the same transaction\ndelete the observations citing the fact\nand reset their other sources;\naudit row and MEMORY_CURATED event" {class: step}
+
+jobs: "Jobs enqueued in that transaction" {
+  grid-columns: 2
+  grid-gap: 12
+  rederive: "rederive_memory\nupdate, restore: re-embed outside\nany tx, then rebuild links" {class: job}
+  graph: "graph_maintenance\nlink top-ups, orphan\nentity pruning" {class: job}
+  consolidate: "consolidate\ninvalidate, and after a\nrederive writes the embedding" {class: job}
+  refresh: "refresh_mental_model\nmodels citing the fact or a\ndeleted observation" {class: job}
+}
+jobs.*.width: 420
+jobs.*.height: 100
+
+rpcs -> common
+common -> jobs
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 4
+  grid-gap: 12
+  a: "DB transaction" {class: tx; width: 170; height: 50}
+  b: Step {class: step; width: 110; height: 50}
+  c: Job {class: job; width: 110; height: 50}
+  d: "recall stops seeing the fact at once" {shape: text; width: 400; height: 50}
+}

@@ -1,0 +1,58 @@
+# Shared style for every memd diagram: `...@_style` at the top of a diagram pulls these classes in.
+#
+# Dark mode: d2 recolours only what has no explicit colour, so containers, plain nodes, edges and labels carry
+# none. The category classes below use mid-tone fills with white text, which read on both a light and a dark
+# background. Change a colour here and every diagram follows after `make diagrams`.
+
+classes: {
+  # A memd process or component.
+  svc: {
+    style: {fill: "#3b6fd4"; stroke: "#25488f"; font-color: "#ffffff"; border-radius: 8; stroke-width: 2}
+  }
+  # A datastore: Postgres, object storage.
+  store: {
+    shape: cylinder
+    style: {fill: "#2e8b6e"; stroke: "#1c5c47"; font-color: "#ffffff"; stroke-width: 2}
+  }
+  # A system outside memd: clients, the AI gateway, Datadog.
+  ext: {
+    style: {fill: "#5b6577"; stroke: "#3d4553"; font-color: "#ffffff"; border-radius: 8; stroke-width: 2}
+  }
+  # A background job or queue row.
+  job: {
+    style: {fill: "#b85c10"; stroke: "#8a430a"; font-color: "#ffffff"; border-radius: 8; stroke-width: 2}
+  }
+  # A model call (LLM, embedder, reranker): never inside a database transaction.
+  model: {
+    style: {fill: "#b0386f"; stroke: "#80264f"; font-color: "#ffffff"; border-radius: 8; stroke-width: 2}
+  }
+  # A short database transaction.
+  tx: {
+    style: {fill: "#1f7f92"; stroke: "#14586a"; font-color: "#ffffff"; border-radius: 8; stroke-width: 2}
+  }
+  # Concrete I/O code that implements a boundary (the Postgres store, the S3 blob store, the gateway client).
+  adapter: {
+    style: {fill: "#1f7f92"; stroke: "#14586a"; font-color: "#ffffff"; border-radius: 8; stroke-width: 2}
+  }
+  # A package tier or boundary interface.
+  boundary: {
+    style: {fill: "#7650c0"; stroke: "#523888"; font-color: "#ffffff"; border-radius: 8; stroke-width: 2}
+  }
+  # Not built yet: no fill, dashed outline.
+  planned: {
+    style: {stroke-dash: 5; stroke-width: 2; border-radius: 8}
+  }
+  # A plain step: the theme's own colours.
+  step: {
+    style: {border-radius: 8}
+  }
+  # An edge that is asynchronous or optional.
+  async: {
+    style: {stroke-dash: 5}
+  }
+}
+
+# d2 does not carry globs across the @_style import, so every diagram repeats these two lines after its direction:
+#   **.style.font-size: 20
+#   (** -> **)[*].style.font-size: 18
+# They keep labels legible at README width. Set a container's own font-size after them when its label needs more.

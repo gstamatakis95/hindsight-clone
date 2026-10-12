@@ -7,6 +7,8 @@ and observability. Feature behaviour lives in the other design documents (see [R
 
 ## Process model
 
+![Deployment: clients, the memd processes, Postgres, object storage, the AI gateway and the planned ingest queue](diagrams/deployment.svg)
+
 One Go binary, `memd`, runs in one of three modes. Every mode is stateless: all state, jobs included, lives in
 Postgres and object storage, so processes are disposable and scale by replica count.
 
@@ -41,7 +43,7 @@ The choices the rest of the design builds on:
 
 - **No message broker.** Jobs are Postgres rows claimed with `FOR UPDATE SKIP LOCKED` (the design Hindsight uses
   for its `async_operations` table), inserted in the same transaction as their cause, and serialized by the claim's
-  serial-key predicate. There is no Kafka, Redis or separate queue to keep consistent with the database.
+  serial-key predicate. There is no Kafka, Redis or separate queue to keep consistent with the database. (Queue ingestion is a different thing: an optional external broker feeding documents in, behind the `ingest` boundary; see [Ingest boundary](#ingest-boundary).)
 - **Tenancy is a column.** Every table carries `tenant_id` and every store call takes `(tenant, bank)`; Hindsight
   uses a schema per tenant instead. Authentication is out of scope: the tenant comes from a header an auth layer in
   front of memd can set.
@@ -63,16 +65,18 @@ The choices the rest of the design builds on:
 memd is a flat set of packages under `internal/`, arranged in tiers. A package imports only packages in lower
 tiers, and depguard (in `.golangci.yml`) enforces it.
 
+![Package tiers, with the allowed import direction](diagrams/layering.svg)
+
 | Tier | Packages | Holds |
 |---|---|---|
 | Domain | `domain` | Plain types and pure rules shared by everything: banks, units, documents, config, operations, tags and tag filters, scopes (`ExpandScopes`), directive selection (`SelectDirectives`), refresh due time (`RefreshDueAt`), paging bounds, error classes. Imports nothing internal. |
 | Leaves | `clock`, `prompts`, `jsonschema` | The injected clock, the prompt templates, the JSON Schema subset. |
-| Boundaries | `store`, `graph`, `ai`, `blob` | The interfaces to I/O (below). |
+| Boundaries | `store`, `graph`, `ai`, `blob`, `ingest` | The interfaces to I/O (below). |
 | Infrastructure | `config`, `jobs` | Config resolution, merge, defaults, validation and patches; the job runner and the job catalogue. |
 | Libraries | `timex`, `linking`, `recall` (with `recall/arms`), `reflect` | One concrete main type each and no RPCs: `timex.Normalizer`, `linking.Linker` / `Resolver` / `LabelResolver`, `recall.Engine`, `reflect.Agent`. |
 | Services | `memory`, `document`, `observation`, `mentalmodel`, `bank`, `configsvc`, `operation` | One package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC logic, its job handlers (`RunXJob`) and its maintenance sweeps. |
 | Top | `maintenance`, `grpcapi` | The 60 s tick and the graph_maintenance job; the thin gRPC handlers, interceptors, conversion and error mapping. |
-| Adapters | `store/postgres`, `ai/gateway`, `blob/s3`, `observability` | The concrete Postgres, gateway, S3 and Datadog code. |
+| Adapters | `store/postgres`, `ai/gateway`, `blob/s3`, `ingest/memq`, `observability` | The concrete Postgres, gateway, S3 and Datadog code. |
 | Composition root | `cmd/memd` | Wiring only: the one place concrete types meet. |
 
 Rules that keep the tiers honest:
@@ -80,7 +84,7 @@ Rules that keep the tiers honest:
 - **Services never import each other**; libraries never import services. A service affects another service's
   data by enqueueing that service's job with a `jobs.Enqueue*` helper inside its own transaction. Rules two
   services share live in `domain`.
-- **Interfaces exist only at I/O boundaries** (`store`, `graph`, `ai`, `blob`, `clock`, `jobs.Claimer`,
+- **Interfaces exist only at I/O boundaries** (`store`, `graph`, `ai`, `blob`, `ingest`, `clock`, `jobs.Claimer`,
   `grpcapi.ReadinessProbe`) and for polymorphism inside one package (recall arms, reflect's tools, retain's
   extraction modes, the mental-model synthesizers). Everything else is concrete and passed as a pointer.
 - Services, libraries and infrastructure never import adapters, `grpcapi`, `maintenance`, generated proto code,
@@ -101,9 +105,23 @@ Rules that keep the tiers honest:
 | `ai` | `LLM`, `Embedder`, `Reranker`; `Router` and `Tokenizer` are concrete | `ai/gateway` (one client implements all three) | See [Model gateway](#model-gateway). |
 | `blob` | `Store` (Put, Get, List, DeletePrefix), `Key`, `BankPrefix` | `blob/s3`, chosen by `MEMD_BLOB_PROVIDER` (`s3`, the only value today) | See [storage.md](storage.md#blob-storage). |
 | `clock` | `Clock`; `System` and `Manual` | — | Tests use `clock.Manual`. |
+| `ingest` | `Source` (Receive, Ack, Nack, DeadLetter), `Message` | `ingest/memq` (in memory, for tests); no broker adapter yet | See [Ingest boundary](#ingest-boundary). |
 
 Errors crossing a boundary are already domain error classes (`domain.ErrNotFound`, `ErrUnavailable`, ...), so
 callers test them with `errors.Is`.
+
+### Ingest boundary
+
+`internal/ingest` is the boundary to a message queue that will carry documents to retain. A `Source` is one consumer's
+subscription with at-least-once delivery: `Receive` hands out messages, and each ends in an `Ack`, a `Nack` (redelivery
+no sooner than a delay) or a `DeadLetter`. An unsettled message comes back, so consumers must be idempotent, and
+memd's retain is: a redelivered document is unchanged, joins the retain in flight, or is stale. Messages with the same
+key arrive in publish order. `internal/ingest/ingesttest` is the contract suite every adapter runs and
+`internal/ingest/memq` the in-memory source that tests it; `internal/ingest/doc.go` has the contract and the recipe for
+a Kafka, SQS, Pub/Sub or NATS adapter. The consumer that feeds these messages into retain is not built yet, so the
+diagram shows it dashed.
+
+![Queue ingestion: broker, ingest.Source, the consumer loop, the commit point and the settlements](diagrams/ingest-queue.svg)
 
 ### Graph boundary
 
@@ -171,6 +189,8 @@ Reads outside a transaction (`DB.Read()`) run each call as its own statement and
 transaction. Reads that need transaction-local settings (the vector search) open a short read-only transaction.
 
 ## Job queue
+
+![Job pipeline: enqueue, claim, run, settle, the status moves and the maintenance tick](diagrams/job-pipeline.svg)
 
 There is no broker. Jobs are rows of `operations`, claimed with `FOR UPDATE SKIP LOCKED`. The operation id is
 the job id, so status, progress, cancel, retry, overrides, usage and the owning bank all live on one row, and
