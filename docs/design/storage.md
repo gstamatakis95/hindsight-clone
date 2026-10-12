@@ -18,14 +18,19 @@ declares the blob boundary and `internal/blob/s3` implements it.
 
 ## Conventions
 
-- Every table has `tenant_id text NOT NULL` except `tenants`, whose `id` is the tenant. Banks have no foreign key
-  to `tenants`: a write to an unknown bank creates the bank with tenant defaults, and no tenant row is needed.
-- Client-chosen ids (bank, document, mental model) are `text` with composite keys `(tenant_id, bank_id, id)`
-  (banks: `(tenant_id, id)`). Server ids (units, chunks, entities, operations) are global `uuid` keys: BM25 needs
+- Every table has `tenant_id text NOT NULL` except `tenants`, whose `id` is the tenant, and every table but
+  `tenants` and `orgs` has `org_id text NOT NULL` right after it (a schema test checks it, so a new table can't
+  escape the org). Orgs and banks have no foreign key to `tenants`, so no tenant row is needed. Banks reference
+  `orgs (tenant_id, id) ON DELETE RESTRICT`: an org row can only go once none of its banks is left. Orgs are
+  created explicitly (CreateOrg), never by a write; a write to an unknown bank of an existing org creates the bank.
+- Client-chosen ids (org, bank, document, mental model) are `text` with composite keys `(tenant_id, org_id,
+  bank_id, id)` (banks: `(tenant_id, org_id, id)`; orgs: `(tenant_id, id)`). Server ids (units, chunks, entities, operations) are global `uuid` keys: BM25 needs
   one unique key column, which a composite key can't provide. Directive ids are server-generated UUIDs stored as
   text under the bank's composite key; a directive's name is unique per bank.
-- Bank-owned tables reference `banks (tenant_id, id) ON DELETE CASCADE`. Tables keyed by a uuid parent reference
-  that parent and carry `tenant_id, bank_id` denormalized. Every foreign key states its ON DELETE action.
+- Bank-owned tables reference `banks (tenant_id, org_id, id) ON DELETE CASCADE`. Tables keyed by a uuid parent
+  reference that parent and carry `tenant_id, org_id, bank_id` denormalized. Every index on bank-keyed rows starts
+  with `(tenant_id, org_id, bank_id)`, so org-wide scans use the same indexes as a prefix, and every statement that
+  names a bank names its org (a store test scans the queries and the dynamic builders). Every foreign key states its ON DELETE action.
 - Timestamps are `timestamptz`; a NULL timestamp means "has not happened" (`extracted_at`, `consolidated_at`,
   ...). Strings are `text NOT NULL DEFAULT ''` unless NULL carries meaning.
 - Tags are normalized `text[]` with GIN indexes. Normalization (`domain.NormalizeTags`): Unicode NFC, trim,
@@ -40,12 +45,13 @@ declares the blob boundary and `internal/blob/s3` implements it.
 
 ## Tables
 
-### Banks and tenants
+### Tenants, orgs and banks
 
 | Table | Key columns | Notes |
 |---|---|---|
 | `tenants` | `id`, `config` | The tenant config level. |
-| `banks` | `(tenant_id, id)`, `name`, `config`, `change_seq`, `deleting_at`, `last_memory_write_at` | `config` is the bank's own overrides. `change_seq` is the change sequence. `deleting_at` is the tombstone. `last_memory_write_at` is stamped by every `tx.Seq` (so config writes move it too); it is only displayed. |
+| `orgs` | `(tenant_id, id)`, `name`, `config`, `deleting_at` | `config` is the org config level. `deleting_at` is the org delete tombstone: bank creation in the org then fails with `ORG_DELETING`. |
+| `banks` | `(tenant_id, org_id, id)`, `name`, `config`, `change_seq`, `deleting_at`, `last_memory_write_at` | `config` is the bank's own overrides. `change_seq` is the change sequence. `deleting_at` is the tombstone. `last_memory_write_at` is stamped by every `tx.Seq` (so config writes move it too); it is only displayed. |
 
 ### Documents and chunks
 
@@ -116,12 +122,12 @@ calls a unit a *memory*.
 | Index | Purpose |
 |---|---|
 | `memory_units_embedding_hnsw` (HNSW, `vector_cosine_ops`, default m / ef_construction) | One shared index for all banks: the vector arm, semantic links, consolidation's related observations and dedup probe. |
-| `memory_units_bm25` (`USING bm25 (id, text, context, tenant_id::literal, bank_id::literal, fact_type::literal)`) | The text arm. The literal-tokenized filter columns push tenant, bank and type equality into the BM25 scan. Only one BM25 index per table is allowed. |
+| `memory_units_bm25` (`USING bm25 (id, text, context, tenant_id::literal, org_id::literal, bank_id::literal, fact_type::literal)`) | The text arm. The literal-tokenized filter columns push tenant, org, bank and type equality into the BM25 scan. Only one BM25 index per table is allowed. |
 | `entities_name_trgm` (GIN trigram on `lower(canonical_name)`) and `entities_name_idx` | Entity resolution candidates. |
-| `memory_units_unconsolidated_idx (tenant, bank, created_at) WHERE consolidated_at IS NULL AND consolidation_failed_at IS NULL AND fact_type <> 'observation'` | Consolidation planning and the tick's candidate banks. |
+| `memory_units_unconsolidated_idx (tenant, org, bank, created_at) WHERE consolidated_at IS NULL AND consolidation_failed_at IS NULL AND fact_type <> 'observation'` | Consolidation planning and the tick's candidate banks. |
 | `memory_units_seq_idx`, `memory_units_observation_scope_idx`, `memory_units_tags_gin`, `memory_units_document_idx`, `memory_units_created_at_idx`, `memory_units_occurred_start_idx` | Staleness and watermark reads, per-scope observation counts, tag filters, document replacement, listings, temporal reads. |
-| `operations_processing_serial_key_uniq (tenant, bank, serial_key) WHERE status = 'processing'` | At most one running job per serial key. |
-| `operations_active_serial_key_idx (tenant, bank, serial_key, kind) WHERE status IN ('pending','processing')` | The claim's NOT EXISTS (first three columns), the dedupe lookup (all four) and the queue metrics. |
+| `operations_processing_serial_key_uniq (tenant, org, bank, serial_key) WHERE status = 'processing'` | At most one running job per serial key. |
+| `operations_active_serial_key_idx (tenant, org, bank, serial_key, kind) WHERE status IN ('pending','processing')` | The claim's NOT EXISTS (first four columns), the dedupe lookup (all five) and the queue metrics. |
 | `operations_pending_run_at_idx`, `operations_processing_heartbeat_idx`, `operations_terminal_finished_idx`, `operations_parent_idx`, `operations_bank_created_idx` | Claim, reclaim, prune, batch settlement, listing. |
 | `mental_models_embedding_hnsw`, `mental_models_refresh_cron_idx` (partial), `mental_models_tags_gin` | Mental-model search, the cron sweep, tag filters. Mental models have no BM25 index. |
 | `lifecycle_events_seq_idx`, `lifecycle_events_at_idx` | Event polling and pruning. |
@@ -161,8 +167,10 @@ filters by bank, fact types, tag predicate and seq range, reads only live units,
   transport failure UNAVAILABLE. `MEMD_BLOB_PROVIDER` picks the adapter; `s3` (AWS S3 and any S3-compatible
   store) is the only one today, and `internal/blob/doc.go` lists the steps to add GCS or Azure. Every adapter
   runs the shared contract suite `internal/blob/blobtest`.
-- **Layout.** `blob.Key` builds `{tenant}/{bank}/docs/{document_id}/{content_hash}`, which holds a document's
-  original text; `blob.BankPrefix` is `{tenant}/{bank}/`. Because the key includes the content hash, every
+- **Layout.** `blob.Key` builds `{tenant}/{org}/{bank}/docs/{document_id}/{content_hash}`, which holds a
+  document's original text; `blob.BankPrefix` is `{tenant}/{org}/{bank}/` and `blob.OrgPrefix` is `{tenant}/{org}/`.
+  Blobs stored under an older layout are not migrated: before the first release, recreate the bucket with the
+  database. Because the key includes the content hash, every
   distinct content of a document is its own object, and a job always reads the exact content it was enqueued
   with.
 - **S3 adapter.** The client signs with static credentials only (no AWS default chain), uses path-style

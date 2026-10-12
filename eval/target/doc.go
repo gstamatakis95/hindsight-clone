@@ -8,7 +8,7 @@
 // memd requires.
 //
 //	conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
-//	tgt := target.NewMemd(conn, "eval")
+//	tgt := target.NewMemd(conn, "eval", "eval")
 //
 // Its methods:
 //

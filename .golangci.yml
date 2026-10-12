@@ -63,6 +63,8 @@ linters:
               desc: contracts sit below the services
             - pkg: "memd/internal/bank"
               desc: contracts sit below the services
+            - pkg: "memd/internal/org"
+              desc: contracts sit below the services
             - pkg: "memd/internal/operation"
               desc: contracts sit below the services
             - pkg: "memd/internal/grpcapi"
@@ -110,6 +112,8 @@ linters:
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/bank"
               desc: the graph boundary imports only domain
+            - pkg: "memd/internal/org"
+              desc: the graph boundary imports only domain
             - pkg: "memd/internal/operation"
               desc: the graph boundary imports only domain
             - pkg: "memd/internal/grpcapi"
@@ -148,6 +152,8 @@ linters:
               desc: adapters never import services
             - pkg: "memd/internal/bank"
               desc: adapters never import services
+            - pkg: "memd/internal/org"
+              desc: adapters never import services
             - pkg: "memd/internal/operation"
               desc: adapters never import services
             - pkg: "memd/internal/grpcapi"
@@ -178,6 +184,8 @@ linters:
             - pkg: "memd/internal/mentalmodel"
               desc: infrastructure sits below the services
             - pkg: "memd/internal/bank"
+              desc: infrastructure sits below the services
+            - pkg: "memd/internal/org"
               desc: infrastructure sits below the services
             - pkg: "memd/internal/configsvc"
               desc: infrastructure sits below the services
@@ -229,6 +237,8 @@ linters:
               desc: jobs sits below the services; they import it
             - pkg: "memd/internal/bank"
               desc: jobs sits below the services; they import it
+            - pkg: "memd/internal/org"
+              desc: jobs sits below the services; they import it
             - pkg: "memd/internal/operation"
               desc: jobs sits below the services; they import it
             - pkg: "memd/internal/grpcapi"
@@ -265,6 +275,8 @@ linters:
             - pkg: "memd/internal/mentalmodel"
               desc: libraries never import the services
             - pkg: "memd/internal/bank"
+              desc: libraries never import the services
+            - pkg: "memd/internal/org"
               desc: libraries never import the services
             - pkg: "memd/internal/configsvc"
               desc: libraries never import the services
@@ -315,7 +327,7 @@ linters:
               desc: the engine never names an arm; arms implement recall.Arm and are registered in cmd/memd/wire.go
         services-infra:
           files: ["**/internal/memory/**", "**/internal/document/**", "**/internal/observation/**",
-            "**/internal/mentalmodel/**", "**/internal/bank/**", "**/internal/configsvc/**",
+            "**/internal/mentalmodel/**", "**/internal/org/**", "**/internal/bank/**", "**/internal/configsvc/**",
             "**/internal/operation/**", "!$test"]   # tests use pgtest
           deny:
             - pkg: "memd/internal/store/postgres"
@@ -345,6 +357,8 @@ linters:
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/bank"
               desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/org"
+              desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/configsvc"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/operation"
@@ -363,6 +377,8 @@ linters:
             - pkg: "memd/internal/mentalmodel"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/org"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/configsvc"
               desc: services never import each other; enqueue the other service's job instead
@@ -383,6 +399,8 @@ linters:
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/bank"
               desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/org"
+              desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/configsvc"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/operation"
@@ -401,6 +419,8 @@ linters:
             - pkg: "memd/internal/observation"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/org"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/configsvc"
               desc: services never import each other; enqueue the other service's job instead
@@ -425,6 +445,29 @@ linters:
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/operation"
               desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/org"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/grpcapi"
+              desc: services don't know about gRPC
+            - pkg: "memd/internal/maintenance"
+              desc: the maintenance tick sits above the services
+        feature-org:
+          files: ["**/internal/org/**"]   # tests included
+          deny:
+            - pkg: "memd/internal/memory"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/document"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/observation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/mentalmodel"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/configsvc"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/operation"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/grpcapi"
               desc: services don't know about gRPC
             - pkg: "memd/internal/maintenance"
@@ -441,6 +484,8 @@ linters:
             - pkg: "memd/internal/mentalmodel"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/org"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/operation"
               desc: services never import each other; enqueue the other service's job instead
@@ -460,6 +505,8 @@ linters:
             - pkg: "memd/internal/mentalmodel"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/bank"
+              desc: services never import each other; enqueue the other service's job instead
+            - pkg: "memd/internal/org"
               desc: services never import each other; enqueue the other service's job instead
             - pkg: "memd/internal/configsvc"
               desc: services never import each other; enqueue the other service's job instead

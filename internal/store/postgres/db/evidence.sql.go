@@ -12,14 +12,15 @@ import (
 )
 
 const evidenceAdd = `-- name: EvidenceAdd :exec
-INSERT INTO observation_evidence (tenant_id, bank_id, observation_id, unit_id, quote)
-SELECT $1::text, $2::text, $3::uuid, x.unit_id, ($4::text[])[x.i]
-FROM unnest($5::uuid[]) WITH ORDINALITY AS x(unit_id, i)
+INSERT INTO observation_evidence (tenant_id, org_id, bank_id, observation_id, unit_id, quote)
+SELECT $1::text, $2::text, $3::text, $4::uuid, x.unit_id, ($5::text[])[x.i]
+FROM unnest($6::uuid[]) WITH ORDINALITY AS x(unit_id, i)
 ON CONFLICT (observation_id, unit_id) DO NOTHING
 `
 
 type EvidenceAddParams struct {
 	TenantID      string
+	OrgID         string
 	BankID        string
 	ObservationID uuid.UUID
 	Quotes        []string
@@ -30,6 +31,7 @@ type EvidenceAddParams struct {
 func (q *Queries) EvidenceAdd(ctx context.Context, arg EvidenceAddParams) error {
 	_, err := q.db.Exec(ctx, evidenceAdd,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ObservationID,
 		arg.Quotes,
@@ -41,14 +43,15 @@ func (q *Queries) EvidenceAdd(ctx context.Context, arg EvidenceAddParams) error 
 const evidenceCites = `-- name: EvidenceCites :one
 SELECT EXISTS (
     SELECT 1 FROM observation_evidence ev JOIN memory_units o ON o.id = ev.observation_id
-    WHERE ev.unit_id = $1 AND o.tenant_id = $2 AND o.bank_id = $3
-      AND o.fact_type = 'observation' AND o.scope_key = $4::text
+    WHERE ev.unit_id = $1 AND o.tenant_id = $2 AND o.org_id = $3 AND o.bank_id = $4
+      AND o.fact_type = 'observation' AND o.scope_key = $5::text
 )
 `
 
 type EvidenceCitesParams struct {
 	UnitID   uuid.UUID
 	TenantID string
+	OrgID    string
 	BankID   string
 	ScopeKey string
 }
@@ -58,6 +61,7 @@ func (q *Queries) EvidenceCites(ctx context.Context, arg EvidenceCitesParams) (b
 	row := q.db.QueryRow(ctx, evidenceCites,
 		arg.UnitID,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.ScopeKey,
 	)
@@ -68,20 +72,26 @@ func (q *Queries) EvidenceCites(ctx context.Context, arg EvidenceCitesParams) (b
 
 const evidenceCiting = `-- name: EvidenceCiting :many
 SELECT o.id FROM memory_units o
-WHERE o.tenant_id = $1 AND o.bank_id = $2 AND o.fact_type = 'observation'
-  AND EXISTS (SELECT 1 FROM observation_evidence ev WHERE ev.observation_id = o.id AND ev.unit_id = ANY($3::uuid[]))
+WHERE o.tenant_id = $1 AND o.org_id = $2 AND o.bank_id = $3 AND o.fact_type = 'observation'
+  AND EXISTS (SELECT 1 FROM observation_evidence ev WHERE ev.observation_id = o.id AND ev.unit_id = ANY($4::uuid[]))
 ORDER BY o.id FOR UPDATE
 `
 
 type EvidenceCitingParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // EvidenceCiting locks, in id order, the bank's observations citing any of the units and returns their ids.
 func (q *Queries) EvidenceCiting(ctx context.Context, arg EvidenceCitingParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, evidenceCiting, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, evidenceCiting,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -101,11 +111,12 @@ func (q *Queries) EvidenceCiting(ctx context.Context, arg EvidenceCitingParams) 
 }
 
 const evidenceObservationBank = `-- name: EvidenceObservationBank :one
-SELECT tenant_id, bank_id FROM memory_units WHERE id = $1 AND fact_type = 'observation'
+SELECT tenant_id, org_id, bank_id FROM memory_units WHERE id = $1 AND fact_type = 'observation'
 `
 
 type EvidenceObservationBankRow struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 }
 
@@ -113,7 +124,7 @@ type EvidenceObservationBankRow struct {
 func (q *Queries) EvidenceObservationBank(ctx context.Context, id uuid.UUID) (EvidenceObservationBankRow, error) {
 	row := q.db.QueryRow(ctx, evidenceObservationBank, id)
 	var i EvidenceObservationBankRow
-	err := row.Scan(&i.TenantID, &i.BankID)
+	err := row.Scan(&i.TenantID, &i.OrgID, &i.BankID)
 	return i, err
 }
 
@@ -151,17 +162,23 @@ func (q *Queries) EvidenceOtherSources(ctx context.Context, arg EvidenceOtherSou
 
 const evidenceResetSources = `-- name: EvidenceResetSources :exec
 UPDATE memory_units SET consolidated_at = NULL
-WHERE tenant_id = $1 AND bank_id = $2 AND id = ANY($3::uuid[])
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = ANY($4::uuid[])
 `
 
 type EvidenceResetSourcesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // EvidenceResetSources clears consolidated_at on the bank's units, so they are consolidated again.
 func (q *Queries) EvidenceResetSources(ctx context.Context, arg EvidenceResetSourcesParams) error {
-	_, err := q.db.Exec(ctx, evidenceResetSources, arg.TenantID, arg.BankID, arg.Ids)
+	_, err := q.db.Exec(ctx, evidenceResetSources,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	return err
 }

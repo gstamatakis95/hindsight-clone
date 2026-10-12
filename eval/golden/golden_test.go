@@ -71,7 +71,7 @@ func TestGoldenFixturesUnderTwoMinutes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = journal.Close() })
 	runner, err := harness.NewRunner(
-		harness.Deps{Target: target.NewMemd(conn, "golden"), Judge: judge.Contains{}, Journal: journal},
+		harness.Deps{Target: target.NewMemd(conn, "golden", "golden"), Judge: judge.Contains{}, Journal: journal},
 		harness.Config{Mode: harness.ModeRecall, BankPrefix: "golden-", Parallel: 4, PollInterval: 10 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)

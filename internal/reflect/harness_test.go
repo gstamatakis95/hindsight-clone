@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-var bank = domain.BankRef{Tenant: "t1", Bank: "b1"}
+var bank = domain.NewBankRef("t1", "org", "b1")
 
 // uid is the unit id of a readable fixture name (Postgres stores unit ids as uuid).
 func uid(name string) domain.UnitID { return pgtest.ID[domain.UnitID](name) }
@@ -54,6 +54,7 @@ type harness struct {
 func newHarness(t *testing.T, cfg domain.BankConfig, units ...domain.Unit) *harness {
 	t.Helper()
 	h := &harness{t: t, store: pgtest.NewStore(t), llm: fake.NewLLM(), clock: clock.NewManual(time.Time{})}
+	pgtest.CreateOrgs(t, h.store, domain.NewBankRef("t1", "org", ""))
 	h.emb = &mockai.Embedder{
 		EmbedQueryFunc: func(context.Context, string) ([]float32, error) { return sameVector, nil },
 	}

@@ -24,7 +24,8 @@ func inTx(t *testing.T, db store.DB, fn func(tx store.Tx) error) {
 // is ErrInvalidArgument naming page_size.
 func TestListEventsPageBounds(t *testing.T) {
 	db := pgtest.NewStore(t)
-	b := domain.BankRef{Tenant: "t", Bank: "events"}
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("t", "org", ""))
+	b := domain.NewBankRef("t", "org", "events")
 	total := domain.ListPage.Max + 50
 	for range total { // one seq per event, so the soft limit never extends a page over a seq group
 		inTx(t, db, func(tx store.Tx) error {
@@ -89,8 +90,9 @@ func status(t *testing.T, db store.DB, b domain.BankRef, id domain.OperationID) 
 // only for its delete_bank operation, which is NOT_FOUND once the bank is gone.
 func TestCancelAndRetryRules(t *testing.T) {
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("t", "org", ""))
 	ctx := t.Context()
-	b := domain.BankRef{Tenant: "t", Bank: "c"}
+	b := domain.NewBankRef("t", "org", "c")
 	inTx(t, db, func(tx store.Tx) error { _, err := tx.Banks().Ensure(ctx, b); return err })
 	s := New(Deps{DB: db})
 	del := enqueue(t, db, store.Job{Bank: b, Kind: domain.OperationKindDeleteBank, SerialKey: "bank"})

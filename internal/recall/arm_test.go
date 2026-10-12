@@ -97,7 +97,7 @@ func TestRecallArmSelection(t *testing.T) {
 // addOtherBank inserts u into a second bank of testBank's tenant.
 func (e *env) addOtherBank(t *testing.T, u domain.Unit) {
 	t.Helper()
-	other := domain.BankRef{Tenant: testBank.Tenant, Bank: "other"}
+	other := domain.NewBankRef(testBank.Tenant, testBank.Org, "other")
 	err := e.store.InTx(context.Background(), func(tx store.Tx) error {
 		ctx := context.Background()
 		if _, err := tx.Banks().Ensure(ctx, other); err != nil {

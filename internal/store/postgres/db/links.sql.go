@@ -13,18 +13,24 @@ import (
 )
 
 const linkClearDirty = `-- name: LinkClearDirty :exec
-DELETE FROM graph_dirty WHERE tenant_id = $1 AND bank_id = $2 AND unit_id = ANY($3::uuid[])
+DELETE FROM graph_dirty WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND unit_id = ANY($4::uuid[])
 `
 
 type LinkClearDirtyParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // LinkClearDirty removes units from a bank's graph_dirty.
 func (q *Queries) LinkClearDirty(ctx context.Context, arg LinkClearDirtyParams) error {
-	_, err := q.db.Exec(ctx, linkClearDirty, arg.TenantID, arg.BankID, arg.Ids)
+	_, err := q.db.Exec(ctx, linkClearDirty,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	return err
 }
 
@@ -68,21 +74,27 @@ func (q *Queries) LinkDeleteForUnit(ctx context.Context, arg LinkDeleteForUnitPa
 
 const linkDirty = `-- name: LinkDirty :many
 SELECT g.unit_id FROM graph_dirty g
-JOIN memory_units u ON u.id = g.unit_id AND u.tenant_id = g.tenant_id AND u.bank_id = g.bank_id
-WHERE g.tenant_id = $1 AND g.bank_id = $2
+JOIN memory_units u ON u.id = g.unit_id AND u.tenant_id = g.tenant_id AND u.org_id = g.org_id AND u.bank_id = g.bank_id
+WHERE g.tenant_id = $1 AND g.org_id = $2 AND g.bank_id = $3
 ORDER BY g.created_at, g.unit_id
-LIMIT $3
+LIMIT $4
 `
 
 type LinkDirtyParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // LinkDirty returns up to lim live units queued in a bank's graph_dirty, oldest first.
 func (q *Queries) LinkDirty(ctx context.Context, arg LinkDirtyParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, linkDirty, arg.TenantID, arg.BankID, arg.Lim)
+	rows, err := q.db.Query(ctx, linkDirty,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -102,13 +114,14 @@ func (q *Queries) LinkDirty(ctx context.Context, arg LinkDirtyParams) ([]uuid.UU
 }
 
 const linkInsert = `-- name: LinkInsert :exec
-INSERT INTO memory_links (tenant_id, bank_id, from_unit_id, to_unit_id, kind, weight, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, now()))
+INSERT INTO memory_links (tenant_id, org_id, bank_id, from_unit_id, to_unit_id, kind, weight, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::timestamptz, now()))
 ON CONFLICT (from_unit_id, to_unit_id, kind) DO UPDATE SET weight = EXCLUDED.weight
 `
 
 type LinkInsertParams struct {
 	TenantID   string
+	OrgID      string
 	BankID     string
 	FromUnitID uuid.UUID
 	ToUnitID   uuid.UUID
@@ -121,6 +134,7 @@ type LinkInsertParams struct {
 func (q *Queries) LinkInsert(ctx context.Context, arg LinkInsertParams) error {
 	_, err := q.db.Exec(ctx, linkInsert,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.FromUnitID,
 		arg.ToUnitID,

@@ -18,7 +18,7 @@ import (
 func TestListDocuments(t *testing.T) {
 	ctx := context.Background()
 	f := newFixture(t)
-	listed := domain.BankRef{Tenant: "acme", Bank: "listed"}
+	listed := domain.NewBankRef("acme", "org", "listed")
 	for i := 1; i <= 6; i++ {
 		tags := []string{"a"}
 		if i == 6 {

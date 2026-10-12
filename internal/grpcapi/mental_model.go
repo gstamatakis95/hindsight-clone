@@ -18,8 +18,8 @@ type MentalModelHandler struct {
 var _ pb.MentalModelServiceServer = (*MentalModelHandler)(nil)
 
 // modelRef resolves the bank and the required mental_model_id of a request.
-func modelRef(ctx context.Context, bankID, id string) (domain.BankRef, domain.MentalModelID, error) {
-	b, err := bankRef(ctx, bankID)
+func modelRef(ctx context.Context, r bankScoped, id string) (domain.BankRef, domain.MentalModelID, error) {
+	b, err := bankRef(ctx, r)
 	if err != nil {
 		return domain.BankRef{}, "", err
 	}
@@ -33,7 +33,7 @@ func modelRef(ctx context.Context, bankID, id string) (domain.BankRef, domain.Me
 func (h *MentalModelHandler) CreateMentalModel(
 	ctx context.Context, req *pb.CreateMentalModelRequest,
 ) (*pb.CreateMentalModelResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -62,7 +62,7 @@ func (h *MentalModelHandler) CreateMentalModel(
 func (h *MentalModelHandler) GetMentalModel(
 	ctx context.Context, req *pb.GetMentalModelRequest,
 ) (*pb.GetMentalModelResponse, error) {
-	b, id, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
+	b, id, err := modelRef(ctx, req, req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -82,7 +82,7 @@ func (h *MentalModelHandler) GetMentalModel(
 func (h *MentalModelHandler) ListMentalModels(
 	ctx context.Context, req *pb.ListMentalModelsRequest,
 ) (*pb.ListMentalModelsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -103,7 +103,7 @@ func (h *MentalModelHandler) ListMentalModels(
 func (h *MentalModelHandler) UpdateMentalModel(
 	ctx context.Context, req *pb.UpdateMentalModelRequest,
 ) (*pb.UpdateMentalModelResponse, error) {
-	b, id, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
+	b, id, err := modelRef(ctx, req, req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -122,7 +122,7 @@ func (h *MentalModelHandler) UpdateMentalModel(
 func (h *MentalModelHandler) RefreshMentalModel(
 	ctx context.Context, req *pb.RefreshMentalModelRequest,
 ) (*pb.RefreshMentalModelResponse, error) {
-	b, _, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
+	b, _, err := modelRef(ctx, req, req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -145,7 +145,7 @@ func (h *MentalModelHandler) RefreshMentalModel(
 func (h *MentalModelHandler) PreviewMentalModelRefresh(
 	ctx context.Context, req *pb.PreviewMentalModelRefreshRequest,
 ) (*pb.PreviewMentalModelRefreshResponse, error) {
-	b, id, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
+	b, id, err := modelRef(ctx, req, req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -165,7 +165,7 @@ func (h *MentalModelHandler) PreviewMentalModelRefresh(
 func (h *MentalModelHandler) ListMentalModelHistory(
 	ctx context.Context, req *pb.ListMentalModelHistoryRequest,
 ) (*pb.ListMentalModelHistoryResponse, error) {
-	b, _, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
+	b, _, err := modelRef(ctx, req, req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -185,7 +185,7 @@ func (h *MentalModelHandler) ListMentalModelHistory(
 func (h *MentalModelHandler) DeleteMentalModel(
 	ctx context.Context, req *pb.DeleteMentalModelRequest,
 ) (*pb.DeleteMentalModelResponse, error) {
-	b, id, err := modelRef(ctx, req.GetBankId(), req.GetMentalModelId())
+	b, id, err := modelRef(ctx, req, req.GetMentalModelId())
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -199,7 +199,7 @@ func (h *MentalModelHandler) DeleteMentalModel(
 func (h *MentalModelHandler) DeleteMentalModelFolder(
 	ctx context.Context, req *pb.DeleteMentalModelFolderRequest,
 ) (*pb.DeleteMentalModelFolderResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -217,7 +217,7 @@ func (h *MentalModelHandler) DeleteMentalModelFolder(
 func (h *MentalModelHandler) SearchMentalModels(
 	ctx context.Context, req *pb.SearchMentalModelsRequest,
 ) (*pb.SearchMentalModelsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}

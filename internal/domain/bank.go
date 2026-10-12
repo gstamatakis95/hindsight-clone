@@ -2,10 +2,31 @@ package domain
 
 import "time"
 
+// Org groups a tenant's banks. It carries the org config level (server < tenant < org < bank) and must exist
+// before anything is written under it.
+type Org struct {
+	// Ref is the org's tenant and id.
+	Ref OrgRef
+	// Name is a display name.
+	Name string
+	// Config is the org's own config level.
+	Config BankConfig
+	// DeletingAt is set once the org is tombstoned for deletion; reads under it are then not found and writes fail
+	// with ErrOrgDeleting.
+	DeletingAt *time.Time
+	// CreatedAt is the creation time.
+	CreatedAt time.Time
+	// UpdatedAt is the last update time.
+	UpdatedAt time.Time
+}
+
+// Deleting reports whether the org is tombstoned.
+func (o Org) Deleting() bool { return o.DeletingAt != nil }
+
 // Bank is one memory bank. Its Config holds only the bank's own overrides; the effective view comes
-// from merging server < tenant < bank.
+// from merging server < tenant < org < bank.
 type Bank struct {
-	// Ref is the bank's tenant and id.
+	// Ref is the bank's tenant, org and id.
 	Ref BankRef
 	// Name is a display name.
 	Name string

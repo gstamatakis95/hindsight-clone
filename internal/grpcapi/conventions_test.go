@@ -99,7 +99,7 @@ func TestTagFilterEverySite(t *testing.T) {
 func TestOperationShape(t *testing.T) {
 	at := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	op := domain.Operation{
-		ID: "op-1", Bank: domain.BankRef{Tenant: "t", Bank: "b"}, Kind: domain.OperationKindRefreshMentalModel,
+		ID: "op-1", Bank: domain.NewBankRef("t", "org", "b"), Kind: domain.OperationKindRefreshMentalModel,
 		Status: domain.OperationStatusCompleted, Result: json.RawMessage(`{ "strategy": "single_shot" }`),
 		CreatedAt: at, UpdatedAt: at,
 	}

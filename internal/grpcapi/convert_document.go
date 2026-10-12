@@ -33,7 +33,6 @@ func documentViewToProto(v document.View) *pb.Document {
 func listDocumentsFromProto(r *pb.ListDocumentsRequest) (document.ListRequest, error) {
 	var d decoder
 	out := document.ListRequest{
-		Bank:               domain.BankRef{Bank: r.GetBankId()},
 		DocumentIDContains: r.GetDocumentIdContains(),
 		Tags:               d.tagFilter(r.GetTags()),
 		Start:              d.tsPtr(r.GetStart()),

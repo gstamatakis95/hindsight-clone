@@ -6,6 +6,7 @@ import (
 	"memd/internal/blob"
 	"memd/internal/domain"
 	"memd/test/e2e/gatewayemu"
+	"memd/test/e2e/harness"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func (e *env) retainSync(t *testing.T) {
 	if !again.GetUnchanged() {
 		t.Fatalf("identical retain re-extracted: %+v", again)
 	}
-	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{
+	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{OrgId: e.c.Org, BankId: bank, Items: []*pb.RetainItem{
 		{Content: "Bob plays chess on Sundays.", DocumentId: "doc-bob"},
 	}})
 	if err != nil {
@@ -72,10 +73,12 @@ func (e *env) retainSync(t *testing.T) {
 // barrier drains, every child completes and the units are there.
 func (e *env) retainAsync(t *testing.T) {
 	const bank = "sc-retain-async"
-	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
-		{Content: aliceText, DocumentId: aliceDoc},
-		{Content: "Bob plays chess on Sundays. Bob lives in Porto.", DocumentId: "doc-bob"},
-	}})
+	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: e.c.Org, BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
+			{Content: aliceText, DocumentId: aliceDoc},
+			{Content: "Bob plays chess on Sundays. Bob lives in Porto.", DocumentId: "doc-bob"},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,22 +111,29 @@ func (e *env) consolidationRecallReflect(t *testing.T) {
 	if obs := e.memories(t, bank, "", pb.FactType_FACT_TYPE_OBSERVATION); len(obs) == 0 {
 		t.Fatal("no observations after consolidation")
 	}
-	stats, err := e.c.Banks.GetBankStats(e.ctx(t), &pb.GetBankStatsRequest{BankId: bank})
+	stats, err := e.c.Banks.GetBankStats(e.ctx(t), &pb.GetBankStatsRequest{OrgId: e.c.Org, BankId: bank})
 	if err != nil || stats.GetStats().GetUnconsolidatedMemories() != 0 {
 		t.Fatalf("stats after consolidation: %+v %v", stats.GetStats(), err)
 	}
 	if got := e.recall(t, bank, "Where does Alice live? Lisbon"); !anyContains(got, "Lisbon") {
 		t.Fatalf("recall missed Lisbon: %v", got)
 	}
-	resp, err := e.c.Memory.Reflect(e.ctx(t), &pb.ReflectRequest{BankId: bank, Query: "Where does Alice live?"})
+	resp, err := e.c.Memory.Reflect(e.ctx(t), &pb.ReflectRequest{
+		OrgId: e.c.Org, BankId: bank, Query: "Where does Alice live?",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(resp.GetText()) == "" || len(resp.GetBasedOn().GetMemories()) == 0 {
 		t.Fatalf("reflect: %q based on %d memories", resp.GetText(), len(resp.GetBasedOn().GetMemories()))
 	}
-	_, err = e.c.Memory.Recall(e.ctx(t), &pb.RecallRequest{BankId: "sc-never-written", Query: "x"})
+	_, err = e.c.Memory.Recall(e.ctx(t), &pb.RecallRequest{OrgId: e.c.Org, BankId: "sc-never-written", Query: "x"})
 	wantCode(t, "recall of an unknown bank", err, codes.NotFound)
+	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: "sc-no-such-org", BankId: bank,
+		Items: []*pb.RetainItem{{Content: "x"}},
+	})
+	wantCode(t, "retain under an org that was never created", err, codes.NotFound)
 }
 
 // mentalModels: a model's first build runs agentic; a manual single-shot refresh writes the next version.
@@ -132,7 +142,7 @@ func (e *env) mentalModels(t *testing.T) {
 	e.retain(t, bank, aliceDoc, aliceText)
 	e.idle(t, bank)
 	created, err := e.c.MentalModels.CreateMentalModel(e.ctx(t), &pb.CreateMentalModelRequest{
-		BankId: bank, Spec: &pb.MentalModelSpec{
+		OrgId: e.c.Org, BankId: bank, Spec: &pb.MentalModelSpec{
 			Id: "alice", Name: "Alice", SourceQuery: "What do we know about Alice?",
 			Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_AGENTIC,
 		},
@@ -146,7 +156,7 @@ func (e *env) mentalModels(t *testing.T) {
 		t.Fatalf("agentic build: version %d, content %q", first.GetVersion(), first.GetContentMd())
 	}
 	ref, err := e.c.MentalModels.RefreshMentalModel(e.ctx(t), &pb.RefreshMentalModelRequest{
-		BankId: bank, MentalModelId: "alice", ForceFull: true,
+		OrgId: e.c.Org, BankId: bank, MentalModelId: "alice", ForceFull: true,
 		Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,
 	})
 	if err != nil {
@@ -170,16 +180,18 @@ func (e *env) mentalModels(t *testing.T) {
 func (e *env) consolidationTriggersRefresh(t *testing.T) {
 	const bank = "sc-mm-after-consolidation"
 	debounce := int32(1)
-	_, err := e.c.Banks.CreateBank(e.ctx(t), &pb.CreateBankRequest{BankId: bank, Initial: &pb.CreateBankRequest_Config{
-		Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
-	}})
+	_, err := e.c.Banks.CreateBank(e.ctx(t), &pb.CreateBankRequest{
+		OrgId: e.c.Org, BankId: bank, Initial: &pb.CreateBankRequest_Config{
+			Config: &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.retain(t, bank, aliceDoc, aliceText)
 	e.idle(t, bank)
 	created, err := e.c.MentalModels.CreateMentalModel(e.ctx(t), &pb.CreateMentalModelRequest{
-		BankId: bank, Spec: &pb.MentalModelSpec{
+		OrgId: e.c.Org, BankId: bank, Spec: &pb.MentalModelSpec{
 			Id: "alice", Name: "Alice", SourceQuery: "What do we know about Alice?",
 			Strategy: pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,
 			Schedule: &pb.RefreshSchedule{When: &pb.RefreshSchedule_AfterConsolidation{AfterConsolidation: true}},
@@ -212,7 +224,8 @@ func (e *env) consolidationTriggersRefresh(t *testing.T) {
 func (e *env) refreshOps(t *testing.T, bank string, status pb.OperationStatus) []*pb.Operation {
 	t.Helper()
 	resp, err := e.c.Operations.ListOperations(e.ctx(t), &pb.ListOperationsRequest{
-		BankId: bank, Status: status, Kind: pb.OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL, PageSize: 100,
+		OrgId: e.c.Org, BankId: bank,
+		Status: status, Kind: pb.OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL, PageSize: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +236,9 @@ func (e *env) refreshOps(t *testing.T, bank string, status pb.OperationStatus) [
 // model reads a mental model at full detail.
 func (e *env) model(t *testing.T, bank, id string) *pb.MentalModel {
 	t.Helper()
-	resp, err := e.c.MentalModels.GetMentalModel(e.ctx(t), &pb.GetMentalModelRequest{BankId: bank, MentalModelId: id})
+	resp, err := e.c.MentalModels.GetMentalModel(e.ctx(t), &pb.GetMentalModelRequest{
+		OrgId: e.c.Org, BankId: bank, MentalModelId: id,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +262,7 @@ func (e *env) invalidateRestore(t *testing.T) {
 	}
 	seq := e.changeSeq(t, bank)
 	inv, err := e.c.Memory.InvalidateMemory(e.ctx(t), &pb.InvalidateMemoryRequest{
-		BankId: bank, MemoryId: target.GetId(), Reason: "wrong",
+		OrgId: e.c.Org, BankId: bank, MemoryId: target.GetId(), Reason: "wrong",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -261,7 +276,7 @@ func (e *env) invalidateRestore(t *testing.T) {
 	seq = e.wantSeqAfter(t, bank, seq, "invalidate")
 	e.idle(t, bank)
 	res, err := e.c.Memory.RestoreMemory(e.ctx(t), &pb.RestoreMemoryRequest{
-		BankId: bank, MemoryId: target.GetId(), Reason: "right after all",
+		OrgId: e.c.Org, BankId: bank, MemoryId: target.GetId(), Reason: "right after all",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -284,7 +299,7 @@ func (e *env) editFact(t *testing.T, bank, id string, seq int64) {
 	t.Helper()
 	text := "Alice moved to Porto in 2023."
 	ed, err := e.c.Memory.UpdateMemory(e.ctx(t), &pb.UpdateMemoryRequest{
-		BankId: bank, MemoryId: id, Memory: &pb.MemoryEdit{Text: text}, Reason: "she moved again",
+		OrgId: e.c.Org, BankId: bank, MemoryId: id, Memory: &pb.MemoryEdit{Text: text}, Reason: "she moved again",
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"text"}},
 	})
 	if err != nil {
@@ -304,7 +319,7 @@ func (e *env) editFact(t *testing.T, bank, id string, seq int64) {
 // changeSeq reads the bank's change_seq.
 func (e *env) changeSeq(t *testing.T, bank string) int64 {
 	t.Helper()
-	resp, err := e.c.Banks.GetBankStats(e.ctx(t), &pb.GetBankStatsRequest{BankId: bank})
+	resp, err := e.c.Banks.GetBankStats(e.ctx(t), &pb.GetBankStatsRequest{OrgId: e.c.Org, BankId: bank})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +342,7 @@ func (e *env) retagReprocess(t *testing.T) {
 	e.retain(t, bank, aliceDoc, aliceText)
 	e.idle(t, bank)
 	up, err := e.c.Documents.RetagDocument(e.ctx(t), &pb.RetagDocumentRequest{
-		BankId: bank, DocumentId: aliceDoc, Tags: &pb.TagSet{Tags: []string{"people"}},
+		OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc, Tags: &pb.TagSet{Tags: []string{"people"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -340,7 +355,9 @@ func (e *env) retagReprocess(t *testing.T) {
 	}
 	e.idle(t, bank)
 	before := e.facts(t, bank, aliceDoc)
-	rp, err := e.c.Documents.ReprocessDocument(e.ctx(t), &pb.ReprocessDocumentRequest{BankId: bank, DocumentId: aliceDoc})
+	rp, err := e.c.Documents.ReprocessDocument(e.ctx(t), &pb.ReprocessDocumentRequest{
+		OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +368,7 @@ func (e *env) retagReprocess(t *testing.T) {
 		t.Fatalf("reprocess: %d facts before, %d after", len(before), len(after))
 	}
 	doc, err := e.c.Documents.GetDocument(e.ctx(t), &pb.GetDocumentRequest{
-		BankId: bank, DocumentId: aliceDoc, IncludeText: true,
+		OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc, IncludeText: true,
 	})
 	if err != nil || doc.GetDocument().GetExtractedAt() == nil || doc.GetDocument().GetOriginalText() != aliceText {
 		t.Fatalf("document after reprocess: %+v %v", doc.GetDocument(), err)
@@ -367,13 +384,13 @@ func (e *env) cancelRetry(t *testing.T) {
 	id := e.retainAsync1(t, bank, aliceDoc, aliceText)
 	e.waitOp(t, bank, id, pb.OperationStatus_OPERATION_STATUS_PROCESSING)
 	if _, err := e.c.Operations.CancelOperation(e.ctx(t), &pb.CancelOperationRequest{
-		BankId: bank, OperationId: id,
+		OrgId: e.c.Org, BankId: bank, OperationId: id,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	e.waitOp(t, bank, id, pb.OperationStatus_OPERATION_STATUS_CANCELLED)
 	if _, err := e.c.Operations.RetryOperation(e.ctx(t), &pb.RetryOperationRequest{
-		BankId: bank, OperationId: id,
+		OrgId: e.c.Org, BankId: bank, OperationId: id,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -386,9 +403,11 @@ func (e *env) cancelRetry(t *testing.T) {
 // retainAsync1 retains one document asynchronously and returns its operation id.
 func (e *env) retainAsync1(t *testing.T, bank, doc, content string) string {
 	t.Helper()
-	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
-		{Content: content, DocumentId: doc},
-	}})
+	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: e.c.Org, BankId: bank, RunAsync: true, Items: []*pb.RetainItem{
+			{Content: content, DocumentId: doc},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,30 +446,34 @@ func (e *env) bankDelete(t *testing.T) {
 	const bank = "sc-delete"
 	e.retain(t, bank, aliceDoc, aliceText)
 	e.idle(t, bank)
-	prefix := blob.BankPrefix(domain.BankRef{Tenant: e2eTenant, Bank: bank})
+	prefix := blob.BankPrefix(domain.NewBankRef(e2eTenant, harness.Org, bank))
 	if keys := e.blobKeys(t, prefix); len(keys) == 0 {
 		t.Fatalf("no blob under %q after a retain", prefix)
 	}
 	if err := e.worker.Stop(); err != nil {
 		t.Fatal(err)
 	}
-	del, err := e.c.Banks.DeleteBank(e.ctx(t), &pb.DeleteBankRequest{BankId: bank})
+	del, err := e.c.Banks.DeleteBank(e.ctx(t), &pb.DeleteBankRequest{OrgId: e.c.Org, BankId: bank})
 	if err != nil {
 		t.Fatal(err)
 	}
 	opID := del.GetOperation().GetId()
-	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{{Content: "x"}}})
+	_, err = e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{
+		OrgId: e.c.Org, BankId: bank, Items: []*pb.RetainItem{{Content: "x"}},
+	})
 	wantCode(t, "write to a deleting bank", err, codes.FailedPrecondition)
-	_, err = e.c.Banks.GetBank(e.ctx(t), &pb.GetBankRequest{BankId: bank})
+	_, err = e.c.Banks.GetBank(e.ctx(t), &pb.GetBankRequest{OrgId: e.c.Org, BankId: bank})
 	wantCode(t, "GetBank of a deleting bank", err, codes.NotFound)
-	op, err := e.c.Operations.GetOperation(e.ctx(t), &pb.GetOperationRequest{BankId: bank, OperationId: opID})
+	op, err := e.c.Operations.GetOperation(e.ctx(t), &pb.GetOperationRequest{
+		OrgId: e.c.Org, BankId: bank, OperationId: opID,
+	})
 	if err != nil || op.GetOperation().GetStatus() != pb.OperationStatus_OPERATION_STATUS_PENDING {
 		t.Fatalf("delete_bank operation while the worker is stopped: %v %v", op, err)
 	}
 	e.worker.Restart()
 	ctx := e.ctx(t)
 	for {
-		_, err := e.c.Operations.GetOperation(ctx, &pb.GetOperationRequest{BankId: bank, OperationId: opID})
+		_, err := e.c.Operations.GetOperation(ctx, &pb.GetOperationRequest{OrgId: e.c.Org, BankId: bank, OperationId: opID})
 		if codeOf(err) == codes.NotFound {
 			break
 		}
@@ -466,7 +489,9 @@ func (e *env) bankDelete(t *testing.T) {
 	if got := e.facts(t, bank, aliceDoc); len(got) != 0 {
 		t.Fatalf("recreated bank still has %d of the deleted bank's facts", len(got))
 	}
-	_, err = e.c.Documents.GetDocument(e.ctx(t), &pb.GetDocumentRequest{BankId: bank, DocumentId: aliceDoc})
+	_, err = e.c.Documents.GetDocument(e.ctx(t), &pb.GetDocumentRequest{
+		OrgId: e.c.Org, BankId: bank, DocumentId: aliceDoc,
+	})
 	wantCode(t, "deleted document", err, codes.NotFound)
 	e.idle(t, bank)
 }

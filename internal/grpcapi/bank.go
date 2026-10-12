@@ -19,7 +19,7 @@ var _ pb.BankServiceServer = (*BankHandler)(nil)
 // CreateBank creates a bank with its own config overrides, or from a template; the config and the template's
 // mental-model overrides must pass config.Validate.
 func (h *BankHandler) CreateBank(ctx context.Context, req *pb.CreateBankRequest) (*pb.CreateBankResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -50,7 +50,7 @@ func (h *BankHandler) CreateBank(ctx context.Context, req *pb.CreateBankRequest)
 
 // GetBank returns a live bank.
 func (h *BankHandler) GetBank(ctx context.Context, req *pb.GetBankRequest) (*pb.GetBankResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -61,14 +61,14 @@ func (h *BankHandler) GetBank(ctx context.Context, req *pb.GetBankRequest) (*pb.
 	return &pb.GetBankResponse{Bank: bankToProto(out)}, nil
 }
 
-// ListBanks pages the calling tenant's live banks in id order.
+// ListBanks pages an org's live banks in id order.
 func (h *BankHandler) ListBanks(ctx context.Context, req *pb.ListBanksRequest) (*pb.ListBanksResponse, error) {
-	t, err := tenant(ctx)
+	o, err := orgRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
 	out, err := h.Banks.ListBanks(ctx, bank.ListBanksRequest{
-		Tenant: t, IDPrefix: req.GetIdPrefix(), PageSize: int(req.GetPageSize()), PageToken: req.GetPageToken(),
+		Org: o, IDPrefix: req.GetIdPrefix(), PageSize: int(req.GetPageSize()), PageToken: req.GetPageToken(),
 	})
 	if err != nil {
 		return nil, toStatus(err)
@@ -82,7 +82,7 @@ func (h *BankHandler) ListBanks(ctx context.Context, req *pb.ListBanksRequest) (
 
 // GetBankStats returns the bank's counts.
 func (h *BankHandler) GetBankStats(ctx context.Context, req *pb.GetBankStatsRequest) (*pb.GetBankStatsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -95,7 +95,7 @@ func (h *BankHandler) GetBankStats(ctx context.Context, req *pb.GetBankStatsRequ
 
 // ListTags pages through the bank's tags with counts.
 func (h *BankHandler) ListTags(ctx context.Context, req *pb.ListTagsRequest) (*pb.ListTagsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -113,7 +113,7 @@ func (h *BankHandler) ListTags(ctx context.Context, req *pb.ListTagsRequest) (*p
 
 // DeleteBank tombstones the bank and returns the delete_bank operation.
 func (h *BankHandler) DeleteBank(ctx context.Context, req *pb.DeleteBankRequest) (*pb.DeleteBankResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -128,7 +128,7 @@ func (h *BankHandler) DeleteBank(ctx context.Context, req *pb.DeleteBankRequest)
 func (h *BankHandler) ExportBankTemplate(
 	ctx context.Context, req *pb.ExportBankTemplateRequest,
 ) (*pb.ExportBankTemplateResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}

@@ -178,9 +178,9 @@ func tenantUnit(b domain.BankRef, text string, doc domain.DocumentID) domain.Uni
 	return u
 }
 
-// testTenantIsolation: the same bank id under another tenant shares no units, documents, events or seq.
-func testTenantIsolation(t *testing.T, s store.DB) {
-	other := bankOtherTenant
+// testTenantIsolation: the same bank id under another tenant, or another org, shares no units, documents, events
+// or seq.
+func testTenantIsolation(t *testing.T, s store.DB, other domain.BankRef) {
 	ensureBanks(t, s, bankA, other)
 	upsertDocs(t, s, bankA, "doc-1", "doc-only-a")
 	upsertDocs(t, s, other, "doc-1")
@@ -194,34 +194,33 @@ func testTenantIsolation(t *testing.T, s store.DB) {
 	appendEvents(t, s, other, "event-other")
 
 	if got := getUnits(t, s, other, mine.ID, mine2.ID); len(got) != 0 {
-		t.Errorf("GetUnits(other tenant, tenant-1 ids) = %v, want none", unitIDs(got))
+		t.Errorf("GetUnits(other bank, tenant-1 ids) = %v, want none", unitIDs(got))
 	}
-	wantSeq(t, "GetUnits(other tenant)", unitIDs(getUnits(t, s, other, theirs.ID, mine.ID)), []domain.UnitID{theirs.ID})
-	assertTenantSearches(t, s, theirs.ID, mine.ID)
+	wantSeq(t, "GetUnits(other bank)", unitIDs(getUnits(t, s, other, theirs.ID, mine.ID)), []domain.UnitID{theirs.ID})
+	assertTenantSearches(t, s, other, theirs.ID, mine.ID)
 	_, err := getDocument(t, s, other, "doc-only-a")
-	wantErrIs(t, "Documents().Get(other tenant, tenant-1 document)", err, domain.ErrNotFound)
+	wantErrIs(t, "Documents().Get(other bank, tenant-1 document)", err, domain.ErrNotFound)
 	d, err := getDocument(t, s, other, "doc-1")
 	if err != nil || d.BlobKey != blob.Key(other, "doc-1", "h0") {
 		t.Errorf("Documents().Get(other tenant, doc-1) = %q, %v; want its own blob key", d.BlobKey, err)
 	}
-	wantSeq(t, "Events().List(other tenant)", eventSubjects(listEvents(t, s, other, 0, 10)), []string{"event-other"})
-	wantSeq(t, "Unconsolidated(other tenant)", unitIDs(unconsolidated(t, s, other, nil, 10)), []domain.UnitID{theirs.ID})
+	wantSeq(t, "Events().List(other bank)", eventSubjects(listEvents(t, s, other, 0, 10)), []string{"event-other"})
+	wantSeq(t, "Unconsolidated(other bank)", unitIDs(unconsolidated(t, s, other, nil, 10)), []domain.UnitID{theirs.ID})
 	if a, o := bankSeq(t, s, bankA), bankSeq(t, s, other); a != 3 || o != 2 {
 		t.Errorf("BankSeq tenant-1, other tenant = %d, %d; want 3, 2", a, o)
 	}
 }
 
-// assertTenantSearches checks that every arm of the other tenant's bank returns only theirs, never mine.
-func assertTenantSearches(t *testing.T, s store.DB, theirs, mine domain.UnitID) {
+// assertTenantSearches checks that every arm of the other bank returns only theirs, never mine.
+func assertTenantSearches(t *testing.T, s store.DB, other domain.BankRef, theirs, mine domain.UnitID) {
 	t.Helper()
-	other := bankOtherTenant
 	want := []domain.UnitID{theirs}
-	wantSeq(t, "SearchVector(other tenant)",
+	wantSeq(t, "SearchVector(other bank)",
 		hitIDs(searchVector(t, s, store.VectorQuery{Bank: other, Embedding: angleVec(0), Limit: 10})), want)
-	wantSeq(t, "SearchText(other tenant)",
+	wantSeq(t, "SearchText(other bank)",
 		hitIDs(searchText(t, s, store.TextQuery{Bank: other, Text: "zebra", Limit: 10})), want)
-	wantSeq(t, "SearchTemporal(other tenant)",
+	wantSeq(t, "SearchTemporal(other bank)",
 		hitIDs(searchTemporal(t, s, store.TemporalQuery{Bank: other, Window: armWindow, Limit: 10})), want)
 	q := graph.Query{Bank: other, Seeds: []domain.UnitID{mine}, MaxHops: 2, Limit: 10}
-	wantSeq(t, "ExpandGraph(other tenant, tenant-1 seed)", hitIDs(expandGraph(t, s, q)), nil)
+	wantSeq(t, "ExpandGraph(other bank, tenant-1 seed)", hitIDs(expandGraph(t, s, q)), nil)
 }

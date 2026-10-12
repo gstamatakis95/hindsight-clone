@@ -14,6 +14,7 @@ import (
 func operationToProto(o domain.Operation) *pb.Operation {
 	return &pb.Operation{
 		Id:                 string(o.ID),
+		OrgId:              o.Bank.Org,
 		BankId:             o.Bank.Bank,
 		Kind:               toEnum[pb.OperationKind](o.Kind),
 		Status:             toEnum[pb.OperationStatus](o.Status),
@@ -89,6 +90,7 @@ func eventToProto(e domain.LifecycleEvent) *pb.LifecycleEvent {
 	return &pb.LifecycleEvent{
 		Seq:         e.Seq,
 		Type:        toEnum[pb.EventType](e.Type),
+		OrgId:       e.Bank.Org,
 		BankId:      e.Bank.Bank,
 		CreatedAt:   tsToProto(e.CreatedAt),
 		OperationId: string(e.OperationID),

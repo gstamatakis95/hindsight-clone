@@ -53,6 +53,7 @@ func traceJob(ctx context.Context, j store.Job) (context.Context, func(string, e
 		tracer.Tag(ext.SpanKind, ext.SpanKindInternal),
 		tracer.Tag(TagOperationID, string(j.ID)),
 		tracer.Tag(TagTenant, j.Bank.Tenant),
+		tracer.Tag(TagOrg, j.Bank.Org),
 		tracer.Tag(TagBank, j.Bank.Bank),
 		tracer.Tag(TagAttempt, j.Attempt),
 	)

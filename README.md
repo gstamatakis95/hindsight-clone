@@ -80,16 +80,20 @@ every service shares, then the seven services, then each service's messages. The
 - A refresh that writes nothing (`PreviewMentalModelRefresh`), version and failure history
   (`ListMentalModelHistory`), and search over pages (`SearchMentalModels`).
 
-**Banks and tenants** ([design](docs/design/curation-and-operations.md#banks))
+**Tenants, orgs and banks** ([design](docs/design/curation-and-operations.md#orgs))
 - Multi-tenant: the tenant comes from the `x-tenant-id` header and every row is tenant-scoped.
+- Orgs group a tenant's banks (`CreateOrg`, `GetOrg`, `ListOrgs`). Every bank belongs to one org, bank ids are
+  unique within it, and every bank-scoped request names `org_id` and `bank_id`. An org must exist before anything
+  is written under it: a write under an unknown org is `NOT_FOUND` (`ORG_NOT_FOUND`), never a new org.
 - Create a bank with initial config or from a template (`CreateBank`), export one as a template
   (`ExportBankTemplate`), get and list banks (`GetBank`, `ListBanks`), stats and tag counts (`GetBankStats`,
   `ListTags`), and delete a bank with everything it holds, blobs included (`DeleteBank`).
 
 **Configuration** ([design](docs/design/configuration.md))
-- One config shape (`BankConfig`) at every level: server < tenant < bank < strategy < request < item.
-- Tenant and bank levels with views of the own and effective config (`GetTenantConfig`, `UpdateTenantConfig`,
-  `ResetTenantConfig`, `GetBankConfig`, `UpdateBankConfig`, `ResetBankConfig`).
+- One config shape (`BankConfig`) at every level: server < tenant < org < bank < strategy < request < item.
+- Tenant, org and bank levels with views of the own and effective config (`GetTenantConfig`,
+  `UpdateTenantConfig`, `ResetTenantConfig`, `GetOrgConfig`, `UpdateOrgConfig`, `ResetOrgConfig`, `GetBankConfig`,
+  `UpdateBankConfig`, `ResetBankConfig`).
 - A model per step: `models.default` plus per-slot bindings at any level, and per-request overrides messages that
   state exactly what each call may change.
 - Directives (`CreateDirective`, `UpdateDirective`, `ListDirectives`, `DeleteDirective`) and the exact prompt an
@@ -133,13 +137,16 @@ export MEMD_GATEWAY_URL=http://127.0.0.1:4000/v1 \
 make run       # memd all (api and worker in one process) on :50051; MEMD_DSN comes from the Makefile
 ```
 
-Then, from another terminal:
+Then, from another terminal, create an org (banks live in orgs, and a write never creates one), then write to a
+bank of it, which creates the bank:
 
 ```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","name":"Acme support"}' \
+  localhost:50051 memory.v1.OrgService/CreateOrg
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","items":[{"content":"Alice moved to Paris in May. Alice works as a nurse."}]}' \
+  -d '{"org_id":"o1","bank_id":"b1","items":[{"content":"Alice moved to Paris in May. Alice works as a nurse."}]}' \
   localhost:50051 memory.v1.MemoryService/Retain
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","query":"Where does Alice live?"}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","query":"Where does Alice live?"}' \
   localhost:50051 memory.v1.MemoryService/Recall
 ```
 
@@ -176,25 +183,25 @@ proto files. The examples below assume the quick-start server; `<id>` stands for
 **MemoryService**: retain, recall, reflect, and browse and curate memories.
 
 ```sh
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","query":"Summarize what we know about Alice"}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","query":"Summarize what we know about Alice"}' \
   localhost:50051 memory.v1.MemoryService/Reflect
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","memory_id":"<id>","memory":{"text":"Alice moved to Lyon in May."},"update_mask":{"paths":["text"]}}' \
+  -d '{"org_id":"o1","bank_id":"b1","memory_id":"<id>","memory":{"text":"Alice moved to Lyon in May."},"update_mask":{"paths":["text"]}}' \
   localhost:50051 memory.v1.MemoryService/UpdateMemory
 ```
 
 **DocumentService**: list, read, retag and reprocess retained documents.
 
 ```sh
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","document_id":"<id>","tags":{"tags":["people"]}}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","document_id":"<id>","tags":{"tags":["people"]}}' \
   localhost:50051 memory.v1.DocumentService/RetagDocument
 ```
 
 **ObservationService**: run consolidation and inspect or clear observations.
 
 ```sh
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.ObservationService/Consolidate
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","scopes":{"tag_sets":[{"tags":["people"]}]}}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1"}' localhost:50051 memory.v1.ObservationService/Consolidate
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","scopes":{"tag_sets":[{"tags":["people"]}]}}' \
   localhost:50051 memory.v1.ObservationService/ClearObservations
 ```
 
@@ -202,40 +209,50 @@ grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","scopes":{"tag_set
 
 ```sh
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","spec":{"id":"alice","name":"Alice","source_query":"Who is Alice?","schedule":{"after_consolidation":true}}}' \
+  -d '{"org_id":"o1","bank_id":"b1","spec":{"id":"alice","name":"Alice","source_query":"Who is Alice?","schedule":{"after_consolidation":true}}}' \
   localhost:50051 memory.v1.MentalModelService/CreateMentalModel
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","mental_model_id":"alice"}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","mental_model_id":"alice"}' \
   localhost:50051 memory.v1.MentalModelService/GetMentalModel
+```
+
+**OrgService**: the tenant's orgs. DeleteOrg is not available in this version (`UNIMPLEMENTED`).
+
+```sh
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"page_size":50}' localhost:50051 memory.v1.OrgService/ListOrgs
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1"}' localhost:50051 memory.v1.OrgService/GetOrg
 ```
 
 **BankService**: bank lifecycle, stats, tags and templates.
 
 ```sh
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"page_size":50}' localhost:50051 memory.v1.BankService/ListBanks
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.BankService/GetBankStats
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","page_size":50}' \
+  localhost:50051 memory.v1.BankService/ListBanks
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1"}' localhost:50051 memory.v1.BankService/GetBankStats
 ```
 
-**ConfigService**: tenant and bank config, directives and the prompt preview.
+**ConfigService**: tenant, org and bank config, directives and the prompt preview.
 
 ```sh
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1"}' localhost:50051 memory.v1.ConfigService/GetBankConfig
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1"}' localhost:50051 memory.v1.ConfigService/GetBankConfig
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","directive":{"name":"tone","rules":["Answer formally."],"active":true}}' \
+  -d '{"org_id":"o1","bank_id":"b1","directive":{"name":"tone","rules":["Answer formally."],"active":true}}' \
   localhost:50051 memory.v1.ConfigService/CreateDirective
 ```
 
 **OperationService**: background operations and the event feed.
 
 ```sh
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","page_size":20}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","page_size":20}' \
   localhost:50051 memory.v1.OperationService/ListOperations
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","after_seq":0,"page_size":50}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","after_seq":0,"page_size":50}' \
   localhost:50051 memory.v1.OperationService/ListEvents
 ```
 
 Conventions, stated once in the proto header:
 
-- **Banks.** A write to an unknown bank creates it with tenant defaults; a read of an unknown bank is `NOT_FOUND`.
+- **Orgs and banks.** Every bank-scoped request names `org_id` and `bank_id`. An org must exist (`CreateOrg`): any
+  request under an unknown org is `NOT_FOUND` (`ORG_NOT_FOUND`). A write to an unknown bank of an existing org
+  creates it; a read of an unknown bank is `NOT_FOUND`.
   DeleteBank tombstones the bank at once (reads `NOT_FOUND`, writes `FAILED_PRECONDITION`) and deletes everything in
   the background; poll `GetOperation` with the returned operation until it is `NOT_FOUND`.
 - **Async work.** An RPC that enqueues work returns the `Operation` itself (`operation`, `operations`,
@@ -266,18 +283,20 @@ memd has three kinds of settings ([design](docs/design/configuration.md)):
   setting. Its `defaults:` block is the server level of the config hierarchy, written like the API's `BankConfig`;
   the `gateway`, `worker`, `retention`, `api` and `observability` sections hold operator settings.
   [memd.example.yaml](memd.example.yaml) documents every key; unknown keys fail startup.
-- **Per-bank and per-request config** through the API: ConfigService sets the tenant and bank levels, and each RPC
+- **Per-org, per-bank and per-request config** through the API: ConfigService sets the tenant, org and bank
+  levels, and each RPC
   that does work takes its own overrides message.
 
-One `BankConfig` shape is merged server < tenant < bank < consolidation strategy < request (< item for retain). It is
+One `BankConfig` shape is merged server < tenant < org < bank < consolidation strategy < request (< item for
+retain). It is
 grouped by phase: `retain`, `observations`, `recall`, `reflect`, `mental_models` and `models`. Scalars: set replaces
 unset; groups merge field by field; a model binding is used whole; lists replace.
 
 ```sh
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","config":{"observations":{"dedup_threshold":0.95}},"update_mask":{"paths":["observations.dedup_threshold"]}}' \
+  -d '{"org_id":"o1","bank_id":"b1","config":{"observations":{"dedup_threshold":0.95}},"update_mask":{"paths":["observations.dedup_threshold"]}}' \
   localhost:50051 memory.v1.ConfigService/UpdateBankConfig
-grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"bank_id":"b1","reset_mask":{"paths":["observations"]}}' \
+grpcurl -plaintext -H 'x-tenant-id: acme' -d '{"org_id":"o1","bank_id":"b1","reset_mask":{"paths":["observations"]}}' \
   localhost:50051 memory.v1.ConfigService/ResetBankConfig
 ```
 
@@ -305,10 +324,10 @@ Swap every chat step of one bank, then one step for one call:
 
 ```sh
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","config":{"models":{"default":{"model":"claude-sonnet"}}},"update_mask":{"paths":["models.default"]}}' \
+  -d '{"org_id":"o1","bank_id":"b1","config":{"models":{"default":{"model":"claude-sonnet"}}},"update_mask":{"paths":["models.default"]}}' \
   localhost:50051 memory.v1.ConfigService/UpdateBankConfig
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","query":"Where does Alice live?","overrides":{"reflect_model":{"model":"gpt-4o","temperature":0}}}' \
+  -d '{"org_id":"o1","bank_id":"b1","query":"Where does Alice live?","overrides":{"reflect_model":{"model":"gpt-4o","temperature":0}}}' \
   localhost:50051 memory.v1.MemoryService/Reflect
 ```
 
@@ -336,7 +355,7 @@ later.
 ```sh
 grpcurl -plaintext -H 'x-tenant-id: acme' -d '{}' localhost:50051 memory.v1.MemoryService/ListRecallArms
 grpcurl -plaintext -H 'x-tenant-id: acme' \
-  -d '{"bank_id":"b1","query":"Who does Alice work with?","arms":["graph","vector"],"trace":true}' \
+  -d '{"org_id":"o1","bank_id":"b1","query":"Who does Alice work with?","arms":["graph","vector"],"trace":true}' \
   localhost:50051 memory.v1.MemoryService/Recall
 ```
 
@@ -373,7 +392,8 @@ are fire-and-forget UDP datagrams. If a client can't start, memd logs it and run
 
 ### Traces
 
-- **gRPC:** one `grpc.server` span per RPC, with resource = the full method, tagged `memd.tenant` and `memd.bank`.
+- **gRPC:** one `grpc.server` span per RPC, with resource = the full method, tagged `memd.tenant`, `memd.org` and
+  `memd.bank`.
 - **Worker jobs:** one `memd.job` span per run, with resource = the kind, carrying the operation id, attempt and
   outcome.
 - **Maintenance:** one `memd.maintenance.tick` span per tick.
@@ -524,7 +544,8 @@ handlers and maintenance sweeps)
 | `internal/observation` | ObservationService and consolidation: the `consolidate` job (scopes, decide, dedup, apply, stamp), clears, the strategy preview and the consolidation reconcile sweep. |
 | `internal/mentalmodel` | MentalModelService: the refresh pipeline (agentic and single-shot, full and delta), staleness, scheduling, the `refresh_mental_model` job, and the cron and failed-refresh sweeps. |
 | `internal/bank` | BankService: create (plain or from a template), get, list, stats, tags, export, and the two-step delete with the `delete_bank` job and its resume sweep. |
-| `internal/configsvc` | ConfigService: the tenant and bank config levels as views, resets, directives and the prompt preview. |
+| `internal/org` | OrgService: create, get and list orgs. |
+| `internal/configsvc` | ConfigService: the tenant, org and bank config levels as views, resets, directives and the prompt preview. |
 | `internal/operation` | OperationService: operation reads, cancel and retry, and the lifecycle event feed. |
 
 **Libraries** (one concrete main type each, no RPCs)
@@ -550,7 +571,7 @@ handlers and maintenance sweeps)
 | `internal/graph/graphtest` | The contract suite every graph adapter runs. |
 | `internal/ai` | The AI boundary: `LLM`, `Embedder` and `Reranker`, plus the concrete `Router` (model routing per slot) and `Tokenizer` (cl100k). |
 | `internal/ai/gateway` | `Client`, the OpenAI-compatible gateway adapter: structured and tool calls, embeddings, rerank, retries, concurrency caps. |
-| `internal/blob` | The object-storage boundary: `Store` (Put, Get, List, DeletePrefix) and the key layout (`Key`, `BankPrefix`). |
+| `internal/blob` | The object-storage boundary: `Store` (Put, Get, List, DeletePrefix) and the key layout (`Key`, `BankPrefix`, `OrgPrefix`: `{tenant}/{org}/{bank}/...`). |
 | `internal/blob/s3` | `Store` on S3-compatible storage (AWS S3, MinIO). |
 | `internal/ingest` | The message-queue boundary: `Source` (Receive, Ack, Nack, DeadLetter) with at-least-once delivery, and the `Message` it delivers. No consumer or broker adapter exists yet. |
 | `internal/ingest/ingesttest` | The contract suite every ingest source runs. |
@@ -603,7 +624,7 @@ handlers and maintenance sweeps)
 | `test/e2e/gatewayemu` | The deterministic gateway emulator (chat, tools, structured output, embeddings, rerank). |
 | `test/e2e/gatewayemu/cmd/gatewayemu` | The emulator as a standalone server for local development. |
 | `examples/chat-assistant`, `examples/model-per-step`, `examples/multi-tenant`, `examples/async-ingest`, `examples/mental-models`, `examples/curation`, `examples/directives-structured`, `examples/recall-filters` | One runnable scenario each, written against the generated client only. |
-| `examples/internal/exampleutil` | The examples' shared helper: flags, a tenant-stamping connection and polling. |
+| `examples/internal/exampleutil` | The examples' shared helper: flags, a tenant-stamping connection, the org every example creates first, and polling. |
 
 ## Design and limitations
 

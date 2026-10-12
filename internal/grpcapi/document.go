@@ -21,7 +21,7 @@ var _ pb.DocumentServiceServer = (*DocumentHandler)(nil)
 func (h *DocumentHandler) ListDocuments(
 	ctx context.Context, req *pb.ListDocumentsRequest,
 ) (*pb.ListDocumentsResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -41,7 +41,7 @@ func (h *DocumentHandler) ListDocuments(
 func (h *DocumentHandler) GetDocument(
 	ctx context.Context, req *pb.GetDocumentRequest,
 ) (*pb.GetDocumentResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -60,7 +60,7 @@ func (h *DocumentHandler) GetDocument(
 func (h *DocumentHandler) RetagDocument(
 	ctx context.Context, req *pb.RetagDocumentRequest,
 ) (*pb.RetagDocumentResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}
@@ -89,7 +89,7 @@ func (h *DocumentHandler) RetagDocument(
 func (h *DocumentHandler) ReprocessDocument(
 	ctx context.Context, req *pb.ReprocessDocumentRequest,
 ) (*pb.ReprocessDocumentResponse, error) {
-	b, err := bankRef(ctx, req.GetBankId())
+	b, err := bankRef(ctx, req)
 	if err != nil {
 		return nil, toStatus(err)
 	}

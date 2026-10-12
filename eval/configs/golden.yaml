@@ -7,5 +7,6 @@ benchmark: golden
 memd:
   addr: localhost:50051
   tenant: eval
+  org: eval
 parallel: 4
 out_dir: eval-results

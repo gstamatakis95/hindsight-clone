@@ -11,19 +11,25 @@ import (
 
 const bankDeleteArchive = `-- name: BankDeleteArchive :execrows
 DELETE FROM memory_units_archive WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM memory_units_archive d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM memory_units_archive d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteArchiveParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteArchive deletes up to lim memory_units_archive rows of the bank.
 func (q *Queries) BankDeleteArchive(ctx context.Context, arg BankDeleteArchiveParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteArchive, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteArchive,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -32,19 +38,25 @@ func (q *Queries) BankDeleteArchive(ctx context.Context, arg BankDeleteArchivePa
 
 const bankDeleteChunks = `-- name: BankDeleteChunks :execrows
 DELETE FROM chunks WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM chunks d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM chunks d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteChunksParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteChunks deletes up to lim chunks rows of the bank.
 func (q *Queries) BankDeleteChunks(ctx context.Context, arg BankDeleteChunksParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteChunks, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteChunks,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -54,20 +66,26 @@ func (q *Queries) BankDeleteChunks(ctx context.Context, arg BankDeleteChunksPara
 const bankDeleteCooccurrences = `-- name: BankDeleteCooccurrences :execrows
 DELETE FROM entity_cooccurrences WHERE ctid = ANY(ARRAY(
     SELECT c.ctid FROM entity_cooccurrences c JOIN entities p ON p.id = c.entity_a
-    WHERE p.tenant_id = $1 AND p.bank_id = $2
-    LIMIT $3::int
+    WHERE p.tenant_id = $1 AND p.org_id = $2 AND p.bank_id = $3
+    LIMIT $4::int
 ))
 `
 
 type BankDeleteCooccurrencesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteCooccurrences deletes up to lim entity_cooccurrences rows of the bank (via entities).
 func (q *Queries) BankDeleteCooccurrences(ctx context.Context, arg BankDeleteCooccurrencesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteCooccurrences, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteCooccurrences,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -76,19 +94,25 @@ func (q *Queries) BankDeleteCooccurrences(ctx context.Context, arg BankDeleteCoo
 
 const bankDeleteDirectives = `-- name: BankDeleteDirectives :execrows
 DELETE FROM directives WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM directives d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM directives d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteDirectivesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteDirectives deletes up to lim directives rows of the bank.
 func (q *Queries) BankDeleteDirectives(ctx context.Context, arg BankDeleteDirectivesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteDirectives, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteDirectives,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -97,19 +121,25 @@ func (q *Queries) BankDeleteDirectives(ctx context.Context, arg BankDeleteDirect
 
 const bankDeleteDocuments = `-- name: BankDeleteDocuments :execrows
 DELETE FROM documents WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM documents d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM documents d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteDocumentsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteDocuments deletes up to lim documents rows of the bank.
 func (q *Queries) BankDeleteDocuments(ctx context.Context, arg BankDeleteDocumentsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteDocuments, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteDocuments,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -118,19 +148,25 @@ func (q *Queries) BankDeleteDocuments(ctx context.Context, arg BankDeleteDocumen
 
 const bankDeleteEntities = `-- name: BankDeleteEntities :execrows
 DELETE FROM entities WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM entities d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM entities d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteEntitiesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteEntities deletes up to lim entities rows of the bank.
 func (q *Queries) BankDeleteEntities(ctx context.Context, arg BankDeleteEntitiesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteEntities, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteEntities,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -139,19 +175,25 @@ func (q *Queries) BankDeleteEntities(ctx context.Context, arg BankDeleteEntities
 
 const bankDeleteEntityMaintenance = `-- name: BankDeleteEntityMaintenance :execrows
 DELETE FROM entity_maintenance WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM entity_maintenance d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM entity_maintenance d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteEntityMaintenanceParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteEntityMaintenance deletes up to lim entity_maintenance rows of the bank.
 func (q *Queries) BankDeleteEntityMaintenance(ctx context.Context, arg BankDeleteEntityMaintenanceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteEntityMaintenance, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteEntityMaintenance,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -159,37 +201,44 @@ func (q *Queries) BankDeleteEntityMaintenance(ctx context.Context, arg BankDelet
 }
 
 const bankDeleteEvents = `-- name: BankDeleteEvents :exec
-DELETE FROM lifecycle_events WHERE tenant_id = $1 AND bank_id = $2
+DELETE FROM lifecycle_events WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3
 `
 
 type BankDeleteEventsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 }
 
 // BankDeleteEvents deletes every lifecycle event of a bank.
 func (q *Queries) BankDeleteEvents(ctx context.Context, arg BankDeleteEventsParams) error {
-	_, err := q.db.Exec(ctx, bankDeleteEvents, arg.TenantID, arg.BankID)
+	_, err := q.db.Exec(ctx, bankDeleteEvents, arg.TenantID, arg.OrgID, arg.BankID)
 	return err
 }
 
 const bankDeleteEvidence = `-- name: BankDeleteEvidence :execrows
 DELETE FROM observation_evidence WHERE ctid = ANY(ARRAY(
     SELECT c.ctid FROM observation_evidence c JOIN memory_units p ON p.id = c.observation_id
-    WHERE p.tenant_id = $1 AND p.bank_id = $2
-    LIMIT $3::int
+    WHERE p.tenant_id = $1 AND p.org_id = $2 AND p.bank_id = $3
+    LIMIT $4::int
 ))
 `
 
 type BankDeleteEvidenceParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteEvidence deletes up to lim observation_evidence rows of the bank (via memory_units).
 func (q *Queries) BankDeleteEvidence(ctx context.Context, arg BankDeleteEvidenceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteEvidence, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteEvidence,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -198,19 +247,25 @@ func (q *Queries) BankDeleteEvidence(ctx context.Context, arg BankDeleteEvidence
 
 const bankDeleteGraphDirty = `-- name: BankDeleteGraphDirty :execrows
 DELETE FROM graph_dirty WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM graph_dirty d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM graph_dirty d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteGraphDirtyParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteGraphDirty deletes up to lim graph_dirty rows of the bank.
 func (q *Queries) BankDeleteGraphDirty(ctx context.Context, arg BankDeleteGraphDirtyParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteGraphDirty, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteGraphDirty,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -220,20 +275,26 @@ func (q *Queries) BankDeleteGraphDirty(ctx context.Context, arg BankDeleteGraphD
 const bankDeleteLinks = `-- name: BankDeleteLinks :execrows
 DELETE FROM memory_links WHERE ctid = ANY(ARRAY(
     SELECT c.ctid FROM memory_links c JOIN memory_units p ON p.id = c.from_unit_id
-    WHERE p.tenant_id = $1 AND p.bank_id = $2
-    LIMIT $3::int
+    WHERE p.tenant_id = $1 AND p.org_id = $2 AND p.bank_id = $3
+    LIMIT $4::int
 ))
 `
 
 type BankDeleteLinksParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteLinks deletes up to lim memory_links rows of the bank (via memory_units).
 func (q *Queries) BankDeleteLinks(ctx context.Context, arg BankDeleteLinksParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteLinks, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteLinks,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -242,19 +303,25 @@ func (q *Queries) BankDeleteLinks(ctx context.Context, arg BankDeleteLinksParams
 
 const bankDeleteMemoryAudit = `-- name: BankDeleteMemoryAudit :execrows
 DELETE FROM memory_audit WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM memory_audit d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM memory_audit d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteMemoryAuditParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteMemoryAudit deletes up to lim memory_audit rows of the bank.
 func (q *Queries) BankDeleteMemoryAudit(ctx context.Context, arg BankDeleteMemoryAuditParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteMemoryAudit, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteMemoryAudit,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -263,19 +330,25 @@ func (q *Queries) BankDeleteMemoryAudit(ctx context.Context, arg BankDeleteMemor
 
 const bankDeleteModelHistory = `-- name: BankDeleteModelHistory :execrows
 DELETE FROM mental_model_history WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM mental_model_history d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM mental_model_history d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteModelHistoryParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteModelHistory deletes up to lim mental_model_history rows of the bank.
 func (q *Queries) BankDeleteModelHistory(ctx context.Context, arg BankDeleteModelHistoryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteModelHistory, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteModelHistory,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -284,19 +357,25 @@ func (q *Queries) BankDeleteModelHistory(ctx context.Context, arg BankDeleteMode
 
 const bankDeleteModels = `-- name: BankDeleteModels :execrows
 DELETE FROM mental_models WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM mental_models d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM mental_models d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteModelsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteModels deletes up to lim mental_models rows of the bank.
 func (q *Queries) BankDeleteModels(ctx context.Context, arg BankDeleteModelsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteModels, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteModels,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -305,19 +384,25 @@ func (q *Queries) BankDeleteModels(ctx context.Context, arg BankDeleteModelsPara
 
 const bankDeleteObservationScopes = `-- name: BankDeleteObservationScopes :execrows
 DELETE FROM observation_scopes WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM observation_scopes d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM observation_scopes d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteObservationScopesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteObservationScopes deletes up to lim observation_scopes rows of the bank.
 func (q *Queries) BankDeleteObservationScopes(ctx context.Context, arg BankDeleteObservationScopesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteObservationScopes, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteObservationScopes,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -326,19 +411,25 @@ func (q *Queries) BankDeleteObservationScopes(ctx context.Context, arg BankDelet
 
 const bankDeleteObservationVersions = `-- name: BankDeleteObservationVersions :execrows
 DELETE FROM observation_versions WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM observation_versions d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM observation_versions d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteObservationVersionsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteObservationVersions deletes up to lim observation_versions rows of the bank.
 func (q *Queries) BankDeleteObservationVersions(ctx context.Context, arg BankDeleteObservationVersionsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteObservationVersions, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteObservationVersions,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -346,32 +437,34 @@ func (q *Queries) BankDeleteObservationVersions(ctx context.Context, arg BankDel
 }
 
 const bankDeleteOperations = `-- name: BankDeleteOperations :exec
-DELETE FROM operations WHERE tenant_id = $1 AND bank_id = $2
+DELETE FROM operations WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3
 `
 
 type BankDeleteOperationsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 }
 
 // BankDeleteOperations deletes every operation of a bank.
 func (q *Queries) BankDeleteOperations(ctx context.Context, arg BankDeleteOperationsParams) error {
-	_, err := q.db.Exec(ctx, bankDeleteOperations, arg.TenantID, arg.BankID)
+	_, err := q.db.Exec(ctx, bankDeleteOperations, arg.TenantID, arg.OrgID, arg.BankID)
 	return err
 }
 
 const bankDeleteRow = `-- name: BankDeleteRow :execrows
-DELETE FROM banks WHERE tenant_id = $1 AND id = $2 AND deleting_at IS NOT NULL
+DELETE FROM banks WHERE tenant_id = $1 AND org_id = $2 AND id = $3 AND deleting_at IS NOT NULL
 `
 
 type BankDeleteRowParams struct {
 	TenantID string
+	OrgID    string
 	ID       string
 }
 
 // BankDeleteRow deletes a tombstoned bank's row; a live bank matches nothing.
 func (q *Queries) BankDeleteRow(ctx context.Context, arg BankDeleteRowParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteRow, arg.TenantID, arg.ID)
+	result, err := q.db.Exec(ctx, bankDeleteRow, arg.TenantID, arg.OrgID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -381,20 +474,26 @@ func (q *Queries) BankDeleteRow(ctx context.Context, arg BankDeleteRowParams) (i
 const bankDeleteUnitEntities = `-- name: BankDeleteUnitEntities :execrows
 DELETE FROM unit_entities WHERE ctid = ANY(ARRAY(
     SELECT c.ctid FROM unit_entities c JOIN memory_units p ON p.id = c.unit_id
-    WHERE p.tenant_id = $1 AND p.bank_id = $2
-    LIMIT $3::int
+    WHERE p.tenant_id = $1 AND p.org_id = $2 AND p.bank_id = $3
+    LIMIT $4::int
 ))
 `
 
 type BankDeleteUnitEntitiesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteUnitEntities deletes up to lim unit_entities rows of the bank (via memory_units).
 func (q *Queries) BankDeleteUnitEntities(ctx context.Context, arg BankDeleteUnitEntitiesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteUnitEntities, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteUnitEntities,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -403,19 +502,25 @@ func (q *Queries) BankDeleteUnitEntities(ctx context.Context, arg BankDeleteUnit
 
 const bankDeleteUnits = `-- name: BankDeleteUnits :execrows
 DELETE FROM memory_units WHERE ctid = ANY(ARRAY(
-    SELECT d.ctid FROM memory_units d WHERE d.tenant_id = $1 AND d.bank_id = $2 LIMIT $3::int
+    SELECT d.ctid FROM memory_units d WHERE d.tenant_id = $1 AND d.org_id = $2 AND d.bank_id = $3 LIMIT $4::int
 ))
 `
 
 type BankDeleteUnitsParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // BankDeleteUnits deletes up to lim memory_units rows of the bank.
 func (q *Queries) BankDeleteUnits(ctx context.Context, arg BankDeleteUnitsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, bankDeleteUnits, arg.TenantID, arg.BankID, arg.Lim)
+	result, err := q.db.Exec(ctx, bankDeleteUnits,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return 0, err
 	}

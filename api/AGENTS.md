@@ -8,7 +8,7 @@ docs/design/curation-and-operations.md for the services and their conventions).
 
 The file has six parts, in this order:
 
-1. A header comment with the conventions every service shares (tenant header, unknown banks, the config
+1. A header comment with the conventions every service shares (tenant header, orgs, unknown banks, the config
    hierarchy, async operations, events, paging, tag filters, the error model with its reason table, naming).
 2. All service blocks.
 3. One section per service, in the same order as the service blocks, under a

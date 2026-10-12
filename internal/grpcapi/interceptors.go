@@ -74,13 +74,13 @@ func DeadlineInterceptor(def time.Duration) grpc.UnaryServerInterceptor {
 	}
 }
 
-// maxNameLen bounds tenant and bank ids.
+// maxNameLen bounds tenant, org and bank ids.
 const maxNameLen = 256
 
-// checkName validates a tenant or bank id: non-empty, not "." or "..", at most 256 bytes, and free of '/'
-// and control characters. Blob keys are "{tenant}/{bank}/...", so a '/' would let one bank's prefix cover
-// another's, and a dot segment would make the key a relative path on stores or tools that normalize it. The
-// error names the request field: bank_id, or x-tenant-id for the tenant.
+// checkName validates a tenant, org or bank id: non-empty, not "." or "..", at most 256 bytes, and free of '/'
+// and control characters. Blob keys are "{tenant}/{org}/{bank}/...", so a '/' would let one org's or bank's prefix
+// cover another's, and a dot segment would make the key a relative path on stores or tools that normalize it. The
+// error names the request field: org_id, bank_id, or x-tenant-id for the tenant.
 func checkName(what, v string) error {
 	field := what
 	if what == "tenant" {
@@ -99,16 +99,42 @@ func checkName(what, v string) error {
 	return nil
 }
 
-// bankRef builds the BankRef of a request from the context's tenant and the request's bank id.
-func bankRef(ctx context.Context, bankID string) (domain.BankRef, error) {
+// bankScoped is a request that names a bank: every request with org_id and bank_id fields.
+type bankScoped interface {
+	// GetOrgId returns the request's org_id.
+	GetOrgId() string
+	// GetBankId returns the request's bank_id.
+	GetBankId() string
+}
+
+// orgScoped is a request that names an org.
+type orgScoped interface {
+	// GetOrgId returns the request's org_id.
+	GetOrgId() string
+}
+
+// orgRef builds the OrgRef of a request from the context's tenant and the request's org id.
+func orgRef(ctx context.Context, r orgScoped) (domain.OrgRef, error) {
 	tenant := TenantFrom(ctx)
 	if err := checkName("tenant", tenant); err != nil {
+		return domain.OrgRef{}, err
+	}
+	if err := checkName("org_id", r.GetOrgId()); err != nil {
+		return domain.OrgRef{}, err
+	}
+	return domain.OrgRef{Tenant: tenant, Org: r.GetOrgId()}, nil
+}
+
+// bankRef builds the BankRef of a request from the context's tenant and the request's org and bank ids.
+func bankRef(ctx context.Context, r bankScoped) (domain.BankRef, error) {
+	o, err := orgRef(ctx, r)
+	if err != nil {
 		return domain.BankRef{}, err
 	}
-	if err := checkName("bank_id", bankID); err != nil {
+	if err := checkName("bank_id", r.GetBankId()); err != nil {
 		return domain.BankRef{}, err
 	}
-	return domain.BankRef{Tenant: tenant, Bank: bankID}, nil
+	return domain.NewBankRef(o.Tenant, o.Org, r.GetBankId()), nil
 }
 
 // requireID rejects an empty id field.

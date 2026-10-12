@@ -221,8 +221,8 @@ func newTargets(cfg Config) ([]*runTarget, func(), error) {
 			label = "in-process stub"
 		}
 		targets = append(targets, &runTarget{
-			Target: target.NewMemd(conn, cfg.Memd.Tenant),
-			meta:   targetMeta{Name: "memd", Address: label, Tenant: cfg.Memd.Tenant},
+			Target: target.NewMemd(conn, cfg.Memd.Tenant, cfg.Memd.Org),
+			meta:   targetMeta{Name: "memd", Address: label, Tenant: cfg.Memd.Tenant, Org: cfg.Memd.Org},
 		})
 	}
 	if cfg.Hindsight.URL != "" {

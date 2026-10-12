@@ -32,6 +32,8 @@ const (
 const (
 	// TagTenant is the tenant id (gRPC and job spans).
 	TagTenant = "memd.tenant"
+	// TagOrg is the org id (gRPC and job spans).
+	TagOrg = "memd.org"
 	// TagBank is the bank id (gRPC and job spans).
 	TagBank = "memd.bank"
 	// TagOperationID is the job's operation id.

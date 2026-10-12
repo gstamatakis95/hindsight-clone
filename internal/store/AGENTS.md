@@ -34,6 +34,17 @@ These rules add to the root AGENTS.md.
 - InTx runs at READ COMMITTED and retries the whole closure on 40P01, 40001 and pruned-entity conflicts.
 - Tx.Seq bumps and caches the bank's change seq; it refuses unknown (NotFound) and tombstoned (ErrBankDeleting) banks.
 
+## Orgs
+- Every bank-scoped table carries org_id after tenant_id, and every bank key and index is (tenant_id, org_id,
+  bank_id, ...). Every statement that names bank_id or the banks table names org_id too (TestSQLNamesOrg scans the
+  queries and the dynamic builders); every new table but tenants and orgs carries org_id (TestSchemaOrgColumns).
+- The adapter refuses a BankRef without an org (ErrInvalidArgument) at its choke points: the bank repo, Tx.Seq,
+  Queue.Enqueue and the bank-level reads.
+- Orgs are never created on first use. Bank creation (Ensure, Create, SetConfig) takes FOR KEY SHARE on the org row
+  first: unknown = ErrOrgNotFound, tombstoned = ErrOrgDeleting. An org delete locks the row FOR UPDATE before it
+  tombstones the org's banks, so a concurrent creation waits and then fails; org config updates (an advisory lock
+  and a plain UPDATE) never block bank creation.
+
 ## Postgres
 - Alembic owns the schema (migrations/; one baseline revision until the first release); Go never migrates.
   Queries are sqlc-generated from `schema/schema.sql`: edit `postgres/queries/*.sql`, then `make gen`.
@@ -41,8 +52,8 @@ These rules add to the root AGENTS.md.
   extensions production uses.
 
 ## Blob providers
-- blob.Store is provider-neutral: Put, Get, List (prefix, paged) and DeletePrefix, keys from `blob.Key` and
-  `blob.BankPrefix`. To add a provider (GCS, Azure, ...), follow the steps in `internal/blob/doc.go`: a new
+- blob.Store is provider-neutral: Put, Get, List (prefix, paged) and DeletePrefix, keys from `blob.Key`,
+  `blob.BankPrefix` and `blob.OrgPrefix` (`{tenant}/{org}/{bank}/...`). To add a provider (GCS, Azure, ...), follow the steps in `internal/blob/doc.go`: a new
   `internal/blob/<provider>` package, its tests running `blobtest.Run`, and a MEMD_BLOB_PROVIDER case in cmd/memd.
 
 ## Graph boundary

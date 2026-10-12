@@ -14,7 +14,7 @@
 //
 // A config is assembled from levels, least to most specific:
 //
-//	server < tenant < bank < strategy < request < item
+//	server < tenant < org < bank < strategy < request < item
 //
 // server is the defaults block of the server config file over the built-in defaults ([ServerDefaults]); tenant
 // and bank are the stored levels; strategy is the consolidation strategy matching a scope ([StrategyLevel];
@@ -64,8 +64,8 @@
 //
 // [NewResolver](store, server) returns the Resolver:
 //
-//   - Effective(ctx, bank, overrides...) merges server < tenant < bank < overrides (in order).
-//   - ForScope(ctx, scope, request) merges server < tenant < bank < strategy < request, where strategy is
+//   - Effective(ctx, bank, overrides...) merges server < tenant < org < bank < overrides (in order).
+//   - ForScope(ctx, scope, request) merges server < tenant < org < bank < strategy < request, where strategy is
 //     the first consolidation strategy whose pattern matches the scope, taken from the merged list with the
 //     request level included, so a Consolidate call can bring its own strategies ([MatchStrategy]).
 //

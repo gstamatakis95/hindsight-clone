@@ -14,11 +14,12 @@ import (
 
 const chunkCommitted = `-- name: ChunkCommitted :many
 SELECT chunk_index, content_hash FROM chunks
-WHERE tenant_id = $1 AND bank_id = $2 AND document_id = $3
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND document_id = $4
 `
 
 type ChunkCommittedParams struct {
 	TenantID   string
+	OrgID      string
 	BankID     string
 	DocumentID string
 }
@@ -30,7 +31,12 @@ type ChunkCommittedRow struct {
 
 // ChunkCommitted returns a document's committed chunks as (index, content hash).
 func (q *Queries) ChunkCommitted(ctx context.Context, arg ChunkCommittedParams) ([]ChunkCommittedRow, error) {
-	rows, err := q.db.Query(ctx, chunkCommitted, arg.TenantID, arg.BankID, arg.DocumentID)
+	rows, err := q.db.Query(ctx, chunkCommitted,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.DocumentID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -51,12 +57,13 @@ func (q *Queries) ChunkCommitted(ctx context.Context, arg ChunkCommittedParams) 
 
 const chunkDeleteReplaced = `-- name: ChunkDeleteReplaced :exec
 DELETE FROM chunks
-WHERE tenant_id = $1 AND bank_id = $2 AND document_id = $3
-  AND chunk_index = $4 AND id <> $5
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND document_id = $4
+  AND chunk_index = $5 AND id <> $6
 `
 
 type ChunkDeleteReplacedParams struct {
 	TenantID   string
+	OrgID      string
 	BankID     string
 	DocumentID string
 	ChunkIndex int32
@@ -67,6 +74,7 @@ type ChunkDeleteReplacedParams struct {
 func (q *Queries) ChunkDeleteReplaced(ctx context.Context, arg ChunkDeleteReplacedParams) error {
 	_, err := q.db.Exec(ctx, chunkDeleteReplaced,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.DocumentID,
 		arg.ChunkIndex,
@@ -76,10 +84,10 @@ func (q *Queries) ChunkDeleteReplaced(ctx context.Context, arg ChunkDeleteReplac
 }
 
 const chunkInsert = `-- name: ChunkInsert :exec
-INSERT INTO chunks (id, tenant_id, bank_id, document_id, chunk_index, text, content_hash, token_count, created_at)
+INSERT INTO chunks (id, tenant_id, org_id, bank_id, document_id, chunk_index, text, content_hash, token_count, created_at)
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8,
-    COALESCE($9::timestamptz, now())
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    COALESCE($10::timestamptz, now())
 )
 ON CONFLICT (id) DO UPDATE
 SET text = EXCLUDED.text, content_hash = EXCLUDED.content_hash, token_count = EXCLUDED.token_count
@@ -88,6 +96,7 @@ SET text = EXCLUDED.text, content_hash = EXCLUDED.content_hash, token_count = EX
 type ChunkInsertParams struct {
 	ID          uuid.UUID
 	TenantID    string
+	OrgID       string
 	BankID      string
 	DocumentID  string
 	ChunkIndex  int32
@@ -102,6 +111,7 @@ func (q *Queries) ChunkInsert(ctx context.Context, arg ChunkInsertParams) error 
 	_, err := q.db.Exec(ctx, chunkInsert,
 		arg.ID,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.DocumentID,
 		arg.ChunkIndex,

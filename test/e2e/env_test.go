@@ -76,7 +76,7 @@ func (e *env) waitOp(t *testing.T, bank, id string, want ...pb.OperationStatus) 
 	ctx := e.ctx(t)
 	var last *pb.Operation
 	for {
-		resp, err := e.c.Operations.GetOperation(ctx, &pb.GetOperationRequest{BankId: bank, OperationId: id})
+		resp, err := e.c.Operations.GetOperation(ctx, &pb.GetOperationRequest{OrgId: e.c.Org, BankId: bank, OperationId: id})
 		if err != nil {
 			t.Fatalf("get operation %s: %v", id, err)
 		}
@@ -96,7 +96,7 @@ func (e *env) waitOp(t *testing.T, bank, id string, want ...pb.OperationStatus) 
 // retain retains one document synchronously and returns its result.
 func (e *env) retain(t *testing.T, bank, doc, content string, tags ...string) *pb.RetainedDocument {
 	t.Helper()
-	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{BankId: bank, Items: []*pb.RetainItem{
+	resp, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{OrgId: e.c.Org, BankId: bank, Items: []*pb.RetainItem{
 		{Content: content, DocumentId: doc, Tags: tags},
 	}})
 	if err != nil {
@@ -112,7 +112,8 @@ func (e *env) retain(t *testing.T, bank, doc, content string, tags ...string) *p
 func (e *env) memories(t *testing.T, bank, doc string, types ...pb.FactType) []*pb.Memory {
 	t.Helper()
 	resp, err := e.c.Memory.ListMemories(e.ctx(t), &pb.ListMemoriesRequest{
-		BankId: bank, FactTypes: types, DocumentId: doc, State: pb.MemoryState_MEMORY_STATE_VALID, PageSize: 500,
+		OrgId: e.c.Org, BankId: bank,
+		FactTypes: types, DocumentId: doc, State: pb.MemoryState_MEMORY_STATE_VALID, PageSize: 500,
 	})
 	if err != nil {
 		t.Fatalf("list memories: %v", err)
@@ -129,7 +130,9 @@ func (e *env) facts(t *testing.T, bank, doc string) []*pb.Memory {
 // recall runs a recall and returns its result texts by id.
 func (e *env) recall(t *testing.T, bank, query string) map[string]string {
 	t.Helper()
-	resp, err := e.c.Memory.Recall(e.ctx(t), &pb.RecallRequest{BankId: bank, Query: query, MaxTokens: 4096})
+	resp, err := e.c.Memory.Recall(e.ctx(t), &pb.RecallRequest{
+		OrgId: e.c.Org, BankId: bank, Query: query, MaxTokens: 4096,
+	})
 	if err != nil {
 		t.Fatalf("recall %q: %v", query, err)
 	}

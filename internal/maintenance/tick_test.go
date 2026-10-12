@@ -174,10 +174,10 @@ func TestMaintenanceStepOrderAndIsolation(t *testing.T) {
 	if strings.Join(log.steps, ",") != strings.Join(want, ",") {
 		t.Errorf("steps = %v, want %v", log.steps, want)
 	}
-	if n := ops.count(`tenant_id = $1 AND bank_id = $2`, bankA.Tenant, bankA.Bank); n != 1 {
+	if n := ops.count(`tenant_id = $1 AND org_id = $2 AND bank_id = $3`, bankA.Tenant, bankA.Org, bankA.Bank); n != 1 {
 		t.Errorf("bank A consolidate jobs = %d, want 1", n)
 	}
-	if n := ops.count(`tenant_id = $1 AND bank_id = $2`, bankC.Tenant, bankC.Bank); n != 0 {
+	if n := ops.count(`tenant_id = $1 AND org_id = $2 AND bank_id = $3`, bankC.Tenant, bankC.Org, bankC.Bank); n != 0 {
 		t.Errorf("deleting bank C got %d jobs", n)
 	}
 	now := clock.Now()
@@ -276,7 +276,7 @@ func TestMaintenanceResumesStalledBankDelete(t *testing.T) {
 	if row := ops.row(first); row.status != domain.OperationStatusFailed {
 		t.Fatalf("reclaimed delete_bank at its cap: %s, want failed", row.status)
 	}
-	pending := ops.countBank(bankC, domain.OperationKindDeleteBank, "status = 'pending' AND serial_key = $4",
+	pending := ops.countBank(bankC, domain.OperationKindDeleteBank, "status = 'pending' AND serial_key = $5",
 		jobs.SerialKeyDeleteBank)
 	if pending != 1 {
 		t.Fatalf("%d pending delete_bank rows after three ticks, want exactly 1", pending)
@@ -313,7 +313,7 @@ func TestMaintenanceEnqueuesGraphMaintenance(t *testing.T) {
 		t.Fatalf("second reconcile = %d, %v; want 0 (joined)", n, err)
 	}
 	for b, want := range map[domain.BankRef]int{bankA: 1, bankB: 1, bankC: 0} {
-		got := ops.countBank(b, domain.OperationKindGraphMaintenance, "serial_key = $4", jobs.SerialKeyGraph)
+		got := ops.countBank(b, domain.OperationKindGraphMaintenance, "serial_key = $5", jobs.SerialKeyGraph)
 		if got != want {
 			t.Errorf("bank %v: %d graph_maintenance rows, want %d", b, got, want)
 		}

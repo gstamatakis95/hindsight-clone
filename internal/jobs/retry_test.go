@@ -74,7 +74,7 @@ func TestPendingChecker(t *testing.T) {
 		Bank: bankC, Kind: domain.OperationKindConsolidate, SerialKey: SerialKeyConsolidate,
 		Overrides: &domain.BankConfig{},
 	}) // manual, with overrides: not joinable
-	ops.markDeleting(domain.BankRef{Tenant: "t9", Bank: "gone"})
+	ops.markDeleting(domain.NewBankRef("t9", "org", "gone"))
 	rows := ops.count("true")
 	tests := []struct {
 		bank domain.BankRef
@@ -83,14 +83,14 @@ func TestPendingChecker(t *testing.T) {
 		{bankA, true},  // due automatic consolidate
 		{bankB, false}, // parked
 		{bankC, false}, // not joinable
-		{domain.BankRef{Tenant: "t9", Bank: "gone"}, false}, // tombstoned
+		{domain.NewBankRef("t9", "org", "gone"), false}, // tombstoned
 	}
 	for _, tt := range tests {
 		if ok, err := pc.hasPending(bg, tt.bank); err != nil || ok != tt.want {
 			t.Errorf("bank %v = %v, %v; want %v", tt.bank, ok, err, tt.want)
 		}
 	}
-	if _, err := pc.hasPending(bg, domain.BankRef{Tenant: "t9", Bank: "x"}); !errors.Is(
+	if _, err := pc.hasPending(bg, domain.NewBankRef("t9", "org", "x")); !errors.Is(
 		err, domain.ErrNotFound) {
 		t.Errorf("unknown bank = %v, want ErrNotFound", err)
 	}

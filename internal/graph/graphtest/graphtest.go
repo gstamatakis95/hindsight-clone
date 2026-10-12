@@ -2,6 +2,8 @@ package graphtest
 
 import (
 	"cmp"
+	"context"
+	"errors"
 	"memd/internal/domain"
 	"memd/internal/graph"
 	"memd/internal/store"
@@ -22,9 +24,9 @@ type Fixture struct {
 
 // The banks the cases use: two banks of one tenant and a bank of another tenant with the same bank id.
 var (
-	bankA     = domain.BankRef{Tenant: "tenant-1", Bank: "a"}
-	bankB     = domain.BankRef{Tenant: "tenant-1", Bank: "b"}
-	bankOther = domain.BankRef{Tenant: "tenant-2", Bank: "a"}
+	bankA     = domain.NewBankRef("tenant-1", "org", "a")
+	bankB     = domain.NewBankRef("tenant-1", "org", "b")
+	bankOther = domain.NewBankRef("tenant-2", "org", "a")
 )
 
 // Run runs the contract suite: each case gets its own fixture from open and runs in parallel with the others. It
@@ -202,7 +204,7 @@ func units(t *testing.T, f Fixture, b domain.BankRef, n int) []domain.UnitID {
 	t.Helper()
 	ids := make([]domain.UnitID, n)
 	err := f.DB.InTx(t.Context(), func(tx store.Tx) error {
-		if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
+		if err := ensureBank(t.Context(), tx, b); err != nil {
 			return err
 		}
 		seq, err := tx.Seq(t.Context(), b)
@@ -288,4 +290,17 @@ func wantSet(t *testing.T, what string, got []domain.UnitID, want ...domain.Unit
 	if !slices.Equal(g, w) {
 		t.Errorf("%s: got %v, want (any order) %v", what, g, w)
 	}
+}
+
+// ensureBank creates b's org when it is missing (orgs are never created on first use), then b itself.
+func ensureBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
+	if _, err := tx.Orgs().Get(ctx, b.OrgRef()); errors.Is(err, domain.ErrOrgNotFound) {
+		if err := tx.Orgs().Create(ctx, domain.Org{Ref: b.OrgRef()}); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	_, err := tx.Banks().Ensure(ctx, b)
+	return err
 }

@@ -72,7 +72,7 @@ func modelParams(m domain.MentalModel) (db.MentalModelCreateParams, error) {
 		structured = m.StructuredOutputJSON
 	}
 	return db.MentalModelCreateParams{
-		TenantID: m.Bank.Tenant, BankID: m.Bank.Bank, ID: string(m.Spec.ID), Name: m.Spec.Name,
+		TenantID: m.Bank.Tenant, OrgID: m.Bank.Org, BankID: m.Bank.Bank, ID: string(m.Spec.ID), Name: m.Spec.Name,
 		SourceQuery: m.Spec.SourceQuery, FolderPath: m.Spec.FolderPath, Tags: tagsOrEmpty(m.Spec.Tags),
 		MaxTokens: maxTokens, RefreshSettings: settings, Overrides: overrides, ContentMd: m.ContentMD,
 		StructuredOutputJson: structured, Version: m.Version, LastRefreshedAt: m.LastRefreshedAt,
@@ -102,7 +102,7 @@ func modelOf(r db.MentalModel) (domain.MentalModel, error) {
 			ID: domain.MentalModelID(r.ID), Name: r.Name, SourceQuery: r.SourceQuery, FolderPath: r.FolderPath,
 			Tags: r.Tags,
 		},
-		Bank: domain.BankRef{Tenant: r.TenantID, Bank: r.BankID}, ContentMD: r.ContentMd,
+		Bank: domain.NewBankRef(r.TenantID, r.OrgID, r.BankID), ContentMD: r.ContentMd,
 		StructuredOutputJSON: r.StructuredOutputJson, Version: r.Version, LastRefreshedAt: r.LastRefreshedAt,
 		LastSeqSeen: r.LastSeqSeen, LastRefreshFailedAt: r.LastRefreshFailedAt, AutoRefreshPaused: r.AutoRefreshPaused,
 		SourceIDs: idsOf[domain.UnitID](r.SourceIds), Embedding: vecOf(r.Embedding),

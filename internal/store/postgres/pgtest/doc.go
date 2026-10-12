@@ -12,6 +12,9 @@
 //		...
 //	}
 //
+// Orgs are never created on first use, so a test creates the orgs of its banks first: [CreateOrgs] (an existing org
+// is fine), or [EnsureBanks], which creates the orgs and then the banks.
+//
 // [NewStore] and [New] create a new database on every call; [Pool] returns the newest database created for t (or
 // creates one). A test that needs two databases, or a helper that must not depend on call order, keeps the [DB] from
 // [New]. Subtests get their own databases, so tests and subtests may call t.Parallel. No TestMain is needed.

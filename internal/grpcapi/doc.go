@@ -19,7 +19,7 @@
 //	s := grpcapi.New(h, grpcapi.Options{DefaultDeadline: d, Probes: probes}, grpc.ChainUnaryInterceptor(extra...))
 //	err := s.Serve(lis)
 //
-// [New] registers each non-nil handler of [Handlers] ([MemoryHandler], [BankHandler], [ConfigHandler],
+// [New] registers each non-nil handler of [Handlers] ([MemoryHandler], [OrgHandler], [BankHandler], [ConfigHandler],
 // [DocumentHandler], [ObservationHandler], [MentalModelHandler], [OperationHandler]) plus grpc.health.v1. A
 // nil handler leaves its service unregistered, so its RPCs answer UNIMPLEMENTED.
 //
@@ -43,8 +43,10 @@
 //     are checked by the recall engine; overrides.recall.arms on Recall and Reflect is rejected outright, since
 //     the request's arms field picks the arms there. ListRecallArms lists the registered arms.
 //
-// Tenant and bank ids must be non-empty, at most 256 bytes, not "." or "..", and free of '/' and control
-// characters, because blob keys are "{tenant}/{bank}/..." and one bank's prefix must never cover another's.
+// Tenant, org and bank ids must be non-empty, at most 256 bytes, not "." or "..", and free of '/' and control
+// characters, because blob keys are "{tenant}/{org}/{bank}/..." and one org's or bank's prefix must never cover
+// another's. Every bank-scoped request names org_id and bank_id; bankRef validates both and names the offending
+// field.
 //
 // # Request overrides
 //

@@ -34,7 +34,7 @@ type Deps struct {
 	Router *ai.Router
 	// Tokens counts tokens for chunking; nil = an approximation of ceil(runes / 4).
 	Tokens *ai.Tokenizer
-	// Config resolves the effective config (server < tenant < bank < request overrides).
+	// Config resolves the effective config (server < tenant < org < bank < request overrides).
 	Config *config.Resolver
 	// Times resolves relative time expressions of extracted facts; nil = facts keep only absolute dates.
 	Times *timex.Normalizer

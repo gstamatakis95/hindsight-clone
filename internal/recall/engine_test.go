@@ -136,7 +136,7 @@ func TestRecallIncludes(t *testing.T) {
 
 func TestRecallUnknownBank(t *testing.T) {
 	e := newEnv(t, envOpts{})
-	nope := domain.BankRef{Tenant: "t1", Bank: "nope"}
+	nope := domain.NewBankRef("t1", "org", "nope")
 	_, err := e.rc.Recall(context.Background(), Request{Bank: nope, Query: "x"})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("err = %v, want NOT_FOUND", err)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func (racingBanks) Create(context.Context, domain.Bank) error {
 func TestCreateBank(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc(DeleteConfig{})
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	created, ops, err := s.CreateBank(e.ctx, CreateRequest{Bank: domain.Bank{
 		Ref: b, Name: "B", Config: domain.BankConfig{Reflect: &domain.ReflectConfig{Mission: "m"}},
 	}})
@@ -78,7 +79,7 @@ func TestCreateBank(t *testing.T) {
 func TestGetBankDeleting(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc(DeleteConfig{})
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	if _, _, err := s.CreateBank(e.ctx, CreateRequest{Bank: domain.Bank{Ref: b}}); err != nil {
 		t.Fatal(err)
 	}
@@ -96,21 +97,23 @@ func TestListBanks(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc(DeleteConfig{})
 	for _, ref := range []domain.BankRef{
-		{Tenant: "t", Bank: "b2"},
-		{Tenant: "t", Bank: "a1"},
-		{Tenant: "t", Bank: "b1"},
-		{Tenant: "t", Bank: "gone"},
-		{Tenant: "u", Bank: "b0"},
+		domain.NewBankRef("t", "org", "b2"),
+		domain.NewBankRef("t", "org", "a1"),
+		domain.NewBankRef("t", "org", "b1"),
+		domain.NewBankRef("t", "org", "gone"),
+		domain.NewBankRef("t", "other", "b0"),
+		domain.NewBankRef("u", "org", "b0"),
 	} {
+		pgtest.CreateOrgs(t, e.store, ref)
 		if _, _, err := s.CreateBank(e.ctx, CreateRequest{Bank: domain.Bank{Ref: ref}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.DeleteBank(e.ctx, domain.BankRef{Tenant: "t", Bank: "gone"}); err != nil {
+	if _, err := s.DeleteBank(e.ctx, domain.NewBankRef("t", "org", "gone")); err != nil {
 		t.Fatal(err)
 	}
 	list := func(prefix string) []string {
-		req := ListBanksRequest{Tenant: "t", IDPrefix: prefix, PageSize: 1}
+		req := ListBanksRequest{Org: domain.OrgRef{Tenant: "t", Org: "org"}, IDPrefix: prefix, PageSize: 1}
 		var ids []string
 		for range 10 {
 			page, err := s.ListBanks(e.ctx, req)
@@ -134,8 +137,13 @@ func TestListBanks(t *testing.T) {
 	if got := list("b"); !slices.Equal(got, []string{"b1", "b2"}) {
 		t.Errorf("ListBanks(prefix b) = %v, want [b1 b2]", got)
 	}
-	if _, err := s.ListBanks(e.ctx, ListBanksRequest{Tenant: "t", PageToken: "junk"}); !errors.Is(err,
+	org := domain.OrgRef{Tenant: "t", Org: "org"}
+	if _, err := s.ListBanks(e.ctx, ListBanksRequest{Org: org, PageToken: "junk"}); !errors.Is(err,
 		domain.ErrInvalidArgument) {
 		t.Errorf("malformed page token: %v, want ErrInvalidArgument", err)
+	}
+	unknown := domain.OrgRef{Tenant: "t", Org: "nope"}
+	if _, err := s.ListBanks(e.ctx, ListBanksRequest{Org: unknown}); !errors.Is(err, domain.ErrOrgNotFound) {
+		t.Errorf("ListBanks(unknown org): %v, want ErrOrgNotFound", err)
 	}
 }

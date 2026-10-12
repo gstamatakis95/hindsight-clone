@@ -18,7 +18,6 @@ import (
 func listMemoriesRequestFromProto(r *pb.ListMemoriesRequest) (memory.ListRequest, error) {
 	var d decoder
 	out := memory.ListRequest{
-		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		FactTypes:    fromEnums[domain.FactType](&d, r.GetFactTypes()),
 		TextContains: r.GetTextContains(),
 		DocumentID:   domain.DocumentID(r.GetDocumentId()),
@@ -76,8 +75,7 @@ func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (memory.UpdateReque
 	}
 	var d decoder
 	out := memory.UpdateRequest{
-		Bank: domain.BankRef{Bank: r.GetBankId()},
-		ID:   domain.UnitID(r.GetMemoryId()),
+		ID: domain.UnitID(r.GetMemoryId()),
 		Edit: memory.Edit{
 			Text:          ed.GetText(),
 			Context:       ed.GetContext(),
@@ -98,7 +96,6 @@ func updateMemoryRequestFromProto(r *pb.UpdateMemoryRequest) (memory.UpdateReque
 // the tenant).
 func restoreMemoryRequestFromProto(r *pb.RestoreMemoryRequest) memory.RestoreRequest {
 	return memory.RestoreRequest{
-		Bank:            domain.BankRef{Bank: r.GetBankId()},
 		ID:              domain.UnitID(r.GetMemoryId()),
 		Reason:          r.GetReason(),
 		ResolveEntities: optCopy(r.ResolveEntities),

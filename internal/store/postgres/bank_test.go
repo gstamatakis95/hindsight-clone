@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"memd/internal/domain"
 	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"sync"
 	"testing"
 	"time"
@@ -36,6 +37,7 @@ func mustBank(t *testing.T, s store.DB, b domain.BankRef) domain.Bank {
 // ensureBank runs Ensure in its own transaction and returns its result unchanged.
 func ensureBank(t *testing.T, s store.DB, b domain.BankRef) (domain.Bank, error) {
 	t.Helper()
+	pgtest.CreateOrgs(t, s, b)
 	var bank domain.Bank
 	err := s.InTx(t.Context(), func(tx store.Tx) error {
 		var err error
@@ -117,6 +119,7 @@ func testBankEnsure(t *testing.T, s store.DB) {
 
 // testBankCreate: Create stores name and config; a second Create is ErrAlreadyExists; Ensure keeps them.
 func testBankCreate(t *testing.T, s store.DB) {
+	pgtest.CreateOrgs(t, s, bankA, bankOtherTenant)
 	bank := domain.Bank{
 		Ref: bankA, Name: "Research", Config: domain.BankConfig{Retain: &domain.RetainConfig{Mission: "papers"}},
 	}

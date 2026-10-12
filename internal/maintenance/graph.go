@@ -84,7 +84,7 @@ func (s *Service) drainGraph(ctx context.Context, b domain.BankRef, budget time.
 	deadline := s.d.Clock.Now().Add(budget)
 	for {
 		if err := ctx.Err(); err != nil {
-			return false, fmt.Errorf("%w: graph maintenance of %s/%s: %w", domain.ErrCancelled, b.Tenant, b.Bank, err)
+			return false, fmt.Errorf("%w: graph maintenance of %s: %w", domain.ErrCancelled, b, err)
 		}
 		var linked, pruned int
 		err := s.d.Store.InTx(ctx, func(tx store.Tx) error {
@@ -101,7 +101,7 @@ func (s *Service) drainGraph(ctx context.Context, b domain.BankRef, budget time.
 		})
 		if err != nil {
 			if ctx.Err() != nil {
-				return false, fmt.Errorf("%w: graph maintenance of %s/%s: %w", domain.ErrCancelled, b.Tenant, b.Bank, err)
+				return false, fmt.Errorf("%w: graph maintenance of %s: %w", domain.ErrCancelled, b, err)
 			}
 			return false, err
 		}
@@ -118,13 +118,13 @@ func (s *Service) drainGraph(ctx context.Context, b domain.BankRef, budget time.
 func checkBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
 	bank, err := tx.Banks().Get(ctx, b)
 	if errors.Is(err, domain.ErrNotFound) {
-		return fmt.Errorf("%w: bank %s/%s is gone: %w", domain.ErrCancelled, b.Tenant, b.Bank, err)
+		return fmt.Errorf("%w: bank %s is gone: %w", domain.ErrCancelled, b, err)
 	}
 	if err != nil {
 		return err
 	}
 	if bank.Deleting() {
-		return fmt.Errorf("%w: bank %s/%s is being deleted", domain.ErrCancelled, b.Tenant, b.Bank)
+		return fmt.Errorf("%w: bank %s is being deleted", domain.ErrCancelled, b)
 	}
 	return nil
 }

@@ -14,7 +14,7 @@ tags) holds every fact. Each observation belongs to exactly one scope (its `scop
 - **Scope key encoding** (`domain.ScopeKey`). Tags only, each written as `<byte length>:<tag>`, joined by `,`
   (`["foo","bar,b"]` → `3:foo,5:bar,b`); the shared scope is `""`. The length prefix makes collisions
   impossible. Keys are canonical: decoding rejects unsorted, duplicate, unnormalized or empty tags. The bank is
-  not part of the key (storage keys scopes by tenant and bank).
+  not part of the key (storage keys scopes by tenant, org and bank).
 - **Scope modes** (`ObservationScopeModes.mode`, expanded by `domain.ExpandScopes`) decide which scopes a fact
   consolidates under, from its tags:
 
@@ -30,7 +30,7 @@ tags) holds every fact. Each observation belongs to exactly one scope (its `scop
   INVALID_ARGUMENT. Scopes are processed in key order, so every run decides them in the same order.
 - **Where a fact's mode comes from**, in order: its document's item-level `observation_scope_modes`; its
   document's stored retain overrides (`retain.default_observation_scope_modes`); the run's effective
-  `retain.default_observation_scope_modes` (server < tenant < bank < request); combined. If expansion fails at
+  `retain.default_observation_scope_modes` (server < tenant < org < bank < request); combined. If expansion fails at
   consolidation time (the mode or cap changed after retain), the fact uses its combined scope rather than being
   stranded.
 - **Fan-out check at retain.** `MODE_ALL_COMBINATIONS` over `max_combinations` is rejected synchronously by Retain

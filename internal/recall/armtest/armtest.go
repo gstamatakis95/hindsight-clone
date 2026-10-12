@@ -23,9 +23,9 @@ type Fixture struct {
 
 // The banks the suite seeds: two banks of one tenant and a bank of another tenant with the same bank id.
 var (
-	bankA     = domain.BankRef{Tenant: "armtest-1", Bank: "a"}
-	bankB     = domain.BankRef{Tenant: "armtest-1", Bank: "b"}
-	bankOther = domain.BankRef{Tenant: "armtest-2", Bank: "a"}
+	bankA     = domain.NewBankRef("armtest-1", "org", "a")
+	bankB     = domain.NewBankRef("armtest-1", "org", "b")
+	bankOther = domain.NewBankRef("armtest-2", "org", "a")
 )
 
 // perBank is how many matching units and how many linked-only units each bank gets; limit is the query's Limit,
@@ -106,7 +106,7 @@ func seed(t *testing.T, db store.DB, b domain.BankRef) map[domain.UnitID]bool {
 	ids := map[domain.UnitID]bool{}
 	err := db.InTx(t.Context(), func(tx store.Tx) error {
 		clear(ids)
-		if _, err := tx.Banks().Ensure(t.Context(), b); err != nil {
+		if err := ensureBank(t.Context(), tx, b); err != nil {
 			return err
 		}
 		seq, err := tx.Seq(t.Context(), b)
@@ -169,4 +169,17 @@ func seqs(t *testing.T, db store.DB) [3]int64 {
 		out[i] = s
 	}
 	return out
+}
+
+// ensureBank creates b's org when it is missing (orgs are never created on first use), then b itself.
+func ensureBank(ctx context.Context, tx store.Tx, b domain.BankRef) error {
+	if _, err := tx.Orgs().Get(ctx, b.OrgRef()); errors.Is(err, domain.ErrOrgNotFound) {
+		if err := tx.Orgs().Create(ctx, domain.Org{Ref: b.OrgRef()}); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	_, err := tx.Banks().Ensure(ctx, b)
+	return err
 }

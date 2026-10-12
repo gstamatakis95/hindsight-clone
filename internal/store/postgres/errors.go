@@ -50,9 +50,28 @@ func mapErr(what string, err error) error {
 // through mapErr.
 func bankErr(b domain.BankRef, err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w %s/%s", domain.ErrBankNotFound, b.Tenant, b.Bank)
+		return fmt.Errorf("%w %s", domain.ErrBankNotFound, b)
 	}
-	return mapErr(fmt.Sprintf("bank %s/%s", b.Tenant, b.Bank), err)
+	return mapErr(fmt.Sprintf("bank %s", b), err)
+}
+
+// checkRef rejects a BankRef without a tenant, org or bank id as domain.ErrInvalidArgument. Every API path builds
+// refs with all three (domain.NewBankRef), so this is a programming error; failing loudly keeps a ref that forgot
+// its org from reading or writing nothing.
+func checkRef(b domain.BankRef) error {
+	if b.Tenant == "" || b.Org == "" || b.Bank == "" {
+		return fmt.Errorf("%w: bank reference %q needs a tenant, an org and a bank id", domain.ErrInvalidArgument,
+			b.String())
+	}
+	return nil
+}
+
+// checkOrgRef rejects an OrgRef without a tenant or org id as domain.ErrInvalidArgument (see checkRef).
+func checkOrgRef(o domain.OrgRef) error {
+	if o.Tenant == "" || o.Org == "" {
+		return fmt.Errorf("%w: org reference %q needs a tenant and an org id", domain.ErrInvalidArgument, o.String())
+	}
+	return nil
 }
 
 // pgClass picks the domain error class of a Postgres SQLSTATE.

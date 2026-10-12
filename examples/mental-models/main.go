@@ -25,7 +25,7 @@ type scenario struct {
 func (s *scenario) setup(ctx context.Context) error {
 	debounce := int32(1)
 	if _, err := s.c.Config.UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
-		BankId:     s.bank,
+		OrgId: s.c.Org, BankId: s.bank,
 		Config:     &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
 		UpdateMask: exampleutil.Paths("mental_models.refresh_debounce_seconds"),
 	}); err != nil {
@@ -38,7 +38,7 @@ func (s *scenario) setup(ctx context.Context) error {
 // retain stores one document and waits for the consolidation that follows, so the next step sees observations.
 func (s *scenario) retain(ctx context.Context, doc, text string) error {
 	if _, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{
-		BankId: s.bank, Items: []*pb.RetainItem{{DocumentId: doc, Content: text}},
+		OrgId: s.c.Org, BankId: s.bank, Items: []*pb.RetainItem{{DocumentId: doc, Content: text}},
 	}); err != nil {
 		return fmt.Errorf("retain %s: %w", doc, err)
 	}
@@ -61,7 +61,9 @@ func (s *scenario) createModels(ctx context.Context) error {
 		Schedule:    &pb.RefreshSchedule{When: &pb.RefreshSchedule_Cron{Cron: "0 9 * * 1"}},
 		Strategy:    pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,
 	}} {
-		created, err := s.c.MentalModels.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{BankId: s.bank, Spec: spec})
+		created, err := s.c.MentalModels.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{
+			OrgId: s.c.Org, BankId: s.bank, Spec: spec,
+		})
 		if err != nil {
 			return fmt.Errorf("create %s: %w", spec.GetId(), err)
 		}
@@ -82,7 +84,7 @@ func (s *scenario) preview(ctx context.Context) error {
 		pb.RefreshStrategy_REFRESH_STRATEGY_AGENTIC, pb.RefreshStrategy_REFRESH_STRATEGY_SINGLE_SHOT,
 	} {
 		p, err := s.c.MentalModels.PreviewMentalModelRefresh(ctx, &pb.PreviewMentalModelRefreshRequest{
-			BankId: s.bank, MentalModelId: "atlas-status", Strategy: strategy,
+			OrgId: s.c.Org, BankId: s.bank, MentalModelId: "atlas-status", Strategy: strategy,
 		})
 		if err != nil {
 			return fmt.Errorf("preview: %w", err)
@@ -103,7 +105,7 @@ func (s *scenario) newKnowledge(ctx context.Context) error {
 	var model *pb.MentalModel
 	err := exampleutil.Until(ctx, func() (bool, error) {
 		got, err := s.c.MentalModels.GetMentalModel(ctx, &pb.GetMentalModelRequest{
-			BankId: s.bank, MentalModelId: "atlas-status",
+			OrgId: s.c.Org, BankId: s.bank, MentalModelId: "atlas-status",
 		})
 		model = got.GetMentalModel()
 		if err != nil {
@@ -123,7 +125,7 @@ func (s *scenario) newKnowledge(ctx context.Context) error {
 func (s *scenario) historyAndSearch(ctx context.Context) error {
 	exampleutil.Section("history and search")
 	hist, err := s.c.MentalModels.ListMentalModelHistory(ctx, &pb.ListMentalModelHistoryRequest{
-		BankId: s.bank, MentalModelId: "atlas-status", Kind: pb.MentalModelHistoryEntry_KIND_VERSION,
+		OrgId: s.c.Org, BankId: s.bank, MentalModelId: "atlas-status", Kind: pb.MentalModelHistoryEntry_KIND_VERSION,
 	})
 	if err != nil {
 		return fmt.Errorf("history: %w", err)
@@ -135,7 +137,7 @@ func (s *scenario) historyAndSearch(ctx context.Context) error {
 		return fmt.Errorf("expected the refresh to leave a version in the history")
 	}
 	found, err := s.c.MentalModels.SearchMentalModels(ctx, &pb.SearchMentalModelsRequest{
-		BankId: s.bank, Query: "Atlas risk", FolderPrefix: "projects/",
+		OrgId: s.c.Org, BankId: s.bank, Query: "Atlas risk", FolderPrefix: "projects/",
 	})
 	if err != nil {
 		return fmt.Errorf("search: %w", err)
@@ -147,7 +149,7 @@ func (s *scenario) historyAndSearch(ctx context.Context) error {
 		return fmt.Errorf("expected search to find the Atlas pages")
 	}
 	list, err := s.c.MentalModels.ListMentalModels(ctx, &pb.ListMentalModelsRequest{
-		BankId: s.bank, FolderPrefix: "projects/atlas/reports",
+		OrgId: s.c.Org, BankId: s.bank, FolderPrefix: "projects/atlas/reports",
 	})
 	if err != nil {
 		return fmt.Errorf("list: %w", err)

@@ -28,7 +28,7 @@ const (
 )
 
 // acceptSmall is the small bank searched.
-var acceptSmall = domain.BankRef{Tenant: "t1", Bank: "small"}
+var acceptSmall = domain.NewBankRef("t1", "org", "small")
 
 // loadAcceptFixture inserts the banks and units in SQL (random vectors generated server-side) and analyzes
 // the table. It returns the ids of the small bank's units.
@@ -67,12 +67,14 @@ func loadAcceptRows(ctx context.Context, pool *pgxpool.Pool, indexDef string, wo
 		fmt.Sprintf(`SET LOCAL max_parallel_maintenance_workers = %d`, workers),
 		// Without a size estimate the planner builds the index serially, several times slower.
 		fmt.Sprintf(`ALTER TABLE memory_units SET (parallel_workers = %d)`, max(workers, 1)),
-		`INSERT INTO banks (tenant_id, id) VALUES ('t1', 'small'), ('t1', 'big'), ('t2', 'small'), ('t2', 'big')`,
+		`INSERT INTO orgs (tenant_id, id) VALUES ('t1', 'org'), ('t2', 'org')`,
+		`INSERT INTO banks (tenant_id, org_id, id)
+		 VALUES ('t1', 'org', 'small'), ('t1', 'org', 'big'), ('t2', 'org', 'small'), ('t2', 'org', 'big')`,
 		`DROP INDEX memory_units_embedding_hnsw`,
 		// The subquery references g (in WHERE), so it runs once per row (an uncorrelated one would give every row
 		// the same vector).
-		`INSERT INTO memory_units (tenant_id, bank_id, fact_type, text, seq, embedding)
-		 SELECT CASE WHEN g % 1000 = 0 OR g % 2 = 0 THEN 't1' ELSE 't2' END,
+		`INSERT INTO memory_units (tenant_id, org_id, bank_id, fact_type, text, seq, embedding)
+		 SELECT CASE WHEN g % 1000 = 0 OR g % 2 = 0 THEN 't1' ELSE 't2' END, 'org',
 		        CASE WHEN g % 1000 = 0 THEN 'small' WHEN g % 2 = 0 OR g % 4 = 1 THEN 'big' ELSE 'small' END,
 		        'world', 'unit ' || g, 1,
 		        (SELECT array_agg(random() - 0.5) FROM generate_series(1, 768) WHERE g > 0)::vector
@@ -97,7 +99,8 @@ func loadAcceptRows(ctx context.Context, pool *pgxpool.Pool, indexDef string, wo
 func smallBankIDs(t *testing.T, pool *pgxpool.Pool) map[domain.UnitID]bool {
 	t.Helper()
 	ctx := t.Context()
-	rows, err := pool.Query(ctx, `SELECT id::text FROM memory_units WHERE tenant_id = 't1' AND bank_id = 'small'`)
+	rows, err := pool.Query(ctx, `SELECT id::text FROM memory_units
+		WHERE tenant_id = 't1' AND org_id = 'org' AND bank_id = 'small'`)
 	if err != nil {
 		t.Fatalf("small ids: %v", err)
 	}
@@ -136,9 +139,9 @@ func explainVector(ctx context.Context, t *testing.T, pool *pgxpool.Pool, q []fl
 			return fmt.Errorf("explain query: %w", err)
 		}
 		rows, err := tx.Query(ctx, `EXPLAIN SELECT id, 1 - dist AS score FROM (SELECT id, embedding <=> $1::vector
-			AS dist FROM memory_units WHERE embedding IS NOT NULL AND tenant_id = $2::text AND bank_id = $3::text
-			ORDER BY embedding <=> $1::vector LIMIT $4::int) s ORDER BY dist, id`,
-			pgvector.NewVector(q), acceptSmall.Tenant, acceptSmall.Bank, 10)
+			AS dist FROM memory_units WHERE embedding IS NOT NULL AND tenant_id = $2::text AND org_id = $3::text
+			AND bank_id = $4::text ORDER BY embedding <=> $1::vector LIMIT $5::int) s ORDER BY dist, id`,
+			pgvector.NewVector(q), acceptSmall.Tenant, acceptSmall.Org, acceptSmall.Bank, 10)
 		if err != nil {
 			return fmt.Errorf("explain query: %w", err)
 		}
@@ -233,8 +236,9 @@ func countWithoutIterativeScan(t *testing.T, pool *pgxpool.Pool, q []float32) in
 			return fmt.Errorf("explain query: %w", err)
 		}
 		return tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT id FROM memory_units WHERE embedding IS NOT NULL
-			AND tenant_id = $2::text AND bank_id = $3::text ORDER BY embedding <=> $1::vector LIMIT 10) s`,
-			pgvector.NewVector(q), acceptSmall.Tenant, acceptSmall.Bank).Scan(&n)
+			AND tenant_id = $2::text AND org_id = $3::text AND bank_id = $4::text
+			ORDER BY embedding <=> $1::vector LIMIT 10) s`,
+			pgvector.NewVector(q), acceptSmall.Tenant, acceptSmall.Org, acceptSmall.Bank).Scan(&n)
 	})
 	if err != nil {
 		t.Fatalf("query without iterative scan: %v", err)

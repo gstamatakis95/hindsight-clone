@@ -62,6 +62,7 @@ func newEnv(t *testing.T) *env {
 	clk := clock.NewManual(time.Now().Add(time.Hour).UTC().Truncate(time.Second))
 	db := pgtest.New(t)
 	pg := db.Store()
+	pgtest.CreateOrgs(t, pg, domain.NewBankRef("t1", "org", ""))
 	server, err := config.ServerDefaults(domain.BankConfig{Models: &domain.ModelBindings{
 		Default: &domain.ModelBinding{Model: "test-model"},
 	}})
@@ -73,7 +74,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	e := &env{
-		t: t, ctx: context.Background(), bank: domain.BankRef{Tenant: "t1", Bank: "b1"}, clock: clk,
+		t: t, ctx: context.Background(), bank: domain.NewBankRef("t1", "org", "b1"), clock: clk,
 		store: pg, pool: db.Pool, llm: &testLLM{LLM: fake.NewLLM()}, config: config.NewResolver(pg, server),
 		maint: &stubMaint{Maintenance: pg},
 	}

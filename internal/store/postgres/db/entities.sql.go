@@ -13,14 +13,15 @@ import (
 )
 
 const entityAttach = `-- name: EntityAttach :many
-INSERT INTO unit_entities (tenant_id, bank_id, unit_id, entity_id)
-SELECT $1::text, $2::text, $3::uuid, x.id FROM unnest($4::uuid[]) AS x(id)
+INSERT INTO unit_entities (tenant_id, org_id, bank_id, unit_id, entity_id)
+SELECT $1::text, $2::text, $3::text, $4::uuid, x.id FROM unnest($5::uuid[]) AS x(id)
 ON CONFLICT DO NOTHING
 RETURNING entity_id
 `
 
 type EntityAttachParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	UnitID   uuid.UUID
 	Ids      []uuid.UUID
@@ -30,6 +31,7 @@ type EntityAttachParams struct {
 func (q *Queries) EntityAttach(ctx context.Context, arg EntityAttachParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, entityAttach,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.UnitID,
 		arg.Ids,
@@ -53,16 +55,17 @@ func (q *Queries) EntityAttach(ctx context.Context, arg EntityAttachParams) ([]u
 }
 
 const entityBumpCooccurrences = `-- name: EntityBumpCooccurrences :exec
-INSERT INTO entity_cooccurrences (tenant_id, bank_id, entity_a, entity_b, count, last_at)
-SELECT $1::text, $2::text, LEAST(n.id, ue.entity_id), GREATEST(n.id, ue.entity_id), 1, now()
-FROM unnest($3::uuid[]) AS n(id)
-JOIN unit_entities ue ON ue.unit_id = $4::uuid AND ue.entity_id <> n.id
-WHERE ue.entity_id <> ALL($3::uuid[]) OR n.id < ue.entity_id
+INSERT INTO entity_cooccurrences (tenant_id, org_id, bank_id, entity_a, entity_b, count, last_at)
+SELECT $1::text, $2::text, $3::text, LEAST(n.id, ue.entity_id), GREATEST(n.id, ue.entity_id), 1, now()
+FROM unnest($4::uuid[]) AS n(id)
+JOIN unit_entities ue ON ue.unit_id = $5::uuid AND ue.entity_id <> n.id
+WHERE ue.entity_id <> ALL($4::uuid[]) OR n.id < ue.entity_id
 ON CONFLICT (entity_a, entity_b) DO UPDATE SET count = entity_cooccurrences.count + 1, last_at = now()
 `
 
 type EntityBumpCooccurrencesParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	NewIds   []uuid.UUID
 	UnitID   uuid.UUID
@@ -72,6 +75,7 @@ type EntityBumpCooccurrencesParams struct {
 func (q *Queries) EntityBumpCooccurrences(ctx context.Context, arg EntityBumpCooccurrencesParams) error {
 	_, err := q.db.Exec(ctx, entityBumpCooccurrences,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.NewIds,
 		arg.UnitID,
@@ -90,16 +94,17 @@ func (q *Queries) EntityBumpMentions(ctx context.Context, ids []uuid.UUID) error
 }
 
 const entityCandidates = `-- name: EntityCandidates :many
-SELECT e.id, e.tenant_id, e.bank_id, e.canonical_name, e.kind, e.label_value, e.mention_count, e.first_seen, e.last_seen, e.created_at, e.updated_at, similarity(lower(e.canonical_name), lower($1::text))::float8 AS sim
+SELECT e.id, e.tenant_id, e.org_id, e.bank_id, e.canonical_name, e.kind, e.label_value, e.mention_count, e.first_seen, e.last_seen, e.created_at, e.updated_at, similarity(lower(e.canonical_name), lower($1::text))::float8 AS sim
 FROM entities e
-WHERE e.tenant_id = $2 AND e.bank_id = $3 AND lower(e.canonical_name) % lower($1::text)
+WHERE e.tenant_id = $2 AND e.org_id = $3 AND e.bank_id = $4 AND lower(e.canonical_name) % lower($1::text)
 ORDER BY sim DESC, e.id
-LIMIT $4
+LIMIT $5
 `
 
 type EntityCandidatesParams struct {
 	Name     string
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
@@ -114,6 +119,7 @@ func (q *Queries) EntityCandidates(ctx context.Context, arg EntityCandidatesPara
 	rows, err := q.db.Query(ctx, entityCandidates,
 		arg.Name,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.Lim,
 	)
@@ -127,6 +133,7 @@ func (q *Queries) EntityCandidates(ctx context.Context, arg EntityCandidatesPara
 		if err := rows.Scan(
 			&i.Entity.ID,
 			&i.Entity.TenantID,
+			&i.Entity.OrgID,
 			&i.Entity.BankID,
 			&i.Entity.CanonicalName,
 			&i.Entity.Kind,
@@ -150,30 +157,37 @@ func (q *Queries) EntityCandidates(ctx context.Context, arg EntityCandidatesPara
 
 const entityClearMaintenance = `-- name: EntityClearMaintenance :exec
 DELETE FROM entity_maintenance
-WHERE tenant_id = $1 AND bank_id = $2 AND entity_id = ANY($3::uuid[])
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND entity_id = ANY($4::uuid[])
 `
 
 type EntityClearMaintenanceParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // EntityClearMaintenance removes entities from a bank's entity_maintenance.
 func (q *Queries) EntityClearMaintenance(ctx context.Context, arg EntityClearMaintenanceParams) error {
-	_, err := q.db.Exec(ctx, entityClearMaintenance, arg.TenantID, arg.BankID, arg.Ids)
+	_, err := q.db.Exec(ctx, entityClearMaintenance,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	return err
 }
 
 const entityCooccurrence = `-- name: EntityCooccurrence :one
 SELECT count(*)::int FROM entity_cooccurrences c
-WHERE c.tenant_id = $1 AND c.bank_id = $2 AND c.count > 0
-  AND ((c.entity_a = $3 AND c.entity_b = ANY($4::uuid[]))
-       OR (c.entity_b = $3 AND c.entity_a = ANY($4::uuid[])))
+WHERE c.tenant_id = $1 AND c.org_id = $2 AND c.bank_id = $3 AND c.count > 0
+  AND ((c.entity_a = $4 AND c.entity_b = ANY($5::uuid[]))
+       OR (c.entity_b = $4 AND c.entity_a = ANY($5::uuid[])))
 `
 
 type EntityCooccurrenceParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	EntityID uuid.UUID
 	Others   []uuid.UUID
@@ -183,6 +197,7 @@ type EntityCooccurrenceParams struct {
 func (q *Queries) EntityCooccurrence(ctx context.Context, arg EntityCooccurrenceParams) (int32, error) {
 	row := q.db.QueryRow(ctx, entityCooccurrence,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.EntityID,
 		arg.Others,
@@ -194,19 +209,25 @@ func (q *Queries) EntityCooccurrence(ctx context.Context, arg EntityCooccurrence
 
 const entityDeleteOrphans = `-- name: EntityDeleteOrphans :execrows
 DELETE FROM entities e
-WHERE e.tenant_id = $1 AND e.bank_id = $2 AND e.id = ANY($3::uuid[])
+WHERE e.tenant_id = $1 AND e.org_id = $2 AND e.bank_id = $3 AND e.id = ANY($4::uuid[])
   AND NOT EXISTS (SELECT 1 FROM unit_entities ue WHERE ue.entity_id = e.id)
 `
 
 type EntityDeleteOrphansParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // EntityDeleteOrphans deletes those of the bank's entities that no unit references (their co-occurrences go by cascade).
 func (q *Queries) EntityDeleteOrphans(ctx context.Context, arg EntityDeleteOrphansParams) (int64, error) {
-	result, err := q.db.Exec(ctx, entityDeleteOrphans, arg.TenantID, arg.BankID, arg.Ids)
+	result, err := q.db.Exec(ctx, entityDeleteOrphans,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -215,10 +236,10 @@ func (q *Queries) EntityDeleteOrphans(ctx context.Context, arg EntityDeleteOrpha
 
 const entityDetach = `-- name: EntityDetach :exec
 WITH d AS (
-    DELETE FROM unit_entities WHERE unit_id = $1 RETURNING tenant_id, bank_id, entity_id
+    DELETE FROM unit_entities WHERE unit_id = $1 RETURNING tenant_id, org_id, bank_id, entity_id
 ), queued AS (
-    INSERT INTO entity_maintenance (tenant_id, bank_id, entity_id)
-    SELECT d.tenant_id, d.bank_id, d.entity_id FROM d
+    INSERT INTO entity_maintenance (tenant_id, org_id, bank_id, entity_id)
+    SELECT d.tenant_id, d.org_id, d.bank_id, d.entity_id FROM d
     ON CONFLICT DO NOTHING
 )
 UPDATE entities e SET mention_count = GREATEST(e.mention_count - 1, 0), updated_at = now()
@@ -232,9 +253,9 @@ func (q *Queries) EntityDetach(ctx context.Context, unitID uuid.UUID) error {
 }
 
 const entityInsert = `-- name: EntityInsert :one
-INSERT INTO entities AS x (id, tenant_id, bank_id, canonical_name, kind, label_value, first_seen, last_seen)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT (tenant_id, bank_id, kind, label_value) WHERE label_value IS NOT NULL
+INSERT INTO entities AS x (id, tenant_id, org_id, bank_id, canonical_name, kind, label_value, first_seen, last_seen)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (tenant_id, org_id, bank_id, kind, label_value) WHERE label_value IS NOT NULL
 DO UPDATE SET first_seen = LEAST(x.first_seen, EXCLUDED.first_seen),
     last_seen = GREATEST(x.last_seen, EXCLUDED.last_seen), updated_at = now()
 RETURNING id
@@ -243,6 +264,7 @@ RETURNING id
 type EntityInsertParams struct {
 	ID            uuid.UUID
 	TenantID      string
+	OrgID         string
 	BankID        string
 	CanonicalName string
 	Kind          string
@@ -256,6 +278,7 @@ func (q *Queries) EntityInsert(ctx context.Context, arg EntityInsertParams) (uui
 	row := q.db.QueryRow(ctx, entityInsert,
 		arg.ID,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 		arg.CanonicalName,
 		arg.Kind,
@@ -270,19 +293,25 @@ func (q *Queries) EntityInsert(ctx context.Context, arg EntityInsertParams) (uui
 
 const entityLock = `-- name: EntityLock :many
 SELECT id FROM entities
-WHERE tenant_id = $1 AND bank_id = $2 AND id = ANY($3::uuid[])
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = ANY($4::uuid[])
 ORDER BY id FOR NO KEY UPDATE
 `
 
 type EntityLockParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // EntityLock locks the bank's entities with the given ids in id order (FOR NO KEY UPDATE) and returns the ids found.
 func (q *Queries) EntityLock(ctx context.Context, arg EntityLockParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, entityLock, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, entityLock,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -303,19 +332,25 @@ func (q *Queries) EntityLock(ctx context.Context, arg EntityLockParams) ([]uuid.
 
 const entityLockForDelete = `-- name: EntityLockForDelete :many
 SELECT id FROM entities
-WHERE tenant_id = $1 AND bank_id = $2 AND id = ANY($3::uuid[])
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3 AND id = ANY($4::uuid[])
 ORDER BY id FOR UPDATE
 `
 
 type EntityLockForDeleteParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Ids      []uuid.UUID
 }
 
 // EntityLockForDelete locks the bank's entities with the given ids in id order (FOR UPDATE), so no unit can attach them until commit.
 func (q *Queries) EntityLockForDelete(ctx context.Context, arg EntityLockForDeleteParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, entityLockForDelete, arg.TenantID, arg.BankID, arg.Ids)
+	rows, err := q.db.Query(ctx, entityLockForDelete,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Ids,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -336,20 +371,26 @@ func (q *Queries) EntityLockForDelete(ctx context.Context, arg EntityLockForDele
 
 const entityPendingMaintenance = `-- name: EntityPendingMaintenance :many
 SELECT entity_id FROM entity_maintenance
-WHERE tenant_id = $1 AND bank_id = $2
+WHERE tenant_id = $1 AND org_id = $2 AND bank_id = $3
 ORDER BY created_at, entity_id
-LIMIT $3
+LIMIT $4
 `
 
 type EntityPendingMaintenanceParams struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 	Lim      int32
 }
 
 // EntityPendingMaintenance returns up to lim entity ids queued in a bank's entity_maintenance, oldest first.
 func (q *Queries) EntityPendingMaintenance(ctx context.Context, arg EntityPendingMaintenanceParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, entityPendingMaintenance, arg.TenantID, arg.BankID, arg.Lim)
+	rows, err := q.db.Query(ctx, entityPendingMaintenance,
+		arg.TenantID,
+		arg.OrgID,
+		arg.BankID,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -369,11 +410,12 @@ func (q *Queries) EntityPendingMaintenance(ctx context.Context, arg EntityPendin
 }
 
 const entityUnitBank = `-- name: EntityUnitBank :one
-SELECT tenant_id, bank_id FROM memory_units WHERE id = $1
+SELECT tenant_id, org_id, bank_id FROM memory_units WHERE id = $1
 `
 
 type EntityUnitBankRow struct {
 	TenantID string
+	OrgID    string
 	BankID   string
 }
 
@@ -381,7 +423,7 @@ type EntityUnitBankRow struct {
 func (q *Queries) EntityUnitBank(ctx context.Context, id uuid.UUID) (EntityUnitBankRow, error) {
 	row := q.db.QueryRow(ctx, entityUnitBank, id)
 	var i EntityUnitBankRow
-	err := row.Scan(&i.TenantID, &i.BankID)
+	err := row.Scan(&i.TenantID, &i.OrgID, &i.BankID)
 	return i, err
 }
 
@@ -390,7 +432,7 @@ UPDATE entities SET
     canonical_name = $1, kind = $2, label_value = $3,
     first_seen = LEAST(first_seen, $4::timestamptz),
     last_seen = GREATEST(last_seen, $5::timestamptz), updated_at = now()
-WHERE id = $6 AND tenant_id = $7 AND bank_id = $8
+WHERE id = $6 AND tenant_id = $7 AND org_id = $8 AND bank_id = $9
 RETURNING id
 `
 
@@ -402,6 +444,7 @@ type EntityUpdateParams struct {
 	LastSeen      *time.Time
 	ID            uuid.UUID
 	TenantID      string
+	OrgID         string
 	BankID        string
 }
 
@@ -415,6 +458,7 @@ func (q *Queries) EntityUpdate(ctx context.Context, arg EntityUpdateParams) (uui
 		arg.LastSeen,
 		arg.ID,
 		arg.TenantID,
+		arg.OrgID,
 		arg.BankID,
 	)
 	var id uuid.UUID

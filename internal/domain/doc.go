@@ -20,8 +20,8 @@
 // scalars are pointers (nil = unset), nested messages are pointers (nil = unset) and lists are slices (nil = unset,
 // non-nil empty = explicitly cleared).
 //
-// [BankConfig] is the one configuration shape used at every level, merged server < tenant < bank < strategy < request
-// (< item). It is grouped by phase ([RetainConfig], [ObservationConfig], [RecallConfig], [ReflectConfig],
+// [BankConfig] is the one configuration shape used at every level, merged server < tenant < org < bank < strategy <
+// request (< item). It is grouped by phase ([RetainConfig], [ObservationConfig], [RecallConfig], [ReflectConfig],
 // [MentalModelConfig], [ModelBindings]): a set scalar replaces an unset one, groups merge field by field, a
 // [ModelBinding] is atomic, and lists replace rather than append. [ModelBindings] binds models.default for every
 // chat-model slot ([LLMSlots]) plus one optional binding per slot. The merging itself lives in internal/config;

@@ -16,20 +16,21 @@ and switches are environment variables.
 ## BankConfig levels
 
 ```
-server < tenant < bank < strategy < request < item
+server < tenant < org < bank < strategy < request < item
 ```
 
 | Level | Source |
 |---|---|
 | server | The `defaults:` block of the server config file over the built-in defaults (`config.ServerDefaults`) |
 | tenant | UpdateTenantConfig / ResetTenantConfig |
+| org | CreateOrg (`config`), UpdateOrgConfig / ResetOrgConfig |
 | bank | CreateBank (`config`, or a template's), UpdateBankConfig / ResetBankConfig |
 | strategy | The first consolidation strategy whose pattern matches the scope (consolidation only) |
 | request | An RPC's overrides message; for Retain also stored on the document and replayed by ReprocessDocument |
 | item | A retain item's overrides |
 
-Mental-model refreshes use their own chain: server < tenant < bank < the model's stored overrides < the call's
-overrides. Graph maintenance relinks with tenant < bank tuning.
+Mental-model refreshes use their own chain: server < tenant < org < bank < the model's stored overrides < the
+call's overrides. Graph maintenance relinks with tenant < org < bank tuning.
 
 BankConfig is grouped by phase:
 
@@ -55,11 +56,13 @@ BankConfig is grouped by phase:
 
 ### Resolution
 
-`config.Resolver` reads the tenant config and the bank in one short read-only transaction (so it must not be called
-inside an open transaction). `Effective(bank, overrides...)` merges server < tenant < bank < overrides;
-`ForScope(scope, request)` adds the matching strategy between bank and request. The strategy list is taken from
-the merged config including the request, so a Consolidate call can bring its own strategies. An unknown or
-tombstoned bank is NOT_FOUND; write paths call `Banks().Ensure` first.
+`config.Resolver` reads the tenant config, the org and the bank in one short read-only transaction (so it must not
+be called inside an open transaction). `Effective(bank, overrides...)` merges server < tenant < org < bank <
+overrides; `ForScope(scope, request)` adds the matching strategy between bank and request. The strategy list is
+taken from the merged config including the request, so a Consolidate call can bring its own strategies. An unknown
+or tombstoned org is NOT_FOUND (`ORG_NOT_FOUND`), and so is an unknown or tombstoned bank (`BANK_NOT_FOUND`); write
+paths call `Banks().Ensure` first. A retain into an unknown bank of an existing org is validated against tenant <
+org merged with its overrides, before the write creates the bank.
 
 ## Model routing
 

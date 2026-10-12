@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var testBank = domain.BankRef{Tenant: "acme", Bank: "notes"}
+var testBank = domain.NewBankRef("acme", "org", "notes")
 
 // uid is the unit id of a readable fixture name (Postgres stores unit ids as uuid).
 func uid(name string) domain.UnitID { return pgtest.ID[domain.UnitID](name) }
@@ -65,6 +65,7 @@ func newFixture(t *testing.T) fixture {
 	ctx := context.Background()
 	clock := clock.NewManual(time.Time{})
 	db := pgtest.NewStore(t)
+	pgtest.CreateOrgs(t, db, domain.NewBankRef("acme", "org", ""))
 	err := db.InTx(ctx, func(tx store.Tx) error {
 		if _, err := tx.Banks().Ensure(ctx, testBank); err != nil {
 			return err
@@ -285,7 +286,7 @@ func TestRetagUnknownDocument(t *testing.T) {
 	if _, err := r.Retag(ctx, testBank, "nope", []string{"a"}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown document: %v, want ErrNotFound", err)
 	}
-	other := domain.BankRef{Tenant: "acme", Bank: "other"}
+	other := domain.NewBankRef("acme", "org", "other")
 	if _, err := r.Retag(ctx, other, "d1", []string{"a"}); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("unknown bank: %v, want ErrNotFound", err)
 	}

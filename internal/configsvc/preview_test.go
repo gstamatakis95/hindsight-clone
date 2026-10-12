@@ -38,7 +38,7 @@ func TestPreview(t *testing.T) {
 		Observations: &domain.ObservationConfig{Mission: "group habits"},
 		Reflect:      &domain.ReflectConfig{Mission: "answer kindly", Disposition: &domain.Disposition{Skepticism: 4}},
 	}
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	p := newEnv(t).withBank(t, b, base,
 		domain.Directive{Name: "polite", Rules: []string{"never swear"}, Active: true},
 		domain.Directive{Name: "scoped", Rules: []string{"tagged rule"}, Tags: []string{"team"}, Active: true})
@@ -111,7 +111,7 @@ func checkPreviewText(t *testing.T, text string, want []string) {
 // TestPreviewRetainCausalLinksDefault checks that the retain preview treats an unset
 // retain.extract_causal_links as retain does (on) and omits the causal section only when it is false.
 func TestPreviewRetainCausalLinksDefault(t *testing.T) {
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	p := newEnv(t).withBank(t, b, domain.BankConfig{})
 	off := false
 	for _, tc := range []struct {
@@ -134,7 +134,7 @@ func TestPreviewRetainCausalLinksDefault(t *testing.T) {
 }
 
 func TestPreviewChunksSkipsAndUnknownOp(t *testing.T) {
-	b := domain.BankRef{Tenant: "t", Bank: "b"}
+	b := domain.NewBankRef("t", "org", "b")
 	p := newEnv(t).withBank(t, b, domain.BankConfig{})
 	got, err := p.PreviewPrompt(t.Context(), b, domain.PromptOperationRetain,
 		domain.BankConfig{Retain: &domain.RetainConfig{ExtractionMode: domain.ExtractionModeChunks}})

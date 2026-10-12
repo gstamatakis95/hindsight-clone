@@ -38,7 +38,7 @@ func contentLimit(limit int) int32 {
 // entityOf builds a domain.Entity from its row.
 func entityOf(e db.Entity) domain.Entity {
 	return domain.Entity{
-		ID: idOf[domain.EntityID](e.ID), Bank: domain.BankRef{Tenant: e.TenantID, Bank: e.BankID},
+		ID: idOf[domain.EntityID](e.ID), Bank: domain.NewBankRef(e.TenantID, e.OrgID, e.BankID),
 		CanonicalName: e.CanonicalName, Kind: e.Kind, LabelValue: textOf[string](e.LabelValue),
 		MentionCount: int(e.MentionCount), FirstSeen: e.FirstSeen, LastSeen: e.LastSeen,
 		CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt,
@@ -55,7 +55,7 @@ func (r *entityRepo) Candidates(
 		return []domain.EntityCandidate{}, nil
 	}
 	rows, err := r.q.EntityCandidates(ctx, db.EntityCandidatesParams{
-		Name: name, TenantID: b.Tenant, BankID: b.Bank, Lim: contentLimit(limit),
+		Name: name, TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: contentLimit(limit),
 	})
 	if err != nil {
 		return nil, mapErr("entity candidates", err)
@@ -81,7 +81,7 @@ func (r *entityRepo) Cooccurrence(
 		return 0, nil
 	}
 	n, err := r.q.EntityCooccurrence(ctx, db.EntityCooccurrenceParams{
-		TenantID: b.Tenant, BankID: b.Bank, EntityID: id, Others: ids,
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, EntityID: id, Others: ids,
 	})
 	if err != nil {
 		return 0, mapErr("entity cooccurrence", err)
@@ -101,7 +101,7 @@ func (r *entityRepo) Upsert(ctx context.Context, e domain.Entity) (domain.Entity
 	if e.ID != "" {
 		got, err := r.q.EntityUpdate(ctx, db.EntityUpdateParams{
 			CanonicalName: e.CanonicalName, Kind: e.Kind, LabelValue: label, FirstSeen: e.FirstSeen,
-			LastSeen: e.LastSeen, ID: id, TenantID: e.Bank.Tenant, BankID: e.Bank.Bank,
+			LastSeen: e.LastSeen, ID: id, TenantID: e.Bank.Tenant, OrgID: e.Bank.Org, BankID: e.Bank.Bank,
 		})
 		if err == nil {
 			return idOf[domain.EntityID](got), nil
@@ -111,7 +111,7 @@ func (r *entityRepo) Upsert(ctx context.Context, e domain.Entity) (domain.Entity
 		}
 	}
 	got, err := r.q.EntityInsert(ctx, db.EntityInsertParams{
-		ID: id, TenantID: e.Bank.Tenant, BankID: e.Bank.Bank, CanonicalName: e.CanonicalName, Kind: e.Kind,
+		ID: id, TenantID: e.Bank.Tenant, OrgID: e.Bank.Org, BankID: e.Bank.Bank, CanonicalName: e.CanonicalName, Kind: e.Kind,
 		LabelValue: label, FirstSeen: e.FirstSeen, LastSeen: e.LastSeen,
 	})
 	if err != nil {
@@ -140,7 +140,9 @@ func (r *entityRepo) Attach(ctx context.Context, unit domain.UnitID, ents []doma
 	if len(ids) == 0 {
 		return nil
 	}
-	locked, err := r.q.EntityLock(ctx, db.EntityLockParams{TenantID: bank.TenantID, BankID: bank.BankID, Ids: ids})
+	locked, err := r.q.EntityLock(ctx, db.EntityLockParams{
+		TenantID: bank.TenantID, OrgID: bank.OrgID, BankID: bank.BankID, Ids: ids,
+	})
 	if err != nil {
 		return mapErr("lock entities", err)
 	}
@@ -149,7 +151,7 @@ func (r *entityRepo) Attach(ctx context.Context, unit domain.UnitID, ents []doma
 			len(ids)-len(locked), len(ids))
 	}
 	added, err := r.q.EntityAttach(ctx, db.EntityAttachParams{
-		TenantID: bank.TenantID, BankID: bank.BankID, UnitID: uid, Ids: locked,
+		TenantID: bank.TenantID, OrgID: bank.OrgID, BankID: bank.BankID, UnitID: uid, Ids: locked,
 	})
 	if err != nil || len(added) == 0 {
 		return mapErr("attach entities", err)
@@ -166,7 +168,7 @@ func (r *entityRepo) countAttached(
 		return mapErr("count entity mentions", err)
 	}
 	err := r.q.EntityBumpCooccurrences(ctx, db.EntityBumpCooccurrencesParams{
-		TenantID: bank.TenantID, BankID: bank.BankID, NewIds: added, UnitID: unit,
+		TenantID: bank.TenantID, OrgID: bank.OrgID, BankID: bank.BankID, NewIds: added, UnitID: unit,
 	})
 	return mapErr("count entity cooccurrences", err)
 }
@@ -177,7 +179,7 @@ func (r *entityRepo) PendingMaintenance(ctx context.Context, b domain.BankRef, l
 		return []domain.EntityID{}, nil
 	}
 	ids, err := r.q.EntityPendingMaintenance(ctx, db.EntityPendingMaintenanceParams{
-		TenantID: b.Tenant, BankID: b.Bank, Lim: contentLimit(limit),
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Lim: contentLimit(limit),
 	})
 	if err != nil {
 		return nil, mapErr("pending entity maintenance", err)
@@ -203,15 +205,21 @@ func (r *entityRepo) PruneOrphans(ctx context.Context, b domain.BankRef, ids []d
 	if len(uuids) == 0 {
 		return 0, nil
 	}
-	_, err := r.q.EntityLockForDelete(ctx, db.EntityLockForDeleteParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	_, err := r.q.EntityLockForDelete(ctx, db.EntityLockForDeleteParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return 0, mapErr("lock entities", err)
 	}
-	n, err := r.q.EntityDeleteOrphans(ctx, db.EntityDeleteOrphansParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	n, err := r.q.EntityDeleteOrphans(ctx, db.EntityDeleteOrphansParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return 0, mapErr("prune orphan entities", err)
 	}
-	err = r.q.EntityClearMaintenance(ctx, db.EntityClearMaintenanceParams{TenantID: b.Tenant, BankID: b.Bank, Ids: uuids})
+	err = r.q.EntityClearMaintenance(ctx, db.EntityClearMaintenanceParams{
+		TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, Ids: uuids,
+	})
 	if err != nil {
 		return 0, mapErr("clear entity maintenance", err)
 	}

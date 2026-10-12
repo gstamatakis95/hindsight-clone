@@ -11,12 +11,12 @@
 -- whose tags contain the observation's tags).
 -- name: ReadsListUnits :many
 WITH picked AS (
-    (SELECT u.id, u.tenant_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata,
+    (SELECT u.id, u.tenant_id, u.org_id, u.bank_id, u.document_id, u.chunk_id, u.fact_type, u.text, u.context, u.metadata,
         u.tags, u.embedding, u.occurred_start, u.occurred_end, u.mentioned_at, u.timeless, u.proof_count,
         u.version, u.seq, u.consolidated_at, u.consolidation_failed_at, u.edited_at, u.created_at, u.updated_at,
         TRUE AS live, '[]'::jsonb AS entities_snapshot
     FROM memory_units u
-    WHERE @include_live::bool AND u.tenant_id = @tenant_id AND u.bank_id = @bank_id
+    WHERE @include_live::bool AND u.tenant_id = @tenant_id AND u.org_id = @org_id AND u.bank_id = @bank_id
       AND (sqlc.narg(unit_id)::uuid IS NULL OR u.id = sqlc.narg(unit_id)::uuid)
       AND (cardinality(@types::text[]) = 0 OR u.fact_type = ANY(@types::text[]))
       AND (@text_like::text = '' OR u.text ILIKE @text_like::text)
@@ -44,12 +44,12 @@ WITH picked AS (
     ORDER BY u.created_at DESC, u.id DESC
     LIMIT @lim::int)
     UNION ALL
-    (SELECT a.id, a.tenant_id, a.bank_id, a.document_id, a.chunk_id, a.fact_type, a.text, a.context, a.metadata,
+    (SELECT a.id, a.tenant_id, a.org_id, a.bank_id, a.document_id, a.chunk_id, a.fact_type, a.text, a.context, a.metadata,
         a.tags, NULL::vector, a.occurred_start, a.occurred_end, a.mentioned_at, a.timeless, 0::int,
         0::bigint, a.seq, NULL::timestamptz, NULL::timestamptz, a.edited_at, a.created_at, a.archived_at,
         FALSE, a.entities_snapshot
     FROM memory_units_archive a
-    WHERE @include_archived::bool AND a.tenant_id = @tenant_id AND a.bank_id = @bank_id
+    WHERE @include_archived::bool AND a.tenant_id = @tenant_id AND a.org_id = @org_id AND a.bank_id = @bank_id
       AND sqlc.narg(entity_id)::uuid IS NULL
       AND (sqlc.narg(unit_id)::uuid IS NULL OR a.id = sqlc.narg(unit_id)::uuid)
       AND (cardinality(@types::text[]) = 0 OR a.fact_type = ANY(@types::text[]))
@@ -76,7 +76,7 @@ WITH picked AS (
     ORDER BY a.created_at DESC, a.id DESC
     LIMIT @lim::int)
 )
-SELECT p.id, p.tenant_id, p.bank_id, p.document_id, p.chunk_id, p.fact_type, p.text, p.context, p.metadata,
+SELECT p.id, p.tenant_id, p.org_id, p.bank_id, p.document_id, p.chunk_id, p.fact_type, p.text, p.context, p.metadata,
     p.tags, p.embedding, p.occurred_start, p.occurred_end, p.mentioned_at, p.timeless, p.proof_count,
     p.version, p.seq, p.consolidated_at, p.consolidation_failed_at, p.edited_at, p.created_at, p.updated_at,
     p.live::bool AS live,
@@ -94,7 +94,7 @@ SELECT p.id, p.tenant_id, p.bank_id, p.document_id, p.chunk_id, p.fact_type, p.t
     ELSE '{}' END)::uuid[] AS source_ids,
     (p.live AND p.fact_type = 'observation' AND EXISTS (
         SELECT 1 FROM memory_units f
-        WHERE f.tenant_id = p.tenant_id AND f.bank_id = p.bank_id AND f.fact_type <> 'observation'
+        WHERE f.tenant_id = p.tenant_id AND f.org_id = p.org_id AND f.bank_id = p.bank_id AND f.fact_type <> 'observation'
           AND f.consolidated_at IS NULL AND f.consolidation_failed_at IS NULL AND f.tags @> p.tags))::bool AS stale
 FROM picked p
 ORDER BY p.created_at DESC, p.id DESC, p.live DESC

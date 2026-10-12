@@ -171,21 +171,21 @@ func dialStub(t *testing.T) *grpc.ClientConn {
 func TestResumeSkipsCompletedWork(t *testing.T) {
 	conn := dialStub(t)
 	chat := fakeGateway(t)
-	want, interrupted := runInto(context.Background(), t, t.TempDir(), target.NewMemd(conn, "t1"), chat)
+	want, interrupted := runInto(context.Background(), t, t.TempDir(), target.NewMemd(conn, "t1", "o1"), chat)
 	if interrupted || want.Overall.Total != 9 || want.Overall.Correct != 6 || want.Pending != 0 {
 		t.Fatalf("uninterrupted run: overall %+v pending %d errors %v", want.Overall, want.Pending, want.Errors)
 	}
 
 	dir := t.TempDir()
 	ctx, crash := context.WithCancel(context.Background())
-	tgt := &crashingTarget{Target: target.NewMemd(conn, "t1"), crashAfter: 5, crash: crash}
+	tgt := &crashingTarget{Target: target.NewMemd(conn, "t1", "o1"), crashAfter: 5, crash: crash}
 	partial, interrupted := runInto(ctx, t, dir, tgt, chat)
 	if !interrupted || partial.Pending == 0 {
 		t.Fatalf("crashed run: interrupted %v, pending %d; want an interrupted, partial run", interrupted, partial.Pending)
 	}
 	retainedBefore, unanswered := tgt.retains, partial.Pending
 
-	tgt = &crashingTarget{Target: target.NewMemd(conn, "t1")}
+	tgt = &crashingTarget{Target: target.NewMemd(conn, "t1", "o1")}
 	got, interrupted := runInto(context.Background(), t, dir, tgt, chat)
 	if interrupted || retainedBefore+tgt.retains != 6 || tgt.recalls != unanswered {
 		t.Errorf("resume: interrupted %v, sessions retained %d before + %d after (want 6 in all), "+

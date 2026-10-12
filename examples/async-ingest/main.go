@@ -30,14 +30,14 @@ type scenario struct {
 func (s *scenario) setup(ctx context.Context) error {
 	debounce := int32(3600)
 	if _, err := s.c.Config.UpdateBankConfig(ctx, &pb.UpdateBankConfigRequest{
-		BankId:     s.bank,
+		OrgId: s.c.Org, BankId: s.bank,
 		Config:     &pb.BankConfig{MentalModels: &pb.MentalModelConfig{RefreshDebounceSeconds: &debounce}},
 		UpdateMask: exampleutil.Paths("mental_models.refresh_debounce_seconds"),
 	}); err != nil {
 		return fmt.Errorf("update bank config: %w", err)
 	}
 	created, err := s.c.MentalModels.CreateMentalModel(ctx, &pb.CreateMentalModelRequest{
-		BankId: s.bank,
+		OrgId: s.c.Org, BankId: s.bank,
 		Spec: &pb.MentalModelSpec{
 			Id: "ingest-digest", Name: "Digest", SourceQuery: "Summarize each ticket and customer request",
 			Schedule: &pb.RefreshSchedule{When: &pb.RefreshSchedule_AfterConsolidation{AfterConsolidation: true}},
@@ -63,7 +63,7 @@ func (s *scenario) enqueueBatch(ctx context.Context) error {
 	} {
 		items = append(items, &pb.RetainItem{DocumentId: fmt.Sprintf("ticket-%d", 101+i), Content: text})
 	}
-	resp, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{BankId: s.bank, Items: items, RunAsync: true})
+	resp, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{OrgId: s.c.Org, BankId: s.bank, Items: items, RunAsync: true})
 	if err != nil {
 		return fmt.Errorf("retain: %w", err)
 	}
@@ -81,7 +81,9 @@ func (s *scenario) pollOperations(ctx context.Context) error {
 		return err
 	}
 	fmt.Println("batch finished:", done.GetStatus())
-	list, err := s.c.Operations.ListOperations(ctx, &pb.ListOperationsRequest{BankId: s.bank, ExcludeParents: true})
+	list, err := s.c.Operations.ListOperations(ctx, &pb.ListOperationsRequest{
+		OrgId: s.c.Org, BankId: s.bank, ExcludeParents: true,
+	})
 	if err != nil {
 		return fmt.Errorf("list operations: %w", err)
 	}
@@ -98,7 +100,7 @@ func (s *scenario) followEvents(ctx context.Context) error {
 	if err := s.printEvents(ctx); err != nil {
 		return err
 	}
-	if _, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{BankId: s.bank, Items: []*pb.RetainItem{
+	if _, err := s.c.Memory.Retain(ctx, &pb.RetainRequest{OrgId: s.c.Org, BankId: s.bank, Items: []*pb.RetainItem{
 		{DocumentId: "ticket-106", Content: "Ticket 106: the mobile app logs users out after an update."},
 	}}); err != nil {
 		return fmt.Errorf("retain: %w", err)
@@ -111,7 +113,7 @@ func (s *scenario) followEvents(ctx context.Context) error {
 }
 
 func (s *scenario) printEvents(ctx context.Context) error {
-	resp, err := s.c.Operations.ListEvents(ctx, &pb.ListEventsRequest{BankId: s.bank, AfterSeq: s.cursor})
+	resp, err := s.c.Operations.ListEvents(ctx, &pb.ListEventsRequest{OrgId: s.c.Org, BankId: s.bank, AfterSeq: s.cursor})
 	if err != nil {
 		return fmt.Errorf("list events: %w", err)
 	}
@@ -126,7 +128,7 @@ func (s *scenario) printEvents(ctx context.Context) error {
 func (s *scenario) cancelAndRetry(ctx context.Context) error {
 	exampleutil.Section("cancel and retry")
 	pending, err := s.c.Operations.ListOperations(ctx, &pb.ListOperationsRequest{
-		BankId: s.bank, Kind: pb.OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL,
+		OrgId: s.c.Org, BankId: s.bank, Kind: pb.OperationKind_OPERATION_KIND_REFRESH_MENTAL_MODEL,
 		Status: pb.OperationStatus_OPERATION_STATUS_PENDING,
 	})
 	if err != nil {
@@ -136,12 +138,16 @@ func (s *scenario) cancelAndRetry(ctx context.Context) error {
 		return fmt.Errorf("expected one parked refresh, got %d", len(pending.GetOperations()))
 	}
 	id := pending.GetOperations()[0].GetId()
-	cancelled, err := s.c.Operations.CancelOperation(ctx, &pb.CancelOperationRequest{BankId: s.bank, OperationId: id})
+	cancelled, err := s.c.Operations.CancelOperation(ctx, &pb.CancelOperationRequest{
+		OrgId: s.c.Org, BankId: s.bank, OperationId: id,
+	})
 	if err != nil {
 		return fmt.Errorf("cancel: %w", err)
 	}
 	fmt.Println("cancel:", cancelled.GetOperation().GetStatus())
-	retried, err := s.c.Operations.RetryOperation(ctx, &pb.RetryOperationRequest{BankId: s.bank, OperationId: id})
+	retried, err := s.c.Operations.RetryOperation(ctx, &pb.RetryOperationRequest{
+		OrgId: s.c.Org, BankId: s.bank, OperationId: id,
+	})
 	if err != nil {
 		return fmt.Errorf("retry: %w", err)
 	}
