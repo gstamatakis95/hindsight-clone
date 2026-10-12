@@ -30,7 +30,7 @@ draft.*.height: 90
 
 modes: "Full: a new page. Delta: edit ops on the page;\nfalls back to full if sources were retracted,\nthe query changed, or too much changed" {class: step}
 write: "Write transaction\nSeq, re-read, conflict check, new version,\nembedding, watermark, MENTAL_MODEL_REFRESHED" {class: tx}
-fail: "A failed attempt writes nothing;\nafter 3 runs the tick pauses auto\nrefresh until a manual one succeeds" {class: planned}
+fail: "A failed attempt writes nothing;\nafter 3 runs the tick pauses auto\nrefresh until a manual one succeeds" {class: failure}
 
 triggers -> due -> read -> recheck -> draft -> modes -> write
 draft -> fail: error {class: async}

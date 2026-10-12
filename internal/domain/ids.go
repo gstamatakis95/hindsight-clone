@@ -1,5 +1,28 @@
 package domain
 
+import "strings"
+
+// MaxNameLen bounds tenant, org and bank ids, in bytes.
+const MaxNameLen = 256
+
+// CheckName validates a tenant, org or bank id (what names it in the message): non-empty, not "." or "..", at most
+// MaxNameLen bytes, and free of '/' and control characters. Blob keys are "{tenant}/{org}/{bank}/...", so a '/'
+// would let one org's or bank's prefix cover another's, and a dot segment would make the key a relative path on
+// stores or tools that normalize it. The error is an InvalidField naming field.
+func CheckName(field, what, v string) error {
+	switch {
+	case v == "":
+		return InvalidField(field, "%s is required", what)
+	case v == "." || v == "..":
+		return InvalidField(field, "%s must not be %q", what, v)
+	case len(v) > MaxNameLen:
+		return InvalidField(field, "%s is longer than %d bytes", what, MaxNameLen)
+	case strings.ContainsFunc(v, func(r rune) bool { return r == '/' || r < 0x20 || r == 0x7f }):
+		return InvalidField(field, "%s %q contains '/' or a control character", what, v)
+	}
+	return nil
+}
+
 // OrgRef names an org: a group of a tenant's banks. Orgs are created explicitly (CreateOrg) and never on first
 // use; every bank belongs to exactly one.
 type OrgRef struct {

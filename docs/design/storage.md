@@ -47,6 +47,8 @@ declares the blob boundary and `internal/blob/s3` implements it.
 
 ### Tenants, orgs and banks
 
+![Tenancy: tenant, org and bank, their rows and config levels, the isolation keys and the blob prefixes](diagrams/tenancy.svg)
+
 | Table | Key columns | Notes |
 |---|---|---|
 | `tenants` | `id`, `config` | The tenant config level. |

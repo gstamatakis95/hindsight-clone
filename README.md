@@ -14,7 +14,7 @@ OpenAI-compatible AI gateway, and each step can use its own model.
 ![memd deployment: clients, api, worker and ingest processes over Postgres, object storage and the AI gateway](docs/design/diagrams/deployment.svg)
 
 The whole API is one file, [`api/memory/v1/memory.proto`](api/memory/v1/memory.proto): first the conventions
-every service shares, then the seven services, then each service's messages. The design documents in
+every service shares, then the eight services, then each service's messages. The design documents in
 [docs/design](docs/design/README.md) explain how everything works.
 
 ## Features
@@ -119,6 +119,9 @@ every service shares, then the seven services, then each service's messages. The
 
 **Operations tooling**
 - Structured errors: canonical codes with a stable `ErrorInfo` reason and `BadRequest` field violations.
+- Every list pages with an opaque token in a stated order; every response stays under gRPC's 4 MiB default: pages
+  end early under `api.max_response_bytes`, and a read that can't fit fails with `RESOURCE_EXHAUSTED`
+  (`RESPONSE_TOO_LARGE`).
 - Health and readiness (`grpc.health.v1`) and gRPC server reflection.
 - Optional Datadog traces, metrics and JSON logs.
 - Benchmarks (LoCoMo, LongMemEval, golden fixtures) and runnable examples.
@@ -191,6 +194,8 @@ deployments over the same Postgres, bucket and config file (and `memd ingest` as
 
 Every call carries the tenant in the `x-tenant-id` header. The server registers gRPC reflection, so grpcurl needs no
 proto files. The examples below assume the quick-start server; `<id>` stands for an id from an earlier response.
+
+![memd services: each gRPC service with its RPCs, the job kinds it runs and enqueues, and its maintenance tick steps](docs/design/diagrams/service-map.svg)
 
 **MemoryService**: retain, recall, reflect, and browse and curate memories.
 
@@ -339,7 +344,8 @@ A message is acked only after its document and job are committed; one that can't
 dead-letter topic with the reason in the `memd-dlq-reason` header; a transient failure is retried with exponential
 backoff and dead-lettered after `ingest.consumer.max_attempts` (10); a backlog rejection pauses the consumer for its
 retry delay; and a message for a deleted org is dropped. `MEMD_INGEST_TENANT` (and `MEMD_INGEST_ORG`) pin the topic
-to one tenant: an envelope may then omit `tenant_id`, and one naming another tenant is dead-lettered. Run as many
+to one tenant (and org): an envelope may then omit `tenant_id` (`org_id`), and one naming another is dead-lettered; a
+malformed pin fails startup. Run as many
 `memd ingest` replicas as the topic has partitions (they share the consumer group `MEMD_INGEST_KAFKA_GROUP`, default
 `memd-ingest`); `memd all` runs the consumer too when `MEMD_INGEST_PROVIDER` is set. TLS and SASL settings, and the
 `ingest.consumer` section (batch size, flush interval, concurrency, attempts, backoff, poll settings), are in
@@ -579,7 +585,8 @@ and the "Adding a benchmark" section of eval/README.md have the details.
 
 ```sh
 make test      # go test -race ./...: store code runs on real Postgres, so this needs Docker or a database URL
-make e2e       # compose stack + emulated gateway + memd api/worker processes: every scenario, crash and reclaim
+make e2e       # compose stack + emulated gateway + memd api/worker/ingest processes: every scenario, crash and
+               # reclaim, Kafka ingestion and the org-deletion compliance run
 make lint      # golangci-lint (with depguard), ifacedoc, txcheck, buf lint, ruff
 make diagrams  # re-render docs/design/diagrams (d2 v0.9.0); make diagrams-check fails on a stale SVG
 ```
@@ -703,7 +710,7 @@ handlers and maintenance sweeps)
 
 | Package | Owns |
 |---|---|
-| `test/e2e` | The end-to-end suites: scenarios, crash and reclaim, the golden fixtures and the examples against memd processes. |
+| `test/e2e` | The end-to-end suites: scenarios, crash and reclaim, Kafka ingestion, the org-deletion compliance run (an org filled over Kafka, deleted, verified empty), the golden fixtures and the examples against memd processes. |
 | `test/e2e/harness` | Brings up the compose stack, runs memd processes and the emulator, and waits for background work. |
 | `test/e2e/gatewayemu` | The deterministic gateway emulator (chat, tools, structured output, embeddings, rerank). |
 | `test/e2e/gatewayemu/cmd/gatewayemu` | The emulator as a standalone server for local development. |

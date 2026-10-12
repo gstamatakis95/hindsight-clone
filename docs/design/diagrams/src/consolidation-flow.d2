@@ -20,7 +20,7 @@ scope: "Per scope, in key order; LLM batches of 8 facts" {
 finish: "Finish transaction\nSeq, stamp the rest,\nCONSOLIDATION_COMPLETED" {class: tx}
 refresh: "refresh_mental_model jobs\nfor models scheduled\nafter_consolidation" {class: job}
 cont: "consolidate continuation\nif facts remain" {class: job}
-fail: "Failed CONSOLIDATE call\nhalve the batch; a fact failing alone\nis probed, retried, then parked" {class: planned}
+fail: "Failed CONSOLIDATE call\nhalve the batch; a fact failing alone\nis probed, retried, then parked" {class: failure}
 
 enq -> plan -> scope
 scope.apply -> refresh: same transaction {class: async}

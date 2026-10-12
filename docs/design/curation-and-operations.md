@@ -1,13 +1,13 @@
 # Curation and operations
 
 This document covers the administrative surface: memory listing and curation, observation admin, documents,
-banks, the config levels, directives, the prompt preview, operations and events, and how requests and errors are
+orgs, banks, the config levels, directives, the prompt preview, operations and events, and how requests and errors are
 handled. The API conventions are stated once in the header of `api/memory/v1/memory.proto`; this document
 explains the behaviour behind them.
 
 | Service | Package | RPCs |
 |---|---|---|
-| MemoryService | `memory` | Retain, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory, InvalidateMemory, RestoreMemory |
+| MemoryService | `memory` | Retain, RetainBatch, Recall, Reflect, ListRecallArms, ListMemories, GetMemory, UpdateMemory, InvalidateMemory, RestoreMemory |
 | DocumentService | `document` | ListDocuments, GetDocument, RetagDocument, ReprocessDocument |
 | ObservationService | `observation` | Consolidate, ListObservationScopes, ListObservationHistory, ClearObservations, PreviewConsolidationStrategies |
 | MentalModelService | `mentalmodel` | CreateMentalModel, GetMentalModel, ListMentalModels, UpdateMentalModel, RefreshMentalModel, PreviewMentalModelRefresh, ListMentalModelHistory, DeleteMentalModel, DeleteMentalModelFolder, SearchMentalModels |
@@ -15,6 +15,8 @@ explains the behaviour behind them.
 | BankService | `bank` | CreateBank, GetBank, ListBanks, DeleteBank, GetBankStats, ListTags, ExportBankTemplate |
 | ConfigService | `configsvc` | GetTenantConfig, UpdateTenantConfig, ResetTenantConfig, GetOrgConfig, UpdateOrgConfig, ResetOrgConfig, GetBankConfig, UpdateBankConfig, ResetBankConfig, PreviewPrompt, CreateDirective, UpdateDirective, ListDirectives, DeleteDirective |
 | OperationService | `operation` | GetOperation, ListOperations, CancelOperation, RetryOperation, ListEvents |
+
+![Service map: each service's RPCs, the job kinds it runs and enqueues, its tick steps, and the callers](diagrams/service-map.svg)
 
 ## Common rules
 

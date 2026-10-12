@@ -1,0 +1,101 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+map: "" {
+  grid-columns: 1
+  grid-gap: 40
+  style: {stroke-width: 0}
+
+  callers: "Callers" {
+    grid-columns: 3
+    grid-gap: 12
+    grpcapi: "grpcapi\none handler per service" {class: svc}
+    ingestapi: "ingestapi (memd ingest)\nqueue consumer: RetainBatch" {class: svc}
+    tick: "maintenance tick\ncalls each service's sweeps" {class: job}
+  }
+  callers.*.width: 535
+  callers.*.height: 80
+
+  # One cell per service: its RPCs, the job kinds it runs (runs) and enqueues for others (queues), and its tick steps.
+  services: "Services: one package each, never importing another; cross-service effects go through the jobs catalogue" {
+    grid-rows: 3
+    grid-columns: 3
+    grid-gap: 14
+
+    memory: "MemoryService\ninternal/memory" {
+      grid-columns: 1
+      rpc: "Retain, RetainBatch, Recall, Reflect,\nListRecallArms, ListMemories, GetMemory,\nUpdateMemory, InvalidateMemory,\nRestoreMemory" {class: svc}
+      job: "runs: retain_document, rederive_memory\n(retain_batch: a parent, never run)\nqueues: consolidate, graph_maintenance" {class: job}
+      tick: "tick: rederive_stranded,\nsettle_retain_batches" {class: step}
+    }
+    document: "DocumentService\ninternal/document" {
+      grid-columns: 1
+      rpc: "ListDocuments, GetDocument,\nRetagDocument, ReprocessDocument" {class: svc}
+      job: "runs: retag_document\nqueues: retain_document, consolidate,\ngraph_maintenance" {class: job}
+      tick: "tick: none" {class: step}
+    }
+    observation: "ObservationService\ninternal/observation" {
+      grid-columns: 1
+      rpc: "Consolidate, ListObservationScopes,\nListObservationHistory, ClearObservations,\nPreviewConsolidationStrategies" {class: svc}
+      job: "runs: consolidate\nqueues: refresh_mental_model,\ngraph_maintenance" {class: job}
+      tick: "tick: consolidation_reconcile" {class: step}
+    }
+    mentalmodel: "MentalModelService\ninternal/mentalmodel" {
+      grid-columns: 1
+      rpc: "CreateMentalModel, GetMentalModel,\nListMentalModels, UpdateMentalModel,\nRefreshMentalModel, PreviewMentalModelRefresh,\nListMentalModelHistory, DeleteMentalModel,\nDeleteMentalModelFolder, SearchMentalModels" {class: svc}
+      job: "runs: refresh_mental_model" {class: job}
+      tick: "tick: refresh_failures, cron_refresh" {class: step}
+    }
+    org: "OrgService\ninternal/org" {
+      grid-columns: 1
+      rpc: "CreateOrg, GetOrg, ListOrgs,\nDeleteOrg, GetDeletionReceipt" {class: svc}
+      job: "runs: delete_org (org-scoped)\nqueues: delete_bank" {class: job}
+      tick: "tick: resume_org_deletes,\nprune_deletion_receipts" {class: step}
+    }
+    bank: "BankService\ninternal/bank" {
+      grid-columns: 1
+      rpc: "CreateBank, GetBank, ListBanks,\nDeleteBank, GetBankStats, ListTags,\nExportBankTemplate" {class: svc}
+      job: "runs: delete_bank\nqueues: refresh_mental_model\n(a template's models)" {class: job}
+      tick: "tick: resume_bank_deletes" {class: step}
+    }
+    configsvc: "ConfigService\ninternal/configsvc" {
+      grid-columns: 1
+      rpc: "{Get,Update,Reset}TenantConfig,\n{Get,Update,Reset}OrgConfig,\n{Get,Update,Reset}BankConfig, PreviewPrompt,\n{Create,Update,Delete}Directive,\nListDirectives" {class: svc}
+      job: "runs: none" {class: job}
+      tick: "tick: none" {class: step}
+    }
+    operation: "OperationService\ninternal/operation" {
+      grid-columns: 1
+      rpc: "GetOperation, ListOperations,\nCancelOperation, RetryOperation,\nListEvents" {class: svc}
+      job: "runs: none\nRetryOperation re-queues a row" {class: job}
+      tick: "tick: none" {class: step}
+    }
+    maintenance: "no RPCs\ninternal/maintenance" {
+      grid-columns: 1
+      rpc: "the 60 s tick on every worker" {class: step}
+      job: "runs: graph_maintenance\nqueues: consolidate, rederive_memory,\ndelete_bank, graph_maintenance" {class: job}
+      tick: "tick: reclaim_stale, graph_reconcile,\nprune_operations, prune_events" {class: step}
+    }
+  }
+  services.*.*.width: 470
+  services.*.job.height: 100
+  services.*.tick.height: 70
+
+  store: "Postgres: the operations table is the job queue\njobs.Enqueue* writes a row in the cause's transaction;\nthe runner claims each kind for the service that runs it" {class: store}
+}
+
+map.callers -> map.services: "RPCs, RetainBatch, sweeps"
+map.services -> map.store: "enqueue" {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 4
+  grid-gap: 12
+  a: "RPCs" {class: svc; width: 130; height: 50}
+  b: "Job kinds" {class: job; width: 130; height: 50}
+  c: "Tick steps" {class: step; width: 130; height: 50}
+  d: "runs: its job handlers; queues: kinds it enqueues for others" {shape: text; width: 560; height: 50}
+}

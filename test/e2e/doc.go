@@ -24,8 +24,12 @@
 //     crashed worker's job is reclaimed in seconds) through these scenarios, each on its own bank and one after another
 //     because emulator faults are global: RetainSync, RetainAsync, RetainBatch, ConsolidationRecallReflect,
 //     MentalModelBothStrategies, ConsolidationTriggersRefresh, InvalidateRestore, RetagReprocess, CancelRetry,
-//     WorkerCrashReclaim, BankDelete, OrgDelete (the config file's deletion.blob_grace is 1s there) and
-//     QueueIngestKafka (a Kafka container and a memd ingest process pinned to the e2e tenant).
+//     WorkerCrashReclaim, BankDelete, QueueIngestKafka (a Kafka container and a memd ingest process pinned to the
+//     e2e tenant) and OrgDeleteCompliance: an org with three banks filled over Kafka by a memd ingest process pinned
+//     to the tenant and the org, consolidated and given a mental model, then deleted (the config file's
+//     deletion.blob_grace is 1s there); it checks the COMPLETED receipt, zero rows in every table with org_id, zero
+//     blobs under the org prefix, NOT_FOUND reads, and that a message published afterwards is dropped (the
+//     memd.ingest.dropped metric, read from a DogStatsD stand-in) and creates nothing.
 //   - TestGoldenAgainstMemdAll runs every eval/golden fixture through the eval harness against `memd all`; every check
 //     must pass.
 //   - TestExamples builds every program under examples/ and runs each against `memd all` and the emulated gateway; an

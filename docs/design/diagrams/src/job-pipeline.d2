@@ -34,14 +34,16 @@ tick: "Maintenance tick: every 60 s on every worker, no leader, each step idempo
   grid-gap: 10
   s1: "1  reclaim_stale rows" {class: step}
   s2: "2  resume_bank_deletes" {class: step}
-  s3: "3  refresh_failures" {class: step}
-  s4: "4  cron_refresh" {class: step}
-  s5: "5  consolidation_reconcile" {class: step}
-  s6: "6  graph_reconcile" {class: step}
-  s7: "7  rederive_stranded" {class: step}
-  s8: "8  settle_retain_batches" {class: step}
-  s9: "9  prune_operations (7 d)" {class: step}
-  s10: "10  prune_events (30 d)" {class: step}
+  s3: "3  resume_org_deletes" {class: step}
+  s4: "4  refresh_failures" {class: step}
+  s5: "5  cron_refresh" {class: step}
+  s6: "6  consolidation_reconcile" {class: step}
+  s7: "7  graph_reconcile" {class: step}
+  s8: "8  rederive_stranded" {class: step}
+  s9: "9  settle_retain_batches" {class: step}
+  s10: "10  prune_operations (7 d)" {class: step}
+  s11: "11  prune_events (30 d)" {class: step}
+  s12: "12  prune_deletion_receipts (3 y)" {class: step}
 }
 tick.*.width: 400
 tick.*.height: 50

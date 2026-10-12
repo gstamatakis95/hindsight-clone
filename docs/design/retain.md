@@ -131,7 +131,8 @@ errors. Producers set the message key to the document id, so the versions of one
 
 **Tenant pinning.** `MEMD_INGEST_TENANT` pins the source to one tenant: an envelope without `tenant_id` is that
 tenant's, and one naming another tenant is dead-lettered (`TENANT_MISMATCH`). `MEMD_INGEST_ORG` pins the org the same
-way (`ORG_MISMATCH`). An unpinned source requires `tenant_id` and trusts it, which is only safe when the broker's
+way (`ORG_MISMATCH`). A pin must be a valid id (the API's id rules): a malformed one fails startup rather than
+dead-lettering every message. An unpinned source requires `tenant_id` and trusts it, which is only safe when the broker's
 publish permissions are the tenant boundary (a topic per tenant, or ACLs).
 
 **The loop.**

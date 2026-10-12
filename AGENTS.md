@@ -6,8 +6,8 @@ docs/design/rules-to-tests.md maps each rule to its tests); this file is the sou
 
 ## Layout
 - api/memory/v1/memory.proto: the whole API, one file (rules in api/AGENTS.md). Run `make gen` after any change.
-- internal/domain: plain types, errors and pure rules (tag filters and predicates, scope expansion, directive
-  selection, refresh due time).
+- internal/domain: plain types, errors and pure rules (the id rules, tag filters and predicates, scope expansion,
+  directive selection, refresh due time).
 - Boundaries (interfaces), each with its adapter (rules in internal/store/AGENTS.md):
   - internal/store (DB, Tx, Reader = Search + Catalog + Freshness, repos, Queue, Maintenance) —
     internal/store/postgres (sqlc in postgres/db, test harness in postgres/pgtest; also implements jobs.Claimer)

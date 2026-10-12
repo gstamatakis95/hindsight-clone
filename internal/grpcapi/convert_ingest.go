@@ -15,8 +15,8 @@ import (
 // the request-level overrides. Any problem is domain.ErrInvalidArgument naming the envelope field; the item's own
 // rules (document_id, size, item overrides) are left to RetainBatch, which rejects the item.
 func IngestEnvelopeFromProto(tenant string, e *pb.IngestEnvelope) (memory.RetainBatchRequest, error) {
-	if err := checkNameAt("tenant_id", "tenant", tenant); err != nil {
-		return memory.RetainBatchRequest{}, err
+	if err := domain.CheckName("tenant_id", "tenant", tenant); err != nil {
+		return memory.RetainBatchRequest{}, err //nolint:wrapcheck // an InvalidField, already the domain class
 	}
 	if err := checkName("org_id", e.GetOrgId()); err != nil {
 		return memory.RetainBatchRequest{}, err

@@ -12,7 +12,7 @@ import (
 
 var modelBindingType = reflect.TypeFor[*domain.ModelBinding]()
 
-// Merge combines levels from least to most specific (server, tenant, bank, strategy, request, item):
+// Merge combines levels from least to most specific (server, tenant, org, bank, strategy, request, item):
 // a set field replaces the field below it, nested messages merge field by field, a model binding is
 // replaced whole, and lists and maps are replaced, never appended. Each level's models are flattened
 // first (every chat-model slot the level leaves unset takes the level's default), so for each slot the
