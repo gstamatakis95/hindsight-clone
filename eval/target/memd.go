@@ -159,7 +159,7 @@ func (m *Memd) Recall(
 	return out, nil
 }
 
-// Models returns the model of every slot bound in bank's effective config (server < tenant < bank).
+// Models returns the model of every slot bound in bank's effective config (server < tenant < org < bank).
 func (m *Memd) Models(ctx context.Context, bank string) (map[string]string, error) {
 	resp, err := m.config.GetBankConfig(m.out(ctx), &memoryv1.GetBankConfigRequest{OrgId: m.org, BankId: bank})
 	if err != nil {

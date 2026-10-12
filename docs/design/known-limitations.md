@@ -140,7 +140,7 @@ says so.
 - **Impact:** a tenant- or org-level `mental_models.refresh_debounce_seconds` or `min_refresh_interval_seconds`
   does not apply to those refreshes.
 
-### Orgs can't be deleted yet
+### Orgs can't be deleted
 - **What:** OrgService.DeleteOrg answers UNIMPLEMENTED. An org, once created, stays, and so does its config level.
 - **Workaround:** delete the org's banks one by one with DeleteBank; the empty org row remains.
 
