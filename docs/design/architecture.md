@@ -76,7 +76,7 @@ tiers, and depguard (in `.golangci.yml`) enforces it.
 | Libraries | `timex`, `linking`, `recall` (with `recall/arms`), `reflect` | One concrete main type each and no RPCs: `timex.Normalizer`, `linking.Linker` / `Resolver` / `LabelResolver`, `recall.Engine`, `reflect.Agent`. |
 | Services | `memory`, `document`, `observation`, `mentalmodel`, `bank`, `configsvc`, `operation` | One package per gRPC service, each exporting one `Service` built by `New(Deps)`; each owns its RPC logic, its job handlers (`RunXJob`) and its maintenance sweeps. |
 | Top | `maintenance`, `grpcapi` | The 60 s tick and the graph_maintenance job; the thin gRPC handlers, interceptors, conversion and error mapping. |
-| Adapters | `store/postgres`, `ai/gateway`, `blob/s3`, `ingest/memq`, `observability` | The concrete Postgres, gateway, S3 and Datadog code. |
+| Adapters | `store/postgres`, `ai/gateway`, `blob/s3`, `ingest/memq`, `ingest/kafka`, `observability` | The concrete Postgres, gateway, S3, Kafka and Datadog code. |
 | Composition root | `cmd/memd` | Wiring only: the one place concrete types meet. |
 
 Rules that keep the tiers honest:
@@ -105,7 +105,7 @@ Rules that keep the tiers honest:
 | `ai` | `LLM`, `Embedder`, `Reranker`; `Router` and `Tokenizer` are concrete | `ai/gateway` (one client implements all three) | See [Model gateway](#model-gateway). |
 | `blob` | `Store` (Put, Get, List, DeletePrefix), `Key`, `BankPrefix` | `blob/s3`, chosen by `MEMD_BLOB_PROVIDER` (`s3`, the only value today) | See [storage.md](storage.md#blob-storage). |
 | `clock` | `Clock`; `System` and `Manual` | — | Tests use `clock.Manual`. |
-| `ingest` | `Source` (Receive, Ack, Nack, DeadLetter), `Message` | `ingest/memq` (in memory, for tests); no broker adapter yet | See [Ingest boundary](#ingest-boundary). |
+| `ingest` | `Source` (Receive, Ack, Nack, DeadLetter), `Message` | `ingest/memq` (in memory, for tests), `ingest/kafka` (a Kafka consumer group; not wired yet) | See [Ingest boundary](#ingest-boundary). |
 
 Errors crossing a boundary are already domain error classes (`domain.ErrNotFound`, `ErrUnavailable`, ...), so
 callers test them with `errors.Is`.
@@ -118,8 +118,19 @@ no sooner than a delay) or a `DeadLetter`. An unsettled message comes back, so c
 memd's retain is: a redelivered document is unchanged, joins the retain in flight, or is stale. Messages with the same
 key arrive in publish order. `internal/ingest/ingesttest` is the contract suite every adapter runs and
 `internal/ingest/memq` the in-memory source that tests it; `internal/ingest/doc.go` has the contract and the recipe for
-a Kafka, SQS, Pub/Sub or NATS adapter. The consumer that feeds these messages into retain is not built yet, so the
+an SQS, Pub/Sub or NATS adapter. The consumer that feeds these messages into retain is not built yet, so the
 diagram shows it dashed.
+
+`internal/ingest/kafka` is the first broker adapter: a consumer group on a topic, with the pure-Go franz-go client.
+Kafka commits one offset per partition, so the adapter commits only past records that are settled contiguously; a
+later record's Ack waits for every earlier record of its partition. Kafka has no negative acknowledgement, so Nack
+is local: the record is redelivered by the same consumer after the delay, and only the later records of its key wait
+for it; the other keys of the partition keep flowing. The price is the head of line: a record that keeps failing
+holds back its partition's commit (a crash or rebalance meanwhile redelivers the later, already acked records), and
+once the partition buffers too many records behind it, fetching that partition pauses. The consumer bounds this by
+dead-lettering after its maximum attempts. DeadLetter produces the record to a dead-letter topic with failure
+headers (reason, source position, attempt) and settles it once the produce is acknowledged. The package comment has
+the full semantics and the operational notes (partitioning by document id, dead-letter retention, lag).
 
 ![Queue ingestion: broker, ingest.Source, the consumer loop, the commit point and the settlements](diagrams/ingest-queue.svg)
 

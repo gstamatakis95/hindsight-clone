@@ -169,6 +169,32 @@ says so.
 - **What:** the loop requires *some* retrieval first, not Hindsight's mental models → observations → recall
   order; `directive_compliance` is not checked.
 
+## Queue ingestion
+
+### A failing Kafka record holds back its partition
+- **What:** Kafka commits one offset per partition, so while a record waits out its Nacks, nothing after it in its
+  partition is committed, even records of other keys that were acked. Once the partition buffers
+  `MaxBuffered` records (default 10 000) behind it, fetching that partition pauses for every key.
+- **Impact:** a crash or rebalance meanwhile redelivers the acked records after the stuck one (retain absorbs them as
+  unchanged, joined or stale); a long-failing record stalls its partition.
+- **Workaround:** dead-letter after a bounded number of attempts, and give the topic enough partitions that one
+  stuck partition is a small share of the traffic.
+
+### Kafka delivery attempts restart after a rebalance
+- **What:** Kafka keeps no delivery count, so `Message.Attempt` counts this consumer's deliveries since it was
+  assigned the partition, and starts again at 1 after a rebalance or a restart. A rebalance between a dead-letter
+  produce and its settlement also puts the record on the dead-letter topic twice.
+- **Impact:** a record that keeps failing across restarts is retried more than the maximum attempts before it is
+  dead-lettered; dead-letter consumers may see duplicates.
+- **Workaround:** none needed for correctness; deduplicate dead letters by their `memd-dlq-topic`,
+  `memd-dlq-partition` and `memd-dlq-offset` headers.
+
+### The Kafka source is not wired yet
+- **What:** `internal/ingest/kafka` is built and tested, but no consumer loop drives it and cmd/memd reads none of its
+  settings.
+- **Impact:** queue ingestion is not available in a deployment yet.
+- **Workaround:** retain through the API.
+
 ## Out of scope
 
 memd matches Hindsight's memory engine except for these, which it does not provide:
