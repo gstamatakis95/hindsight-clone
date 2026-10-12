@@ -37,6 +37,17 @@ func TestWiredStackNoModelCallInsideTransaction(t *testing.T) {
 		t.Fatalf("reflect: %v %v", ref, err)
 	}
 	w.mentalModelBothStrategies(t, models, bank)
+	w.invalidateAndRestore(t, mem, bank)
+	w.guard.mu.Lock()
+	defer w.guard.mu.Unlock()
+	if len(w.guard.violations) > 0 {
+		t.Fatalf("gateway calls inside a transaction: %v", w.guard.violations)
+	}
+}
+
+// invalidateAndRestore invalidates a fact of bank, then restores it, letting the stack go idle after each.
+func (w *wiredStack) invalidateAndRestore(t *testing.T, mem pb.MemoryServiceClient, bank string) {
+	t.Helper()
 	facts, err := mem.ListMemories(w.ctx(t), &pb.ListMemoriesRequest{
 		BankId: bank, FactTypes: []pb.FactType{pb.FactType_FACT_TYPE_WORLD, pb.FactType_FACT_TYPE_EXPERIENCE},
 	})
@@ -64,11 +75,6 @@ func TestWiredStackNoModelCallInsideTransaction(t *testing.T) {
 		t.Fatalf("restore memory: %v", err)
 	}
 	w.idle(t, bank)
-	w.guard.mu.Lock()
-	defer w.guard.mu.Unlock()
-	if len(w.guard.violations) > 0 {
-		t.Fatalf("gateway calls inside a transaction: %v", w.guard.violations)
-	}
 }
 
 // mentalModelBothStrategies builds a model agentically, then refreshes it single-shot.

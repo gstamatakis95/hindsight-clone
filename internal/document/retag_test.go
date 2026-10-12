@@ -343,16 +343,21 @@ func TestRetagSetEqualAfterFailedRetagReenqueues(t *testing.T) {
 		t.Fatalf("unit tags = %v, want [c]", us["f1"].Tags)
 	}
 	// Now the newest retag completed (well, ran): mark it done, after which the same tags are a no-op.
-	jobs := f.jobs(t, domain.OperationKindRetagDocument)
-	for _, op := range jobs {
-		if op.ID == again && op.Status == domain.OperationStatusProcessing {
-			if err := f.store.Complete(ctx, again, nil, nil); err != nil {
+	f.completeIfProcessing(t, again)
+	if id, err := r.Retag(ctx, testBank, "d1", []string{"c"}); err != nil || id != "" {
+		t.Fatalf("same tags after a completed retag = %q, %v; want a no-op", id, err)
+	}
+}
+
+// completeIfProcessing marks retag operation id completed when it is still processing.
+func (f fixture) completeIfProcessing(t *testing.T, id domain.OperationID) {
+	t.Helper()
+	for _, op := range f.jobs(t, domain.OperationKindRetagDocument) {
+		if op.ID == id && op.Status == domain.OperationStatusProcessing {
+			if err := f.store.Complete(context.Background(), id, nil, nil); err != nil {
 				t.Fatalf("Complete: %v", err)
 			}
 		}
-	}
-	if id, err := r.Retag(ctx, testBank, "d1", []string{"c"}); err != nil || id != "" {
-		t.Fatalf("same tags after a completed retag = %q, %v; want a no-op", id, err)
 	}
 }
 

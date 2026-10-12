@@ -333,6 +333,14 @@ func compareUnit(t *testing.T, got, want domain.Unit) {
 	if !maps.Equal(got.Metadata, want.Metadata) || !slices.Equal(got.Tags, want.Tags) {
 		t.Errorf("unit %s metadata/tags = %v %q, want %v %q", want.ID, got.Metadata, got.Tags, want.Metadata, want.Tags)
 	}
+	compareUnitState(t, got, want)
+	compareUnitTimes(t, got, want)
+	compareEmbedding(t, want.ID, got.Embedding, want.Embedding)
+}
+
+// compareUnitState reports differing timeless flag, seq, and an observation's version and proof count.
+func compareUnitState(t *testing.T, got, want domain.Unit) {
+	t.Helper()
 	if got.Timeless != want.Timeless || got.Seq != want.Seq {
 		t.Errorf("unit %s timeless/seq = %v %d, want %v %d", want.ID, got.Timeless, got.Seq, want.Timeless, want.Seq)
 	}
@@ -340,8 +348,6 @@ func compareUnit(t *testing.T, got, want domain.Unit) {
 		t.Errorf("observation %s version/proof_count = %d %d, want %d %d", want.ID, got.Version, got.ProofCount,
 			want.Version, want.ProofCount)
 	}
-	compareUnitTimes(t, got, want)
-	compareEmbedding(t, want.ID, got.Embedding, want.Embedding)
 }
 
 // compareUnitTimes reports differing timestamps of a unit.

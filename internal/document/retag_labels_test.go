@@ -82,13 +82,7 @@ func TestRetagKeepsLabelTags(t *testing.T) {
 		t.Fatalf("Complete: %v", err)
 	}
 
-	seqBefore, _ := f.store.Read().BankSeq(ctx, testBank)
-	if id, err := r.Retag(ctx, testBank, "d1", []string{" c "}); err != nil || id != "" {
-		t.Fatalf("set-equal retag = %q, %v; want a no-op", id, err)
-	}
-	if seqAfter, _ := f.store.Read().BankSeq(ctx, testBank); seqAfter != seqBefore {
-		t.Fatalf("set-equal retag bumped change_seq %d -> %d", seqBefore, seqAfter)
-	}
+	f.wantNoopRetag(t, r, []string{" c "})
 	if us := f.units(t, "f4"); !slices.Equal(us["f4"].Tags, want) {
 		t.Fatalf("after set-equal retag: f4 tags %v, want %v", us["f4"].Tags, want)
 	}
@@ -96,5 +90,19 @@ func TestRetagKeepsLabelTags(t *testing.T) {
 	f.restore(t, "f5")
 	if us := f.units(t, "f5"); !slices.Equal(us["f5"].Tags, want) {
 		t.Fatalf("archived f5 after retag and Restore: tags %v, want %v", us["f5"].Tags, want)
+	}
+}
+
+// wantNoopRetag checks that retagging d1 with tags (set-equal to its current tags) enqueues nothing and leaves the
+// bank's change_seq alone.
+func (f fixture) wantNoopRetag(t *testing.T, r retagger, tags []string) {
+	t.Helper()
+	ctx := context.Background()
+	seqBefore, _ := f.store.Read().BankSeq(ctx, testBank)
+	if id, err := r.Retag(ctx, testBank, "d1", tags); err != nil || id != "" {
+		t.Fatalf("set-equal retag = %q, %v; want a no-op", id, err)
+	}
+	if seqAfter, _ := f.store.Read().BankSeq(ctx, testBank); seqAfter != seqBefore {
+		t.Fatalf("set-equal retag bumped change_seq %d -> %d", seqBefore, seqAfter)
 	}
 }

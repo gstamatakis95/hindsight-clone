@@ -84,9 +84,8 @@ func (e *curateEnv) assertInvalidateEffects() {
 	if keys := e.serialKeys(domain.OperationKindGraphMaintenance); !slices.Equal(keys, []string{"graph"}) {
 		t.Errorf("graph_maintenance jobs = %v", keys)
 	}
-	if audits := e.store.recorded(); len(audits) != 1 || audits[0].Action != domain.CurationInvalidate ||
-		audits[0].Reason != "wrong" || audits[0].Before == nil {
-		t.Errorf("audit rows = %+v", audits)
+	if a, ok := e.store.only(domain.CurationInvalidate); !ok || a.Reason != "wrong" || a.Before == nil {
+		t.Errorf("audit rows = %+v", e.store.recorded())
 	}
 	evs := e.events()
 	if len(evs) != 1 || evs[0].Type != domain.EventTypeMemoryCurated || evs[0].SubjectID != string(idF1) {
@@ -267,9 +266,8 @@ func TestEditClearsEmbeddingAndQueuesRederive(t *testing.T) {
 		t.Errorf("stored edit = %+v", got)
 	}
 	e.assertNotLive(idO1)
-	if audits := e.store.recorded(); len(audits) != 1 || audits[0].Action != domain.CurationEdit ||
-		audits[0].OperationID != op.ID || audits[0].Before == nil || audits[0].After == nil {
-		t.Errorf("audit = %+v", audits)
+	if a, ok := e.store.only(domain.CurationEdit); !ok || a.OperationID != op.ID || a.Before == nil || a.After == nil {
+		t.Errorf("audit = %+v", e.store.recorded())
 	}
 	e.rederiveEdited([]string{"Alice", "Carol"})
 }

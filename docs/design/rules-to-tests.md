@@ -134,7 +134,7 @@ Design: [reflect-and-mental-models.md](reflect-and-mental-models.md#mental-model
 
 | Rule | Tests |
 |---|---|
-| A model is created with its first build queued; a cron must parse | `mentalmodel.TestCreateMentalModelValidatesAndQueuesBuild`, `mentalmodel.TestParseCronStrict`, `grpcapi.TestFieldMaskScheduleOneof` |
+| A model is created with its first build queued; a cron must parse | `mentalmodel.TestCreateMentalModelValidatesAndQueuesBuild`, `mentalmodel.TestCreateMentalModelRejectsInvalidSpecs`, `mentalmodel.TestParseCronStrict`, `grpcapi.TestFieldMaskScheduleOneof` |
 | Two strategies, both honouring full and delta, scope filters and failure rules | `mentalmodel.TestBothStrategiesProduceVersionThroughRunner`, `mentalmodel.TestDeltaAllOpsRejectedKeepsDocument`, `e2e.TestScenarios/MentalModelBothStrategies`, `memd.TestWiredStackNoModelCallInsideTransaction` |
 | Staleness: an in-scope seq above last_seq_seen, or a retracted source; untagged writes never stale a tagged model; fuzzy leaves use the bank's floor | `mentalmodel.TestUntaggedWriteNeverStalesTaggedModel`, `mentalmodel.TestAdminGetViewAndStale`, `mentalmodel.TestStalenessUsesBankFuzzyFloor`, `mentalmodel.TestFuzzyScopeResolvesBankTags` |
 | Watermark: read BankSeq first; a late writer is picked up by the next refresh | `mentalmodel.TestLateCommittingWriterPickedUpByNextRefresh` |

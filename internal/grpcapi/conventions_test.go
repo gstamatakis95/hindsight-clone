@@ -12,10 +12,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// TestTagFilterEverySite checks the one tag-filter shape: no request carries the old tags_match / tag_groups fields,
-// every TagFilter field is named tags (scopes on a strategy), and each site converts the same message to the same
-// domain.TagFilter.
-func TestTagFilterEverySite(t *testing.T) {
+// TestTagFilterFieldNames checks the one tag-filter shape: no request carries the old tags_match / tag_groups
+// fields, and every TagFilter field is named tags (scopes on a strategy).
+func TestTagFilterFieldNames(t *testing.T) {
 	filterName := (&pb.TagFilter{}).ProtoReflect().Descriptor().FullName()
 	msgs := pb.File_memory_v1_memory_proto.Messages()
 	var walk func(protoreflect.MessageDescriptors)
@@ -36,7 +35,11 @@ func TestTagFilterEverySite(t *testing.T) {
 		}
 	}
 	walk(msgs)
+}
 
+// TestTagFilterEverySite checks that each request site converts the same TagFilter message to the same
+// domain.TagFilter, and that the reverse conversion round-trips it.
+func TestTagFilterEverySite(t *testing.T) {
 	in := &pb.TagFilter{
 		Tags: []string{"a", "b"}, Match: pb.TagsMatch_TAGS_MATCH_ALL_STRICT,
 		Groups: []*pb.TagGroup{{Node: &pb.TagGroup_Leaf{Leaf: &pb.TagLeaf{Tags: []string{"c"}}}}},

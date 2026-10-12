@@ -41,23 +41,7 @@ func TestRecallExtraArm(t *testing.T) {
 	}
 
 	// The re-check: fresh leaks another bank's unit, an observation and a tagged unit.
-	other := domain.BankRef{Tenant: testBank.Tenant, Bank: "other"}
-	err := e.store.InTx(context.Background(), func(tx store.Tx) error {
-		ctx := context.Background()
-		if _, err := tx.Banks().Ensure(ctx, other); err != nil {
-			return err
-		}
-		seq, err := tx.Seq(ctx, other)
-		if err != nil {
-			return err
-		}
-		x := fact("x", "x elsewhere")
-		x.Bank, x.Seq, x.Tags = other, seq, []string{}
-		return tx.Units().Insert(ctx, []domain.Unit{x})
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	e.addOtherBank(t, fact("x", "x elsewhere"))
 	e.add(t, fact("secret", "x secret", "secret"),
 		domain.Unit{ID: uid("obs"), Bank: testBank, Type: domain.FactTypeObservation, Text: "x obs"})
 	fresh.hits = arm("fresh", "x", "obs", "secret", "c").hits
@@ -108,4 +92,25 @@ func TestRecallArmSelection(t *testing.T) {
 		}
 	}()
 	New(Deps{DB: e.store, Arms: []Arm{vec, arm(armVector)}})
+}
+
+// addOtherBank inserts u into a second bank of testBank's tenant.
+func (e *env) addOtherBank(t *testing.T, u domain.Unit) {
+	t.Helper()
+	other := domain.BankRef{Tenant: testBank.Tenant, Bank: "other"}
+	err := e.store.InTx(context.Background(), func(tx store.Tx) error {
+		ctx := context.Background()
+		if _, err := tx.Banks().Ensure(ctx, other); err != nil {
+			return err
+		}
+		seq, err := tx.Seq(ctx, other)
+		if err != nil {
+			return err
+		}
+		u.Bank, u.Seq, u.Tags = other, seq, []string{}
+		return tx.Units().Insert(ctx, []domain.Unit{u})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }

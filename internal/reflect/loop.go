@@ -279,20 +279,29 @@ func (r *run) finish(ctx context.Context, stop StopReason) (answer, error) {
 		// OpenAI-compatible backends also reject a named tool_choice.
 		return r.synthesize(ctx, stop)
 	}
-	for _, c := range resp.Message.ToolCalls {
+	if ans, ok, err := r.doneAnswer(resp.Message.ToolCalls, stop); ok || err != nil {
+		return ans, err
+	}
+	return r.synthesize(ctx, stop)
+}
+
+// doneAnswer reads the answer of the first done call among calls; ok is false when there is none or it is
+// malformed (the caller then synthesises), and an empty answer is errEmptyAnswer.
+func (r *run) doneAnswer(calls []ai.ToolCall, stop StopReason) (ans answer, ok bool, err error) {
+	for _, c := range calls {
 		if normalizeName(c.Name) != ToolDone {
 			continue
 		}
 		text, cited, problem := parseDone(c.Arguments, r.data.AnswerAsDocument)
 		if problem != "" {
-			break
+			return answer{}, false, nil
 		}
 		if text == "" {
-			return answer{}, errEmptyAnswer
+			return answer{}, true, errEmptyAnswer
 		}
-		return answer{text: text, cited: cited, viaDone: true, stop: stop}, nil
+		return answer{text: text, cited: cited, viaDone: true, stop: stop}, true, nil
 	}
-	return r.synthesize(ctx, stop)
+	return answer{}, false, nil
 }
 
 // ensureEvidence forces one retrieval turn; ended reports that the run ended there (a synthesis because

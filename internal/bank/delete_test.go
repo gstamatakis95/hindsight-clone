@@ -155,17 +155,7 @@ func TestBankDeleteLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if op.Kind != domain.OperationKindDeleteBank || op.Status != domain.OperationStatusPending {
-		t.Fatalf("tombstone op = %+v", op)
-	}
-	if got, _ := e.getOp(t, b, pending); got.Status != domain.OperationStatusCancelled {
-		t.Errorf("pending consolidate after tombstone: %s, want cancelled", got.Status)
-	}
-	if alive, _ := e.store.Alive(e.ctx, claimed); alive {
-		t.Error("claimed retain job still alive after tombstone")
-	}
-	assertWritesRefused(t, e, b)
-	assertReadsNotFound(t, e, b)
+	assertTombstoned(t, e, b, op, pending, claimed)
 
 	j := claimDelete(t, e)
 	if j.ID != op.ID {
@@ -194,6 +184,23 @@ func TestBankDeleteLifecycle(t *testing.T) {
 	if err := e.store.Complete(e.ctx, claimed, nil, nil); err == nil {
 		t.Error("old retain job completed against the fresh bank")
 	}
+}
+
+// assertTombstoned checks the state right after DeleteBank: a pending delete_bank operation, the bank's pending job
+// cancelled and its claimed job no longer alive, writes refused and reads NOT_FOUND.
+func assertTombstoned(t *testing.T, e env, b domain.BankRef, op domain.Operation, pending, claimed domain.OperationID) {
+	t.Helper()
+	if op.Kind != domain.OperationKindDeleteBank || op.Status != domain.OperationStatusPending {
+		t.Fatalf("tombstone op = %+v", op)
+	}
+	if got, _ := e.getOp(t, b, pending); got.Status != domain.OperationStatusCancelled {
+		t.Errorf("pending consolidate after tombstone: %s, want cancelled", got.Status)
+	}
+	if alive, _ := e.store.Alive(e.ctx, claimed); alive {
+		t.Error("claimed retain job still alive after tombstone")
+	}
+	assertWritesRefused(t, e, b)
+	assertReadsNotFound(t, e, b)
 }
 
 // assertBlockedByProcessing runs the delete while the claimed job of the bank is still processing: every

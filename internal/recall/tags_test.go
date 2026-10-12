@@ -153,6 +153,20 @@ func gNoneOf(g domain.TagGroup) domain.TagGroup {
 	return domain.TagGroup{Kind: domain.TagGroupNoneOf, Not: &g}
 }
 
+// checkMatchesGroups checks that p agrees with domain.MatchGroup over every group on each of unitTagSets.
+func checkMatchesGroups(t *testing.T, p domain.TagPredicate, groups []domain.TagGroup) {
+	t.Helper()
+	for _, u := range unitTagSets {
+		exp := true
+		for _, g := range groups {
+			exp = exp && domain.MatchGroup(u, g)
+		}
+		if got := p.Eval(u); got != exp {
+			t.Errorf("unit %q: Eval = %v, MatchGroup = %v (pred %+v)", u, got, exp, p)
+		}
+	}
+}
+
 func TestCompileGroups(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -191,15 +205,7 @@ func TestCompileGroups(t *testing.T) {
 			if v.calls != 0 {
 				t.Fatalf("vocabulary read %d times without fuzzy leaves", v.calls)
 			}
-			for _, u := range unitTagSets {
-				exp := true
-				for _, g := range tc.groups {
-					exp = exp && domain.MatchGroup(u, g)
-				}
-				if got := p.Eval(u); got != exp {
-					t.Errorf("unit %q: Eval = %v, MatchGroup = %v (pred %+v)", u, got, exp, p)
-				}
-			}
+			checkMatchesGroups(t, p, tc.groups)
 		})
 	}
 

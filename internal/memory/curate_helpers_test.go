@@ -226,6 +226,15 @@ func (s *auditStore) recorded() []domain.AuditEntry {
 	return slices.Clone(s.audits)
 }
 
+// only returns the one recorded audit row; ok is false unless exactly one row, of action, was recorded.
+func (s *auditStore) only(action domain.CurationAction) (domain.AuditEntry, bool) {
+	rows := s.recorded()
+	if len(rows) != 1 || rows[0].Action != action {
+		return domain.AuditEntry{}, false
+	}
+	return rows[0], true
+}
+
 // auditTx is a Tx whose unit repo records audits.
 type auditTx struct {
 	store.Tx
