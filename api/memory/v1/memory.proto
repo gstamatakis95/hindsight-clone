@@ -218,7 +218,9 @@ service OrgService {
   // completion: the operations are removed with the org.
   rpc DeleteOrg(DeleteOrgRequest) returns (DeleteOrgResponse);
   // GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
-  // server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND.
+  // server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND. A receipt also outlives the
+  // reuse of its org id: an org created again after a completed delete is live while GetDeletionReceipt still
+  // returns the old COMPLETED receipt, so check GetOrg first; a live org wins.
   rpc GetDeletionReceipt(GetDeletionReceiptRequest) returns (GetDeletionReceiptResponse);
 }
 

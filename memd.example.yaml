@@ -108,8 +108,8 @@ retention:
 
 deletion:
   # Least time between DeleteOrg and the org's blob sweep, so a request that passed its org check before the
-  # delete has written its blob by then. Default: api.rpc_deadline, at least 10m. Keep it >= api.rpc_deadline.
-  blob_grace: 10m
+  # delete has written its blob by then. Default (unset): api.rpc_deadline, at least 10m. Keep it >= api.rpc_deadline.
+  # blob_grace: 10m
 
 api:
   rpc_deadline: 120s                    # calls that carry no deadline; 0s = none

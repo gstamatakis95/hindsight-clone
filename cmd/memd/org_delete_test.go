@@ -104,6 +104,7 @@ func TestDeleteOrgWhileRunning(t *testing.T) {
 		codes.FailedPrecondition, "ORG_DELETING")
 	_, err = pb.NewBankServiceClient(w.conn).CreateBank(ctx, &pb.CreateBankRequest{OrgId: "del", BankId: "new"})
 	wantStatus(t, "CreateBank in the deleting org", err, codes.FailedPrecondition, "ORG_DELETING")
+	w.wantWritesRefused(t, ctx)
 	_, err = orgs.CreateOrg(ctx, &pb.CreateOrgRequest{OrgId: "del"})
 	wantStatus(t, "CreateOrg of the deleting org", err, codes.FailedPrecondition, "ORG_DELETING")
 	_, err = orgs.GetOrg(ctx, &pb.GetOrgRequest{OrgId: "del"})
@@ -122,6 +123,43 @@ func TestDeleteOrgWhileRunning(t *testing.T) {
 	if err != nil || again.GetOperation().GetKind() != pb.OperationKind_OPERATION_KIND_DELETE_ORG ||
 		again.GetReceipt().GetId() != rc.GetId() {
 		t.Errorf("DeleteOrg again = %v, %v; want the running delete_org and receipt %s", again, err, rc.GetId())
+	}
+}
+
+// wantWritesRefused checks that the other write RPCs on a bank of the deleting org "del" fail FAILED_PRECONDITION
+// (ORG_DELETING or BANK_DELETING), never NOT_FOUND.
+func (w *wiredStack) wantWritesRefused(t *testing.T, ctx context.Context) {
+	t.Helper()
+	writes := map[string]func() error{
+		"RetainBatch": func() error {
+			_, err := pb.NewMemoryServiceClient(w.conn).RetainBatch(ctx, &pb.RetainBatchRequest{
+				OrgId: "del", BankId: "b1", Items: []*pb.RetainItem{{Content: "x"}},
+			})
+			return err //nolint:wrapcheck // test
+		},
+		"Consolidate": func() error {
+			_, err := pb.NewObservationServiceClient(w.conn).Consolidate(ctx, &pb.ConsolidateRequest{
+				OrgId: "del", BankId: "b1",
+			})
+			return err //nolint:wrapcheck // test
+		},
+		"CreateMentalModel": func() error {
+			_, err := pb.NewMentalModelServiceClient(w.conn).CreateMentalModel(ctx, &pb.CreateMentalModelRequest{
+				OrgId: "del", BankId: "b1", Spec: &pb.MentalModelSpec{Id: "m", SourceQuery: "q"},
+			})
+			return err //nolint:wrapcheck // test
+		},
+		"CreateDirective": func() error {
+			_, err := pb.NewConfigServiceClient(w.conn).CreateDirective(ctx, &pb.CreateDirectiveRequest{
+				OrgId: "del", BankId: "b1", Directive: &pb.Directive{Name: "d", Rules: []string{"r"}},
+			})
+			return err //nolint:wrapcheck // test
+		},
+	}
+	for name, call := range writes {
+		if err := call(); status.Code(err) != codes.FailedPrecondition {
+			t.Errorf("%s on a bank of the deleting org: %v, want FAILED_PRECONDITION", name, err)
+		}
 	}
 }
 

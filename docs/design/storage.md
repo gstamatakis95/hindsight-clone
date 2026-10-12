@@ -286,7 +286,10 @@ and leaves a deletion receipt that outlives the org.
 - **Completion signal.** Poll `OrgService.GetDeletionReceipt` until `STATE_COMPLETED`. It looks the org up by
   `sha256(tenant_id || 0x00 || org_id)` and returns its most recent receipt, so it answers after the org is gone
   and tells a deleted org from one never created (an org never deleted is NOT_FOUND). Receipt states:
-  `in_progress`, `failed_verification` (the delete is still retrying), `completed`.
+  `in_progress`, `failed_verification` (the delete is still retrying), `completed`. The lookup and these states are
+  a stable contract (the queue consumer relies on them). A receipt outlives the reuse of its org id: an org created
+  again after a completed delete is live while its old receipt still answers, so a caller deciding whether an org
+  is gone checks GetOrg first, and a live org wins.
 - **Receipt.** `deletion_receipts` stores the receipt id, the tenant, the org id hash, the request and completion
   times, the bank count, the last verification and the server version: no bank ids, document ids, names or
   content. The hash of a short client-chosen id can be reversed by guessing, so the receipt is pseudonymous, not

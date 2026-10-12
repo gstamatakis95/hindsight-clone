@@ -1624,7 +1624,9 @@ type OrgServiceClient interface {
 	// completion: the operations are removed with the org.
 	DeleteOrg(ctx context.Context, in *DeleteOrgRequest, opts ...grpc.CallOption) (*DeleteOrgResponse, error)
 	// GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
-	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND.
+	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND. A receipt also outlives the
+	// reuse of its org id: an org created again after a completed delete is live while GetDeletionReceipt still
+	// returns the old COMPLETED receipt, so check GetOrg first; a live org wins.
 	GetDeletionReceipt(ctx context.Context, in *GetDeletionReceiptRequest, opts ...grpc.CallOption) (*GetDeletionReceiptResponse, error)
 }
 
@@ -1710,7 +1712,9 @@ type OrgServiceServer interface {
 	// completion: the operations are removed with the org.
 	DeleteOrg(context.Context, *DeleteOrgRequest) (*DeleteOrgResponse, error)
 	// GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
-	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND.
+	// server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND. A receipt also outlives the
+	// reuse of its org id: an org created again after a completed delete is live while GetDeletionReceipt still
+	// returns the old COMPLETED receipt, so check GetOrg first; a live org wins.
 	GetDeletionReceipt(context.Context, *GetDeletionReceiptRequest) (*GetDeletionReceiptResponse, error)
 	mustEmbedUnimplementedOrgServiceServer()
 }
