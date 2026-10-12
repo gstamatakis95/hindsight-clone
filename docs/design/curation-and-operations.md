@@ -51,8 +51,10 @@ explains the behaviour behind them.
     `api.max_recall_tokens` (32000), and a Recall entity's `observation_ids` by `domain.MaxEntityObservationIDs` (the
     50 most recently updated, beside `observation_count`).
   - A read (Get, List, Search, Preview, Export, Recall, Reflect) whose encoded response would still pass the limit
-    fails with RESOURCE_EXHAUSTED (`RESPONSE_TOO_LARGE`) instead of breaking the client's receive. In practice that is
-    only ExportBankTemplate: a template is one object that CreateBank takes whole, so it is not paged. A write is
+    fails with RESOURCE_EXHAUSTED (`RESPONSE_TOO_LARGE`) instead of breaking the client's receive. The reads that can
+    reach it are ExportBankTemplate (a template is one object that CreateBank takes whole, so it is not paged),
+    ListOperations (each operation carries its `effective_overrides`, and its pages are not cut by size; a smaller
+    `page_size` helps) and Reflect with `include.tool_outputs`. A write is
     never failed for its response size, since its work is committed.
   - Not paged, by design: ListRecallArms (the server's registry, a handful of arms), the GetBankStats maps (one key
     per fact type and per operation kind), Recall results (a ranking packed to a token budget is not stable across

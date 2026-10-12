@@ -278,3 +278,32 @@ func wantField(t *testing.T, what string, err error, field string) {
 	}
 	t.Errorf("%s: %v names no %s field violation", what, err, field)
 }
+
+// TestRecallTokenCap: a Recall's max_tokens is capped at api.max_recall_tokens before packing. With a cap of one
+// token only the top result comes back (the pack floor), however large the request's budget; with the default cap
+// the same request returns every fact.
+func TestRecallTokenCap(t *testing.T) {
+	for _, tc := range []struct {
+		limit int
+		want  func(int) bool
+	}{
+		{1, func(n int) bool { return n == 1 }},
+		{0, func(n int) bool { return n >= 2 }},
+	} {
+		w := startWiredFile(t, nil, func(f *ServerFile) { f.API.MaxRecallTokens = tc.limit })
+		ctx := w.ctx(t)
+		mem := pb.NewMemoryServiceClient(w.conn)
+		if _, err := mem.Retain(ctx, &pb.RetainRequest{OrgId: testOrg, BankId: "capped", Items: []*pb.RetainItem{
+			{Content: "Alice works as a nurse."}, {Content: "Bob works as a pilot."}, {Content: "Cy works as a cook."},
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		w.idle(t, "capped")
+		resp, err := mem.Recall(ctx, &pb.RecallRequest{
+			OrgId: testOrg, BankId: "capped", Query: "who works as what?", MaxTokens: 100000,
+		})
+		if err != nil || !tc.want(len(resp.GetResults())) {
+			t.Errorf("api.max_recall_tokens %d: %d results, %v", tc.limit, len(resp.GetResults()), err)
+		}
+	}
+}

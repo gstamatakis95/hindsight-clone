@@ -282,7 +282,8 @@ Conventions, stated once in the proto header:
 - **Message sizes.** gRPC clients receive 4 MiB by default, and every response stays under it: pages end early, a
   stored document is at most `ingest.max_document_bytes` (2 MiB), a mental model's content at most 1 MiB, Recall's
   token budgets at most `api.max_recall_tokens` (32000), and a read that would still pass `api.max_response_bytes`
-  (in practice only `ExportBankTemplate`) fails with `RESOURCE_EXHAUSTED` (`RESPONSE_TOO_LARGE`). Requests may be up
+  (`ExportBankTemplate`, a `ListOperations` page of operations with large overrides, a `Reflect` trace with tool
+  outputs) fails with `RESOURCE_EXHAUSTED` (`RESPONSE_TOO_LARGE`). Requests may be up
   to `ingest.max_request_bytes` (16 MiB).
 - **Tag filters.** Every request that filters by tag takes one `TagFilter`: flat `tags` under a `match` mode, or
   boolean `groups` (not both). List RPCs accept the flat form only.

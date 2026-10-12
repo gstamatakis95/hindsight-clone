@@ -134,6 +134,7 @@ Design: [recall.md](recall.md).
 | RRF fusion in arm order; boosts only decide the rerank cut | `recall.TestFuseRRFOrder`, `recall.TestFuseStrategyBoostRankSpace`, `recall.TestRecallFusionOrderGolden` |
 | A failing arm fails the recall | `recall.TestRecallFailingArmFailsRecall` |
 | An entity lists its 50 most recently updated observations and counts them all | `postgres.TestReads/entity_states_observation_cap`, `postgres.TestReads/entity_states` |
+| A Recall's max_tokens (and include budgets) is capped at api.max_recall_tokens before packing | `memd.TestRecallTokenCap` |
 | Packing skips an oversized result and returns the top one when nothing fits | `recall.TestPackSkipsOversized`, `recall.TestPackFloorWhenNothingFits` |
 | No time cue means no TIME_PARSE call | `timex.TestNoCueMakesNoLLMCall`, `arms.TestRecallNoCueNoTimeParse`, `arms.TestRecallExplicitWindowNoTimeParse` |
 
@@ -185,7 +186,7 @@ Design: [curation-and-operations.md](curation-and-operations.md).
 | Errors carry ErrorInfo reasons and BadRequest field violations; a batch item's error carries the same code, reason and fields (under `items[k]`) | `grpcapi.TestToStatus`, `grpcapi.TestToStatusFieldViolations`, `grpcapi.TestBacklogStatusAndItemError` |
 | Paging: a negative page_size or max_results is INVALID_ARGUMENT | `grpcapi.TestPagingInterceptor`, `operation.TestListEventsPageBounds` |
 | Paging: every RPC with page_size serves a size over 1000, rejects a malformed token naming page_token, and a one-item walk lists exactly one default page, in order | `memd.TestListPaging` |
-| A page of large items ends early under api.max_response_bytes, keeps at least one item and continues after the last one kept | `memd.TestListPaging`, `memory.TestListMemoriesResponseBudget` |
+| A page of large items ends early under api.max_response_bytes, keeps at least one item and continues after the last one kept | `memory.TestListMemoriesResponseBudget` |
 | A read whose response passes api.max_response_bytes fails with RESPONSE_TOO_LARGE; a write never does | `grpcapi.TestResponseSizeInterceptor` |
 | FieldMask patches: implicit masks touch only populated leaves; reset needs a mask, `*` resets all | `grpcapi.TestFieldMaskImpliedLeaves`, `grpcapi.TestFieldMaskConfigPatch`, `grpcapi.TestResetMask`, `config.TestResetPaths`, `memd.TestConfigWritesValidated` |
 | Model routing: per slot, the most specific level yielding a binding wins, its own or its default | `config.TestModelResolution`, `config.TestMergePrecedence` |

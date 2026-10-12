@@ -229,12 +229,14 @@ outside its reach.
 - **Impact:** slow tag listings on banks with very many tagged memories.
 - **Workaround:** narrow with `prefix`; use a large `page_size`.
 
-### Operations echo their overrides, outside the response size limit
+### Operations echo their overrides, and their responses are not cut by size
 - **What:** an Operation carries its `effective_overrides`, and ListOperations pages and RetainBatch responses (up to
   `ingest.max_batch_items` operations) do not end early by size the way the listings of large items do.
-- **Impact:** many operations with large overrides (long missions or custom prompts) can make a response pass the
-  client's 4 MiB receive limit.
-- **Workaround:** a smaller `page_size` or smaller batches; raise the client's receive limit.
+- **Impact:** many operations with large overrides (long missions or custom prompts) make a ListOperations page fail
+  with RESOURCE_EXHAUSTED (`RESPONSE_TOO_LARGE`) and a RetainBatch response pass the client's 4 MiB receive limit
+  (the batch is committed either way).
+- **Workaround:** ListOperations: a smaller `page_size`, or a larger `api.max_response_bytes`. RetainBatch: smaller
+  batches, or a larger client receive limit.
 
 ### Mental-model history pages by offset
 - **What:** ListMentalModelHistory pages with an offset token, so a version written while a client pages can repeat

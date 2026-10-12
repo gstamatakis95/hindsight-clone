@@ -62,8 +62,9 @@
 // stored text is at most ingest.max_document_bytes (default 2 MiB), a mental model's content is at most 1 MiB,
 // and Recall's token budgets are capped by api.max_recall_tokens (default 32000). A read (Get*, List*, Search*,
 // Preview*, Export*, Recall, Reflect) whose response would still pass api.max_response_bytes fails with
-// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE) instead of breaking the client's receive; ExportBankTemplate is the one
-// read that can reach it in practice. A write never fails on its response size.
+// RESOURCE_EXHAUSTED (RESPONSE_TOO_LARGE) instead of breaking the client's receive. The reads that can reach it are
+// ExportBankTemplate, ListOperations (each operation carries its overrides; use a smaller page_size) and Reflect
+// with include.tool_outputs. A write never fails on its response size.
 //
 // Tag filters. Every request that filters by tag takes one TagFilter: flat tags under a match mode, or
 // boolean tag groups (setting both = INVALID_ARGUMENT). Each TagFilter field states its default match mode.
