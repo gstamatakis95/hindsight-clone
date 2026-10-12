@@ -17,6 +17,25 @@ shared conventions); the root [README](../../README.md) is the user guide.
 | [known-limitations.md](known-limitations.md) | Accepted gaps, their impact and workarounds |
 | [rules-to-tests.md](rules-to-tests.md) | Every behavioural rule mapped to the tests that assert it |
 
+## Diagrams
+
+The diagrams are D2 sources in [diagrams/src](diagrams/src) (shared classes in `_style.d2`), rendered with the ELK
+layout to SVGs that follow the viewer's light or dark colour scheme. `make diagrams` re-renders them (d2 v0.9.0) and
+`make diagrams-check` fails when a committed SVG is stale. A dashed outline marks something not built yet.
+
+| Diagram | Shows | Embedded in |
+|---|---|---|
+| [deployment](diagrams/deployment.svg) | The memd processes, Postgres, object storage, the AI gateway, the migration step and the planned broker | [README](../../README.md), [architecture.md](architecture.md) |
+| [layering](diagrams/layering.svg) | The package tiers and the allowed import direction | [architecture.md](architecture.md) |
+| [job-pipeline](diagrams/job-pipeline.svg) | Enqueue, claim, run, settle, the status moves and the maintenance tick | [architecture.md](architecture.md) |
+| [ingest-queue](diagrams/ingest-queue.svg) | The ingest boundary and the planned consumer: broker, Receive, retain, Ack, Nack, DeadLetter | [architecture.md](architecture.md) |
+| [retain-flow](diagrams/retain-flow.svg) | The Retain RPC, the write transaction, the retain run and its batches | [retain.md](retain.md) |
+| [recall-flow](diagrams/recall-flow.svg) | Parse, the arms, fusion, rerank, boosts, packing and includes | [recall.md](recall.md) |
+| [reflect-loop](diagrams/reflect-loop.svg) | The tool loop, the evidence guard, closing and overflow, citations | [reflect-and-mental-models.md](reflect-and-mental-models.md) |
+| [mental-model-refresh](diagrams/mental-model-refresh.svg) | Triggers, scheduling, the run, the strategies and the write | [reflect-and-mental-models.md](reflect-and-mental-models.md) |
+| [consolidation-flow](diagrams/consolidation-flow.svg) | Plan, per-scope decide and apply, finish and the continuation | [consolidation.md](consolidation.md) |
+| [curation-flow](diagrams/curation-flow.svg) | Update, invalidate and restore, and the jobs they enqueue | [curation-and-operations.md](curation-and-operations.md) |
+
 Related: [eval/README.md](../../eval/README.md) covers the benchmarks (LoCoMo, LongMemEval, golden fixtures; how a
 run works, the LoCoMo methodology and how to add a benchmark), and [examples/README.md](../../examples/README.md)
 the runnable client scenarios.

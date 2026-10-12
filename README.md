@@ -11,14 +11,7 @@ All state lives in Postgres (pgvector, pg_search, pg_trgm) and object storage, s
 processes can run side by side. Every model call (LLMs, the embedder, the reranker) goes through one
 OpenAI-compatible AI gateway, and each step can use its own model.
 
-```mermaid
-flowchart TB
-  C[Clients: agents, admin tools, eval] --> API["memd api<br/>gRPC: Retain, Recall, Reflect, admin"]
-  API --> Q[("operations table<br/>job queue, SKIP LOCKED")] --> W["memd worker<br/>retain, consolidate, refresh, ..."]
-  API & W --> PG[("Postgres<br/>pgvector, pg_search, pg_trgm")]
-  API & W --> S3[("Object storage")]
-  API & W --> GW["AI gateway (OpenAI-compatible)"]
-```
+![memd deployment: clients, api, worker and ingest processes over Postgres, object storage and the AI gateway](docs/design/diagrams/deployment.svg)
 
 The whole API is one file, [`api/memory/v1/memory.proto`](api/memory/v1/memory.proto): first the conventions
 every service shares, then the seven services, then each service's messages. The design documents in
@@ -486,6 +479,7 @@ and the "Adding a benchmark" section of eval/README.md have the details.
 make test      # go test -race ./...: store code runs on real Postgres, so this needs Docker or a database URL
 make e2e       # compose stack + emulated gateway + memd api/worker processes: every scenario, crash and reclaim
 make lint      # golangci-lint (with depguard), ifacedoc, txcheck, buf lint, ruff
+make diagrams  # re-render docs/design/diagrams (d2 v0.9.0); make diagrams-check fails on a stale SVG
 ```
 
 Every test that touches the store gets its own database, cloned from a migrated template
@@ -558,6 +552,9 @@ handlers and maintenance sweeps)
 | `internal/ai/gateway` | `Client`, the OpenAI-compatible gateway adapter: structured and tool calls, embeddings, rerank, retries, concurrency caps. |
 | `internal/blob` | The object-storage boundary: `Store` (Put, Get, List, DeletePrefix) and the key layout (`Key`, `BankPrefix`). |
 | `internal/blob/s3` | `Store` on S3-compatible storage (AWS S3, MinIO). |
+| `internal/ingest` | The message-queue boundary: `Source` (Receive, Ack, Nack, DeadLetter) with at-least-once delivery, and the `Message` it delivers. No consumer or broker adapter exists yet. |
+| `internal/ingest/ingesttest` | The contract suite every ingest source runs. |
+| `internal/ingest/memq` | An in-memory `Source` for tests and the suite's self-test. |
 | `internal/blob/blobtest` | The contract suite every blob adapter runs. |
 | `internal/clock` | `Clock`, with `System` and the test clock `Manual`. |
 
@@ -611,7 +608,8 @@ handlers and maintenance sweeps)
 ## Design and limitations
 
 - [docs/design](docs/design/README.md): architecture, storage, retain, recall, consolidation, reflect and mental
-  models, curation and operations, configuration, and the rules-to-tests map.
+  models, curation and operations, configuration, and the rules-to-tests map. The diagrams (D2 sources in
+  `docs/design/diagrams/src`, rendered SVGs beside them; `make diagrams` needs d2 v0.9.0) are listed there.
 - [docs/design/known-limitations.md](docs/design/known-limitations.md): accepted gaps, their impact and workarounds.
 
 ## Examples

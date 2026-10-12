@@ -1,0 +1,47 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+triggers: "Triggers: one queued refresh per model" {
+  grid-columns: 3
+  grid-gap: 12
+  consolidation: "after consolidation\nschedule after_consolidation" {class: job}
+  cron: "cron\nevery maintenance tick" {class: job}
+  manual: "manual and curation\ninvalidate, edit, create,\nRefreshMentalModel" {class: job}
+}
+triggers.*.width: 270
+triggers.*.height: 90
+
+due: "Scheduling: skip a paused or fresh model\nelse due at max(now + debounce, last refresh + floor)\njoining a queued row upgrades it" {class: step}
+
+read: "Run: read the model, BankSeq S, merge config\nwindow (0, S] for full, (last_seq_seen, S] for delta" {class: step}
+recheck: "Automatic runs re-check\ninside the interval floor: park again\nfresh: write nothing; nothing in scope: NO_NEW_FACTS" {class: step}
+
+draft: "Draft with the strategy" {
+  grid-columns: 2
+  grid-gap: 12
+  agentic: "agentic (default)\nthe reflect loop writes the page" {class: model}
+  single: "single-shot\none recall, one MENTAL_MODEL call" {class: model}
+}
+draft.*.width: 330
+draft.*.height: 90
+
+modes: "Full: a new page. Delta: edit ops on the page;\nfalls back to full if sources were retracted,\nthe query changed, or too much changed" {class: step}
+write: "Write transaction\nSeq, re-read, conflict check, new version,\nembedding, watermark, MENTAL_MODEL_REFRESHED" {class: tx}
+fail: "A failed attempt writes nothing;\nafter 3 runs the tick pauses auto\nrefresh until a manual one succeeds" {class: planned}
+
+triggers -> due -> read -> recheck -> draft -> modes -> write
+draft -> fail: error {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: Step {class: step; width: 110; height: 50}
+  b: "DB transaction" {class: tx; width: 170; height: 50}
+  c: "Model calls, no tx" {class: model; width: 200; height: 50}
+  d: Trigger {class: job; width: 110; height: 50}
+  e: "dashed: failure" {shape: text; width: 180; height: 50}
+}

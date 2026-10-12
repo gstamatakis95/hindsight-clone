@@ -1,0 +1,41 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+rpc: "Retain RPC (memd api)" {
+  checks: "Validate every item, no-op check, bank check\nan unchanged document stops here" {class: step}
+  blobput: "Blob Put of the original\noutside any transaction" {class: step}
+  write: "Write transaction\nEnsure bank, Seq, upsert documents" {class: tx}
+  checks -> blobput -> write
+}
+
+run: "Retain run" {
+  prep: "Re-read the document (ownership, no-op)\nread the pinned blob, chunk" {class: step}
+  extract: "Per batch of 4 chunks\nextract, normalize dates, embed" {class: model}
+  batch: "Batch transaction\nSeq, owner check, replace old units (first batch)\ninsert units, entities, links" {class: tx}
+  done: "Completing transaction\nSeq, stamp hashes, RETAIN_COMPLETED" {class: tx}
+  prep -> extract -> batch
+  batch -> extract: next batch {class: async}
+  batch -> done: last batch
+}
+
+enqueue: "Async: retain_document job per document,\nretain_batch parent for 2 or more\nenqueued in the write transaction" {class: job}
+consolidate: "consolidate job\n(see consolidation-flow)" {class: job}
+
+rpc.write -> run.prep: "sync (default): runs inline,\nreturns the memories"
+rpc.write -> enqueue: "run_async" {class: async}
+enqueue -> run.prep: "a worker claims it\nserial key doc:{id}" {class: async}
+run.done -> consolidate: "enqueued unless skipped" {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: Step {class: step; width: 110; height: 50}
+  b: "DB transaction" {class: tx; width: 170; height: 50}
+  c: "Model calls, no tx" {class: model; width: 200; height: 50}
+  d: Job {class: job; width: 110; height: 50}
+  e: "dashed: async or loop" {shape: text; width: 240; height: 50}
+}

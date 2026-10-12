@@ -6,13 +6,7 @@ retrieval tools, single-shot mental-model refreshes and the mental-model scope c
 does not go through the engine; it calls the vector and text searches of the store directly (see
 [consolidation.md](consolidation.md#related-observations-and-dedup)).
 
-```
-parse (embed, time window, filters) ─┬─ vector   (HNSW)    ─┐
-                                     ├─ text     (BM25)    ─┤
-                                     ├─ graph    (links)   ─┼─ RRF fuse (k=60) ─ cut to rerank window (300)
-                                     └─ temporal (window)  ─┘   ─ re-check ─ cross-encoder rerank ─ boosts
-                                                                  ─ floors ─ prefer_observations ─ pack ─ includes ─ stale
-```
+![Recall: parse, the four arms, fusion, rerank, boosts, packing and includes](diagrams/recall-flow.svg)
 
 The selected arms run concurrently, each as its own query with no shared snapshot: a write that lands mid-recall
 may appear in one arm and not another, which fusion tolerates.

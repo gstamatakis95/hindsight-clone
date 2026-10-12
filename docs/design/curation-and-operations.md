@@ -62,6 +62,8 @@ explains the behaviour behind them.
 
 ## Curation
 
+![Curation: the three RPCs, their shared transaction and the jobs they enqueue](diagrams/curation-flow.svg)
+
 Curation fixes or retires one raw fact. Observations are never curated (INVALID_ARGUMENT,
 `MEMORY_IS_OBSERVATION`); they re-derive from their sources. Everything that would leave recall inconsistent
 commits in the RPC's own transaction; only re-embedding and re-linking wait for a `rederive_memory` job. Every

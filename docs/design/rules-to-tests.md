@@ -164,3 +164,18 @@ Design: [curation-and-operations.md](curation-and-operations.md).
 | FieldMask patches: implicit masks touch only populated leaves; reset needs a mask, `*` resets all | `grpcapi.TestFieldMaskImpliedLeaves`, `grpcapi.TestFieldMaskConfigPatch`, `grpcapi.TestResetMask`, `config.TestResetPaths`, `memd.TestConfigWritesValidated` |
 | Model routing: per slot, the most specific level yielding a binding wins, its own or its default | `config.TestModelResolution`, `config.TestMergePrecedence` |
 | Health needs no tenant; readiness runs the probes | `grpcapi.TestHealthWithoutTenant`, `grpcapi.TestServeHealth` |
+
+## Ingest boundary
+
+Design: [architecture.md](architecture.md#ingest-boundary). Every adapter runs `ingesttest.Run`; `memq` is the
+in-memory adapter (`memq.TestContract`).
+
+| Rule | Tests |
+|---|---|
+| An unsettled message is redelivered after Close, and after the lease runs out | `memq.TestContract/UnsettledRedeliveredAfterClose`, `memq.TestContract/UnsettledRedeliveredAfterLease` |
+| Ack settles for good, and is idempotent | `memq.TestContract/AckSettlesForGood` |
+| A stale settlement (after Close or a redelivery) neither fails nor settles the redelivered message | `memq.TestContract/StaleSettlementIsHarmless` |
+| Nack redelivers no sooner than its delay | `memq.TestContract/NackDelaysRedelivery`, `memq.TestNackKeepsKeyOrder` |
+| A dead-lettered message never returns on the main subscription | `memq.TestContract/DeadLetterNeverReturns` |
+| Messages with one key arrive in publish order | `memq.TestContract/SameKeyKeepsPublishOrder` |
+| Receive honours max, returns empty when idle, the context's error when cancelled and ErrClosed after Close | `memq.TestContract/ReceiveIdle`, `memq.TestContract/ReceiveHonoursMax`, `memq.TestContract/ReceiveContextCancelled`, `memq.TestContract/ReceiveAfterClose` |

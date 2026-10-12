@@ -1,0 +1,56 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+req: "Reflect request\nquery, tag filter, budget, directives" {class: ext}
+
+loop: "Tool loop: at most max_iterations turns\nlow 0.5x, mid 1x, high 2x of reflect.max_iterations (10)" {
+  turn: "REFLECT model turn\nsystem prompt: mission, disposition,\ndirectives, offered tools" {class: model}
+  tools: "Tool calls, run in order" {
+    grid-columns: 3
+    grid-gap: 10
+    recall: "recall\nfacts" {class: step}
+    obs: "search_\nobservations" {class: step}
+    sm: "search_\nmental_models" {class: step}
+    rm: "read_\nmental_models" {class: step}
+    expand: "expand\nby id" {class: step}
+    done: "done\nanswer + citations" {class: tx}
+  }
+  tools.*.width: 190
+  tools.*.height: 70
+  guard: "Evidence guard\ndone is sent back until a retrieval ran" {class: step}
+  turn -> tools: tool calls
+  tools -> turn: results {class: async}
+  tools.done -> guard
+}
+
+close: "No accepted done by the last turn?\none closing turn asks for done,\nthen a tool-less synthesis call answers\nfrom the gathered tool outputs" {class: model}
+overflow: "Context window full\nsynthesis over the tool outputs so far,\ndropping the oldest half if it overflows too" {class: model}
+cite: "Keep only retrieved citations\nde-duplicated, in citation order" {class: step}
+structured: "Structured output pass\nSTRUCTURED_OUTPUT projects the answer\ninto response_schema_json" {class: model}
+out: "ReflectResponse\ntext, based_on, trace, usage" {class: ext}
+fail: "Retrieval error: the call fails\nreflect never answers from evidence\nit could not gather" {class: planned}
+
+req -> loop
+loop.guard -> cite: accepted
+loop -> close: max_iterations {class: async}
+loop -> overflow: CONTEXT_OVERFLOW {class: async}
+loop -> fail: recall or page read error {class: async}
+close -> cite
+overflow -> cite
+cite -> structured: if a schema is set {class: async}
+cite -> out
+structured -> out
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: Step {class: step; width: 110; height: 50}
+  b: "Model call" {class: model; width: 150; height: 50}
+  c: Done {class: tx; width: 110; height: 50}
+  d: "Request or result" {class: ext; width: 190; height: 50}
+  e: "dashed: exception" {shape: text; width: 200; height: 50}
+}

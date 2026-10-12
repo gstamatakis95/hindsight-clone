@@ -1,0 +1,40 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+enq: "consolidate job\none at a time per bank\nfrom retain, curation, the tick,\nand its own continuation" {class: job}
+
+plan: "Plan: one read-only transaction\noldest unconsolidated facts (up to 100),\neach fact's scopes; cited scopes skipped" {class: tx}
+
+scope: "Per scope, in key order; LLM batches of 8 facts" {
+  strategy: "Pick the scope's strategy\nthen request overrides" {class: step}
+  related: "Related observations of this scope\nvector and text search" {class: step}
+  decide: "Decide: CONSOLIDATE call\ncreates and updates with quotes" {class: model}
+  dedup: "Dedup check on creates\nDEDUP_CHECK merges or keeps twins" {class: model}
+  apply: "Apply transaction\nSeq, re-read facts, write observations\nenqueue refreshes, stamp facts" {class: tx}
+  strategy -> related -> decide -> dedup -> apply
+}
+
+finish: "Finish transaction\nSeq, stamp the rest,\nCONSOLIDATION_COMPLETED" {class: tx}
+refresh: "refresh_mental_model jobs\nfor models scheduled\nafter_consolidation" {class: job}
+cont: "consolidate continuation\nif facts remain" {class: job}
+fail: "Failed CONSOLIDATE call\nhalve the batch; a fact failing alone\nis probed, retried, then parked" {class: planned}
+
+enq -> plan -> scope
+scope.apply -> refresh: same transaction {class: async}
+scope -> finish: all scopes done
+scope.decide -> fail: error {class: async}
+finish -> cont {class: async}
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: Step {class: step; width: 110; height: 50}
+  b: "DB transaction" {class: tx; width: 170; height: 50}
+  c: "Model call, no tx" {class: model; width: 190; height: 50}
+  d: Job {class: job; width: 110; height: 50}
+  e: "dashed: exception or async" {shape: text; width: 280; height: 50}
+}

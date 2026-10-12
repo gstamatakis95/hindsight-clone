@@ -1,0 +1,96 @@
+...@_style
+
+direction: down
+**.style.font-size: 20
+(** -> **)[*].style.font-size: 18
+
+# Tiers, top to bottom. A package imports only packages in a lower tier; depguard enforces it. Every row is
+# about 940 px wide, so each chip gets an equal share of it.
+tiers: "" {
+  grid-columns: 1
+  grid-gap: 14
+  style: {stroke-width: 0}
+
+  root: "Composition root: the one place concrete types meet" {
+    grid-columns: 1
+    cmd: "cmd/memd: wire.go and wire_services.go" {class: step}
+  }
+  adapters: "Adapters: implement a boundary, import nothing above it" {
+    grid-columns: 6
+    pg: store/postgres {class: adapter}
+    gw: ai/gateway {class: adapter}
+    s3: blob/s3 {class: adapter}
+    memq: ingest/memq {class: adapter}
+    kafka: "ingest/kafka\nand other brokers" {class: planned}
+    obs: observability {class: adapter}
+  }
+  transports: "Top: transports and the tick" {
+    grid-columns: 3
+    grpcapi: grpcapi {class: step}
+    maintenance: maintenance {class: step}
+    ingestapi: "ingestapi\nqueue consumer" {class: planned}
+  }
+  services: "Services: one Service per gRPC service, never import each other" {
+    grid-columns: 7
+    memory: memory {class: svc}
+    document: document {class: svc}
+    observation: observation {class: svc}
+    mentalmodel: mentalmodel {class: svc}
+    bank: bank {class: svc}
+    configsvc: configsvc {class: svc}
+    operation: operation {class: svc}
+  }
+  libs: "Libraries: one concrete type each, no RPCs" {
+    grid-columns: 4
+    recall: "recall\nand its arms" {class: step}
+    reflect: reflect {class: step}
+    timex: timex {class: step}
+    linking: linking {class: step}
+  }
+  infra: "Infrastructure" {
+    grid-columns: 2
+    config: "config\nresolution, merge, validation" {class: step}
+    jobs: "jobs\nrunner and job catalogue" {class: step}
+  }
+  bounds: "Boundaries: interfaces to I/O, each with a contract suite" {
+    grid-columns: 5
+    store: store {class: boundary}
+    graph: graph {class: boundary}
+    ai: ai {class: boundary}
+    blob: blob {class: boundary}
+    ingest: ingest {class: boundary}
+  }
+  leaves: "Leaves" {
+    grid-columns: 3
+    clock: clock {class: step}
+    prompts: prompts {class: step}
+    jsonschema: jsonschema {class: step}
+  }
+  domain: "Domain: plain types, errors and pure rules; imports nothing internal" {
+    grid-columns: 1
+    d: domain {class: step}
+  }
+}
+
+tiers.*.grid-gap: 12
+tiers.*.*.height: 60
+tiers.root.*.width: 940
+tiers.adapters.*.width: 143
+tiers.transports.*.width: 305
+tiers.services.*.width: 124
+tiers.libs.*.width: 226
+tiers.infra.*.width: 464
+tiers.bounds.*.width: 178
+tiers.leaves.*.width: 305
+tiers.domain.*.width: 940
+
+legend: Legend {
+  near: bottom-center
+  grid-columns: 5
+  grid-gap: 12
+  a: Service {class: svc; width: 120; height: 50}
+  b: Boundary {class: boundary; width: 120; height: 50}
+  c: Adapter {class: adapter; width: 120; height: 50}
+  d: Planned {class: planned; width: 120; height: 50}
+  e: "a tier imports only tiers below it" {shape: text; width: 340; height: 50}
+}
