@@ -136,3 +136,4 @@ eval-report.*
 
 # Local server config file (memd.example.yaml is the documented template)
 /memd.yaml
+cmd/memd/memd
