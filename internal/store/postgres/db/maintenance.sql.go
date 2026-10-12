@@ -132,6 +132,43 @@ func (q *Queries) StalledBankDeletes(ctx context.Context) ([]StalledBankDeletesR
 	return items, nil
 }
 
+const stalledOrgDeletes = `-- name: StalledOrgDeletes :many
+SELECT g.tenant_id, g.id FROM orgs g
+WHERE g.deleting_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM operations o
+    WHERE o.tenant_id = g.tenant_id AND o.org_id = g.id AND o.bank_id = '' AND o.kind = 'delete_org'
+      AND o.status IN ('pending', 'processing')
+)
+ORDER BY g.tenant_id COLLATE "C", g.id COLLATE "C"
+`
+
+type StalledOrgDeletesRow struct {
+	TenantID string
+	ID       string
+}
+
+// StalledOrgDeletes returns, in byte order, the tombstoned orgs with no pending or processing delete_org operation,
+// for the tick's resume_org_deletes step (docs/design/storage.md#deleting-an-org).
+func (q *Queries) StalledOrgDeletes(ctx context.Context) ([]StalledOrgDeletesRow, error) {
+	rows, err := q.db.Query(ctx, stalledOrgDeletes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StalledOrgDeletesRow{}
+	for rows.Next() {
+		var i StalledOrgDeletesRow
+		if err := rows.Scan(&i.TenantID, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unconsolidatedBanks = `-- name: UnconsolidatedBanks :many
 SELECT b.tenant_id, b.org_id, b.id, o.created_at AS oldest FROM banks b
 CROSS JOIN LATERAL (

@@ -19,10 +19,14 @@ import (
 )
 
 // Fast worker timings for the scenarios: a crashed worker's job is reclaimed within seconds instead of the
-// production 2 minutes (one value feeds the runner and the reclaim, as in production).
-var fastWorker = map[string]any{"worker": map[string]any{
-	"poll_interval": "100ms", "heartbeat_interval": "1s", "stale_after": "6s", "maintenance_interval": "2s",
-}}
+// production 2 minutes (one value feeds the runner and the reclaim, as in production), and an org delete sweeps its
+// blobs a second after the request instead of after the production grace (at least 10 minutes).
+var fastWorker = map[string]any{
+	"worker": map[string]any{
+		"poll_interval": "100ms", "heartbeat_interval": "1s", "stale_after": "6s", "maintenance_interval": "2s",
+	},
+	"deletion": map[string]any{"blob_grace": "1s"},
+}
 
 // env is one running memd (api and worker as separate processes) over one compose stack and the emulator.
 type env struct {

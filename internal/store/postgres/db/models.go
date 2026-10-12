@@ -39,6 +39,18 @@ type Chunk struct {
 	CreatedAt   time.Time
 }
 
+type DeletionReceipt struct {
+	TenantID      string
+	ID            uuid.UUID
+	OrgIDSha256   string
+	Status        string
+	RequestedAt   time.Time
+	CompletedAt   *time.Time
+	Banks         int32
+	Verification  json.RawMessage
+	ServerVersion string
+}
+
 type Directive struct {
 	TenantID  string
 	OrgID     string

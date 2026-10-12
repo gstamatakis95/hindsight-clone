@@ -26,18 +26,19 @@ func New(d Deps) *Service {
 // GetOperation returns one operation of b; an unknown operation or bank is domain.ErrNotFound. A tombstoned bank
 // answers only for its delete_bank operations (any other id is domain.ErrBankNotFound, like every read of a bank
 // being deleted), so a client can poll the operation DeleteBank returned until the delete's last step removes it
-// with the bank.
+// with the bank. An org scope (b.OrgScoped) reads the org's own operations (delete_org) while the org row exists,
+// tombstoned or not.
 func (s *Service) GetOperation(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	var op domain.Operation
 	err := s.d.DB.InTx(ctx, func(tx store.Tx) error {
 		op = domain.Operation{}
-		bank, err := tx.Banks().Get(ctx, b)
+		deleting, err := scopeDeleting(ctx, tx, b)
 		if err != nil {
 			return err
 		}
 		got, err := tx.Queue().Get(ctx, b, id)
 		switch {
-		case bank.Deleting() && (err != nil || got.Kind != domain.OperationKindDeleteBank):
+		case deleting && !b.OrgScoped() && (err != nil || got.Kind != domain.OperationKindDeleteBank):
 			return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b.Bank)
 		case err != nil:
 			return err
@@ -48,8 +49,20 @@ func (s *Service) GetOperation(ctx context.Context, b domain.BankRef, id domain.
 	return op, err
 }
 
+// scopeDeleting reads b's bank row, or its org row for an org scope, and reports whether it is tombstoned; unknown =
+// domain.ErrNotFound (ErrOrgNotFound for an org).
+func scopeDeleting(ctx context.Context, tx store.Tx, b domain.BankRef) (bool, error) {
+	if b.OrgScoped() {
+		org, err := tx.Orgs().Get(ctx, b.OrgRef())
+		return org.Deleting(), err
+	}
+	bank, err := tx.Banks().Get(ctx, b)
+	return bank.Deleting(), err
+}
+
 // ListOperations pages b's operations, newest first, and returns the next page token; the page size follows
-// domain.ListPage. An unknown or tombstoned bank is domain.ErrNotFound.
+// domain.ListPage. An unknown or tombstoned bank is domain.ErrNotFound. An org scope lists the org's own operations
+// (delete_org) while the org row exists.
 func (s *Service) ListOperations(
 	ctx context.Context, b domain.BankRef, f store.OperationFilter,
 ) ([]domain.Operation, string, error) {
@@ -60,8 +73,14 @@ func (s *Service) ListOperations(
 	f.PageSize = size
 	var ops []domain.Operation
 	var next string
-	err = s.readBank(ctx, b, func(tx store.Tx) error {
-		var err error
+	err = s.d.DB.InTx(ctx, func(tx store.Tx) error {
+		deleting, err := scopeDeleting(ctx, tx, b)
+		if err != nil {
+			return err
+		}
+		if deleting && !b.OrgScoped() {
+			return fmt.Errorf("%w %s is being deleted", domain.ErrBankNotFound, b.Bank)
+		}
 		ops, next, err = tx.Queue().List(ctx, b, f)
 		return err
 	})
@@ -90,7 +109,7 @@ func (s *Service) ListEvents(
 }
 
 // CancelOperation marks a pending or processing operation CANCELLED (a running handler stops at its next
-// checkpoint); a terminal one, and any delete_bank, is domain.ErrOperationNotCancellable.
+// checkpoint); a terminal one, and any delete_bank or delete_org, is domain.ErrOperationNotCancellable.
 func (s *Service) CancelOperation(
 	ctx context.Context, b domain.BankRef, id domain.OperationID,
 ) (domain.Operation, error) {
@@ -100,8 +119,8 @@ func (s *Service) CancelOperation(
 		if err != nil {
 			return err
 		}
-		if cur.Kind == domain.OperationKindDeleteBank {
-			return fmt.Errorf("%w: a delete_bank operation can't be cancelled", domain.ErrOperationNotCancellable)
+		if cur.Kind == domain.OperationKindDeleteBank || cur.Kind == domain.OperationKindDeleteOrg {
+			return fmt.Errorf("%w: a %s operation can't be cancelled", domain.ErrOperationNotCancellable, cur.Kind)
 		}
 		op, err = tx.Queue().Cancel(ctx, b, id)
 		return err
@@ -111,7 +130,8 @@ func (s *Service) CancelOperation(
 
 // RetryOperation re-queues a FAILED or CANCELLED operation as PENDING; any other status is
 // domain.ErrOperationNotRetryable, and an operation other than delete_bank on a bank being deleted is
-// domain.ErrBankDeleting.
+// domain.ErrBankDeleting. A FAILED delete_org (org scope) may be retried while its org is being deleted: it is the
+// manual recovery path (Queue.Retry refuses any other org-scoped kind there).
 func (s *Service) RetryOperation(
 	ctx context.Context, b domain.BankRef, id domain.OperationID,
 ) (domain.Operation, error) {
@@ -121,7 +141,7 @@ func (s *Service) RetryOperation(
 		if err != nil {
 			return err
 		}
-		if cur.Kind != domain.OperationKindDeleteBank {
+		if cur.Kind != domain.OperationKindDeleteBank && !b.OrgScoped() {
 			bank, err := tx.Banks().Get(ctx, b)
 			if err != nil {
 				return err

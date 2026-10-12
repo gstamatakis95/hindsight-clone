@@ -40,6 +40,8 @@ const (
 	defaultRPCDeadline       = 120 * time.Second
 	defaultOperationKeep     = 7 * 24 * time.Hour
 	defaultEventKeep         = 30 * 24 * time.Hour
+	defaultReceiptKeep       = 3 * 365 * 24 * time.Hour
+	minBlobGrace             = 10 * time.Minute
 	defaultMetricsInterval   = 15 * time.Second
 )
 
@@ -53,8 +55,10 @@ type ServerFile struct {
 	Gateway GatewayFile `json:"gateway"`
 	// Worker sets the job runner's and maintenance tick's timings.
 	Worker WorkerFile `json:"worker"`
-	// Retention sets how long finished operations and lifecycle events are kept.
+	// Retention sets how long finished operations, lifecycle events and deletion receipts are kept.
 	Retention RetentionFile `json:"retention"`
+	// Deletion paces org deletes.
+	Deletion DeletionFile `json:"deletion"`
 	// API sets the gRPC server's behaviour.
 	API APIFile `json:"api"`
 	// Ingest sets the request limits of Retain and RetainBatch and RetainBatch's backlog gate.
@@ -98,6 +102,16 @@ type RetentionFile struct {
 	Operations Duration `json:"operations"`
 	// Events keeps lifecycle events this long (default 720h).
 	Events Duration `json:"events"`
+	// DeletionReceipts keeps the receipt of a completed org delete this long after completion (default 26280h,
+	// 3 years).
+	DeletionReceipts Duration `json:"deletion_receipts"`
+}
+
+// DeletionFile is the deletion section of the server config file.
+type DeletionFile struct {
+	// BlobGrace is the least time between DeleteOrg and the org's blob sweep, so a request that passed its org check
+	// before the delete has written its blob by then (default: api.rpc_deadline, at least 10m; "0s" = none).
+	BlobGrace *Duration `json:"blob_grace"`
 }
 
 // APIFile is the api section of the server config file.
@@ -263,11 +277,16 @@ func (f *ServerFile) withDefaults() {
 	fill(&f.Worker.MaintenanceInterval, defaultMaintenance)
 	fill(&f.Retention.Operations, defaultOperationKeep)
 	fill(&f.Retention.Events, defaultEventKeep)
+	fill(&f.Retention.DeletionReceipts, defaultReceiptKeep)
 	fill(&f.Observability.MetricsInterval, defaultMetricsInterval)
 	f.Ingest.withDefaults()
 	if f.API.RPCDeadline == nil {
 		d := Duration(defaultRPCDeadline)
 		f.API.RPCDeadline = &d
+	}
+	if f.Deletion.BlobGrace == nil {
+		d := Duration(max(time.Duration(*f.API.RPCDeadline), minBlobGrace))
+		f.Deletion.BlobGrace = &d
 	}
 }
 
@@ -312,7 +331,7 @@ func (f ServerFile) validateOperator() []error {
 	w := f.Worker
 	for _, d := range []Duration{
 		f.Gateway.Timeout, w.PollInterval, w.HeartbeatInterval, w.StaleAfter, w.MaintenanceInterval,
-		f.Retention.Operations, f.Retention.Events, f.Observability.MetricsInterval,
+		f.Retention.Operations, f.Retention.Events, f.Retention.DeletionReceipts, f.Observability.MetricsInterval,
 	} {
 		if d <= 0 {
 			errs = append(errs, errors.New("gateway.timeout, the worker timings, the retentions and "+
@@ -320,8 +339,9 @@ func (f ServerFile) validateOperator() []error {
 			break
 		}
 	}
-	if f.Gateway.MaxConcurrent <= 0 || *f.API.RPCDeadline < 0 {
-		errs = append(errs, errors.New("gateway.max_concurrent must be positive and api.rpc_deadline not negative"))
+	if f.Gateway.MaxConcurrent <= 0 || *f.API.RPCDeadline < 0 || *f.Deletion.BlobGrace < 0 {
+		errs = append(errs, errors.New("gateway.max_concurrent must be positive, and api.rpc_deadline and "+
+			"deletion.blob_grace not negative"))
 	}
 	if w.HeartbeatInterval > 0 && w.StaleAfter > 0 && w.HeartbeatInterval*4 >= w.StaleAfter*3 {
 		errs = append(errs, fmt.Errorf("worker.heartbeat_interval (%s) must be below 3/4 of worker.stale_after (%s)",

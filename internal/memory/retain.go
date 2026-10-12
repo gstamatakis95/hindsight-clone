@@ -191,8 +191,12 @@ func (i *ingestor) Ingest(ctx context.Context, req RetainRequest) (RetainResult,
 		return RetainResult{}, err
 	}
 	res, err := i.write(ctx, req, plans)
-	if err != nil || req.RunAsync {
+	if err != nil {
+		i.dropBlobs(ctx, plans, err)
 		return res, err
+	}
+	if req.RunAsync {
+		return res, nil
 	}
 	return i.runInline(ctx, req.Bank, plans, res)
 }
@@ -200,14 +204,14 @@ func (i *ingestor) Ingest(ctx context.Context, req RetainRequest) (RetainResult,
 // bankConfig returns the bank's effective config, and whether the bank exists. An unknown bank is not created
 // here (validation must store nothing); its config for validation is tenant < org, and the write transaction
 // creates it. The server level only adds defaults that cannot fail validation. Orgs are never created on first
-// use: an unknown or tombstoned org is domain.ErrOrgNotFound.
+// use: an unknown org is domain.ErrOrgNotFound, and one being deleted domain.ErrOrgDeleting.
 func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.BankConfig, bool, error) {
 	cfg, err := i.d.Config.Effective(ctx, b)
 	if err == nil {
 		return cfg, true, nil
 	}
 	if !errors.Is(err, domain.ErrBankNotFound) {
-		return cfg, false, fmt.Errorf("retain: %w", err)
+		return cfg, false, fmt.Errorf("retain: %w", i.deletingOrg(ctx, b.OrgRef(), err))
 	}
 	var tenant, org domain.BankConfig
 	err = i.d.Store.InTx(ctx, func(tx store.Tx) error {
@@ -216,9 +220,33 @@ func (i *ingestor) bankConfig(ctx context.Context, b domain.BankRef) (domain.Ban
 		return err //nolint:wrapcheck // wrapped once below, after the transaction
 	})
 	if err != nil {
-		return domain.BankConfig{}, false, fmt.Errorf("retain: %w", err)
+		return domain.BankConfig{}, false, fmt.Errorf("retain: %w", i.deletingOrg(ctx, b.OrgRef(), err))
 	}
 	return config.Merge(tenant, org), false, nil
+}
+
+// deletingOrg turns err, the domain.ErrOrgNotFound a config read returns for an org that is being deleted, into
+// domain.ErrOrgDeleting: a write under such an org is refused as deleting, as Ensure refuses it. Any other error,
+// and the not-found of an org that does not exist, is returned unchanged.
+func (i *ingestor) deletingOrg(ctx context.Context, o domain.OrgRef, err error) error {
+	if !errors.Is(err, domain.ErrOrgNotFound) {
+		return err
+	}
+	var deleting bool
+	if rerr := i.d.Store.InTx(ctx, func(tx store.Tx) error {
+		org, err := tx.Orgs().Get(ctx, o)
+		deleting = err == nil && org.Deleting()
+		if errors.Is(err, domain.ErrOrgNotFound) {
+			return nil
+		}
+		return err
+	}); rerr != nil {
+		return errors.Join(err, rerr)
+	}
+	if deleting {
+		return fmt.Errorf("%w: org %s", domain.ErrOrgDeleting, o)
+	}
+	return err
 }
 
 // plan validates one item and builds its document payload. Nothing is stored.

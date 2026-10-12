@@ -47,12 +47,21 @@ func readDocument(
 }
 
 // preRead classifies every plan (classify) before anything is written: Upsert would clear extracted_at, and an
-// unchanged or stale item must not even Put its blob. It also rejects a bank being deleted
-// (domain.ErrBankDeleting) before the blob Put, so a retain racing DeleteBank leaves no blob under the bank's
-// prefix; an unknown bank is fine (the write creates it). An item it finds unchanged or stale stays so; one it
+// unchanged or stale item must not even Put its blob. It also rejects an org being deleted (domain.ErrOrgDeleting),
+// an unknown org (domain.ErrOrgNotFound) and a bank being deleted (domain.ErrBankDeleting) before the blob Put, so a
+// retain that loses the race with DeleteOrg or DeleteBank stores no blob; an unknown bank is fine (the write
+// creates it). A retain that passes this check just before the tombstone deletes its blobs again when its write is
+// refused (dropBlobs, compensate). An item it finds unchanged or stale stays so; one it
 // finds changed is checked again under the write transaction's Seq lock (recheck).
 func (i *ingestor) preRead(ctx context.Context, b domain.BankRef, plans []*itemPlan) error {
 	return i.d.Store.InTx(ctx, func(tx store.Tx) error {
+		org, err := tx.Orgs().Get(ctx, b.OrgRef())
+		switch {
+		case err != nil:
+			return err
+		case org.Deleting():
+			return fmt.Errorf("%w: org %s", domain.ErrOrgDeleting, b.OrgRef())
+		}
 		bank, err := tx.Banks().Get(ctx, b)
 		switch {
 		case err == nil && bank.Deleting():
@@ -112,6 +121,22 @@ func (i *ingestor) storeBlobs(ctx context.Context, plans []*itemPlan) error {
 func (i *ingestor) putBlob(ctx context.Context, p *itemPlan) error {
 	return i.d.Blob.Put(ctx, p.payload.BlobKey, strings.NewReader(p.content), int64(len(p.content)),
 		"text/plain; charset=utf-8")
+}
+
+// dropBlobs deletes the blobs storeBlobs wrote for plans after their write failed with err because the org or bank
+// no longer takes writes (orgOrBankGone): the delete may already have swept the prefix, and nothing will reference
+// them. Other failures keep the blobs (a retry writes the same content-addressed keys). It runs even when ctx is
+// done; a failed delete is left to the org or bank delete's own sweep.
+func (i *ingestor) dropBlobs(ctx context.Context, plans []*itemPlan, err error) {
+	if !orgOrBankGone(err) {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	for _, p := range plans {
+		if !p.skip() {
+			_, _ = i.d.Blob.DeletePrefix(ctx, p.payload.BlobKey)
+		}
+	}
 }
 
 // write re-checks and upserts the changed documents and, for an async retain, enqueues their retain_document

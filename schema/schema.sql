@@ -76,6 +76,24 @@ CREATE TABLE public.chunks (
 );
 
 --
+-- Name: deletion_receipts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deletion_receipts (
+    tenant_id text NOT NULL,
+    id uuid NOT NULL,
+    org_id_sha256 text NOT NULL,
+    status text NOT NULL,
+    requested_at timestamp with time zone NOT NULL,
+    completed_at timestamp with time zone,
+    banks integer DEFAULT 0 NOT NULL,
+    verification jsonb,
+    server_version text DEFAULT ''::text NOT NULL,
+    CONSTRAINT deletion_receipts_completed_at_status CHECK (((completed_at IS NULL) = (status <> 'completed'::text))),
+    CONSTRAINT deletion_receipts_status_check CHECK ((status = ANY (ARRAY['in_progress'::text, 'completed'::text, 'failed_verification'::text])))
+);
+
+--
 -- Name: directives; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -481,7 +499,7 @@ CREATE TABLE public.operations (
     cancel_requested_at timestamp with time zone,
     CONSTRAINT operations_cancel_requested_at_status CHECK (((cancel_requested_at IS NULL) OR (status = ANY (ARRAY['processing'::text, 'cancelled'::text])))),
     CONSTRAINT operations_finished_at_terminal_only CHECK (((finished_at IS NULL) OR (status = ANY (ARRAY['completed'::text, 'failed'::text, 'cancelled'::text])))),
-    CONSTRAINT operations_kind_check CHECK ((kind = ANY (ARRAY['retain_batch'::text, 'retain_document'::text, 'consolidate'::text, 'rederive_memory'::text, 'retag_document'::text, 'refresh_mental_model'::text, 'graph_maintenance'::text, 'delete_bank'::text]))),
+    CONSTRAINT operations_kind_check CHECK ((kind = ANY (ARRAY['retain_batch'::text, 'retain_document'::text, 'consolidate'::text, 'rederive_memory'::text, 'retag_document'::text, 'refresh_mental_model'::text, 'graph_maintenance'::text, 'delete_bank'::text, 'delete_org'::text]))),
     CONSTRAINT operations_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
 );
 
@@ -566,6 +584,13 @@ ALTER TABLE ONLY public.chunks
 
 ALTER TABLE ONLY public.chunks
     ADD CONSTRAINT chunks_tenant_id_org_id_bank_id_document_id_chunk_index_key UNIQUE (tenant_id, org_id, bank_id, document_id, chunk_index);
+
+--
+-- Name: deletion_receipts deletion_receipts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deletion_receipts
+    ADD CONSTRAINT deletion_receipts_pkey PRIMARY KEY (tenant_id, id);
 
 --
 -- Name: directives directives_pkey; Type: CONSTRAINT; Schema: public; Owner: -
@@ -713,6 +738,18 @@ ALTER TABLE ONLY public.tenants
 
 ALTER TABLE ONLY public.unit_entities
     ADD CONSTRAINT unit_entities_pkey PRIMARY KEY (unit_id, entity_id);
+
+--
+-- Name: deletion_receipts_completed_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deletion_receipts_completed_idx ON public.deletion_receipts USING btree (completed_at) WHERE (completed_at IS NOT NULL);
+
+--
+-- Name: deletion_receipts_org_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deletion_receipts_org_idx ON public.deletion_receipts USING btree (tenant_id, org_id_sha256, requested_at DESC);
 
 --
 -- Name: directives_bank_created_idx; Type: INDEX; Schema: public; Owner: -

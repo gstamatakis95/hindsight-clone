@@ -15,14 +15,19 @@ import (
 )
 
 const claimAlive = `-- name: ClaimAlive :one
-SELECT (o.status = 'processing' AND o.cancel_requested_at IS NULL AND b.id IS NOT NULL
-        AND (b.deleting_at IS NULL OR o.kind = 'delete_bank'))::bool AS alive
+SELECT (o.status = 'processing' AND o.cancel_requested_at IS NULL AND g.id IS NOT NULL
+        AND (g.deleting_at IS NULL OR o.kind IN ('delete_bank', 'delete_org'))
+        AND (o.bank_id = '' OR (b.id IS NOT NULL AND (b.deleting_at IS NULL OR o.kind = 'delete_bank'))))::bool
+       AS alive
 FROM operations o
+LEFT JOIN orgs g ON (g.tenant_id, g.id) = (o.tenant_id, o.org_id)
 LEFT JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
 WHERE o.id = $1
 `
 
-// ClaimAlive reports whether a job is processing without a cancel request in a live bank.
+// ClaimAlive reports whether a job is processing without a cancel request, with the same scope rules as
+// ClaimSelect: a bank job in a live bank (delete_bank in its tombstoned one), an org-scoped job while its org row
+// exists, and under a tombstoned org only delete_bank and delete_org.
 func (q *Queries) ClaimAlive(ctx context.Context, id uuid.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, claimAlive, id)
 	var alive bool
@@ -300,9 +305,11 @@ func (q *Queries) ClaimRetryLater(ctx context.Context, arg ClaimRetryLaterParams
 
 const claimSelect = `-- name: ClaimSelect :many
 SELECT o.id, o.tenant_id, o.org_id, o.bank_id, o.kind, o.status, o.serial_key, o.payload, o.overrides, o.joinable, o.parent_id, o.attempts, o.run_at, o.worker_id, o.heartbeat_at, o.progress, o.usage, o.result, o.error, o.created_at, o.updated_at, o.finished_at, o.cancel_requested_at FROM operations o
-JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
+JOIN orgs g ON (g.tenant_id, g.id) = (o.tenant_id, o.org_id)
+LEFT JOIN banks b ON (b.tenant_id, b.org_id, b.id) = (o.tenant_id, o.org_id, o.bank_id)
 WHERE o.status = 'pending' AND o.run_at <= now() AND o.kind = ANY($1::text[])
-  AND (b.deleting_at IS NULL OR o.kind = 'delete_bank')
+  AND (g.deleting_at IS NULL OR o.kind IN ('delete_bank', 'delete_org'))
+  AND (o.bank_id = '' OR (b.id IS NOT NULL AND (b.deleting_at IS NULL OR o.kind = 'delete_bank')))
   AND NOT EXISTS (
     SELECT 1 FROM operations p
     WHERE (p.tenant_id, p.org_id, p.bank_id, p.serial_key) = (o.tenant_id, o.org_id, o.bank_id, o.serial_key)
@@ -319,8 +326,9 @@ type ClaimSelectParams struct {
 	Limit   int32
 }
 
-// ClaimSelect is the spec's claim query (only $1 gains a ::text[] cast): due jobs of the given kinds whose
-// serial key is free, oldest first.
+// ClaimSelect is the claim query: due jobs of the given kinds whose serial key is free, oldest first. A bank job
+// needs its bank row, live unless the job is delete_bank; an org-scoped job (bank_id ”) needs only its org row.
+// A tombstoned org runs only delete_bank and delete_org.
 func (q *Queries) ClaimSelect(ctx context.Context, arg ClaimSelectParams) ([]Operation, error) {
 	rows, err := q.db.Query(ctx, claimSelect, arg.Column1, arg.Limit)
 	if err != nil {
@@ -483,6 +491,27 @@ func (q *Queries) QueueCancelBank(ctx context.Context, arg QueueCancelBankParams
 	return result.RowsAffected(), nil
 }
 
+const queueCancelOrg = `-- name: QueueCancelOrg :execrows
+UPDATE operations
+SET status = 'cancelled', finished_at = now(), joinable = false, updated_at = now()
+WHERE tenant_id = $1 AND org_id = $2 AND status = 'pending'
+  AND kind NOT IN ('delete_bank', 'delete_org')
+`
+
+type QueueCancelOrgParams struct {
+	TenantID string
+	OrgID    string
+}
+
+// QueueCancelOrg cancels every pending job of an org, its banks' included, except delete_bank and delete_org.
+func (q *Queries) QueueCancelOrg(ctx context.Context, arg QueueCancelOrgParams) (int64, error) {
+	result, err := q.db.Exec(ctx, queueCancelOrg, arg.TenantID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const queueDedupeLock = `-- name: QueueDedupeLock :exec
 SELECT pg_advisory_xact_lock(hashtextextended(
     $1::text || '/' || $2::text || '/' || $3::text || '/' || $4::text || '/'
@@ -554,7 +583,7 @@ type QueueGetParams struct {
 	ID       uuid.UUID
 }
 
-// QueueGet returns one operation of a bank.
+// QueueGet returns one operation of a bank (of the org itself when bank_id is ”).
 func (q *Queries) QueueGet(ctx context.Context, arg QueueGetParams) (Operation, error) {
 	row := q.db.QueryRow(ctx, queueGet,
 		arg.TenantID,
@@ -766,6 +795,27 @@ func (q *Queries) QueueLockOp(ctx context.Context, id uuid.UUID) (Operation, err
 		&i.CancelRequestedAt,
 	)
 	return i, err
+}
+
+const queueProcessingInOrg = `-- name: QueueProcessingInOrg :one
+SELECT EXISTS (
+    SELECT 1 FROM operations
+    WHERE tenant_id = $1 AND org_id = $2 AND status = 'processing' AND id <> $3::uuid
+)::bool AS busy
+`
+
+type QueueProcessingInOrgParams struct {
+	TenantID string
+	OrgID    string
+	ExceptID uuid.UUID
+}
+
+// QueueProcessingInOrg reports whether an operation of an org other than except_id is processing.
+func (q *Queries) QueueProcessingInOrg(ctx context.Context, arg QueueProcessingInOrgParams) (bool, error) {
+	row := q.db.QueryRow(ctx, queueProcessingInOrg, arg.TenantID, arg.OrgID, arg.ExceptID)
+	var busy bool
+	err := row.Scan(&busy)
+	return busy, err
 }
 
 const queuePrune = `-- name: QueuePrune :execrows

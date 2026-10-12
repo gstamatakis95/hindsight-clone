@@ -113,10 +113,13 @@ type Queue interface {
 	// is treated as Pending). The adapter serializes dedupe Enqueues per (tenant, bank, kind, serial key)
 	// for the rest of the transaction (Postgres: pg_advisory_xact_lock), so concurrent enqueuers never both
 	// insert. A tombstoned bank returns domain.ErrBankDeleting (except for a delete_bank job); an unknown
-	// bank returns domain.ErrNotFound.
+	// bank returns domain.ErrNotFound. An org-scoped job (j.Bank is an OrgRef.Scope; only delete_org is one)
+	// share-locks the org row instead: an unknown org is domain.ErrOrgNotFound, and a tombstoned one
+	// domain.ErrOrgDeleting for any kind but delete_org.
 	// Adapter obligations: take the advisory lock in its own statement before the lookup (keys in sorted
 	// order when one tx enqueues several, or retry on 40P01); lock a joined row FOR UPDATE so a claim can't
-	// land between the join and an Upgrade; take FOR KEY SHARE on the bank row.
+	// land between the join and an Upgrade; take FOR KEY SHARE on the bank row (the org row for an org-scoped
+	// job).
 	Enqueue(ctx context.Context, j Job) (id domain.OperationID, joined bool, err error)
 	// Upgrade merges a joiner's request into a PENDING job under the row lock. payload is a JSON object
 	// shallow-merged into the row's payload: a key present in payload replaces the row's value, except
@@ -130,7 +133,13 @@ type Queue interface {
 	// CancelBank cancels every PENDING job of b except its delete_bank job and returns how many it
 	// cancelled. Processing jobs of b see Alive=false once the bank is tombstoned.
 	CancelBank(ctx context.Context, b domain.BankRef) (int, error)
-	// Get returns one operation of b; unknown = domain.ErrNotFound.
+	// CancelOrg cancels every PENDING job of org o, its banks' included, except delete_bank and delete_org, and
+	// returns how many it cancelled.
+	CancelOrg(ctx context.Context, o domain.OrgRef) (int, error)
+	// ProcessingInOrg reports whether an operation of org o (of any of its banks, or org-scoped) other than except
+	// is PROCESSING.
+	ProcessingInOrg(ctx context.Context, o domain.OrgRef, except domain.OperationID) (bool, error)
+	// Get returns one operation of b (of the org itself when b is an OrgRef.Scope); unknown = domain.ErrNotFound.
 	Get(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
 	// List pages the bank's operations, newest first, and returns the next page token ("" = last page).
 	List(ctx context.Context, b domain.BankRef, f OperationFilter) ([]domain.Operation, string, error)
@@ -144,7 +153,8 @@ type Queue interface {
 	// Retry resets a FAILED or CANCELLED operation to PENDING with run_at = now and returns it (attempt
 	// reset to 0; error, finished_at and the cancel request cleared). Other statuses (including a
 	// cancel-requested PROCESSING row) return domain.ErrFailedPrecondition; an unknown id returns
-	// domain.ErrNotFound.
+	// domain.ErrNotFound. It takes Enqueue's locks first, so a tombstoned bank refuses every kind but delete_bank
+	// and a tombstoned org every org-scoped kind but delete_org.
 	Retry(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error)
 	// Prune deletes terminal, finished operations whose finished_at is before before and returns how many.
 	// Pending and processing operations are never pruned.

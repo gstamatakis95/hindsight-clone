@@ -23,19 +23,11 @@ type queue struct {
 var _ store.Queue = (*queue)(nil)
 
 // Enqueue inserts j, or joins (and locks FOR UPDATE) a joinable row under its effective dedupe policy. It
-// takes FOR KEY SHARE on the bank row first and the dedupe advisory lock in its own statement before the
-// lookup. A deadlock with another enqueuer surfaces as domain.ErrConflict.
+// takes FOR KEY SHARE on the bank row (the org row for an org-scoped job) first and the dedupe advisory lock in its
+// own statement before the lookup. A deadlock with another enqueuer surfaces as domain.ErrConflict.
 func (r *queue) Enqueue(ctx context.Context, j store.Job) (domain.OperationID, bool, error) {
-	b := j.Bank
-	if err := checkRef(b); err != nil {
+	if err := r.lockScope(ctx, j.Bank, j.Kind, "enqueue"); err != nil {
 		return "", false, err
-	}
-	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
-	if err != nil {
-		return "", false, mapErr(fmt.Sprintf("enqueue: bank %s", b), err)
-	}
-	if deletingAt != nil && j.Kind != domain.OperationKindDeleteBank {
-		return "", false, fmt.Errorf("%w: enqueue %s on %s", domain.ErrBankDeleting, j.Kind, b)
 	}
 	policy := effectiveDedupe(j)
 	if policy != store.DedupeNone {
@@ -46,6 +38,38 @@ func (r *queue) Enqueue(ctx context.Context, j store.Job) (domain.OperationID, b
 	}
 	id, err := r.insert(ctx, j, policy != store.DedupeNone)
 	return id, false, err
+}
+
+// lockScope takes FOR KEY SHARE on the row of the scope a job of kind runs in, and refuses a scope that may not take
+// it. A bank job locks its bank: unknown = domain.ErrNotFound, tombstoned = domain.ErrBankDeleting unless kind is
+// delete_bank. An org-scoped job (b.OrgScoped) locks its org: unknown = domain.ErrOrgNotFound, tombstoned =
+// domain.ErrOrgDeleting unless kind is delete_org. what names the caller for the messages.
+func (r *queue) lockScope(ctx context.Context, b domain.BankRef, kind domain.OperationKind, what string) error {
+	if b.OrgScoped() {
+		o := b.OrgRef()
+		if err := checkOrgRef(o); err != nil {
+			return err
+		}
+		deletingAt, err := r.q.OrgLockLive(ctx, db.OrgLockLiveParams{TenantID: o.Tenant, ID: o.Org})
+		if err != nil {
+			return orgErr(o, err)
+		}
+		if deletingAt != nil && kind != domain.OperationKindDeleteOrg {
+			return fmt.Errorf("%w: %s %s on org %s", domain.ErrOrgDeleting, what, kind, o)
+		}
+		return nil
+	}
+	if err := checkRef(b); err != nil {
+		return err
+	}
+	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
+	if err != nil {
+		return mapErr(fmt.Sprintf("%s: bank %s", what, b), err)
+	}
+	if deletingAt != nil && kind != domain.OperationKindDeleteBank {
+		return fmt.Errorf("%w: %s %s on %s", domain.ErrBankDeleting, what, kind, b)
+	}
+	return nil
 }
 
 // effectiveDedupe is the policy Enqueue applies to j: refresh_mental_model always dedupes as Pending, a job
@@ -226,6 +250,39 @@ func (r *queue) CancelBank(ctx context.Context, b domain.BankRef) (int, error) {
 	return int(n), nil
 }
 
+// CancelOrg cancels every PENDING job of o, its banks' included, except delete_bank and delete_org.
+func (r *queue) CancelOrg(ctx context.Context, o domain.OrgRef) (int, error) {
+	if err := checkOrgRef(o); err != nil {
+		return 0, err
+	}
+	n, err := r.q.QueueCancelOrg(ctx, db.QueueCancelOrgParams{TenantID: o.Tenant, OrgID: o.Org})
+	if err != nil {
+		return 0, mapErr(fmt.Sprintf("cancel org %s", o), err)
+	}
+	return int(n), nil
+}
+
+// ProcessingInOrg reports whether an operation of o other than except is PROCESSING.
+func (r *queue) ProcessingInOrg(ctx context.Context, o domain.OrgRef, except domain.OperationID) (bool, error) {
+	if err := checkOrgRef(o); err != nil {
+		return false, err
+	}
+	var exceptID uuid.UUID // the nil UUID matches no operation
+	if except != "" {
+		var err error
+		if exceptID, err = parseID(except); err != nil {
+			return false, err
+		}
+	}
+	busy, err := r.q.QueueProcessingInOrg(ctx, db.QueueProcessingInOrgParams{
+		TenantID: o.Tenant, OrgID: o.Org, ExceptID: exceptID,
+	})
+	if err != nil {
+		return false, mapErr(fmt.Sprintf("processing operations of org %s", o), err)
+	}
+	return busy, nil
+}
+
 // Get returns one operation of b.
 func (r *queue) Get(ctx context.Context, b domain.BankRef, id domain.OperationID) (domain.Operation, error) {
 	uid, err := parseID(id)
@@ -320,19 +377,16 @@ func (r *queue) Retry(ctx context.Context, b domain.BankRef, id domain.Operation
 }
 
 // lockForRetry takes the locks Enqueue takes before a row becomes PENDING (and possibly joinable) again:
-// FOR KEY SHARE on the bank row, refusing a tombstoned bank (domain.ErrBankDeleting) except for its
-// delete_bank job, then the row's dedupe advisory lock, so a concurrent Enqueue can't insert a duplicate.
+// FOR KEY SHARE on the bank row (the org row for an org-scoped operation), refusing a tombstoned bank or org except
+// for its delete_bank or delete_org job (lockScope), then the row's dedupe advisory lock, so a concurrent Enqueue
+// can't insert a duplicate.
 func (r *queue) lockForRetry(ctx context.Context, b domain.BankRef, id uuid.UUID) error {
 	row, err := r.q.QueueGet(ctx, db.QueueGetParams{TenantID: b.Tenant, OrgID: b.Org, BankID: b.Bank, ID: id})
 	if err != nil {
 		return mapErr(fmt.Sprintf("retry %s", id), err)
 	}
-	deletingAt, err := r.q.QueueLockBank(ctx, db.QueueLockBankParams{TenantID: b.Tenant, OrgID: b.Org, ID: b.Bank})
-	if err != nil {
-		return mapErr(fmt.Sprintf("retry: bank %s", b), err)
-	}
-	if deletingAt != nil && row.Kind != string(domain.OperationKindDeleteBank) {
-		return fmt.Errorf("%w: retry %s on %s", domain.ErrBankDeleting, id, b)
+	if err := r.lockScope(ctx, b, domain.OperationKind(row.Kind), "retry"); err != nil {
+		return err
 	}
 	if row.SerialKey == nil {
 		return nil

@@ -156,10 +156,6 @@ says so.
 - **Impact:** a tenant- or org-level `mental_models.refresh_debounce_seconds` or `min_refresh_interval_seconds`
   does not apply to those refreshes.
 
-### Orgs can't be deleted
-- **What:** OrgService.DeleteOrg answers UNIMPLEMENTED. An org, once created, stays, and so does its config level.
-- **Workaround:** delete the org's banks one by one with DeleteBank; the empty org row remains.
-
 ### Models whose every source was retracted stay stale
 - **What:** they keep the dead source ids and re-run (with no model call) at each interval floor until new
   in-scope facts arrive.
@@ -168,6 +164,48 @@ says so.
 ### Missed cron fires are skipped
 - **What:** a fire time missed by more than 5 minutes (service down, ticks stalled) is skipped until the next one.
   Two racing ticks can enqueue one extra refresh, which costs one no-call run.
+
+## Org deletion
+
+DeleteOrg removes everything memd stores for an org ([storage.md](storage.md#deleting-an-org)); these copies are
+outside its reach.
+
+### Postgres keeps dead tuples, WAL and backups
+- **What:** deleted rows stay in table and index pages (HNSW, BM25 segments, GIN) until VACUUM, in the WAL, and in
+  every backup, PITR archive, replica and snapshot until their retention expires.
+- **Impact:** the data is unreachable through memd but physically present for a while.
+- **Workaround:** autovacuum (or `VACUUM` on the large tables for strict deadlines); backup retention within the
+  legal deadline; after a restore, re-run DeleteOrg for every org whose hash matches a receipt completed after the
+  backup was taken (keep the receipts table outside the backup set).
+
+### Versioned buckets keep old blob versions
+- **What:** with object versioning or replication on, deleting a key leaves its noncurrent versions, and the
+  listing that verifies the org prefix does not see them.
+- **Workaround:** a deployment requirement: no versioning, or a noncurrent-version expiry rule within the deadline.
+
+### Broker topics, gateway and provider logs, Datadog and container logs
+- **What:** ingest topics and dead-letter topics keep message content until broker retention; the AI gateway and
+  model providers may log or retain prompts; Datadog keeps span tags (`memd.tenant`, `memd.org`, `memd.bank`),
+  operation ids and error text; container stdout and stderr keep error text with ids.
+- **Workaround:** retention within the deadline on each; gateway content logging off and provider zero-retention
+  agreements; ids that are not personal data.
+
+### A crash between a blob write and its clean-up can leave one blob
+- **What:** a retain that passed its org check before the tombstone writes its blob, and deletes it again when its
+  write is refused. A process crash between the two, after the org's blob sweep, leaves that blob behind. The blob
+  grace (`deletion.blob_grace`, at least the RPC deadline) makes this rare.
+- **Workaround:** none built; list `{tenant}/{org}/` for orgs with a completed receipt to find such a blob.
+
+### The receipt is pseudonymous, not anonymous
+- **What:** a receipt names its org by `sha256(tenant || 0x00 || org)`. A short, guessable org id can be found by
+  hashing candidates.
+- **Workaround:** use org ids that are not personal data.
+
+### Verification scans the join tables
+- **What:** the final check counts the org's rows in every table with `org_id`; `unit_entities`,
+  `entity_cooccurrences`, `memory_links` and `observation_evidence` have no index starting with `(tenant_id,
+  org_id)`, so their counts are sequential scans.
+- **Impact:** the last step of a delete reads those tables in full once (no locks that block writers).
 
 ## Recall, reflect and parsing
 

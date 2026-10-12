@@ -11,6 +11,45 @@ import (
 	"time"
 )
 
+const orgBanksAwaitingDelete = `-- name: OrgBanksAwaitingDelete :many
+SELECT b.id FROM banks b
+WHERE b.tenant_id = $1 AND b.org_id = $2 AND b.deleting_at IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM operations o
+    WHERE o.tenant_id = b.tenant_id AND o.org_id = b.org_id AND o.bank_id = b.id AND o.kind = 'delete_bank'
+      AND o.status IN ('pending', 'processing'))
+ORDER BY b.id COLLATE "C"
+LIMIT $3::int
+`
+
+type OrgBanksAwaitingDeleteParams struct {
+	TenantID string
+	OrgID    string
+	Lim      int32
+}
+
+// OrgBanksAwaitingDelete returns, in byte order, up to lim tombstoned banks of an org with no pending or processing
+// delete_bank operation.
+func (q *Queries) OrgBanksAwaitingDelete(ctx context.Context, arg OrgBanksAwaitingDeleteParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, orgBanksAwaitingDelete, arg.TenantID, arg.OrgID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const orgConfigLock = `-- name: OrgConfigLock :exec
 SELECT pg_advisory_xact_lock(hashtextextended('org_config/' || $1::text || '/' || $2::text, 0))
 `
@@ -24,6 +63,23 @@ type OrgConfigLockParams struct {
 func (q *Queries) OrgConfigLock(ctx context.Context, arg OrgConfigLockParams) error {
 	_, err := q.db.Exec(ctx, orgConfigLock, arg.TenantID, arg.OrgID)
 	return err
+}
+
+const orgCountBanks = `-- name: OrgCountBanks :one
+SELECT count(*) FROM banks WHERE tenant_id = $1 AND org_id = $2
+`
+
+type OrgCountBanksParams struct {
+	TenantID string
+	OrgID    string
+}
+
+// OrgCountBanks counts an org's bank rows, tombstoned or not.
+func (q *Queries) OrgCountBanks(ctx context.Context, arg OrgCountBanksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, orgCountBanks, arg.TenantID, arg.OrgID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const orgCreate = `-- name: OrgCreate :exec
@@ -46,6 +102,55 @@ func (q *Queries) OrgCreate(ctx context.Context, arg OrgCreateParams) error {
 		arg.Config,
 	)
 	return err
+}
+
+const orgDeleteEvents = `-- name: OrgDeleteEvents :exec
+DELETE FROM lifecycle_events WHERE tenant_id = $1 AND org_id = $2
+`
+
+type OrgDeleteEventsParams struct {
+	TenantID string
+	OrgID    string
+}
+
+// OrgDeleteEvents deletes every lifecycle event of an org's banks.
+func (q *Queries) OrgDeleteEvents(ctx context.Context, arg OrgDeleteEventsParams) error {
+	_, err := q.db.Exec(ctx, orgDeleteEvents, arg.TenantID, arg.OrgID)
+	return err
+}
+
+const orgDeleteOperations = `-- name: OrgDeleteOperations :exec
+DELETE FROM operations WHERE tenant_id = $1 AND org_id = $2
+`
+
+type OrgDeleteOperationsParams struct {
+	TenantID string
+	OrgID    string
+}
+
+// OrgDeleteOperations deletes every operation of an org, its banks' and its own.
+func (q *Queries) OrgDeleteOperations(ctx context.Context, arg OrgDeleteOperationsParams) error {
+	_, err := q.db.Exec(ctx, orgDeleteOperations, arg.TenantID, arg.OrgID)
+	return err
+}
+
+const orgDeleteRow = `-- name: OrgDeleteRow :execrows
+DELETE FROM orgs WHERE tenant_id = $1 AND id = $2 AND deleting_at IS NOT NULL
+`
+
+type OrgDeleteRowParams struct {
+	TenantID string
+	ID       string
+}
+
+// OrgDeleteRow deletes a tombstoned org's row; a live org matches nothing, and a bank left in it fails the foreign
+// key (RESTRICT).
+func (q *Queries) OrgDeleteRow(ctx context.Context, arg OrgDeleteRowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, orgDeleteRow, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const orgGet = `-- name: OrgGet :one
@@ -124,6 +229,32 @@ func (q *Queries) OrgList(ctx context.Context, arg OrgListParams) ([]Org, error)
 	return items, nil
 }
 
+const orgLockForDelete = `-- name: OrgLockForDelete :one
+SELECT tenant_id, id, name, config, deleting_at, created_at, updated_at FROM orgs WHERE tenant_id = $1 AND id = $2 FOR UPDATE
+`
+
+type OrgLockForDeleteParams struct {
+	TenantID string
+	ID       string
+}
+
+// OrgLockForDelete locks the org row FOR UPDATE and returns it: it waits for bank creations in flight (FOR KEY SHARE)
+// and makes new ones wait, so an org delete runs it first.
+func (q *Queries) OrgLockForDelete(ctx context.Context, arg OrgLockForDeleteParams) (Org, error) {
+	row := q.db.QueryRow(ctx, orgLockForDelete, arg.TenantID, arg.ID)
+	var i Org
+	err := row.Scan(
+		&i.TenantID,
+		&i.ID,
+		&i.Name,
+		&i.Config,
+		&i.DeletingAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const orgLockLive = `-- name: OrgLockLive :one
 SELECT deleting_at FROM orgs WHERE tenant_id = $1 AND id = $2 FOR KEY SHARE
 `
@@ -141,6 +272,47 @@ func (q *Queries) OrgLockLive(ctx context.Context, arg OrgLockLiveParams) (*time
 	var deleting_at *time.Time
 	err := row.Scan(&deleting_at)
 	return deleting_at, err
+}
+
+const orgMarkBanksDeleting = `-- name: OrgMarkBanksDeleting :execrows
+UPDATE banks SET deleting_at = $1::timestamptz, updated_at = now()
+WHERE tenant_id = $2 AND org_id = $3 AND deleting_at IS NULL
+`
+
+type OrgMarkBanksDeletingParams struct {
+	At       time.Time
+	TenantID string
+	OrgID    string
+}
+
+// OrgMarkBanksDeleting tombstones every live bank of an org. It runs as its own statement after OrgLockForDelete,
+// so under READ COMMITTED it sees every bank committed while that lock waited.
+func (q *Queries) OrgMarkBanksDeleting(ctx context.Context, arg OrgMarkBanksDeletingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, orgMarkBanksDeleting, arg.At, arg.TenantID, arg.OrgID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const orgMarkDeleting = `-- name: OrgMarkDeleting :execrows
+UPDATE orgs SET deleting_at = COALESCE(deleting_at, $1::timestamptz), updated_at = now()
+WHERE tenant_id = $2 AND id = $3
+`
+
+type OrgMarkDeletingParams struct {
+	At       time.Time
+	TenantID string
+	ID       string
+}
+
+// OrgMarkDeleting tombstones an org; marking it again keeps the first time.
+func (q *Queries) OrgMarkDeleting(ctx context.Context, arg OrgMarkDeletingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, orgMarkDeleting, arg.At, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const orgSetConfig = `-- name: OrgSetConfig :execrows
@@ -161,4 +333,35 @@ func (q *Queries) OrgSetConfig(ctx context.Context, arg OrgSetConfigParams) (int
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const orgTablesWithOrgID = `-- name: OrgTablesWithOrgID :many
+SELECT c.table_name::text AS table_name
+FROM information_schema.columns c
+JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+WHERE c.table_schema = current_schema() AND c.column_name = 'org_id' AND t.table_type = 'BASE TABLE'
+  AND c.table_name <> 'orgs'
+ORDER BY c.table_name
+`
+
+// OrgTablesWithOrgID lists, in name order, the base tables of the current schema that have an org_id column, orgs
+// excluded: the tables an org delete verifies are empty for the org.
+func (q *Queries) OrgTablesWithOrgID(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, orgTablesWithOrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var table_name string
+		if err := rows.Scan(&table_name); err != nil {
+			return nil, err
+		}
+		items = append(items, table_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

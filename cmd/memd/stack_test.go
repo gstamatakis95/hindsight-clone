@@ -13,6 +13,7 @@ import (
 	"memd/internal/grpcapi"
 	"memd/internal/observability"
 	"memd/internal/store"
+	"memd/internal/store/postgres"
 	"memd/internal/store/postgres/pgtest"
 	"memd/test/e2e/gatewayemu"
 	"net"
@@ -87,6 +88,8 @@ type wiredStack struct {
 	conn  *grpc.ClientConn
 	srv   *grpc.Server
 	deps  *deps
+	db    *postgres.DB
+	blob  *fake.Blob
 }
 
 // startWired builds the stack and runs the worker until the test ends.
@@ -98,6 +101,12 @@ func startWired(t *testing.T) *wiredStack {
 // startWiredWith is startWired with tel's instrumentation (nil = Datadog off) on the gateway client, the
 // gRPC server and the worker, wired as buildDeps and runAPI wire them.
 func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
+	t.Helper()
+	return startWiredFile(t, tel, nil)
+}
+
+// startWiredFile is startWiredWith with edit (nil = none) applied to the server config file before its defaults.
+func startWiredFile(t *testing.T, tel *observability.Telemetry, edit func(*ServerFile)) *wiredStack {
 	t.Helper()
 	_, ts := gatewayemu.Start(gatewayemu.Options{})
 	t.Cleanup(ts.Close)
@@ -111,10 +120,15 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	for _, slot := range append(append([]domain.ModelSlot{}, domain.LLMSlots...), domain.ModelSlotRerank) {
 		*models.Slot(slot) = &domain.ModelBinding{Model: gatewayemu.ModelFor(string(slot))}
 	}
+	noGrace := Duration(0) // an org delete sweeps its blobs at once
 	cfg := Config{WorkerSlots: 1, GatewayURL: ts.URL, File: ServerFile{
 		Defaults: domain.BankConfig{Models: models},
 		Worker:   WorkerFile{PollInterval: Duration(10 * time.Millisecond), HeartbeatInterval: Duration(time.Second)},
+		Deletion: DeletionFile{BlobGrace: &noGrace},
 	}}
+	if edit != nil {
+		edit(&cfg.File)
+	}
 	cfg.File.withDefaults()
 	serverCfg, err := cfg.File.validate()
 	if err != nil {
@@ -125,7 +139,8 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	in := infra{db: guardStore{DB: db, g: g}, graph: db.Graph(), claimer: db, maint: db, blob: fake.NewBlob(), gw: gw}
+	blobs := fake.NewBlob()
+	in := infra{db: guardStore{DB: db, g: g}, graph: db.Graph(), claimer: db, maint: db, blob: blobs, gw: gw}
 	d := wireServices(cfg, in, tok, serverCfg, clock.System{}, log, tel)
 	d.probes = nil
 	lis := bufconn.Listen(1 << 20)
@@ -142,7 +157,7 @@ func startWiredWith(t *testing.T, tel *observability.Telemetry) *wiredStack {
 	done := make(chan struct{})
 	go func() { _ = runWorker(ctx, d); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
-	return &wiredStack{guard: g, conn: conn, srv: srv, deps: d}
+	return &wiredStack{guard: g, conn: conn, srv: srv, deps: d, db: db, blob: blobs}
 }
 
 // ctx is a context for tenant "t" with a deadline.

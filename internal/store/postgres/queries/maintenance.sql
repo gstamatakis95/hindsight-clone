@@ -27,6 +27,17 @@ WHERE b.deleting_at IS NOT NULL AND NOT EXISTS (
 )
 ORDER BY b.tenant_id COLLATE "C", b.org_id COLLATE "C", b.id COLLATE "C";
 
+-- StalledOrgDeletes returns, in byte order, the tombstoned orgs with no pending or processing delete_org operation,
+-- for the tick's resume_org_deletes step (docs/design/storage.md#deleting-an-org).
+-- name: StalledOrgDeletes :many
+SELECT g.tenant_id, g.id FROM orgs g
+WHERE g.deleting_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM operations o
+    WHERE o.tenant_id = g.tenant_id AND o.org_id = g.id AND o.bank_id = '' AND o.kind = 'delete_org'
+      AND o.status IN ('pending', 'processing')
+)
+ORDER BY g.tenant_id COLLATE "C", g.id COLLATE "C";
+
 -- BanksWithGraphWork returns, in byte order, the banks that are not tombstoned and have graph_dirty or
 -- entity_maintenance rows queued, for the tick's graph_reconcile step (docs/design/architecture.md#maintenance-tick).
 -- name: BanksWithGraphWork :many

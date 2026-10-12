@@ -211,14 +211,15 @@ database.
 | `defaults` | The server level of BankConfig, in the API's shape (proto field names, enum value names): `retain`, `observations`, `recall`, `reflect`, `mental_models`, `models` |
 | `gateway` | `max_concurrent` (32): in-flight gateway calls in this process; `slot_concurrency` (none): per-slot caps keyed by slot name (`extract`, ..., `rerank`, `embed`); `timeout` (120s): one gateway HTTP attempt when the binding sets no `timeout_ms` |
 | `worker` | `poll_interval` (500ms), `heartbeat_interval` (15s; must be below 3/4 of `stale_after`), `stale_after` (2m: the reclaim threshold, and the runner's self-fence at 3/4 of it), `maintenance_interval` (60s) |
-| `retention` | `operations` (168h): finished operations; `events` (720h): lifecycle events |
+| `retention` | `operations` (168h): finished operations; `events` (720h): lifecycle events; `deletion_receipts` (26280h, 3 years): receipts of completed org deletes, counted from completion |
+| `deletion` | `blob_grace` (`api.rpc_deadline`, at least 10m; `0s` = none): the least time between DeleteOrg and the org's blob sweep, so requests that passed their org check before the delete have written their blobs ([storage.md](storage.md#deleting-an-org)) |
 | `api` | `rpc_deadline` (120s): the deadline of calls that carry none; `0s` = none |
 | `ingest` | `max_batch_items` (500): items per RetainBatch call; `max_retain_items` (100): items per Retain call; `max_document_bytes` (2 MiB): one RetainBatch item's content; `max_request_bytes` (16 MiB): the gRPC receive limit for every request, and RetainBatch's summed content; `max_pending_per_bank` (5000) and `max_pending_per_org` (50000): the pending `retain_document` backlog over which RetainBatch is rejected (`INGEST_BACKLOG`); `retry_after` (10s): the delay that rejection's RetryInfo carries ([retain.md](retain.md#retainbatch)) |
 | `observability` | `metrics_interval` (15s): how often the Postgres pool and job queue gauges are sampled (Datadog only) |
 
 Startup validation of the file: `config.ServerDefaults` over the `defaults` block must validate; EXTRACT and
 REFLECT must be bound; every `recall.arms` and `arm_boosts` name must be registered; `slot_concurrency` keys must
-be known slots with positive caps; every duration must be positive (`rpc_deadline` may be 0); `max_concurrent`
+be known slots with positive caps; every duration must be positive (`rpc_deadline` and `blob_grace` may be 0); `max_concurrent`
 must be positive; the heartbeat must be below 3/4 of `stale_after`; and every `ingest` setting must be positive,
 with `max_document_bytes` at most `max_request_bytes`.
 

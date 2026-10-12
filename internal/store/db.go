@@ -55,6 +55,8 @@ type Tx interface {
 	Queue() Queue
 	// Events returns the lifecycle-event repository bound to this transaction.
 	Events() EventRepo
+	// Receipts returns the deletion-receipt repository bound to this transaction.
+	Receipts() ReceiptRepo
 }
 
 // Reader holds every query the API path needs, split by consumer: [Search] for recall and the engines that
@@ -162,6 +164,9 @@ type Maintenance interface {
 	// StalledBankDeletes returns every tombstoned bank with no pending or processing delete_bank operation: its
 	// delete stopped (ReclaimStale or a shutdown release failed it at the attempt cap, or it failed for good).
 	StalledBankDeletes(ctx context.Context) ([]domain.BankRef, error)
+	// StalledOrgDeletes returns every tombstoned org with no pending or processing delete_org operation: its delete
+	// stopped the same ways a bank delete can.
+	StalledOrgDeletes(ctx context.Context) ([]domain.OrgRef, error)
 	// BanksWithGraphWork returns every bank that is not tombstoned and has graph_dirty or entity_maintenance
 	// rows.
 	BanksWithGraphWork(ctx context.Context) ([]domain.BankRef, error)

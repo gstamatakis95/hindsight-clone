@@ -40,6 +40,20 @@ func (s *DB) StalledBankDeletes(ctx context.Context) ([]domain.BankRef, error) {
 	return out, nil
 }
 
+// StalledOrgDeletes returns, ordered by (tenant, org), every tombstoned org with no pending or processing delete_org
+// operation.
+func (s *DB) StalledOrgDeletes(ctx context.Context) ([]domain.OrgRef, error) {
+	rows, err := db.New(s.pool).StalledOrgDeletes(ctx)
+	if err != nil {
+		return nil, mapErr("stalled org deletes", err)
+	}
+	out := make([]domain.OrgRef, len(rows))
+	for i, row := range rows {
+		out[i] = domain.OrgRef{Tenant: row.TenantID, Org: row.ID}
+	}
+	return out, nil
+}
+
 // BanksWithGraphWork returns, ordered by (tenant, bank), every bank that is not tombstoned and has
 // graph_dirty or entity_maintenance rows queued.
 func (s *DB) BanksWithGraphWork(ctx context.Context) ([]domain.BankRef, error) {

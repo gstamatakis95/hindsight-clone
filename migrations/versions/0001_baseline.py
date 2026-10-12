@@ -16,10 +16,12 @@ Areas, in creation order:
 - curation: the archive of invalidated units and the audit log;
 - mental models and their history;
 - directives;
-- jobs: operations (the queue) and lifecycle_events.
+- jobs: operations (the queue) and lifecycle_events;
+- deletion_receipts: the record of each org delete, which outlives the org.
 
-Conventions: every table but tenants carries ``tenant_id``, and every table but tenants and
-orgs carries ``org_id`` right after it. Bank ids are unique per org, so a bank's key is
+Conventions: every table but tenants carries ``tenant_id``, and every table but tenants, orgs
+and deletion_receipts carries ``org_id`` right after it (org delete verifies that no row with
+the org's ``org_id`` is left in any of them). Bank ids are unique per org, so a bank's key is
 ``(tenant_id, org_id, bank_id)`` and every bank-keyed index starts with that prefix.
 Bank-owned tables cascade from banks, directly or through their parent row; the tables
 without that foreign key (the graph queues, observation_versions, the curation tables,
@@ -492,7 +494,8 @@ DIRECTIVES = [
 
 JOBS = [
     # Every background job is an operations row, claimed with FOR UPDATE SKIP LOCKED. No foreign key
-    # to banks: bank delete's final transaction removes the bank's operations and events itself.
+    # to banks: bank delete's final transaction removes the bank's operations and events itself, and
+    # org delete's those of the org. An org-scoped job (delete_org) has bank_id ''.
     """
     CREATE TABLE operations (
         id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -501,7 +504,8 @@ JOBS = [
         bank_id      text        NOT NULL,
         kind         text        NOT NULL CHECK (kind IN (
                          'retain_batch', 'retain_document', 'consolidate', 'rederive_memory',
-                         'retag_document', 'refresh_mental_model', 'graph_maintenance', 'delete_bank')),
+                         'retag_document', 'refresh_mental_model', 'graph_maintenance', 'delete_bank',
+                         'delete_org')),
         status       text        NOT NULL DEFAULT 'pending' CHECK (status IN (
                          'pending', 'processing', 'completed', 'failed', 'cancelled')),
         -- Jobs sharing a serial key run one at a time per bank.
@@ -573,6 +577,41 @@ JOBS = [
     "CREATE INDEX lifecycle_events_at_idx ON lifecycle_events (at)",
 ]
 
+# The record of an org delete. It names the org only by a hash (sha256 of tenant_id, a NUL byte
+# and org_id), so it carries no org_id column: org delete never touches it, and only retention
+# prunes it.
+DELETION_RECEIPTS = [
+    """
+    CREATE TABLE deletion_receipts (
+        tenant_id      text        NOT NULL,
+        id             uuid        NOT NULL,
+        org_id_sha256  text        NOT NULL,
+        status         text        NOT NULL CHECK (status IN (
+                           'in_progress', 'completed', 'failed_verification')),
+        requested_at   timestamptz NOT NULL,
+        completed_at   timestamptz NULL,
+        -- Banks the request tombstoned.
+        banks          integer     NOT NULL DEFAULT 0,
+        -- The last verification: tables_checked, rows_remaining, blobs_remaining, verified_at.
+        verification   jsonb       NULL,
+        server_version text        NOT NULL DEFAULT '',
+        PRIMARY KEY (tenant_id, id),
+        CONSTRAINT deletion_receipts_completed_at_status
+            CHECK ((completed_at IS NULL) = (status <> 'completed'))
+    )
+    """,
+    # GetDeletionReceipt and DeleteOrg read an org's newest receipt.
+    """
+    CREATE INDEX deletion_receipts_org_idx
+        ON deletion_receipts (tenant_id, org_id_sha256, requested_at DESC)
+    """,
+    # Retention pruning of completed receipts.
+    """
+    CREATE INDEX deletion_receipts_completed_idx ON deletion_receipts (completed_at)
+        WHERE completed_at IS NOT NULL
+    """,
+]
+
 # Every table, in creation order. downgrade() drops them in reverse; their indexes go with them.
 TABLES = [
     "tenants",
@@ -597,6 +636,7 @@ TABLES = [
     "directives",
     "operations",
     "lifecycle_events",
+    "deletion_receipts",
 ]
 
 
@@ -613,6 +653,7 @@ def upgrade() -> None:
         MENTAL_MODELS,
         DIRECTIVES,
         JOBS,
+        DELETION_RECEIPTS,
     ):
         for ddl in area:
             op.execute(ddl)

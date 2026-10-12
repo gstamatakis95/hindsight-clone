@@ -54,8 +54,8 @@ func TestOrgsMustExist(t *testing.T) {
 	if _, err := banks.GetBank(ctx, &pb.GetBankRequest{OrgId: testOrg, BankId: "fresh"}); err != nil {
 		t.Errorf("GetBank of the bank the write created: %v", err)
 	}
-	_, err = orgs.DeleteOrg(ctx, &pb.DeleteOrgRequest{OrgId: testOrg})
-	wantStatus(t, "DeleteOrg", err, codes.Unimplemented, "UNIMPLEMENTED")
+	_, err = orgs.DeleteOrg(ctx, &pb.DeleteOrgRequest{OrgId: "typo"})
+	wantStatus(t, "DeleteOrg of an unknown org", err, codes.NotFound, "ORG_NOT_FOUND")
 	_, err = banks.ListBanks(ctx, &pb.ListBanksRequest{})
 	wantStatus(t, "ListBanks without org_id", err, codes.InvalidArgument, "INVALID_ARGUMENT")
 }

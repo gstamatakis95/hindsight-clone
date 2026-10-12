@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
@@ -42,6 +43,7 @@ func TestScenarios(t *testing.T) {
 	t.Run("CancelRetry", e.cancelRetry)
 	t.Run("WorkerCrashReclaim", e.crashReclaim)
 	t.Run("BankDelete", e.bankDelete)
+	t.Run("OrgDelete", e.orgDelete)
 }
 
 // retainSync: a sync retain returns once units commit, reports EXTRACT usage, and an identical retain is a
@@ -561,4 +563,96 @@ func (e *env) bankDelete(t *testing.T) {
 	})
 	wantCode(t, "deleted document", err, codes.NotFound)
 	e.idle(t, bank)
+}
+
+// orgDelete: an org with three banks, each holding a retained document, is deleted. The receipt reaches COMPLETED
+// with a clean verification; no row carrying the org's id is left in any table that has one (read from the schema),
+// no blob is left under its prefix in MinIO, and GetOrg and GetBank are NOT_FOUND.
+func (e *env) orgDelete(t *testing.T) {
+	const org = "e2e-org-delete"
+	banks := []string{"od-1", "od-2", "od-3"}
+	if _, err := e.c.Orgs.CreateOrg(e.ctx(t), &pb.CreateOrgRequest{OrgId: org}); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range banks {
+		_, err := e.c.Memory.Retain(e.ctx(t), &pb.RetainRequest{OrgId: org, BankId: b, Items: []*pb.RetainItem{
+			{Content: aliceText, DocumentId: aliceDoc},
+		}})
+		if err != nil {
+			t.Fatalf("retain into %s: %v", b, err)
+		}
+	}
+	prefix := blob.OrgPrefix(domain.OrgRef{Tenant: e2eTenant, Org: org})
+	if keys := e.blobKeys(t, prefix); len(keys) != len(banks) {
+		t.Fatalf("%d blobs under %q before the delete, want %d", len(keys), prefix, len(banks))
+	}
+	del, err := e.c.Orgs.DeleteOrg(e.ctx(t), &pb.DeleteOrgRequest{OrgId: org})
+	if err != nil || del.GetReceipt().GetBanks() != int32(len(banks)) {
+		t.Fatalf("DeleteOrg = %v, %v", del, err)
+	}
+	rc := e.waitReceipt(t, org)
+	if rc.GetRowsRemaining() != 0 || rc.GetBlobsRemaining() != 0 || rc.GetTablesChecked() == 0 {
+		t.Fatalf("completed receipt = %v", rc)
+	}
+	if n := e.orgRows(t, org); n != 0 {
+		t.Fatalf("%d rows of the deleted org left", n)
+	}
+	if keys := e.blobKeys(t, prefix); len(keys) != 0 {
+		t.Fatalf("blobs left under %q: %v", prefix, keys)
+	}
+	_, err = e.c.Orgs.GetOrg(e.ctx(t), &pb.GetOrgRequest{OrgId: org})
+	wantCode(t, "GetOrg of the deleted org", err, codes.NotFound)
+	_, err = e.c.Banks.GetBank(e.ctx(t), &pb.GetBankRequest{OrgId: org, BankId: banks[0]})
+	wantCode(t, "GetBank of a deleted org's bank", err, codes.NotFound)
+}
+
+// waitReceipt polls GetDeletionReceipt for org until it is COMPLETED.
+func (e *env) waitReceipt(t *testing.T, org string) *pb.DeletionReceipt {
+	t.Helper()
+	ctx := e.ctx(t)
+	for {
+		resp, err := e.c.Orgs.GetDeletionReceipt(ctx, &pb.GetDeletionReceiptRequest{OrgId: org})
+		if err != nil {
+			t.Fatalf("GetDeletionReceipt: %v", err)
+		}
+		if resp.GetReceipt().GetState() == pb.DeletionReceipt_STATE_COMPLETED {
+			return resp.GetReceipt()
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("org delete not completed: %v\n--- worker log tail ---\n%s", resp.GetReceipt(),
+				tail(e.worker.Logs(), 4000))
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// orgRows counts the rows of the e2e tenant's org in every table of the memd schema that has an org_id column.
+func (e *env) orgRows(t *testing.T, org string) int64 {
+	t.Helper()
+	ctx := e.ctx(t)
+	conn, err := pgx.Connect(ctx, e.stack.DSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	rows, err := conn.Query(ctx, `SELECT table_name FROM information_schema.columns
+		WHERE table_schema = 'public' AND column_name = 'org_id'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(tables) == 0 {
+		t.Fatalf("tables with org_id: %v, %v", tables, err)
+	}
+	var total int64
+	for _, table := range tables {
+		var n int64
+		sql := "SELECT count(*) FROM " + pgx.Identifier{table}.Sanitize() + " WHERE tenant_id = $1 AND org_id = $2"
+		if err := conn.QueryRow(ctx, sql, e2eTenant, org).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		total += n
+	}
+	return total
 }

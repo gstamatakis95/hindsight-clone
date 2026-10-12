@@ -1,14 +1,28 @@
 // Package org owns the org lifecycle. Its one type, [Service], built by [New] from [Deps], serves
-// memory.v1.OrgService: creating, reading and listing a tenant's orgs.
+// memory.v1.OrgService: creating, reading, listing and deleting a tenant's orgs, and the receipts of their deletes.
 //
 // # Where it sits
 //
-// org is a service. It imports domain and the store boundary, and never another service, an adapter, grpcapi,
-// maintenance, gen, pgx, net/http, the S3 SDK or Datadog (depguard). cmd/memd/wire_services.go builds the Service
-// (wireOrg) and hands it to grpcapi's OrgHandler. An org's config level belongs to internal/configsvc.
+// org is a service. It imports domain, jobs, blob and the store boundary, and never another service, an adapter,
+// grpcapi, maintenance, gen, pgx, net/http, the S3 SDK or Datadog (depguard). cmd/memd/wire_services.go builds the
+// Service (wireOrg), hands it to grpcapi's OrgHandler, registers its delete_org job and sets its tick steps. An org's
+// config level belongs to internal/configsvc.
 //
-// The public surface: [Service.CreateOrg], [Service.GetOrg] and [Service.ListOrgs]. OrgService.DeleteOrg is not
-// served in this version: grpcapi answers it UNIMPLEMENTED.
+// The public surface: [Service.CreateOrg], [Service.GetOrg], [Service.ListOrgs], [Service.DeleteOrg] and
+// [Service.GetDeletionReceipt]; the delete_org handler [Service.RunDeleteJob]; the tick's
+// [Service.ResumeStalledDeletes] and [Service.PruneReceipts].
+//
+// # Deleting an org
+//
+// DeleteOrg tombstones the org and its banks in one transaction (the org row locked first), cancels their pending
+// jobs, starts an IN_PROGRESS [domain.DeletionReceipt] and enqueues delete_org, an org-scoped job (its operation has
+// no bank). The job fans out to the banks' delete_bank jobs (it never imports internal/bank: jobs.EnqueueDeleteBank is
+// the sanctioned way to affect it), waits for the bank rows to go, sweeps the org's rows whatever their bank, deletes
+// the blobs under blob.OrgPrefix after DeleteConfig.BlobGrace with a fence between pages, and finishes in one
+// transaction that deletes the org's operations, events and row and counts the org's rows in every table carrying
+// org_id (read from the schema). Rows left roll that transaction back and stamp the receipt FAILED_VERIFICATION; the
+// run sweeps again and, failing that, retries. Every step re-reads the org, so a duplicate or resumed run is safe.
+// The receipt names the org only by domain.OrgIDHash and outlives it (docs/design/storage.md#deleting-an-org).
 //
 // # Org rules
 //

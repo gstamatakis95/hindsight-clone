@@ -349,17 +349,19 @@ bank. A failing step is logged and the rest still run.
 |---|---|---|---|
 | 1 | reclaim_stale | jobs | Re-queue or fail stale PROCESSING rows (see [Heartbeats, fencing and reclaim](#heartbeats-fencing-and-reclaim)) |
 | 2 | resume_bank_deletes | bank | For each tombstoned bank with no pending or processing `delete_bank`, enqueue one |
-| 3 | refresh_failures | mentalmodel | Pause mental models whose latest terminal refresh failed and record the failure (see [reflect-and-mental-models.md](reflect-and-mental-models.md#failures-and-pause)) |
-| 4 | cron_refresh | mentalmodel | Enqueue due cron refreshes |
-| 5 | consolidation_reconcile | observation | For each live bank with an unconsolidated fact older than its `observations.reconcile_grace_seconds` (default 600), whose effective config has `observations.auto_consolidation` and `observations.enabled` on, enqueue the automatic consolidate with *pending or running* dedupe |
-| 6 | graph_reconcile | maintenance | For each live bank with queued `graph_dirty` or `entity_maintenance` rows, enqueue `graph_maintenance` |
-| 7 | rederive_stranded | memory | Re-enqueue `rederive_memory` (up to 100 per tick) for live facts with no embedding whose last rederive ended FAILED or CANCELLED more than 10 min ago and none is pending or running |
-| 8 | settle_retain_batches | memory | End every pending `retain_batch` whose children are all terminal: FAILED ("k of n documents failed") if any failed, else CANCELLED if any was cancelled, else COMPLETED |
-| 9 | prune_operations | jobs | Delete terminal operations finished longer than `retention.operations` ago (default 7 days) |
-| 10 | prune_events | jobs | Delete lifecycle events older than `retention.events` (default 30 days) |
+| 3 | resume_org_deletes | org | For each tombstoned org with no pending or processing `delete_org`, enqueue one (with the org's open receipt) |
+| 4 | refresh_failures | mentalmodel | Pause mental models whose latest terminal refresh failed and record the failure (see [reflect-and-mental-models.md](reflect-and-mental-models.md#failures-and-pause)) |
+| 5 | cron_refresh | mentalmodel | Enqueue due cron refreshes |
+| 6 | consolidation_reconcile | observation | For each live bank with an unconsolidated fact older than its `observations.reconcile_grace_seconds` (default 600), whose effective config has `observations.auto_consolidation` and `observations.enabled` on, enqueue the automatic consolidate with *pending or running* dedupe |
+| 7 | graph_reconcile | maintenance | For each live bank with queued `graph_dirty` or `entity_maintenance` rows, enqueue `graph_maintenance` |
+| 8 | rederive_stranded | memory | Re-enqueue `rederive_memory` (up to 100 per tick) for live facts with no embedding whose last rederive ended FAILED or CANCELLED more than 10 min ago and none is pending or running |
+| 9 | settle_retain_batches | memory | End every pending `retain_batch` whose children are all terminal: FAILED ("k of n documents failed") if any failed, else CANCELLED if any was cancelled, else COMPLETED |
+| 10 | prune_operations | jobs | Delete terminal operations finished longer than `retention.operations` ago (default 7 days) |
+| 11 | prune_events | jobs | Delete lifecycle events older than `retention.events` (default 30 days) |
+| 12 | prune_deletion_receipts | org | Delete receipts of org deletes completed longer than `retention.deletion_receipts` ago (default 3 years) |
 
-Steps 2, 5, 6 and 7 take no `tx.Seq`: nothing they write is memory content, and Seq refuses a tombstoned bank,
-which the delete resume must still reach. Step 4 takes `tx.Seq` before joining or inserting each model's refresh.
+Steps 2, 3, 6, 7 and 8 take no `tx.Seq`: nothing they write is memory content, and Seq refuses a tombstoned bank,
+which the delete resume must still reach. Step 5 takes `tx.Seq` before joining or inserting each model's refresh.
 
 - The consolidation reconcile joins a *running* consolidate, not only a pending one; otherwise a tick during a
   slow, failing run would queue a fresh job, the failing run would skip its retry and end FAILED, and backoff

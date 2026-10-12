@@ -208,9 +208,20 @@ service OrgService {
   rpc GetOrg(GetOrgRequest) returns (GetOrgResponse);
   // ListOrgs pages through the tenant's orgs in id order; orgs being deleted are left out.
   rpc ListOrgs(ListOrgsRequest) returns (ListOrgsResponse);
-  // DeleteOrg deletes an org with every bank in it. Not available in this server version: it returns
-  // UNIMPLEMENTED.
+  // DeleteOrg deletes an org with every bank in it, for good. At once and atomically it marks the org and its
+  // banks as being deleted, cancels their pending operations, enqueues the org's delete_org operation and starts
+  // a deletion receipt; it returns both. From then on writes under the org fail FAILED_PRECONDITION
+  // (ORG_DELETING or BANK_DELETING) and reads NOT_FOUND, GetOrg included. The delete removes every bank, every
+  // row of the org and every stored blob, then verifies that none is left before it deletes the org and marks the
+  // receipt COMPLETED. Calling it again while the delete runs joins it: it returns the same receipt and the delete's
+  // current operation (a long delete continues in new delete_org operations). Poll GetDeletionReceipt for
+  // completion: the operations are removed with the org.
   rpc DeleteOrg(DeleteOrgRequest) returns (DeleteOrgResponse);
+  // GetDeletionReceipt returns the receipt of the org's most recent delete, which outlives the org (kept for the
+  // server's receipt retention, 3 years by default). An org never deleted = NOT_FOUND. A receipt also outlives the
+  // reuse of its org id: an org created again after a completed delete is live while GetDeletionReceipt still
+  // returns the old COMPLETED receipt, so check GetOrg first; a live org wins.
+  rpc GetDeletionReceipt(GetDeletionReceiptRequest) returns (GetDeletionReceiptResponse);
 }
 
 // BankService manages the calling tenant's banks: create (optionally from a template), get, list, delete,
@@ -282,16 +293,19 @@ service ConfigService {
 service OperationService {
   // GetOperation returns one operation of the bank. For a bank being deleted it answers only for the bank's
   // delete_bank operations (any other id = NOT_FOUND, BANK_NOT_FOUND); once the delete is done they are
-  // NOT_FOUND too.
+  // NOT_FOUND too. An empty bank_id reads an org-scoped operation (delete_org) instead.
   rpc GetOperation(GetOperationRequest) returns (GetOperationResponse);
-  // ListOperations pages through the bank's operations, optionally filtered by status and kind.
+  // ListOperations pages through the bank's operations, optionally filtered by status and kind. An empty bank_id
+  // lists the org's own operations (delete_org).
   rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse);
   // CancelOperation cancels a PENDING or PROCESSING operation. A pending one becomes CANCELLED at once.
   // A processing one stays PROCESSING with the cancel recorded until it
-  // stops at its next checkpoint, then becomes CANCELLED; committed work stays.
+  // stops at its next checkpoint, then becomes CANCELLED; committed work stays. delete_bank and delete_org
+  // operations can't be cancelled (OPERATION_NOT_CANCELLABLE).
   rpc CancelOperation(CancelOperationRequest) returns (CancelOperationResponse);
   // RetryOperation re-queues a FAILED or CANCELLED operation: it sets it back to PENDING to run
-  // again at once. Other states are rejected.
+  // again at once. Other states are rejected. A FAILED delete_org (empty bank_id) may be retried while its org
+  // is being deleted.
   rpc RetryOperation(RetryOperationRequest) returns (RetryOperationResponse);
   // ListEvents polls the bank's lifecycle events by sequence number.
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
@@ -1757,14 +1771,63 @@ message ListOrgsResponse {
 
 // DeleteOrgRequest names the org to delete.
 message DeleteOrgRequest {
-  // Org id.
+  // Org id; unknown = NOT_FOUND (ORG_NOT_FOUND).
   string org_id = 1;
 }
 
-// DeleteOrgResponse carries the delete job.
+// DeleteOrgResponse carries the delete job and its receipt.
 message DeleteOrgResponse {
-  // The operation deleting the org.
+  // The delete_org operation (org-scoped: its bank_id is empty). It is removed with the org, so poll the receipt.
   Operation operation = 1;
+  // The delete's receipt, IN_PROGRESS.
+  DeletionReceipt receipt = 2;
+}
+
+// ---- GetDeletionReceipt ----
+
+// GetDeletionReceiptRequest names the deleted (or deleting) org.
+message GetDeletionReceiptRequest {
+  // Org id. The receipt stores only a hash of the tenant and org id, so the lookup hashes this.
+  string org_id = 1;
+}
+
+// GetDeletionReceiptResponse carries the receipt.
+message GetDeletionReceiptResponse {
+  // The org's most recent deletion receipt.
+  DeletionReceipt receipt = 1;
+}
+
+// DeletionReceipt records one org delete. It holds no org id (only a hash of it), bank ids, names or content.
+message DeletionReceipt {
+  // State is where the delete stands.
+  enum State {
+    // Not set.
+    STATE_UNSPECIFIED = 0;
+    // The org is being deleted.
+    STATE_IN_PROGRESS = 1;
+    // Every row and blob of the org is gone and the verification found none left; the org no longer exists.
+    STATE_COMPLETED = 2;
+    // The last verification found rows or blobs left; the delete keeps sweeping and verifying until it passes.
+    STATE_FAILED_VERIFICATION = 3;
+  }
+  // Receipt id.
+  string id = 1;
+  // Where the delete stands.
+  State state = 2;
+  // When DeleteOrg was accepted.
+  google.protobuf.Timestamp requested_at = 3;
+  // When the verified delete finished; unset until COMPLETED.
+  google.protobuf.Timestamp completed_at = 4;
+  // Banks the delete covered.
+  int32 banks = 5;
+  // Tables the last verification counted rows in (every table that carries an org id).
+  int32 tables_checked = 6;
+  // Rows of the org the last verification found (0 once COMPLETED).
+  int64 rows_remaining = 7;
+  // Blobs of the org the last verification found (0 once COMPLETED; the check stops at the first one).
+  int64 blobs_remaining = 8;
+  // When the last verification ran; unset before the first.
+  google.protobuf.Timestamp verified_at = 9;
 }
 
 // ---- Resources ----
@@ -2391,7 +2454,7 @@ message GetOperationRequest {
   // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
   string org_id = 1;
   // Bank owning the operation; unknown bank = NOT_FOUND. A bank being deleted serves only its delete_bank
-  // operations.
+  // operations. Empty = an org-scoped operation (delete_org), served while its org exists, deleting or not.
   string bank_id = 2;
   // Operation id.
   string operation_id = 3;
@@ -2410,7 +2473,7 @@ message ListOperationsRequest {
   // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
   // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
   string org_id = 1;
-  // Bank to list; unknown bank = NOT_FOUND.
+  // Bank to list; unknown bank = NOT_FOUND. Empty = the org's own operations (delete_org).
   string bank_id = 2;
   // Only this status; unspecified = any.
   OperationStatus status = 3;
@@ -2439,7 +2502,7 @@ message CancelOperationRequest {
   // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
   // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
   string org_id = 1;
-  // Bank owning the operation.
+  // Bank owning the operation; empty = an org-scoped operation (delete_org).
   string bank_id = 2;
   // Operation id; must be PENDING or PROCESSING.
   string operation_id = 3;
@@ -2458,7 +2521,7 @@ message RetryOperationRequest {
   // Org the bank belongs to. Required: an org must exist (OrgService.CreateOrg) before anything is written
   // under it, and an unknown org = NOT_FOUND (ORG_NOT_FOUND).
   string org_id = 1;
-  // Bank owning the operation.
+  // Bank owning the operation; empty = an org-scoped operation (delete_org).
   string bank_id = 2;
   // Operation id; must be FAILED or CANCELLED (a cancel-requested PROCESSING operation is refused).
   string operation_id = 3;
@@ -3325,6 +3388,9 @@ enum OperationKind {
   OPERATION_KIND_GRAPH_MAINTENANCE = 7;
   // Delete everything the bank holds, then the bank itself.
   OPERATION_KIND_DELETE_BANK = 8;
+  // Delete every bank, row and blob of an org, verify none is left, then delete the org (org-scoped: empty
+  // bank_id).
+  OPERATION_KIND_DELETE_ORG = 9;
 }
 
 // OperationStatus is the lifecycle state of an operation.

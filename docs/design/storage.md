@@ -51,6 +51,7 @@ declares the blob boundary and `internal/blob/s3` implements it.
 |---|---|---|
 | `tenants` | `id`, `config` | The tenant config level. |
 | `orgs` | `(tenant_id, id)`, `name`, `config`, `deleting_at` | `config` is the org config level. `deleting_at` is the org delete tombstone: bank creation in the org then fails with `ORG_DELETING`. |
+| `deletion_receipts` | `(tenant_id, id)`, `org_id_sha256`, `status`, `requested_at`, `completed_at`, `banks`, `verification` | The record of an org delete ([Deleting an org](#deleting-an-org)). It names the org only by hash and has no `org_id`, so it outlives the org; retention prunes it. |
 | `banks` | `(tenant_id, org_id, id)`, `name`, `config`, `change_seq`, `deleting_at`, `last_memory_write_at` | `config` is the bank's own overrides. `change_seq` is the change sequence. `deleting_at` is the tombstone. `last_memory_write_at` is stamped by every `tx.Seq` (so config writes move it too); it is only displayed. |
 
 ### Documents and chunks
@@ -232,6 +233,92 @@ After that, a write to the same bank id creates a new, empty bank.
   pending or processing; re-issuing DeleteBank or retrying the FAILED operation does the same. Every run resumes
   from whatever rows are left.
 - `delete_bank` cannot be cancelled.
+
+## Deleting an org
+
+![Org deletion: the request transaction, the delete_org run and the receipt](diagrams/deletion-flow.svg)
+
+DeleteOrg (`internal/org`) deletes an org with every bank, row and stored blob in it, verifies that none is left,
+and leaves a deletion receipt that outlives the org.
+
+1. **Request** (one transaction, no change seq). Lock the org row `FOR UPDATE`: bank creation share-locks the same
+   row, so the lock waits for creations in flight and makes new ones wait and then fail `ORG_DELETING`. Then, in
+   later statements (so READ COMMITTED sees every bank committed while the lock waited), tombstone the org and every
+   live bank of it, cancel every pending job of the org except `delete_bank` and `delete_org`, insert the receipt
+   (`in_progress`, the number of banks tombstoned) and enqueue `delete_org`. From then on writes under the org are
+   FAILED_PRECONDITION (`ORG_DELETING`, or `BANK_DELETING` once a bank is named), reads are NOT_FOUND (GetOrg
+   included), and claims skip every job of the org except `delete_bank` and `delete_org`. Re-issuing DeleteOrg
+   returns the same receipt and joins the running delete.
+2. **Org-scoped operation.** `delete_org` belongs to the org, not to a bank: its row has `bank_id = ''` and serial
+   key `org`. An org job is claimed and stays `Alive` while its org row exists, tombstoned or not; enqueuing one
+   share-locks the org row (an unknown org is `ORG_NOT_FOUND`, a tombstoned one refuses every kind but
+   `delete_org`). A reclaim or terminal failure writes no `OPERATION_FAILED` event (events are per bank).
+   GetOperation and ListOperations with an empty `bank_id` read it, CancelOperation refuses it
+   (`OPERATION_NOT_CANCELLABLE`), and RetryOperation of a FAILED one is the manual recovery path.
+3. **Fan out.** Each run enqueues `delete_bank` for every tombstoned bank of the org without a pending or
+   processing one (500 per transaction): the bank deletes do the per-bank work, with their own batching, fencing
+   and resume. While any bank row of the org is left, the run re-enqueues itself 5 s later (a wait spends no
+   attempt).
+4. **Sweep.** With no bank left, it deletes the org's rows in every content table by `(tenant_id, org_id)`,
+   whatever their bank, in the bank delete's order, 1000 rows per transaction: rows a straggler wrote, or rows a
+   crash left behind a bank already deleted.
+5. **Fence.** `Alive` on the job, and no other operation of the org PROCESSING (else it re-enqueues itself 5 s
+   later).
+6. **Blobs.** No earlier than `deletion.blob_grace` after the request (default: `api.rpc_deadline`, at least
+   10 min), so a request that passed its org check before the tombstone has written its blob by then, it lists and
+   deletes the keys under `{tenant}/{org}/` page by page, re-checking the fence between pages, then checks that a
+   listing of the prefix is empty. A retain whose write is refused because its org or bank is being deleted (or is
+   gone) deletes the blobs it stored itself.
+7. **Finish and verify** (one transaction). Lock the org row, re-check that nothing else of the org is processing,
+   delete the org's operations (the running `delete_org` included) and lifecycle events and the org row (the
+   banks foreign key, RESTRICT, proves no bank is left), then count the org's rows in every table that has an
+   `org_id` column, as `information_schema` lists them at run time (`orgs` excluded; `tenants` and
+   `deletion_receipts` have none). Any row left rolls the whole transaction back; the receipt is then stamped
+   `failed_verification` with the counts in its own transaction, and the run sweeps and verifies again, up to 3
+   times, before it fails and is retried. Otherwise the receipt becomes `completed` with `completed_at` and the
+   verification (`tables_checked`, `rows_remaining` 0, `blobs_remaining` 0, `verified_at`, the server version),
+   and the job logs one line carrying only the receipt id. The runner treats NOT_FOUND from its final Complete as
+   done.
+
+- **Recovery.** `delete_org` retries without an attempt cap, like `delete_bank`; the tick's `resume_org_deletes`
+  step re-enqueues it for any tombstoned org with none pending or processing, and every run resumes from what is
+  left.
+- **Completion signal.** Poll `OrgService.GetDeletionReceipt` until `STATE_COMPLETED`. It looks the org up by
+  `sha256(tenant_id || 0x00 || org_id)` and returns its most recent receipt, so it answers after the org is gone
+  and tells a deleted org from one never created (an org never deleted is NOT_FOUND). Receipt states:
+  `in_progress`, `failed_verification` (the delete is still retrying), `completed`. The lookup and these states are
+  a stable contract (the queue consumer relies on them). A receipt outlives the reuse of its org id: an org created
+  again after a completed delete is live while its old receipt still answers, so a caller deciding whether an org
+  is gone checks GetOrg first, and a live org wins.
+- **Receipt.** `deletion_receipts` stores the receipt id, the tenant, the org id hash, the request and completion
+  times, the bank count, the last verification and the server version: no bank ids, document ids, names or
+  content. The hash of a short client-chosen id can be reversed by guessing, so the receipt is pseudonymous, not
+  anonymous. No delete path touches the table; the tick's `prune_deletion_receipts` step drops receipts completed
+  more than `retention.deletion_receipts` ago (default 3 years).
+- **Restore runbook.** After restoring a database backup, re-run DeleteOrg for every org of the restored database
+  whose hash matches a receipt completed after the backup was taken. Export the receipts table with, or keep it
+  outside, the backup set.
+- After the delete, the org id is free: CreateOrg makes a new, empty org.
+
+### What an org delete removes, and what it can't
+
+Removed: the org row and its config level, every bank of it (rows of every table carrying `org_id`: memories,
+archive and audit, documents and chunks, entities and links, observations and their history, mental models and
+history, directives, graph queues), the org's operations and lifecycle events, and every blob under
+`{tenant}/{org}/`. Kept: the deletion receipt, and the tenant and its config.
+
+Outside memd's reach (also in [known-limitations.md](known-limitations.md#org-deletion)):
+
+| Where | What lingers | Operator action |
+|---|---|---|
+| Postgres physical storage | dead tuples and index entries (HNSW, BM25 segments, GIN) until VACUUM; WAL | autovacuum normally clears them within hours; run `VACUUM` on the large tables for strict deadlines |
+| Postgres backups, PITR, WAL archives, replicas, snapshots | everything, until backup retention expires | backup retention within the legal deadline, plus the restore runbook above |
+| Object storage with versioning or replication | noncurrent versions survive the delete, and the listing that verifies the prefix can't see them | run the bucket without versioning, or with a noncurrent-version expiry rule within the deadline (a deployment requirement) |
+| Ingest broker | message content in topics until broker retention, and dead-letter copies | broker retention within the deadline; purge dead-letter topics |
+| AI gateway and model providers | prompts holding memory content in gateway logs and provider retention | gateway content logging off; provider zero-retention agreements |
+| Datadog | span tags `memd.tenant`, `memd.org`, `memd.bank`, operation ids, error messages (never content); JSON logs with error text | Datadog retention; ids must not be personal data |
+| Container stdout and stderr logs | error text with ids | log retention |
+| Clients | recall and reflect results cached by agents, eval reports | out of scope |
 
 ## Archive and restore
 

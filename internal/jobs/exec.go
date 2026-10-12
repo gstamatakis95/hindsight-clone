@@ -205,8 +205,8 @@ func fenced(err error) bool {
 }
 
 // report logs the outcome of a terminal Complete or Fail. Fencing outcomes are expected: ErrCancelled (the
-// row was cancel-requested and is now CANCELLED), ErrNotFound for delete_bank (its own row went with the
-// bank) and ErrFailedPrecondition/ErrNotFound (the worker no longer held the row). Any other error leaves
+// row was cancel-requested and is now CANCELLED), ErrNotFound for delete_bank or delete_org (its own row went with
+// the bank or org) and ErrFailedPrecondition/ErrNotFound (the worker no longer held the row). Any other error leaves
 // the row PROCESSING; it stops being heartbeated, so ReclaimStale re-queues it.
 func (r *Runner) report(ctx context.Context, j store.Job, what string, err error) {
 	switch {
@@ -215,6 +215,8 @@ func (r *Runner) report(ctx context.Context, j store.Job, what string, err error
 		r.log.InfoContext(ctx, "operation cancelled", "op", j.ID, "kind", j.Kind)
 	case errors.Is(err, domain.ErrNotFound) && j.Kind == domain.OperationKindDeleteBank:
 		r.log.DebugContext(ctx, "delete_bank finished with its bank", "op", j.ID)
+	case errors.Is(err, domain.ErrNotFound) && j.Kind == domain.OperationKindDeleteOrg:
+		r.log.DebugContext(ctx, "delete_org finished with its org", "op", j.ID)
 	case errors.Is(err, domain.ErrFailedPrecondition), errors.Is(err, domain.ErrNotFound):
 		r.log.WarnContext(ctx, "operation no longer held by this worker", "op", j.ID, "kind", j.Kind, "call", what,
 			"err", err)

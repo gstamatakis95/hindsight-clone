@@ -34,6 +34,7 @@ layout to SVGs that follow the viewer's light or dark colour scheme. `make diagr
 | [reflect-loop](diagrams/reflect-loop.svg) | The tool loop, the evidence guard, closing and overflow, citations | [reflect-and-mental-models.md](reflect-and-mental-models.md) |
 | [mental-model-refresh](diagrams/mental-model-refresh.svg) | Triggers, scheduling, the run, the strategies and the write | [reflect-and-mental-models.md](reflect-and-mental-models.md) |
 | [consolidation-flow](diagrams/consolidation-flow.svg) | Plan, per-scope decide and apply, finish and the continuation | [consolidation.md](consolidation.md) |
+| [deletion-flow](diagrams/deletion-flow.svg) | DeleteOrg's transaction, the delete_org run (fan-out, sweep, blobs, verification) and the receipt | [storage.md](storage.md#deleting-an-org) |
 | [curation-flow](diagrams/curation-flow.svg) | Update, invalidate and restore, and the jobs they enqueue | [curation-and-operations.md](curation-and-operations.md) |
 
 Related: [eval/README.md](../../eval/README.md) covers the benchmarks (LoCoMo, LongMemEval, golden fixtures; how a

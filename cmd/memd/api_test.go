@@ -78,10 +78,8 @@ func (w *wiredStack) callRPC(t *testing.T, sd protoreflect.ServiceDescriptor, md
 	fillRequest(req)
 	method := "/" + string(sd.FullName()) + "/" + string(md.Name())
 	err = w.conn.Invoke(w.ctx(t), method, req.Interface(), out.New().Interface())
-	switch code := status.Code(err); {
-	case method == "/memory.v1.OrgService/DeleteOrg" && code == codes.Unimplemented:
-		// Wired, and answers UNIMPLEMENTED: org deletion is not available in this version.
-	case code == codes.Unimplemented, code == codes.Internal, code == codes.Unknown:
+	switch code := status.Code(err); code {
+	case codes.Unimplemented, codes.Internal, codes.Unknown:
 		t.Fatalf("%s: %v", method, err)
 	}
 }
