@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"memd/internal/domain"
 	"reflect"
 	"slices"
@@ -152,6 +153,20 @@ func gNoneOf(g domain.TagGroup) domain.TagGroup {
 	return domain.TagGroup{Kind: domain.TagGroupNoneOf, Not: &g}
 }
 
+// checkMatchesGroups checks that p agrees with domain.MatchGroup over every group on each of unitTagSets.
+func checkMatchesGroups(t *testing.T, p domain.TagPredicate, groups []domain.TagGroup) {
+	t.Helper()
+	for _, u := range unitTagSets {
+		exp := true
+		for _, g := range groups {
+			exp = exp && domain.MatchGroup(u, g)
+		}
+		if got := p.Eval(u); got != exp {
+			t.Errorf("unit %q: Eval = %v, MatchGroup = %v (pred %+v)", u, got, exp, p)
+		}
+	}
+}
+
 func TestCompileGroups(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -190,15 +205,7 @@ func TestCompileGroups(t *testing.T) {
 			if v.calls != 0 {
 				t.Fatalf("vocabulary read %d times without fuzzy leaves", v.calls)
 			}
-			for _, u := range unitTagSets {
-				exp := true
-				for _, g := range tc.groups {
-					exp = exp && domain.MatchGroup(u, g)
-				}
-				if got := p.Eval(u); got != exp {
-					t.Errorf("unit %q: Eval = %v, MatchGroup = %v (pred %+v)", u, got, exp, p)
-				}
-			}
+			checkMatchesGroups(t, p, tc.groups)
 		})
 	}
 
@@ -386,5 +393,49 @@ func testFuzzyErrors(t *testing.T) {
 	tooMany.Groups[0].Leaf.Match = domain.TagsMatchAnyStrict
 	if err := run(many, tooMany); err != nil {
 		t.Errorf("any_strict has no ceiling: err = %v", err)
+	}
+}
+
+func TestTrigramSimilarity(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		a, b string
+		want float64
+	}{
+		{name: "identical", a: "typescript", b: "typescript", want: 1},
+		{name: "case and punctuation insensitive", a: "Type-Script", b: "type script", want: 1},
+		{name: "disjoint", a: "abc", b: "xyz", want: 0},
+		{name: "empty left", a: "", b: "abc", want: 0},
+		{name: "empty both", a: "", b: "", want: 0},
+		{name: "only separators", a: "--", b: "--", want: 0},
+		// pg_trgm: SELECT similarity('word', 'two words') = 0.36363637.
+		{name: "pg_trgm doc example", a: "word", b: "two words", want: 4.0 / 11.0},
+		// 8 shared of 13 distinct trigrams.
+		{name: "typo", a: "typscript", b: "typescript", want: 8.0 / 13.0},
+		{name: "short words", a: "alise", b: "alice", want: 3.0 / 9.0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := trigramSimilarity(tc.a, tc.b)
+			if math.Abs(got-tc.want) > 1e-6 {
+				t.Fatalf("trigramSimilarity(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+			}
+			if rev := trigramSimilarity(tc.b, tc.a); rev != got {
+				t.Fatalf("not symmetric: %v vs %v", got, rev)
+			}
+		})
+	}
+}
+
+// TestBankTagsMostUsedFirst: the vocabulary read through Reader.TagCounts is ordered by count desc, then
+// tag, not TagCounts' byte order.
+func TestBankTagsMostUsedFirst(t *testing.T) {
+	e := newEnv(t, envOpts{})
+	e.add(t, fact("1", "x", "b", "z"), fact("2", "x", "z"), fact("3", "x", "a"), fact("4", "x", "z", "a"))
+	got, err := bankTags(context.Background(), e.store.Read(), testBank)
+	if err != nil || !slices.Equal(got, []string{"z", "a", "b"}) {
+		t.Fatalf("bankTags = %v, %v; want [z a b]", got, err)
 	}
 }

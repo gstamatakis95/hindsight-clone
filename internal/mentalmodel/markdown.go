@@ -71,15 +71,6 @@ func (d document) prompt() prompts.DeltaDocument {
 	return out
 }
 
-// blockCount is the number of blocks across all sections.
-func (d document) blockCount() int {
-	n := 0
-	for _, s := range d.Sections {
-		n += len(s.Blocks)
-	}
-	return n
-}
-
 // slugifyHeading derives a stable slug from a heading ("Stop Conditions" -> "stop-conditions").
 func slugifyHeading(heading string) string {
 	slug := strings.Trim(slugRx.ReplaceAllString(strings.ToLower(strings.TrimSpace(heading)), "-"), "-")

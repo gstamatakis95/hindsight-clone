@@ -49,9 +49,6 @@ func Dial(t testing.TB, addr, tenant string) *Client {
 	return newClient(conn, tenant)
 }
 
-// As returns a client over the same connection for another tenant.
-func (c *Client) As(tenant string) *Client { return newClient(c.Conn, tenant) }
-
 // newClient builds the service clients over a tenant-stamping connection.
 func newClient(conn *grpc.ClientConn, tenant string) *Client {
 	cc := tenantConn{cc: conn, tenant: tenant}

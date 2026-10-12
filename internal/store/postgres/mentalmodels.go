@@ -61,7 +61,7 @@ func (r *mentalModelRepo) Delete(ctx context.Context, b domain.BankRef, id domai
 	return docRowsErr(fmt.Sprintf("delete mental model %s", id), n, err)
 }
 
-// AppendHistory adds an entry (a zero ChangedAt takes the database's now()), then keeps only the newest keep
+// AppendHistory adds an entry (a zero CreatedAt takes the database's now()), then keeps only the newest keep
 // entries of that kind (keep <= 0 = all). An unknown model is domain.ErrNotFound.
 func (r *mentalModelRepo) AppendHistory(
 	ctx context.Context, b domain.BankRef, id domain.MentalModelID, e domain.MentalModelHistoryEntry, keep int,

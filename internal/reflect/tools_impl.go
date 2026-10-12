@@ -220,7 +220,7 @@ func (t *recallTool) Call(ctx context.Context, st *agentState, args json.RawMess
 	if st.Config.Reflect != nil && st.Config.Reflect.RecallMaxTokens != nil {
 		def = *st.Config.Reflect.RecallMaxTokens
 	}
-	res, err := t.rc.Recall(ctx, recallRequest(st, a.Query, factTypes(st.Request.Types), tokenArg(a.MaxTokens, def)))
+	res, err := t.rc.Recall(ctx, recallRequest(st, a.Query, factTypes(st.Request.FactTypes), tokenArg(a.MaxTokens, def)))
 	if err != nil {
 		return retrievalError(ctx, ToolRecall, err)
 	}

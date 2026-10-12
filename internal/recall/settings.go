@@ -1,6 +1,9 @@
 package recall
 
-import "memd/internal/domain"
+import (
+	"math"
+	"memd/internal/domain"
+)
 
 // Defaults recall owns: the server level sets no default for these knobs, or they are not
 // config knobs at all.
@@ -56,14 +59,14 @@ func settingsOf(cfg domain.BankConfig) settings {
 		rc = *cfg.Recall
 	}
 	s := settings{
-		rerank:             rc.Rerank == nil || *rc.Rerank,
-		rerankMax:          intOr(rc.RerankerMaxCandidates, defaultRerankerMaxCandidates),
-		rrfK:               intOr(rc.RRFK, defaultRRFK),
-		recencyAlpha:       floatOr(rc.RecencyAlpha, defaultRecencyAlpha),
-		temporalAlpha:      floatOr(rc.TemporalAlpha, defaultTemporalAlpha),
-		proofAlpha:         floatOr(rc.ProofAlpha, defaultProofAlpha),
-		recencyHorizonDays: intOr(rc.RecencyHorizonDays, defaultRecencyHorizonDays),
-		fuzzyMinSimilarity: floatOr(rc.FuzzyTagMinSimilarity, defaultFuzzyTagMinSimilarity),
+		rerank:             domain.ValueOr(rc.Rerank, true),
+		rerankMax:          domain.ValueOr(rc.RerankerMaxCandidates, defaultRerankerMaxCandidates),
+		rrfK:               domain.ValueOr(rc.RRFK, defaultRRFK),
+		recencyAlpha:       domain.ValueOr(rc.RecencyAlpha, defaultRecencyAlpha),
+		temporalAlpha:      domain.ValueOr(rc.TemporalAlpha, defaultTemporalAlpha),
+		proofAlpha:         domain.ValueOr(rc.ProofAlpha, defaultProofAlpha),
+		recencyHorizonDays: domain.ValueOr(rc.RecencyHorizonDays, defaultRecencyHorizonDays),
+		fuzzyMinSimilarity: domain.ValueOr(rc.FuzzyTagMinSimilarity, defaultFuzzyTagMinSimilarity),
 		boosts:             rc.ArmBoosts,
 	}
 	if s.rrfK <= 0 {
@@ -75,18 +78,38 @@ func settingsOf(cfg domain.BankConfig) settings {
 	return s
 }
 
-// intOr returns *p, or def when p is nil.
-func intOr(p *int, def int) int {
-	if p == nil {
-		return def
+// adaptiveReference is the max_tokens at which the adaptive budget equals the fixed one: Hindsight's adaptive
+// ratios (0.025 / 0.075 / 0.25 of max_tokens) were chosen to match 100 / 300 / 1000 at 4096 tokens.
+const adaptiveReference = 4096
+
+// budgetLimit returns the per-arm candidate limit for budget b (unspecified = MID). The fixed function returns
+// budget_low / budget_mid / budget_high (default 100 / 300 / 1000) as configured. The adaptive function scales
+// that level by maxTokens / 4096 (maxTokens <= 0 = DefaultMaxTokens) and clamps the result to
+// [budget_min, budget_max] (default [20, 2000]). The result is at least 1.
+func budgetLimit(cfg domain.RecallConfig, b domain.Budget, maxTokens int) int {
+	level := budgetLevel(cfg, b)
+	if cfg.BudgetFunction != domain.BudgetFunctionAdaptive {
+		return max(level, 1)
 	}
-	return *p
+	if maxTokens <= 0 {
+		maxTokens = DefaultMaxTokens
+	}
+	limit := int(math.Round(float64(level) * float64(maxTokens) / adaptiveReference))
+	lo, hi := domain.ValueOr(cfg.BudgetMin, defaultBudgetMin), domain.ValueOr(cfg.BudgetMax, defaultBudgetMax)
+	if hi < lo {
+		hi = lo
+	}
+	return max(min(max(limit, lo), hi), 1)
 }
 
-// floatOr returns *p, or def when p is nil.
-func floatOr(p *float64, def float64) float64 {
-	if p == nil {
-		return def
+// budgetLevel returns the configured fixed limit of budget b.
+func budgetLevel(cfg domain.RecallConfig, b domain.Budget) int {
+	switch b {
+	case domain.BudgetLow:
+		return domain.ValueOr(cfg.BudgetLow, defaultBudgetLow)
+	case domain.BudgetHigh:
+		return domain.ValueOr(cfg.BudgetHigh, defaultBudgetHigh)
+	default:
+		return domain.ValueOr(cfg.BudgetMid, defaultBudgetMid)
 	}
-	return *p
 }

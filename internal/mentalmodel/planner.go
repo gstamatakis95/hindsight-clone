@@ -51,7 +51,7 @@ func (p deltaPlanner) plan(
 	data := prompts.DeltaData{
 		Name: m.Spec.Name, SourceQuery: m.Spec.SourceQuery, Document: doc.prompt(),
 		Observations: obs, Facts: raw, DocumentTokens: approxTokens(m.ContentMD),
-		DocumentBudget: maxContentTokens(m, cfg), MaxOutputTokens: derefInt(binding.MaxOutputTokens),
+		DocumentBudget: maxContentTokens(m, cfg), MaxOutputTokens: domain.ValueOr(binding.MaxOutputTokens, 0),
 	}
 	draft := deltaDraft{ContentMD: m.ContentMD, SourceIDs: unitIDs(facts), FactsRetrieved: len(facts)}
 	ops, usage, err := p.call(ctx, binding, data)
@@ -211,12 +211,4 @@ func maxContentTokens(m domain.MentalModel, cfg domain.BankConfig) int {
 		return max(*cfg.MentalModels.MaxContentTokens, 0)
 	}
 	return 0
-}
-
-// derefInt returns *p, or 0 when p is nil.
-func derefInt(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
 }

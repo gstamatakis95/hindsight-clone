@@ -6,21 +6,27 @@ import (
 	"testing"
 )
 
-// TestCreateMentalModelValidatesAndQueuesBuild checks spec validation and that the first build is a
-// manual, full refresh queued with the model.
-func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
+// TestCreateMentalModelRejectsInvalidSpecs: a bad id, a bad cron and flat tags in the scope (they belong in
+// spec.tags) are INVALID_ARGUMENT.
+func TestCreateMentalModelRejectsInvalidSpecs(t *testing.T) {
 	e := newEnv(t)
-	adm := e.svc
 	bad := []domain.MentalModelSpec{
 		{ID: "Bad_ID"},
 		{ID: "y", Schedule: domain.RefreshSchedule{Cron: "not a cron"}},
-		{ID: "z", Scope: domain.MentalModelScope{Tags: domain.TagFilter{Tags: []string{"a"}}}}, // flat tags: spec.tags
+		{ID: "z", Scope: domain.MentalModelScope{Tags: domain.TagFilter{Tags: []string{"a"}}}},
 	}
 	for _, s := range bad {
-		if _, _, err := adm.CreateMentalModel(e.ctx, e.bank, s); !errors.Is(err, domain.ErrInvalidArgument) {
+		if _, _, err := e.svc.CreateMentalModel(e.ctx, e.bank, s); !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Fatalf("%+v accepted: %v", s, err)
 		}
 	}
+}
+
+// TestCreateMentalModelValidatesAndQueuesBuild checks spec normalization and that the first build is a manual,
+// full refresh queued with the model.
+func TestCreateMentalModelValidatesAndQueuesBuild(t *testing.T) {
+	e := newEnv(t)
+	adm := e.svc
 	m, op, err := adm.CreateMentalModel(e.ctx, e.bank, domain.MentalModelSpec{
 		ID: "team", Name: "Team", Tags: []string{" Proj "}, FolderPath: "/people/eng/",
 	})

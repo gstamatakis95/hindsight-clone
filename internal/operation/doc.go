@@ -5,7 +5,7 @@
 // # Where it sits
 //
 // operation is a service. It imports domain and the store boundary only, and never another service, jobs, an
-// adapter, grpcapi, maintenance, gen, pgx, net/http, the S3 SDK or Datadog (depguard). cmd/memd/wire_operation.go
+// adapter, grpcapi, maintenance, gen, pgx, net/http, the S3 SDK or Datadog (depguard). cmd/memd/wire_services.go
 // builds the Service and hands it to grpcapi's OperationHandler.
 //
 // # Reads

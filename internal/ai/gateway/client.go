@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -92,28 +93,19 @@ func (c *Client) traced(ctx context.Context, slot domain.ModelSlot, model, path 
 // withDefaults returns cfg with every zero field replaced by its default.
 func (cfg Config) withDefaults() Config {
 	cfg.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
-	cfg.EmbedModel = orDefault(cfg.EmbedModel, DefaultEmbedModel)
+	cfg.EmbedModel = cmp.Or(cfg.EmbedModel, DefaultEmbedModel)
 	cfg.EmbedBatchSize = positiveOr(cfg.EmbedBatchSize, DefaultEmbedBatchSize)
-	cfg.RerankPath = orDefault(cfg.RerankPath, DefaultRerankPath)
+	cfg.RerankPath = cmp.Or(cfg.RerankPath, DefaultRerankPath)
 	cfg.MaxConcurrent = positiveOr(cfg.MaxConcurrent, DefaultMaxConcurrent)
 	cfg.Timeout = positiveOr(cfg.Timeout, DefaultTimeout)
-	cfg.MaxRetries = orDefault(cfg.MaxRetries, DefaultMaxRetries)
-	cfg.RetryBackoff = orDefault(cfg.RetryBackoff, DefaultRetryBackoff)
+	cfg.MaxRetries = cmp.Or(cfg.MaxRetries, DefaultMaxRetries)
+	cfg.RetryBackoff = cmp.Or(cfg.RetryBackoff, DefaultRetryBackoff)
 	return cfg
 }
 
 // positiveOr returns def when v <= 0, else v.
 func positiveOr[T int | time.Duration](v, def T) T {
 	if v <= 0 {
-		return def
-	}
-	return v
-}
-
-// orDefault returns def when v is the zero value, else v.
-func orDefault[T comparable](v, def T) T {
-	var zero T
-	if v == zero {
 		return def
 	}
 	return v

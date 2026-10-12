@@ -29,19 +29,7 @@ func TestEmbedDocumentsPrefixAndBatches(t *testing.T) {
 			t.Errorf("vector %d: len %d first %v, want len 768 first %d (ordered by index)", i, len(v), v[0], i%3)
 		}
 	}
-	reqs := g.bodies("embed")
-	var sizes []int
-	var inputs []string
-	for _, r := range reqs {
-		in, _ := r["input"].([]any)
-		sizes = append(sizes, len(in))
-		for _, x := range in {
-			inputs = append(inputs, str(x))
-		}
-		if r["model"] != gateway.DefaultEmbedModel {
-			t.Errorf("model = %v, want %s", r["model"], gateway.DefaultEmbedModel)
-		}
-	}
+	sizes, inputs := embedBatches(t, g.bodies("embed"))
 	if !slices.Equal(sizes, []int{3, 3, 1}) {
 		t.Errorf("batch sizes = %v, want [3 3 1]", sizes)
 	}
@@ -56,6 +44,23 @@ func TestEmbedDocumentsPrefixAndBatches(t *testing.T) {
 	if n := len(g.bodies("embed")); n != 3 {
 		t.Errorf("got %d requests, want 3", n)
 	}
+}
+
+// embedBatches returns the size and the inputs of each embeddings request body, in order, and checks each asks
+// for the default embedding model.
+func embedBatches(t *testing.T, reqs []map[string]any) (sizes []int, inputs []string) {
+	t.Helper()
+	for _, r := range reqs {
+		in, _ := r["input"].([]any)
+		sizes = append(sizes, len(in))
+		for _, x := range in {
+			inputs = append(inputs, str(x))
+		}
+		if r["model"] != gateway.DefaultEmbedModel {
+			t.Errorf("model = %v, want %s", r["model"], gateway.DefaultEmbedModel)
+		}
+	}
+	return sizes, inputs
 }
 
 func TestEmbedQueryPrefix(t *testing.T) {

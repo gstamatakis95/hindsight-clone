@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"encoding/json"
 	"errors"
 	"memd/internal/domain"
 	"memd/internal/store"
@@ -148,5 +149,171 @@ func TestBanksWithGraphWork(t *testing.T) {
 	got, err = s.BanksWithGraphWork(ctx)
 	if want := []domain.BankRef{fuOther}; err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("tombstoned bank listed: %v %v, want %v", got, err, want)
+	}
+}
+
+// strandedRederive enqueues a rederive_memory of u and returns its id.
+func strandedRederive(t *testing.T, s *postgres.DB, u domain.Unit) domain.OperationID {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]string{"unit_id": string(u.ID)})
+	var id domain.OperationID
+	if err := s.InTx(t.Context(), func(tx store.Tx) error {
+		var err error
+		id, _, err = tx.Queue().Enqueue(t.Context(), store.Job{
+			Bank: u.Bank, Kind: domain.OperationKindRederiveMemory, SerialKey: "doc:" + string(u.DocumentID),
+			Payload: payload, Dedupe: store.DedupeNone,
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("enqueue rederive: %v", err)
+	}
+	return id
+}
+
+// TestStrandedFacts checks the maintenance read behind the NULL-embedding rederive reconcile: a fact whose
+// rederive failed for good is listed once the retry delay has passed, and not while a rederive is pending,
+// once it has an embedding, or when its bank is tombstoned.
+func TestStrandedFacts(t *testing.T) {
+	t.Parallel()
+	s := pgtest.NewStore(t)
+	ctx := t.Context()
+	stranded := fuUnit(fuBank, "stranded fact")
+	stranded.DocumentID = "doc-1"
+	healthy := fuUnit(fuBank, "healthy fact")
+	healthy.Embedding = make([]float32, domain.EmbeddingDim)
+	healthy.Embedding[0] = 1
+	if err := fuTx(t, s, func(tx store.Tx) error {
+		if _, err := tx.Banks().Ensure(ctx, fuBank); err != nil {
+			return err
+		}
+		return tx.Documents().Upsert(ctx, domain.Document{Bank: fuBank, ID: "doc-1"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fuInsert(t, s, stranded, healthy)
+	strandedRederive(t, s, stranded)
+	strandedRederive(t, s, healthy)
+	jobs, err := s.Claim(ctx, "w", []domain.OperationKind{domain.OperationKindRederiveMemory}, 10)
+	if err != nil || len(jobs) != 2 {
+		t.Fatalf("claim: %v %v", jobs, err)
+	}
+	for _, j := range jobs {
+		if err := s.Fail(ctx, j.ID, errors.New("embedder down"), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.StrandedFacts(ctx, time.Hour, 10)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("within the retry delay: %v %v", got, err)
+	}
+	got, err = s.StrandedFacts(ctx, 0, 10)
+	want := []domain.Unit{{ID: stranded.ID, Bank: fuBank, DocumentID: "doc-1"}}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("stranded: %+v %v, want %+v", got, err, want)
+	}
+	pending := strandedRederive(t, s, stranded)
+	if got, _ := s.StrandedFacts(ctx, 0, 10); len(got) != 0 {
+		t.Fatalf("listed while rederive %s is pending: %+v", pending, got)
+	}
+	fuMarkDeleting(t, s, fuBank)
+	if got, _ := s.StrandedFacts(ctx, 0, 10); len(got) != 0 {
+		t.Fatalf("listed on a tombstoned bank: %+v", got)
+	}
+}
+
+// settleBatch enqueues a retain_batch parent with n retain_document children and returns their ids.
+func settleBatch(t *testing.T, s *postgres.DB, n int) (domain.OperationID, []domain.OperationID) {
+	t.Helper()
+	var parent domain.OperationID
+	kids := make([]domain.OperationID, n)
+	if err := fuTx(t, s, func(tx store.Tx) error {
+		if _, err := tx.Banks().Ensure(t.Context(), fuBank); err != nil {
+			return err
+		}
+		var err error
+		parent, _, err = tx.Queue().Enqueue(t.Context(), store.Job{
+			Bank: fuBank, Kind: domain.OperationKindRetainBatch, Payload: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			return err
+		}
+		for i := range kids {
+			kids[i], _, err = tx.Queue().Enqueue(t.Context(), store.Job{
+				Bank: fuBank, Kind: domain.OperationKindRetainDocument, SerialKey: "doc:" + string(rune('a'+i)),
+				Payload: json.RawMessage(`{}`), ParentID: parent,
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return parent, kids
+}
+
+// settleStatus reads an operation's status.
+func settleStatus(t *testing.T, s *postgres.DB, id domain.OperationID) domain.Operation {
+	t.Helper()
+	var op domain.Operation
+	if err := fuTx(t, s, func(tx store.Tx) error {
+		var err error
+		op, err = tx.Queue().Get(t.Context(), fuBank, id)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return op
+}
+
+// TestSettleRetainBatches checks a retain_batch parent stays PENDING while a child runs, then aggregates its
+// children: COMPLETED when all completed, FAILED when one failed.
+func TestSettleRetainBatches(t *testing.T) {
+	t.Parallel()
+	s := pgtest.NewStore(t)
+	ctx := t.Context()
+	parent, kids := settleBatch(t, s, 2)
+	jobs, err := s.Claim(ctx, "w", []domain.OperationKind{domain.OperationKindRetainDocument}, 10)
+	if err != nil || len(jobs) != 2 {
+		t.Fatalf("claim: %v %v", jobs, err)
+	}
+	if err := s.Complete(ctx, kids[0], nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.SettleRetainBatches(ctx); err != nil || n != 0 {
+		t.Fatalf("settled %d with a child running: %v", n, err)
+	}
+	if err := s.Complete(ctx, kids[1], nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.SettleRetainBatches(ctx); err != nil || n != 1 {
+		t.Fatalf("settled %d: %v", n, err)
+	}
+	if op := settleStatus(t, s, parent); op.Status != domain.OperationStatusCompleted {
+		t.Fatalf("parent %s", op.Status)
+	}
+	if n, _ := s.SettleRetainBatches(ctx); n != 0 {
+		t.Fatalf("settled again: %d", n)
+	}
+}
+
+// TestSettleRetainBatchFailedChild checks a parent with a failed child ends FAILED with an error.
+func TestSettleRetainBatchFailedChild(t *testing.T) {
+	t.Parallel()
+	s := pgtest.NewStore(t)
+	ctx := t.Context()
+	failedParent, kids2 := settleBatch(t, s, 1)
+	if _, err := s.Claim(ctx, "w", []domain.OperationKind{domain.OperationKindRetainDocument}, 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Fail(ctx, kids2[0], errors.New("boom"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.SettleRetainBatches(ctx); err != nil || n != 1 {
+		t.Fatalf("settled %d: %v", n, err)
+	}
+	if op := settleStatus(t, s, failedParent); op.Status != domain.OperationStatusFailed || op.Error == "" {
+		t.Fatalf("parent with a failed child: %s %q", op.Status, op.Error)
 	}
 }

@@ -58,7 +58,7 @@ Tags are normalized before matching.
 An arm is one retrieval strategy behind the `recall.Arm` interface: a name, a one-line description, and
 `Retrieve(ctx, Query)` returning at most `Query.Limit` hits of the bank, best first. The engine knows arms only by
 name; it never special-cases one. The built-in arms live in `internal/recall/arms`, one file each, and are
-registered in `cmd/memd/wire.go` in this order, which is also the fusion order:
+registered in `cmd/memd/wire_services.go` in this order, which is also the fusion order:
 
 | Arm | Query | Raw score | Floor (`min_scores.arms`) |
 |---|---|---|---|
@@ -90,7 +90,7 @@ registered in `cmd/memd/wire.go` in this order, which is also the fusion order:
    time-window matches that deserve the temporal boost.
 2. Give it a constructor that takes only the boundary it reads (`store.Search`, `graph.Reader`, `ai.Embedder`,
    ...). Arms never import the engine's internals or one another.
-3. Register it in `recallArms` in `cmd/memd/wire.go`; its position is its fusion order.
+3. Register it in `recallArms` in `cmd/memd/wire_services.go`; its position is its fusion order.
 4. Run the contract suite `internal/recall/armtest` from its tests on pgtest.
 
 Clients then select it by name, configure it (`recall.arms`, `recall.arm_boosts`, `min_scores.arms`) and see it in

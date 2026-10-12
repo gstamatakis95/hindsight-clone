@@ -56,12 +56,13 @@ func (in *includer) Enrich(
 	var e enrichment
 	var err error
 	if isSet(inc.Chunks) {
-		if e.Chunks, err = in.chunks(ctx, b, results, intOr(inc.ChunksMaxTokens, DefaultChunksMaxTokens)); err != nil {
+		chunkBudget := domain.ValueOr(inc.ChunksMaxTokens, DefaultChunksMaxTokens)
+		if e.Chunks, err = in.chunks(ctx, b, results, chunkBudget); err != nil {
 			return enrichment{}, err
 		}
 	}
 	if isSet(inc.SourceFacts) {
-		budget := intOr(inc.SourceFactsMaxTokens, DefaultSourceFactsMaxTokens)
+		budget := domain.ValueOr(inc.SourceFactsMaxTokens, DefaultSourceFactsMaxTokens)
 		if e.SourceFacts, e.SourceFactsTruncated, err = in.sourceFacts(ctx, b, seq, results, budget); err != nil {
 			return enrichment{}, err
 		}

@@ -343,15 +343,58 @@ func TestRetagSetEqualAfterFailedRetagReenqueues(t *testing.T) {
 		t.Fatalf("unit tags = %v, want [c]", us["f1"].Tags)
 	}
 	// Now the newest retag completed (well, ran): mark it done, after which the same tags are a no-op.
-	jobs := f.jobs(t, domain.OperationKindRetagDocument)
-	for _, op := range jobs {
-		if op.ID == again && op.Status == domain.OperationStatusProcessing {
-			if err := f.store.Complete(ctx, again, nil, nil); err != nil {
+	f.completeIfProcessing(t, again)
+	if id, err := r.Retag(ctx, testBank, "d1", []string{"c"}); err != nil || id != "" {
+		t.Fatalf("same tags after a completed retag = %q, %v; want a no-op", id, err)
+	}
+}
+
+// completeIfProcessing marks retag operation id completed when it is still processing.
+func (f fixture) completeIfProcessing(t *testing.T, id domain.OperationID) {
+	t.Helper()
+	for _, op := range f.jobs(t, domain.OperationKindRetagDocument) {
+		if op.ID == id && op.Status == domain.OperationStatusProcessing {
+			if err := f.store.Complete(context.Background(), id, nil, nil); err != nil {
 				t.Fatalf("Complete: %v", err)
 			}
 		}
 	}
-	if id, err := r.Retag(ctx, testBank, "d1", []string{"c"}); err != nil || id != "" {
-		t.Fatalf("same tags after a completed retag = %q, %v; want a no-op", id, err)
+}
+
+// cancellingStore cancels the caller's context while its transaction runs, so the commit is aborted.
+type cancellingStore struct {
+	store.DB
+	cancel context.CancelFunc
+}
+
+// InTx runs fn after cancelling the context, simulating a cancel that lands mid-transaction.
+func (s cancellingStore) InTx(ctx context.Context, fn func(store.Tx) error) error {
+	return s.DB.InTx(ctx, func(tx store.Tx) error {
+		s.cancel()
+		return fn(tx)
+	})
+}
+
+// TestRetagApplyCancelledMidTx: a retag_document job whose context ends inside its
+// transaction reports domain.ErrCancelled and commits nothing.
+func TestRetagApplyCancelledMidTx(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := newRetagger(f.store).Retag(ctx, testBank, "d1", []string{"c"}); err != nil {
+		t.Fatal(err)
+	}
+	job := f.claimRetag(t)
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	err := newRetagger(cancellingStore{DB: f.store, cancel: cancel}).Apply(cctx, job)
+	if !errors.Is(err, domain.ErrCancelled) {
+		t.Fatalf("RunRetagJob cancelled mid-tx: %v, want ErrCancelled", err)
+	}
+	us, err := f.store.Read().GetUnits(ctx, testBank, uids("o1"))
+	if err != nil || len(us) != 1 {
+		t.Errorf("o1 after a cancelled retag_document = %+v (%v), want it kept", us, err)
+	}
+	if cons := f.jobs(t, domain.OperationKindConsolidate); len(cons) != 0 {
+		t.Errorf("a cancelled retag_document enqueued %d consolidate jobs, want none", len(cons))
 	}
 }

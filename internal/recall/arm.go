@@ -7,8 +7,8 @@ import (
 )
 
 // Arm is one retrieval strategy of recall: vector, text, graph and temporal are built in (internal/recall/arms), and
-// cmd/memd/wire.go registers every arm through [Deps.Arms]. The engine runs the selected arms concurrently and treats
-// them alike: it fuses their lists by name, applies arm_boosts by name, gives each its min_scores entry through
+// cmd/memd/wire_services.go registers every arm through [Deps.Arms]. The engine runs the selected arms concurrently and
+// treats them alike: it fuses their lists by name, applies arm_boosts by name, gives each its min_scores entry through
 // [Query.ArmSettings] and traces each by name. It re-checks every hit after hydration (same bank, live, types, tag
 // predicate, seq bound), so an arm cannot leak a unit the query excludes.
 //

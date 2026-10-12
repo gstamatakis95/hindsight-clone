@@ -7,6 +7,7 @@ import (
 	"memd/internal/domain"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // maxExactCombinations caps the branches a fuzzy exact leaf may expand into (Hindsight's
@@ -322,4 +323,65 @@ func splitNamespace(tag string) (string, string) {
 		return ns, val
 	}
 	return "", tag
+}
+
+// tagVocabulary lists a bank's tags with their counts, for fuzzy tag leaves; store.Reader satisfies it.
+type tagVocabulary interface {
+	// TagCounts returns up to limit (<= 0 = all) tags of b's source with how many items carry each, ordered
+	// by tag, keeping tags that start with prefix and sort after after. Unknown or tombstoned bank:
+	// domain.ErrNotFound.
+	TagCounts(
+		ctx context.Context, b domain.BankRef, source domain.TagSource, prefix, after string, limit int,
+	) ([]domain.TagCount, error)
+}
+
+// bankTags returns the distinct tags of b's live units, most used first (ties by tag), read through v.
+func bankTags(ctx context.Context, v tagVocabulary, b domain.BankRef) ([]string, error) {
+	counts, err := v.TagCounts(ctx, b, domain.TagSourceMemories, "", "", 0)
+	if err != nil {
+		return nil, fmt.Errorf("tag counts: %w", err)
+	}
+	slices.SortFunc(counts, func(x, y domain.TagCount) int {
+		if c := cmp.Compare(y.Count, x.Count); c != 0 {
+			return c
+		}
+		return strings.Compare(x.Tag, y.Tag)
+	})
+	out := make([]string, len(counts))
+	for i, c := range counts {
+		out[i] = c.Tag
+	}
+	return out, nil
+}
+
+// trigramSimilarity is pg_trgm's similarity(): the Jaccard index |A∩B|/|A∪B| of the two strings' trigram
+// sets, where each lowercased word (a run of letters and digits) is padded with two leading spaces and one
+// trailing space. It is 0 when either set is empty.
+func trigramSimilarity(a, b string) float64 {
+	ta, tb := trigrams(a), trigrams(b)
+	if len(ta) == 0 || len(tb) == 0 {
+		return 0
+	}
+	common := 0
+	for g := range ta {
+		if _, ok := tb[g]; ok {
+			common++
+		}
+	}
+	return float64(common) / float64(len(ta)+len(tb)-common)
+}
+
+// trigrams returns the pg_trgm trigram set of s.
+func trigrams(s string) map[string]struct{} {
+	out := map[string]struct{}{}
+	words := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	for _, w := range words {
+		rs := []rune("  " + w + " ")
+		for i := 0; i+3 <= len(rs); i++ {
+			out[string(rs[i:i+3])] = struct{}{}
+		}
+	}
+	return out
 }

@@ -9,6 +9,15 @@ import (
 	"slices"
 )
 
+// ResolvedScope mirrors memory.v1.ResolvedScope: the effective scope of a model after defaults.
+type ResolvedScope struct {
+	// Tags is the effective tag filter (domain.MentalModelSpec.ScopeFilter): the scope's groups, or the
+	// model's tags under the effective match mode.
+	Tags domain.TagFilter
+	// FactTypes limits the scope; empty = all.
+	FactTypes []domain.FactType
+}
+
 // resolveScope applies the scope defaults to m (domain.MentalModelSpec.ScopeFilter): the match mode defaults to
 // all_strict when the model is tagged (any otherwise), and tag groups override the flat tags.
 func resolveScope(m domain.MentalModel) ResolvedScope {

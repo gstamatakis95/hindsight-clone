@@ -182,8 +182,8 @@ memd matches Hindsight's memory engine except for these, which it does not provi
 
 ## Platform
 
-- **Prompt versions are not recorded** on operations or calls, although each prompt has a computable version
-  hash (`prompts.Version`).
+- **Prompt versions are not recorded** on operations or calls: a template edit is visible only in the code
+  history.
 - **Embedding and rerank usage** is not attributed to operations or responses; only LLM chat and structured usage
   is. With Datadog metrics on, the token counters see every call.
 - **One embedding model** for the deployment (768 dimensions); changing it requires re-embedding everything,

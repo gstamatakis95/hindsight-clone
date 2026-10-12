@@ -12,7 +12,7 @@
 //
 // # Usage
 //
-// Each cmd/memd/wire_<area>.go builds its area's handlers with exactly the services they call, and wire.go calls
+// cmd/memd/wire_services.go builds each area's handlers with exactly the services they call, and wire.go calls
 // [New]:
 //
 //	h := grpcapi.Handlers{Memory: &grpcapi.MemoryHandler{Memory: mem}, ...}

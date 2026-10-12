@@ -279,20 +279,29 @@ func (r *run) finish(ctx context.Context, stop StopReason) (answer, error) {
 		// OpenAI-compatible backends also reject a named tool_choice.
 		return r.synthesize(ctx, stop)
 	}
-	for _, c := range resp.Message.ToolCalls {
+	if ans, ok, err := r.doneAnswer(resp.Message.ToolCalls, stop); ok || err != nil {
+		return ans, err
+	}
+	return r.synthesize(ctx, stop)
+}
+
+// doneAnswer reads the answer of the first done call among calls; ok is false when there is none or it is
+// malformed (the caller then synthesises), and an empty answer is errEmptyAnswer.
+func (r *run) doneAnswer(calls []ai.ToolCall, stop StopReason) (ans answer, ok bool, err error) {
+	for _, c := range calls {
 		if normalizeName(c.Name) != ToolDone {
 			continue
 		}
 		text, cited, problem := parseDone(c.Arguments, r.data.AnswerAsDocument)
 		if problem != "" {
-			break
+			return answer{}, false, nil
 		}
 		if text == "" {
-			return answer{}, errEmptyAnswer
+			return answer{}, true, errEmptyAnswer
 		}
-		return answer{text: text, cited: cited, viaDone: true, stop: stop}, nil
+		return answer{text: text, cited: cited, viaDone: true, stop: stop}, true, nil
 	}
-	return r.synthesize(ctx, stop)
+	return answer{}, false, nil
 }
 
 // ensureEvidence forces one retrieval turn; ended reports that the run ended there (a synthesis because
@@ -374,4 +383,29 @@ func (r *run) synthesize(ctx context.Context, stop StopReason) (answer, error) {
 		}
 		return answer{text: text, stop: stop}, nil
 	}
+}
+
+// addUsage merges one call's usage into st (one entry per slot and model) and enforces the whole-call token
+// budget: past maxTotal (nil or <= 0 = unlimited) reflect fails with RESOURCE_EXHAUSTED.
+func addUsage(st *agentState, u domain.Usage, maxTotal *int64) error {
+	if u.InputTokens != 0 || u.OutputTokens != 0 {
+		merged := false
+		for i := range st.Usage {
+			if st.Usage[i].Slot == u.Slot && st.Usage[i].Model == u.Model {
+				st.Usage[i].InputTokens += u.InputTokens
+				st.Usage[i].OutputTokens += u.OutputTokens
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			st.Usage = append(st.Usage, u)
+		}
+	}
+	st.TotalTokens += u.InputTokens + u.OutputTokens
+	if maxTotal != nil && *maxTotal > 0 && st.TotalTokens > *maxTotal {
+		return fmt.Errorf("%w: reflect used %d tokens, over max_total_tokens %d",
+			domain.ErrMaxTotalTokens, st.TotalTokens, *maxTotal)
+	}
+	return nil
 }

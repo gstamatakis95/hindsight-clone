@@ -96,6 +96,12 @@ func checkLiteral(pass *analysis.Pass, lit *ast.FuncLit, models []*types.Interfa
 		}
 		return true
 	})
+	reportEarlyEnqueues(pass, enqueues, firstSeq, seen)
+}
+
+// reportEarlyEnqueues reports each enqueue placed before firstSeq, the literal's first tx.Seq (0 = none: nothing
+// to report).
+func reportEarlyEnqueues(pass *analysis.Pass, enqueues []*ast.CallExpr, firstSeq token.Pos, seen map[token.Pos]bool) {
 	if firstSeq == 0 {
 		return
 	}

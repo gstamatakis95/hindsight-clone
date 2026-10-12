@@ -211,6 +211,28 @@ func bindFlags(fs *flag.FlagSet, c *Config, rf *runFlags) {
 	fs.IntVar(&c.Recall.ChunkTokens, "recall-chunk-tokens", c.Recall.ChunkTokens, "source chunk token budget (0 = none)")
 }
 
+// readConfigFile reads the config file rf names (-config, or the resumed run's config.yaml): its path, its raw
+// bytes and its decoded content. No file returns "", nil and a zero Config.
+func readConfigFile(rf runFlags) (file string, raw []byte, fromFile Config, err error) {
+	file = rf.config
+	if rf.resume != "" {
+		if file != "" {
+			return "", nil, Config{}, errors.New("-resume uses the run's own config.yaml; drop -config")
+		}
+		file = filepath.Join(rf.resume, configFile)
+	}
+	if file == "" {
+		return "", nil, Config{}, nil
+	}
+	if raw, err = os.ReadFile(filepath.Clean(file)); err != nil {
+		return "", nil, Config{}, fmt.Errorf("read config: %w", err)
+	}
+	if err := decodeYAML(raw, &fromFile); err != nil {
+		return "", nil, Config{}, fmt.Errorf("config %s: %w", file, err)
+	}
+	return file, raw, fromFile, nil
+}
+
 // loadConfig resolves the run config from args. It parses the flags twice: once to find the config file
 // and the benchmark (whose defaults sit below the file), and once more on top of the file.
 func loadConfig(args []string) (Config, runFlags, error) {
@@ -224,23 +246,9 @@ func loadConfig(args []string) (Config, runFlags, error) {
 	if first.NArg() > 0 {
 		return Config{}, rf, fmt.Errorf("unexpected argument %q", first.Arg(0))
 	}
-	file := rf.config
-	if rf.resume != "" {
-		if file != "" {
-			return Config{}, rf, errors.New("-resume uses the run's own config.yaml; drop -config")
-		}
-		file = filepath.Join(rf.resume, configFile)
-	}
-	var raw []byte
-	var fromFile Config
-	if file != "" {
-		var err error
-		if raw, err = os.ReadFile(filepath.Clean(file)); err != nil {
-			return Config{}, rf, fmt.Errorf("read config: %w", err)
-		}
-		if err := decodeYAML(raw, &fromFile); err != nil {
-			return Config{}, rf, fmt.Errorf("config %s: %w", file, err)
-		}
+	file, raw, fromFile, err := readConfigFile(rf)
+	if err != nil {
+		return Config{}, rf, err
 	}
 	cfg := defaultConfig()
 	name := scratch.Benchmark

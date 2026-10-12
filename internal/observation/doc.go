@@ -10,7 +10,7 @@
 // prompts, and never another feature, an adapter, gen, pgx, net/http, the S3 SDK or Datadog (depguard). It
 // reports progress through the jobs.Run it runs under, and enqueues its continuation, graph_maintenance and
 // the mental-model refreshes it triggers through the jobs catalogue, so it never imports mentalmodel.
-// cmd/memd/wire_observation.go builds the Service, hands it to grpcapi's ObservationHandler, registers
+// cmd/memd/wire_services.go builds the Service, hands it to grpcapi's ObservationHandler, registers
 // RunConsolidateJob for the consolidate kind and gives the maintenance tick its consolidation_reconcile step.
 //
 // # Scopes

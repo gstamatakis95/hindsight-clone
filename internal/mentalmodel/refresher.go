@@ -71,15 +71,6 @@ type RefreshOutcome struct {
 	WouldPersist bool
 }
 
-// ResolvedScope mirrors memory.v1.ResolvedScope: the effective scope of a model after defaults.
-type ResolvedScope struct {
-	// Tags is the effective tag filter (domain.MentalModelSpec.ScopeFilter): the scope's groups, or the
-	// model's tags under the effective match mode.
-	Tags domain.TagFilter
-	// FactTypes limits the scope; empty = all.
-	FactTypes []domain.FactType
-}
-
 // synthesizer drafts a model's content. Two implementations, picked by RefreshStrategy:
 //
 //   - agentic: the reflect loop, answering as a document (Hindsight's behaviour);

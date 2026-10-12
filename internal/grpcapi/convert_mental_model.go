@@ -216,7 +216,7 @@ func searchFromProto(r *pb.SearchMentalModelsRequest) recall.SearchMentalModelsR
 		Bank:         domain.BankRef{Bank: r.GetBankId()},
 		Query:        r.GetQuery(),
 		FolderPrefix: r.GetFolderPrefix(),
-		Limit:        int(r.GetMaxResults()),
+		MaxResults:   int(r.GetMaxResults()),
 	}
 }
 

@@ -9,11 +9,11 @@
 // text, graph and temporal) live in internal/recall/arms, one file each, and read store.Search and graph.Reader;
 // the engine itself never imports them (depguard). The engine reads through store.Reader for unit hydration,
 // chunks, entity state, tag counts, stale scopes and page listings, and calls ai.Embedder and ai.Reranker.
-// cmd/memd/wire.go builds one [Engine] with [New], registering the arms through [Deps.Arms]. Besides
+// cmd/memd/wire_services.go builds one [Engine] with [New], registering the arms through [Deps.Arms]. Besides
 // [Engine.Recall] it exposes [Engine.Arms] (ListRecallArms), [Engine.CheckArms] (reflect's request check),
 // [Engine.CompileTags] (the tag-filter compiler mental models use for their scope), [Engine.SearchMentalModels] and
-// [Engine.ReadPages] (mental-model page search and reads). The pipeline stages (fusion, scoring, gates, packing,
-// observation preference, includes) are unexported types tested one by one.
+// [Engine.ReadPages] (mental-model page search and reads). The pipeline stages (fusion, scoring, score floors,
+// packing, observation preference, includes) are unexported types and functions tested one by one.
 //
 // # Usage
 //
@@ -80,7 +80,7 @@
 //     time-window matches that deserve the temporal boost.
 //  2. Add a constructor that takes only the boundary the arm reads (store.Search, graph.Reader, ai.Embedder, ...).
 //     Arms never import the engine's internals or one another.
-//  3. Register it in recallArms in cmd/memd/wire.go. Its position is its fusion order.
+//  3. Register it in recallArms in cmd/memd/wire_services.go. Its position is its fusion order.
 //  4. Clients then select it by name (RecallRequest.arms, ReflectRequest.arms), configure it (recall.arms,
 //     recall.arm_boosts, min_scores.arms; the server validates every name against the registry) and see it in
 //     ListRecallArms, traces and Scores.arms. Nothing in the engine changes: never special-case an arm there.

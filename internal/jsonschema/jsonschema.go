@@ -236,29 +236,39 @@ func jsonEqual(a, b any) bool {
 	switch x := a.(type) {
 	case []any:
 		y, ok := b.([]any)
-		if !ok || len(x) != len(y) {
-			return false
-		}
-		for i := range x {
-			if !jsonEqual(x[i], y[i]) {
-				return false
-			}
-		}
-		return true
+		return ok && arrayEqual(x, y)
 	case map[string]any:
 		y, ok := b.(map[string]any)
-		if !ok || len(x) != len(y) {
-			return false
-		}
-		for k, xv := range x {
-			if yv, ok := y[k]; !ok || !jsonEqual(xv, yv) {
-				return false
-			}
-		}
-		return true
+		return ok && objectEqual(x, y)
 	default:
 		return a == b
 	}
+}
+
+// arrayEqual compares two JSON arrays element by element with jsonEqual.
+func arrayEqual(x, y []any) bool {
+	if len(x) != len(y) {
+		return false
+	}
+	for i := range x {
+		if !jsonEqual(x[i], y[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// objectEqual compares two JSON objects key by key with jsonEqual.
+func objectEqual(x, y map[string]any) bool {
+	if len(x) != len(y) {
+		return false
+	}
+	for k, xv := range x {
+		if yv, ok := y[k]; !ok || !jsonEqual(xv, yv) {
+			return false
+		}
+	}
+	return true
 }
 
 // checkObject validates required, properties and additionalProperties on an object value.

@@ -228,7 +228,7 @@ func (c *consolidator) promptObservations(
 			sources[u.ID] = u
 		}
 	}
-	perObs := orDefault(cfg.GetObservations().SourceFactsMaxTokensPerObservation, defaultSourceTokensPerO)
+	perObs := domain.PositiveOr(cfg.GetObservations().SourceFactsMaxTokensPerObservation, defaultSourceTokensPerO)
 	budget := -1
 	if cfg.GetObservations().SourceFactsMaxTokens != nil {
 		budget = *cfg.GetObservations().SourceFactsMaxTokens

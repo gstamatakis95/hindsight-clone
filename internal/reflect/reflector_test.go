@@ -516,10 +516,14 @@ func TestReflectTraceAndUsage(t *testing.T) {
 	if res.Trace.Iterations != 2 || res.Trace.StopReason != rf.StopAnswered {
 		t.Errorf("trace = %+v", res.Trace)
 	}
+}
 
-	h.llm.Reset()
+// TestReflectToolOutputsDefault: tool outputs default to on when the trace is asked for, and the tool calls are
+// left out of a result that did not ask for the trace.
+func TestReflectToolOutputsDefault(t *testing.T) {
+	h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"))
 	h.turns(recallCall(), doneCall("tea", "u1"))
-	res, err = h.reflect(func(r *rf.Request) { r.Include.Trace = true })
+	res, err := h.reflect(func(r *rf.Request) { r.Include.Trace = true })
 	if err != nil || len(res.Trace.ToolCalls) != 1 ||
 		!strings.Contains(res.Trace.ToolCalls[0].OutputJSON, string(uid("u1"))) {
 		t.Errorf("outputs default to on with tool_calls: %+v %v", res.Trace.ToolCalls, err)
@@ -605,7 +609,7 @@ func TestReflectHonoursTypes(t *testing.T) {
 			h := newHarness(t, domain.BankConfig{}, unit("u1", "Alice likes tea"), obs)
 			h.turns(calls(tc.offered[0], `{"query":"alice"}`), calls(tc.withheld[0], `{"query":"alice"}`),
 				doneCall("tea"))
-			if _, err := h.reflect(func(r *rf.Request) { r.Types = tc.types }); err != nil {
+			if _, err := h.reflect(func(r *rf.Request) { r.FactTypes = tc.types }); err != nil {
 				t.Fatal(err)
 			}
 			first := h.loopCalls()[0]

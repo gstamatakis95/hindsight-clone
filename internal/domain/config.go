@@ -328,3 +328,27 @@ func (c BankConfig) Binding(slot ModelSlot) (ModelBinding, bool) {
 	}
 	return *b, true
 }
+
+// ValueOr returns *p, or def when p is nil: the read of an optional knob whose zero value is meaningful.
+func ValueOr[T any](p *T, def T) T {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
+// PositiveOr returns *p when set and above zero, else def.
+func PositiveOr(p *int, def int) int {
+	if p != nil && *p > 0 {
+		return *p
+	}
+	return def
+}
+
+// NonNegativeOr returns *p when set and not negative, else def.
+func NonNegativeOr(p *int, def int) int {
+	if p != nil && *p >= 0 {
+		return *p
+	}
+	return def
+}

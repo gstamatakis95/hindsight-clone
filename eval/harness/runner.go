@@ -91,17 +91,22 @@ func NewRunner(d Deps, cfg Config) (*Runner, error) {
 	if d.Clock == nil {
 		d.Clock = SystemClock{}
 	}
-	cfg.Parallel = max(cfg.Parallel, 1)
-	if cfg.PollInterval <= 0 {
-		cfg.PollInterval = time.Second
+	return &Runner{d: d, cfg: cfg.withDefaults()}, nil
+}
+
+// withDefaults returns c with the parallelism, poll interval, quiet polls and settle timeout defaulted.
+func (c Config) withDefaults() Config {
+	c.Parallel = max(c.Parallel, 1)
+	if c.PollInterval <= 0 {
+		c.PollInterval = time.Second
 	}
-	if cfg.QuietPolls <= 0 {
-		cfg.QuietPolls = 2
+	if c.QuietPolls <= 0 {
+		c.QuietPolls = 2
 	}
-	if cfg.SettleTimeout <= 0 {
-		cfg.SettleTimeout = 15 * time.Minute
+	if c.SettleTimeout <= 0 {
+		c.SettleTimeout = 15 * time.Minute
 	}
-	return &Runner{d: d, cfg: cfg}, nil
+	return c
 }
 
 // Run retains every conversation into its own bank, waits for the barrier, asks every question and
@@ -161,19 +166,30 @@ func (r *Runner) runConversation(ctx context.Context, c Conversation) error {
 			return r.background(ctx, bank, c.ID, exists)
 		}
 	}
+	if stopped, err := r.askRemaining(ctx, bank, c, st.answered); stopped || err != nil {
+		return err
+	}
+	return r.background(ctx, bank, c.ID, true)
+}
+
+// askRemaining asks c's questions not yet answered and journals each result; stopped reports a cancelled
+// context, which leaves the rest unrecorded.
+func (r *Runner) askRemaining(ctx context.Context, bank string, c Conversation, answered map[string]bool) (
+	stopped bool, err error,
+) {
 	for _, q := range c.Questions {
-		if st.answered[q.ID] {
+		if answered[q.ID] {
 			continue
 		}
 		res := r.ask(ctx, bank, c.ID, q)
 		if ctx.Err() != nil {
-			return nil
+			return true, nil
 		}
 		if err := r.d.Journal.recordResult(res); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return r.background(ctx, bank, c.ID, true)
+	return false, nil
 }
 
 // allAnswered reports whether every question of c is answered without error.

@@ -84,9 +84,8 @@ func (e *curateEnv) assertInvalidateEffects() {
 	if keys := e.serialKeys(domain.OperationKindGraphMaintenance); !slices.Equal(keys, []string{"graph"}) {
 		t.Errorf("graph_maintenance jobs = %v", keys)
 	}
-	if audits := e.store.recorded(); len(audits) != 1 || audits[0].Action != domain.CurationInvalidate ||
-		audits[0].Reason != "wrong" || audits[0].Before == nil {
-		t.Errorf("audit rows = %+v", audits)
+	if a, ok := e.store.only(domain.CurationInvalidate); !ok || a.Reason != "wrong" || a.Before == nil {
+		t.Errorf("audit rows = %+v", e.store.recorded())
 	}
 	evs := e.events()
 	if len(evs) != 1 || evs[0].Type != domain.EventTypeMemoryCurated || evs[0].SubjectID != string(idF1) {
@@ -267,9 +266,8 @@ func TestEditClearsEmbeddingAndQueuesRederive(t *testing.T) {
 		t.Errorf("stored edit = %+v", got)
 	}
 	e.assertNotLive(idO1)
-	if audits := e.store.recorded(); len(audits) != 1 || audits[0].Action != domain.CurationEdit ||
-		audits[0].OperationID != op.ID || audits[0].Before == nil || audits[0].After == nil {
-		t.Errorf("audit = %+v", audits)
+	if a, ok := e.store.only(domain.CurationEdit); !ok || a.OperationID != op.ID || a.Before == nil || a.After == nil {
+		t.Errorf("audit = %+v", e.store.recorded())
 	}
 	e.rederiveEdited([]string{"Alice", "Carol"})
 }
@@ -396,4 +394,28 @@ func TestRederiveSkipsWhenTextChanged(t *testing.T) {
 	if got.Embedding != nil || got.Text != second {
 		t.Errorf("stale rederive wrote an embedding for %q (text now %q)", first, got.Text)
 	}
+}
+
+// TestRestoreAfterEntityPruneKeepsEntities runs graph maintenance's entity prune while f1 is archived (its
+// only entity, Alice, becomes an orphan and is deleted), then restores f1: the restore's transaction
+// re-creates Alice from the archive snapshot's names.
+func TestRestoreAfterEntityPruneKeepsEntities(t *testing.T) {
+	e := newCurateEnv(t)
+	s := e.service(nil)
+	e.invalidate(s)
+	e.inTx(func(tx store.Tx) error {
+		ids, err := tx.Entities().PendingMaintenance(e.ctx, testBank, 100)
+		if err != nil {
+			return err
+		}
+		n, err := tx.Entities().PruneOrphans(e.ctx, testBank, ids)
+		if err == nil && n != 1 {
+			t.Errorf("pruned %d entities, want 1 (Alice)", n)
+		}
+		return err
+	})
+	if _, _, err := s.RestoreMemory(e.ctx, RestoreRequest{Bank: testBank, ID: idF1}); err != nil {
+		t.Fatal(err)
+	}
+	e.rederiveEdited([]string{"Alice"}) // re-created in the restore's own transaction
 }

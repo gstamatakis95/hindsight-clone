@@ -19,8 +19,8 @@ const oaAfterShared = "0"
 func TestObservationAdmin(t *testing.T) {
 	t.Parallel()
 	runStoreCases(t, []storeCase{
-		{"list_scopes", testOaListScopes},
-		{"list_scopes_unknown_or_tombstoned", testOaListScopesUnknown},
+		{"list_observation_scopes", testOaListObservationScopes},
+		{"list_observation_scopes_unknown_or_tombstoned", testOaListObservationScopesUnknown},
 		{"ids_by_document", testOaIDsByDocument},
 		{"citing_scopes", testOaCitingScopes},
 		{"delete_scopes", testOaDeleteScopes},
@@ -96,8 +96,10 @@ func oaListObservationScopes(t *testing.T, s store.DB, b domain.BankRef, after s
 	return s.Read().ListObservationScopes(t.Context(), b, after, limit)
 }
 
-// oaMustListScopes is oaListObservationScopes failing the test on error.
-func oaMustListScopes(t *testing.T, s store.DB, b domain.BankRef, after string, limit int) []domain.ScopeInfo {
+// oaMustListObservationScopes is oaListObservationScopes failing the test on error.
+func oaMustListObservationScopes(
+	t *testing.T, s store.DB, b domain.BankRef, after string, limit int,
+) []domain.ScopeInfo {
 	t.Helper()
 	infos, err := oaListObservationScopes(t, s, b, after, limit)
 	if err != nil {
@@ -154,7 +156,7 @@ func oaPageAll(t *testing.T, s store.DB, b domain.BankRef, limit int) []string {
 	var keys []string
 	after := ""
 	for range 20 {
-		page := oaMustListScopes(t, s, b, after, limit)
+		page := oaMustListObservationScopes(t, s, b, after, limit)
 		if len(page) > limit {
 			t.Errorf("ListObservationScopes(limit %d) returned %d scopes", limit, len(page))
 		}
@@ -261,7 +263,7 @@ func oaWantStamps(t *testing.T, what string, got map[domain.UnitID][2]*time.Time
 
 // ---------- ListObservationScopes ----------
 
-// oaScopeFixture is the list_scopes data of bank A.
+// oaScopeFixture is the list_observation_scopes data of bank A.
 type oaScopeFixture struct {
 	// fz is the consolidated {z} fact cited by oZ.
 	fz domain.UnitID
@@ -294,22 +296,23 @@ func newOaScopeFixture(t *testing.T, s store.DB) oaScopeFixture {
 	return oaScopeFixture{fz: fz.ID, oZ: oZ}
 }
 
-// testOaListScopes: keyset paging returns every scope once in byte order of its key; counts follow 1500
+// testOaListObservationScopes: keyset paging returns every scope once in byte order of its key; counts follow 1500
 // (superset-tagged and unembedded unconsolidated facts count, consolidated, parked and archived ones don't,
 // the shared scope counts every unconsolidated fact); a scope cleared by DeleteScopes still lists with 0
 // observations; limit <= 0 is ErrInvalidArgument.
-func testOaListScopes(t *testing.T, s store.DB) {
+func testOaListObservationScopes(t *testing.T, s store.DB) {
 	f := newOaScopeFixture(t, s)
 	keys := []string{"", "1:x", "1:x,1:y", "1:z"}
-	all := oaMustListScopes(t, s, bankA, "", 10)
+	all := oaMustListObservationScopes(t, s, bankA, "", 10)
 	wantSeq(t, "ListObservationScopes keys", oaKeys(all), keys)
 	oaWantCounts(t, "ListObservationScopes", all, oaCounts{"": {1, 3}, "1:x": {2, 2}, "1:x,1:y": {1, 1}, "1:z": {1, 0}})
 	for _, limit := range []int{1, 2} {
 		wantSeq(t, fmt.Sprintf("ListObservationScopes paged by %d", limit), oaPageAll(t, s, bankA, limit), keys)
 	}
-	wantSeq(t, "ListObservationScopes after the shared scope", oaKeys(oaMustListScopes(t, s, bankA, oaAfterShared, 10)),
+	wantSeq(t, "ListObservationScopes after the shared scope",
+		oaKeys(oaMustListObservationScopes(t, s, bankA, oaAfterShared, 10)),
 		keys[1:])
-	wantSeq(t, "ListObservationScopes after {x}", oaKeys(oaMustListScopes(t, s, bankA, "1:x", 10)), keys[2:])
+	wantSeq(t, "ListObservationScopes after {x}", oaKeys(oaMustListObservationScopes(t, s, bankA, "1:x", 10)), keys[2:])
 	for _, limit := range []int{0, -1} {
 		_, err := oaListObservationScopes(t, s, bankA, "", limit)
 		wantErrIs(t, "ListObservationScopes(limit <= 0)", err, domain.ErrInvalidArgument)
@@ -318,15 +321,15 @@ func testOaListScopes(t *testing.T, s store.DB) {
 	deleted, reset := oaDeleteScopes(t, s, bankA, []domain.ScopeKey{oaScope(bankA, "z")})
 	wantSeq(t, "DeleteScopes({z}) deleted", deleted, []domain.UnitID{f.oZ})
 	wantSeq(t, "DeleteScopes({z}) reset", reset, []domain.UnitID{f.fz})
-	oaWantCounts(t, "ListObservationScopes after clearing {z}", oaMustListScopes(t, s, bankA, "", 10),
+	oaWantCounts(t, "ListObservationScopes after clearing {z}", oaMustListObservationScopes(t, s, bankA, "", 10),
 		oaCounts{"": {1, 4}, "1:x": {2, 2}, "1:x,1:y": {1, 1}, "1:z": {0, 1}})
 }
 
-// testOaListScopesUnknown: an unknown and a tombstoned bank are ErrNotFound; a live bank without scopes lists
-// none.
-func testOaListScopesUnknown(t *testing.T, s store.DB) {
+// testOaListObservationScopesUnknown: an unknown and a tombstoned bank are ErrNotFound; a live bank without scopes
+// lists none.
+func testOaListObservationScopesUnknown(t *testing.T, s store.DB) {
 	ensureBanks(t, s, bankA, bankB)
-	if got := oaMustListScopes(t, s, bankB, "", 10); len(got) != 0 {
+	if got := oaMustListObservationScopes(t, s, bankB, "", 10); len(got) != 0 {
 		t.Errorf("ListObservationScopes(bank without observations) = %q, want none", oaKeys(got))
 	}
 	_, err := oaListObservationScopes(t, s, domain.BankRef{Tenant: "tenant-1", Bank: "unknown"}, "", 10)
@@ -531,7 +534,7 @@ func testOaDeleteAllObservations(t *testing.T, s store.DB) {
 	oaWantStamps(t, "parked f5 after DeleteAllObservations", st, f.f5, nil, ptr(day(6)))
 	f.wantTheirs(t, s, "after DeleteAllObservations")
 	for b := range f.theirs {
-		if got := oaMustListScopes(t, s, b, "", 10); len(got) != 1 || got[0].Observations != 1 {
+		if got := oaMustListObservationScopes(t, s, b, "", 10); len(got) != 1 || got[0].Observations != 1 {
 			t.Errorf("ListObservationScopes(%v) after bank A's DeleteAllObservations = %q, want {x} with 1 observation", b,
 				oaKeys(got))
 		}
@@ -561,8 +564,9 @@ func testOaTenantIsolation(t *testing.T, s store.DB) {
 		units[b] = unitIDs(us)
 		obs[b] = []domain.UnitID{oaObserve(t, s, b, units[b], "x")}
 	}
-	oaWantCounts(t, "ListObservationScopes(bank A)", oaMustListScopes(t, s, bankA, "", 10), oaCounts{"1:x": {1, 1}})
-	oaWantCounts(t, "ListObservationScopes(other tenant)", oaMustListScopes(t, s, bankOtherTenant, "", 10),
+	oaWantCounts(t, "ListObservationScopes(bank A)", oaMustListObservationScopes(t, s, bankA, "", 10),
+		oaCounts{"1:x": {1, 1}})
+	oaWantCounts(t, "ListObservationScopes(other tenant)", oaMustListObservationScopes(t, s, bankOtherTenant, "", 10),
 		oaCounts{"1:x": {1, 2}})
 	oaWantSorted(t, "IDsByDocument(bank A)", oaIDsByDocument(t, s, bankA, "doc-1"), units[bankA])
 	oaWantSorted(t, "IDsByDocument(other tenant)", oaIDsByDocument(t, s, bankOtherTenant, "doc-1"),
@@ -579,5 +583,5 @@ func testOaTenantIsolation(t *testing.T, s store.DB) {
 	oaWantSorted(t, "DeleteScopes(other tenant, {x}) reset", reset, units[bankOtherTenant])
 	oaWantLive(t, s, "bank A observation after the other tenant's DeleteScopes", bankA, obs[bankA], obs[bankA])
 	oaWantCounts(t, "ListObservationScopes(bank A) after the other tenant's DeleteScopes",
-		oaMustListScopes(t, s, bankA, "", 10), oaCounts{"1:x": {1, 1}})
+		oaMustListObservationScopes(t, s, bankA, "", 10), oaCounts{"1:x": {1, 1}})
 }

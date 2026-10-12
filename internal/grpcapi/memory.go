@@ -95,7 +95,7 @@ func (h *MemoryHandler) Reflect(ctx context.Context, req *pb.ReflectRequest) (*p
 		return nil, toStatus(err)
 	}
 	resp := reflectResultToProto(out)
-	if resp.BasedOn == nil && (in.Include.BasedOn == nil || *in.Include.BasedOn) {
+	if resp.BasedOn == nil && domain.ValueOr(in.Include.BasedOn, true) {
 		resp.BasedOn = &pb.BasedOn{} // based_on was asked for: an answer citing nothing still has one
 	}
 	return resp, nil

@@ -44,7 +44,7 @@ func TestDatadogDisabledInstallsNothing(t *testing.T) {
 	t.Cleanup(mt.Stop)
 	tel, stop := observability.Start(observability.Config{Profiler: true})
 	t.Cleanup(stop)
-	if tel != nil || tel.Enabled() {
+	if tel != nil {
 		t.Fatalf("disabled Start returned an enabled Telemetry")
 	}
 	w := startWiredWith(t, tel)
@@ -319,7 +319,7 @@ func TestDatadogUnreachableAgentStillServes(t *testing.T) {
 		Enabled: true, Profiler: true, Metrics: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	t.Cleanup(stop)
-	if !tel.Enabled() {
+	if tel == nil {
 		t.Fatal("enabled Start returned a disabled Telemetry")
 	}
 	w := startWiredWith(t, tel)

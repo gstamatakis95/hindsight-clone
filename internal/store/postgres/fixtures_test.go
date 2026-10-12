@@ -378,3 +378,11 @@ func waitFor[T any](t *testing.T, what string, ch <-chan T) T {
 		return zero
 	}
 }
+
+// embeddedFact is fact with an embedding. UnitRepo.Unconsolidated and Store.UnconsolidatedBanks skip units
+// without one, so a test expecting a fact among the consolidation candidates builds it here.
+func embeddedFact(b domain.BankRef, text string) domain.Unit {
+	u := fact(b, text)
+	u.Embedding = angleVec(0)
+	return u
+}

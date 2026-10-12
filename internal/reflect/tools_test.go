@@ -257,7 +257,7 @@ func TestToolExpand(t *testing.T) {
 	if len(st.RetrievedUnits) != 0 {
 		t.Errorf("expand must not register citable ids")
 	}
-	st = newState(Request{Types: []domain.FactType{domain.FactTypeWorld}})
+	st = newState(Request{FactTypes: []domain.FactType{domain.FactTypeWorld}})
 	res, err = e.tool(ToolExpand).Call(context.Background(), st,
 		json.RawMessage(ids(`{"memory_ids":["o1","f1"]}`)))
 	if err != nil || !containsAll(string(res.Output), ids("Memory not found: o1"), ids(`"memory_id":"f1","memory"`)) {

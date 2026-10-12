@@ -31,9 +31,6 @@ type Engine struct {
 	tags     *tagCompiler
 	fuser    rrf
 	scorer   *scorer
-	gate     gate
-	packer   *packer
-	prefer   preference
 	includer *includer
 }
 
@@ -42,7 +39,7 @@ type Deps struct {
 	// DB serves hydration, includes, fuzzy tags, stale scopes and page listings through DB.Read, and whole pages
 	// in a short read-only transaction.
 	DB store.DB
-	// Arms are the registered recall arms, in fusion order; cmd/memd/wire.go registers the built-in vector, text,
+	// Arms are the registered recall arms, in fusion order; cmd/memd/wire_services.go registers the built-in vector, text,
 	// graph and temporal arms (internal/recall/arms). Names must be unique and non-empty.
 	Arms []Arm
 	// Config merges server < tenant < bank < request.
@@ -70,9 +67,8 @@ func newEngine(d Deps, read store.Reader, count tokenCounter) *Engine {
 	arms := newRegistry(d.Arms)
 	return &Engine{
 		db: d.DB, read: read, config: d.Config, embedder: d.Embedder, times: d.Times, clock: d.Clock, count: count,
-		arms: arms, tags: newTagCompiler(read), fuser: newRRF(arms.names()), gate: newScoreGate(),
-		scorer: newScorer(d.Reranker, d.Router, d.Clock, arms.windowed), packer: newPacker(count),
-		prefer: newObservationPreference(), includer: newIncluder(read, count),
+		arms: arms, tags: newTagCompiler(read), fuser: newRRF(arms.names()),
+		scorer: newScorer(d.Reranker, d.Router, d.Clock, arms.windowed), includer: newIncluder(read, count),
 	}
 }
 
@@ -125,16 +121,7 @@ func (r *Engine) Recall(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	maxTokens := req.MaxTokens
-	if maxTokens <= 0 {
-		maxTokens = DefaultMaxTokens
-	}
-	var packed []candidate
-	if req.PreferObservations {
-		packed = r.prefer.Apply(ranked, 2*q.Limit, maxTokens, r.count)
-	} else {
-		packed = r.packer.Pack(ranked, maxTokens)
-	}
+	packed, maxTokens := r.pack(req, q.Limit, ranked)
 	enr, err := r.includer.Enrich(ctx, req.Bank, req.Seq, packed, req.Include)
 	if err != nil {
 		return Result{}, fmt.Errorf("recall: include: %w", err)
@@ -152,6 +139,20 @@ func (r *Engine) Recall(ctx context.Context, req Request) (Result, error) {
 		}
 	}
 	return out, nil
+}
+
+// pack fits ranked into the request's token budget (max_tokens, 0 = DefaultMaxTokens), dropping the facts an
+// observation covers first when the request prefers observations (within 2 * limit, the per-arm limit). It returns
+// the packed candidates and the budget used.
+func (r *Engine) pack(req Request, limit int, ranked []candidate) ([]candidate, int) {
+	maxTokens := req.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = DefaultMaxTokens
+	}
+	if req.PreferObservations {
+		return preferObservations(ranked, 2*limit, maxTokens, r.count), maxTokens
+	}
+	return pack(ranked, maxTokens, r.count, nil), maxTokens
 }
 
 // CompileTags validates f, resolves its fuzzy leaves against b's tags by trigram similarity (at or above
@@ -242,7 +243,7 @@ func (r *Engine) rank(ctx context.Context, q *parsedQuery, fused []candidate, se
 		if c.Reranker != nil {
 			reranked++
 		}
-		if r.gate.Keep(c, q.MinScores) {
+		if passesFloors(c, q.MinScores) {
 			kept = append(kept, c)
 		}
 	}

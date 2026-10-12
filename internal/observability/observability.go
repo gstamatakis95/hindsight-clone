@@ -183,9 +183,6 @@ func NewMetrics(log *slog.Logger, c statsd.ClientInterface) *Telemetry {
 	return &Telemetry{log: log, stats: c}
 }
 
-// Enabled reports whether t installs instrumentation (false for nil).
-func (t *Telemetry) Enabled() bool { return t != nil }
-
 // traces reports whether t's tracing helpers install anything.
 func (t *Telemetry) traces() bool { return t != nil && t.tracing }
 

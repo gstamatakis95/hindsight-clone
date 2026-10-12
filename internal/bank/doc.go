@@ -8,7 +8,7 @@
 // bank is a service. It imports domain, the boundaries (store, blob, clock) and jobs, and never another service, an
 // adapter, grpcapi, maintenance, gen, pgx, net/http, the S3 SDK or Datadog (depguard). A template's mental models
 // get their first build through the jobs catalogue (jobs.QueueModelRefresh), so the mentalmodel service runs it
-// without either package importing the other. cmd/memd/wire_bank.go builds the Service, hands it to grpcapi's
+// without either package importing the other. cmd/memd/wire_services.go builds the Service, hands it to grpcapi's
 // BankHandler and maintenance, and registers RunDeleteJob for the delete_bank kind. The bank's config, directives
 // and prompt preview belong to internal/configsvc.
 //

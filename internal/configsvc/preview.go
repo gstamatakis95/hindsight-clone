@@ -122,8 +122,8 @@ func previewRetain(cfg domain.BankConfig) (domain.PromptPreview, error) {
 	}
 	data := prompts.ExtractData{
 		CustomPrompt:     cfg.GetRetain().CustomExtractionPrompt,
-		CausalLinks:      cfg.Retain == nil || deref(cfg.Retain.ExtractCausalLinks, true),
-		FreeFormEntities: deref(cfg.GetRetain().EntitiesAllowFreeForm, true),
+		CausalLinks:      domain.ValueOr(cfg.GetRetain().ExtractCausalLinks, true),
+		FreeFormEntities: domain.ValueOr(cfg.GetRetain().EntitiesAllowFreeForm, true),
 		Labels:           cfg.GetRetain().EntityLabels,
 		Mission:          cfg.GetRetain().Mission,
 		Context:          phContext,
@@ -217,7 +217,7 @@ func maxContentTokens(cfg domain.BankConfig) int {
 	if cfg.MentalModels == nil {
 		return 0
 	}
-	return deref(cfg.MentalModels.MaxContentTokens, 0)
+	return domain.ValueOr(cfg.MentalModels.MaxContentTokens, 0)
 }
 
 // directiveText lists directives as "name: rule; rule" lines; empty when none.
@@ -241,12 +241,4 @@ func jsonText(v any) string {
 	default:
 		return s
 	}
-}
-
-// deref returns *p, or def when p is nil.
-func deref[T any](p *T, def T) T {
-	if p == nil {
-		return def
-	}
-	return *p
 }

@@ -1,6 +1,7 @@
 package recall
 
 import (
+	"memd/internal/domain"
 	"sort"
 	"unicode"
 )
@@ -12,24 +13,12 @@ type tokenCounter interface {
 	Count(text string) int
 }
 
-// packer fits ranked candidates into a token budget.
-type packer struct{ count tokenCounter }
-
-// newPacker returns a packer counting unit text with count.
-func newPacker(count tokenCounter) *packer { return &packer{count: count} }
-
-// Pack walks cs in order and keeps each candidate whose unit text still fits in maxTokens (<= 0 =
-// DefaultMaxTokens), skipping one that doesn't and trying the next, so an oversized candidate never evicts shorter
-// ones behind it. When nothing fits, the top candidate is returned whole and over budget (Hindsight's floor: an
-// empty answer would read as "nothing known"). It sets candidate.Tokens.
-func (p *packer) Pack(cs []candidate, maxTokens int) []candidate {
-	out, _ := pack(cs, maxTokens, p.count, nil)
-	return out
-}
-
-// pack is Pack with an optional skip filter (prefer_observations): candidates for which skip reports true are
-// left out without spending budget. It also returns the tokens used.
-func pack(cs []candidate, maxTokens int, count tokenCounter, skip func(candidate) bool) ([]candidate, int) {
+// pack walks cs in order and keeps each candidate whose unit text (counted with count) still fits in maxTokens
+// (<= 0 = DefaultMaxTokens), skipping one that doesn't and trying the next, so an oversized candidate never evicts
+// shorter ones behind it. When nothing fits, the top candidate is returned whole and over budget (Hindsight's
+// floor: an empty answer would read as "nothing known"). It sets candidate.Tokens. Candidates for which skip (nil =
+// none) reports true are left out without spending budget.
+func pack(cs []candidate, maxTokens int, count tokenCounter, skip func(candidate) bool) []candidate {
 	if maxTokens <= 0 {
 		maxTokens = DefaultMaxTokens
 	}
@@ -53,9 +42,31 @@ func pack(cs []candidate, maxTokens int, count tokenCounter, skip func(candidate
 	if len(out) == 0 && first >= 0 {
 		c := cs[first]
 		c.Tokens = count.Count(unitText(c))
-		return []candidate{c}, c.Tokens
+		return []candidate{c}
 	}
-	return out, used
+	return out
+}
+
+// preferObservations follows Hindsight's prefer-observations dedup: every observation within the first window of
+// ranked (window <= 0 = all of ranked; Recall passes 2 * the per-arm limit) supersedes the raw facts it cites
+// (Unit.SourceIDs), which are dropped wherever they rank. The rest is packed into maxTokens (same rules as pack), so
+// the freed budget backfills from lower-ranked candidates. An observation below the window never drops a fact.
+func preferObservations(ranked []candidate, window, maxTokens int, count tokenCounter) []candidate {
+	head := ranked
+	if window > 0 && len(head) > window {
+		head = head[:window]
+	}
+	superseded := map[domain.UnitID]bool{}
+	for _, c := range head {
+		if c.Unit != nil && c.Unit.Type == domain.FactTypeObservation {
+			for _, src := range c.Unit.SourceIDs {
+				superseded[src] = true
+			}
+		}
+	}
+	return pack(ranked, maxTokens, count, func(c candidate) bool {
+		return c.Unit != nil && c.Unit.Type != domain.FactTypeObservation && superseded[c.ID]
+	})
 }
 
 // unitText is the text a candidate spends budget on.

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Request mirrors memory.v1.Request with domain types, plus scope fields used only by
+// Request mirrors memory.v1.ReflectRequest with domain types, plus scope fields used only by
 // internal callers (the agentic mental-model refresh).
 type Request struct {
 	// Bank is the bank reflected over.
@@ -36,8 +36,8 @@ type Request struct {
 	Arms []string
 	// Seq bounds the units every retrieval sees; zero = unbounded. Internal callers only.
 	Seq domain.SeqRange
-	// Types limits fact types for retrieval tools; empty = all. Internal callers only.
-	Types []domain.FactType
+	// FactTypes limits fact types for retrieval tools; empty = all. Internal callers only.
+	FactTypes []domain.FactType
 	// ExcludeMentalModels hides every mental model from the page tools. Internal callers only.
 	ExcludeMentalModels bool
 	// ExcludeMentalModelIDs hides specific mental models from the page tools. Internal callers only.
@@ -102,7 +102,7 @@ const (
 	StopContextFull StopReason = "context_full"
 )
 
-// Trace mirrors memory.v1.Trace.
+// Trace mirrors memory.v1.ReflectTrace.
 type Trace struct {
 	// ToolCalls are the loop's tool calls (when include.trace).
 	ToolCalls []domain.ToolCallTrace

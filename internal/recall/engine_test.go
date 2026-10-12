@@ -5,6 +5,7 @@ import (
 	"errors"
 	"memd/internal/domain"
 	"memd/internal/store"
+	"memd/internal/store/postgres/pgtest"
 	"slices"
 	"strings"
 	"testing"
@@ -30,8 +31,7 @@ func TestRecallMinScoresResult(t *testing.T) {
 	}
 }
 
-func TestScoreGate(t *testing.T) {
-	g := newScoreGate()
+func TestPassesFloors(t *testing.T) {
 	m := domain.MinScores{Reranker: ptr(0.5), Final: ptr(0.2)}
 	tests := []struct {
 		c    candidate
@@ -43,7 +43,7 @@ func TestScoreGate(t *testing.T) {
 		{candidate{Reranker: ptr(0.9), Final: 0.1}, false},
 	}
 	for i, tt := range tests {
-		if got := g.Keep(tt.c, m); got != tt.keep {
+		if got := passesFloors(tt.c, m); got != tt.keep {
 			t.Errorf("case %d: Keep = %v, want %v", i, got, tt.keep)
 		}
 	}
@@ -225,5 +225,31 @@ func TestRecallLongQueryTruncated(t *testing.T) {
 	calls := e.emb.Calls()
 	if len(calls) != 1 || len(strings.Fields(calls[0].Texts[0])) != MaxQueryTokens {
 		t.Fatalf("embedded query has %d words, want %d", len(strings.Fields(calls[0].Texts[0])), MaxQueryTokens)
+	}
+}
+
+// TestRecallMemoryStale: Memory.Stale is set from Reader.StaleScopes on observations whose scope
+// holds an unconsolidated fact, never on facts, and clears once the fact is consolidated.
+func TestRecallMemoryStale(t *testing.T) {
+	e := newEnv(t, envOpts{arms: []Arm{arm(armVector, "oa", "ob", "fa")}})
+	e.add(t, fact("fa", "fact a", "a"))
+	e.add(t,
+		domain.Unit{ID: uid("oa"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs a", Tags: []string{"a"}},
+		domain.Unit{ID: uid("ob"), Bank: testBank, Type: domain.FactTypeObservation, Text: "obs b", Tags: []string{"b"}})
+	stale := func() map[string]bool {
+		out := map[string]bool{}
+		for _, m := range e.recall(t, Request{Query: "obs"}).Results {
+			out[pgtest.Name(m.Unit.ID)] = m.Stale
+		}
+		return out
+	}
+	if got := stale(); !got["oa"] || got["ob"] || got["fa"] || len(got) != 3 {
+		t.Fatalf("stale = %v, want only oa", got)
+	}
+	e.tx(t, func(ctx context.Context, tx store.Tx, _ int64) error {
+		return tx.Units().MarkConsolidated(ctx, uids("fa"), testNow)
+	})
+	if got := stale(); got["oa"] {
+		t.Fatalf("stale after consolidation = %v, want none", got)
 	}
 }
