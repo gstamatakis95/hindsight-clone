@@ -32,10 +32,32 @@ explains the behaviour behind them.
 - **Counts** (stats, tag counts, scope counts) are indexed COUNT queries; there are no counter tables, and
   listings return no totals.
 - **Paging** is keyset-based with opaque tokens (`domain.EncodePageToken`: base64url JSON of the last position).
-  Every List RPC applies `domain.ListPage`: `page_size` 0 = 100, larger than 1000 = 1000, negative =
-  INVALID_ARGUMENT (the paging interceptor also checks every `page_size` and `max_results` field by name). A
-  malformed token is INVALID_ARGUMENT. A page asks the store for one extra row to decide whether a next-page
-  token exists.
+  Every List RPC, and PreviewConsolidationStrategies, applies `domain.ListPage`: `page_size` 0 = 100, larger than
+  1000 = 1000, negative = INVALID_ARGUMENT (the paging interceptor also checks every `page_size` and `max_results`
+  field by name). A malformed token is INVALID_ARGUMENT. A page asks the store for one extra row to decide whether a
+  next-page token exists. Every order below ends in a unique tiebreak, so a walk never skips or repeats an item that
+  did not change meanwhile; `cmd/memd` TestListPaging checks the bounds, the tokens and a one-item walk of every RPC
+  that takes `page_size`, found from the descriptors.
+- **Response size.** Every response stays under `api.max_response_bytes` (default 3 MiB,
+  `domain.DefaultMaxResponseBytes`, below the 4 MiB gRPC clients receive by default):
+  - The listings of large items (ListMemories, ListMentalModels in the CONTENT and FULL views,
+    ListMentalModelHistory) end a page early once its items reach the limit (`domain.FitBytes`: each item's text
+    fields plus a fixed overhead, always at least one item) and set the token after the last item kept, so
+    `page_size` is a maximum and clients follow `next_page_token`.
+  - Single objects are bounded where they are written: a document's text by `ingest.max_document_bytes` (2 MiB, on
+    Retain and RetainBatch; the server refuses a configuration where it is not below `api.max_response_bytes`), a
+    mental model's content by `domain.MaxMentalModelContentBytes` (1 MiB: a refresh drafting a larger page fails for
+    good with `content_too_large` and keeps the stored page), Recall's `max_tokens` and include budgets by
+    `api.max_recall_tokens` (32000), and a Recall entity's `observation_ids` by `domain.MaxEntityObservationIDs` (the
+    50 most recently updated, beside `observation_count`).
+  - A read (Get, List, Search, Preview, Export, Recall, Reflect) whose encoded response would still pass the limit
+    fails with RESOURCE_EXHAUSTED (`RESPONSE_TOO_LARGE`) instead of breaking the client's receive. In practice that is
+    only ExportBankTemplate: a template is one object that CreateBank takes whole, so it is not paged. A write is
+    never failed for its response size, since its work is committed.
+  - Not paged, by design: ListRecallArms (the server's registry, a handful of arms), the GetBankStats maps (one key
+    per fact type and per operation kind), Recall results (a ranking packed to a token budget is not stable across
+    calls) and Reflect's `based_on` and trace (bounded by `max_total_tokens`; `include.tool_outputs` makes traces
+    larger).
 
 | Listing | Order |
 |---|---|
@@ -43,15 +65,16 @@ explains the behaviour behind them.
 | ListDocuments | `(created_at, id)` descending |
 | ListObservationScopes | scope key, bytewise; the shared scope first |
 | ListObservationHistory | version descending (newest first) |
+| PreviewConsolidationStrategies | the scopes in ListObservationScopes order; each page reports the matches of its scopes |
 | ListTags | tag, bytewise |
 | ListOrgs | id, bytewise |
 | ListBanks | id, bytewise |
-| ListMentalModels | id |
-| ListMentalModelHistory | newest first |
+| ListMentalModels | id, bytewise |
+| ListMentalModelHistory | `(changed_at, id)` descending (newest first); an offset token, since the history is short (`history_max_entries` per kind): a version written while paging can repeat an entry at a page boundary, never skip one |
 | ListDirectives | `(created_at, id)` ascending (oldest first) |
 | ListOperations | `(created_at, id)` descending |
 | ListEvents | seq ascending; `page_size` is soft (a page never splits a seq group) and the cursor is `after_seq` / `next_after_seq` |
-| SearchMentalModels | score; `max_results` 0 = 10, at most 100 (`domain.SearchResults`) |
+| SearchMentalModels | score descending, then model id; `max_results` 0 = 10, at most 100 (`domain.SearchResults`) |
 
 ## Memories
 
@@ -145,8 +168,9 @@ problems through missions and reprocess; curate the residue. Audit and archive r
   with no versions (unknown, or not an observation) is NOT_FOUND. Versions outlive the observation.
 - **ClearObservations** takes exactly one target (`scopes`, `memory_id` or `all`; none is INVALID_ARGUMENT) and
   optionally `reconsolidate`; see [consolidation.md](consolidation.md#clearing-observations). `deleted` is exact.
-- **PreviewConsolidationStrategies** evaluates draft strategies without saving them
-  ([consolidation.md](consolidation.md#strategies)).
+- **PreviewConsolidationStrategies** evaluates draft strategies without saving them, one page of the bank's scopes
+  per call (`page_size`, `page_token`, in ListObservationScopes order); a scope's verdict depends only on the drafts,
+  so the pages add up to the whole bank ([consolidation.md](consolidation.md#strategies)).
 
 ## Documents
 

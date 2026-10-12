@@ -270,9 +270,16 @@ Conventions, stated once in the proto header:
 - **Async work.** An RPC that enqueues work returns the `Operation` itself (`operation`, `operations`,
   `batch_operation`, `mental_model_operations`). `Retain` is synchronous unless `run_async` is set; `RetainBatch`
   is always asynchronous.
-- **Paging.** Every List RPC takes `page_size` (0 = 100, at most 1000, negative = `INVALID_ARGUMENT`) and
-  `page_token`, and returns `next_page_token`. `ListEvents` pages by sequence (`after_seq` / `next_after_seq`);
-  `SearchMentalModels` takes `max_results` (0 = 10, at most 100).
+- **Paging.** Every List RPC (and `PreviewConsolidationStrategies`) takes `page_size` (0 = 100, at most 1000,
+  negative = `INVALID_ARGUMENT`) and an opaque `page_token`, and returns `next_page_token`; each response states its
+  order, ending in a unique tiebreak. `page_size` is a maximum: a page of large items ends early under
+  `api.max_response_bytes` (3 MiB), so follow `next_page_token` until it is empty. `ListEvents` pages by sequence
+  (`after_seq` / `next_after_seq`); `SearchMentalModels` takes `max_results` (0 = 10, at most 100).
+- **Message sizes.** gRPC clients receive 4 MiB by default, and every response stays under it: pages end early, a
+  stored document is at most `ingest.max_document_bytes` (2 MiB), a mental model's content at most 1 MiB, Recall's
+  token budgets at most `api.max_recall_tokens` (32000), and a read that would still pass `api.max_response_bytes`
+  (in practice only `ExportBankTemplate`) fails with `RESOURCE_EXHAUSTED` (`RESPONSE_TOO_LARGE`). Requests may be up
+  to `ingest.max_request_bytes` (16 MiB).
 - **Tag filters.** Every request that filters by tag takes one `TagFilter`: flat `tags` under a `match` mode, or
   boolean `groups` (not both). List RPCs accept the flat form only.
 - **Patches.** Update RPCs take a FieldMask `update_mask` (empty = the populated fields; a named field left unset
@@ -294,7 +301,7 @@ Two RPCs write documents ([design](docs/design/retain.md#retainbatch)):
 | Errors | one invalid item fails the whole call | a status per item: `ACCEPTED`, `UNCHANGED`, `STALE`, `SUPERSEDED`, `REJECTED`, `FAILED` |
 | `document_id` | optional (generated when empty) | required: it makes a redelivery idempotent |
 | Redelivery | unchanged content is a no-op; in flight, a second job | unchanged content is `UNCHANGED`; in flight, it joins the running operation |
-| Limits | `ingest.max_retain_items` (100) | `ingest.max_batch_items` (500), `max_document_bytes`, `max_request_bytes`, the backlog gate |
+| Limits | `ingest.max_retain_items` (100), `max_document_bytes` | `ingest.max_batch_items` (500), `max_document_bytes`, `max_request_bytes`, the backlog gate |
 
 Both take an optional `revision` per item (an event time, a source row version, a broker offset): an item older than
 the document's stored revision changes nothing. Both re-check the no-op rule inside the write transaction, so a

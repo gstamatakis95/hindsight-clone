@@ -58,7 +58,10 @@ Where a new type goes:
   `ConfigView` (`own` and `effective`).
 - **One paging convention.** A List RPC takes `int32 page_size` ("0 = 100, at most 1000") and `string page_token`
   and returns `string next_page_token`; the service applies `domain.ListPage` (negative = INVALID_ARGUMENT), and
-  the paging interceptor checks every `page_size` and `max_results` field by name. A search takes `max_results`
+  the paging interceptor checks every `page_size` and `max_results` field by name. The response comment states the
+  order, ending in a unique tiebreak. A listing of large items ends a page early under `api.max_response_bytes`
+  (`domain.FitBytes`, token after the last item kept); a new unpaged response must be bounded where its data is
+  written, since a read over the limit fails with `RESPONSE_TOO_LARGE`. A search takes `max_results`
   (`domain.SearchResults`). A feed consumers persist pages by an integer cursor (`ListEvents`: `after_seq` /
   `next_after_seq`).
 - **One tag-filter shape.** A field that filters by tag is a `TagFilter` named `tags` (a strategy's `scopes`), never

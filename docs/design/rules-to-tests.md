@@ -72,6 +72,7 @@ Design: [curation-and-operations.md](curation-and-operations.md#banks), [storage
 | Rule | Tests |
 |---|---|
 | A write to an unknown bank creates it; a read of an unknown bank is NOT_FOUND | `recall.TestRecallUnknownBank`, `config.TestEffectiveUnknownOrDeletingBank`, `e2e.TestScenarios/RetainSync` |
+| A Retain item over ingest.max_document_bytes is INVALID_ARGUMENT naming items[k].content, and nothing is stored | `memory.TestIngestValidation` |
 | CreateBank: an existing bank is ALREADY_EXISTS; a template creates directives and models and enqueues first builds, all or nothing | `bank.TestCreateBank`, `bank.TestTemplateRoundTrip`, `bank.TestTemplateCreateRollsBackOnBadSpec` |
 | GetBank and every read of a deleting bank are NOT_FOUND; ListBanks leaves it out | `bank.TestGetBankDeleting`, `bank.TestListBanks` |
 | DeleteBank: tombstone, cancel pending, enqueue delete_bank in one transaction; writes FAILED_PRECONDITION, reads NOT_FOUND, claims skip, running jobs stop; batched delete, blob prefix, bank row | `bank.TestBankDeleteLifecycle`, `bank.TestTombstoneIdempotent`, `bank.TestDeleteRunStopsWhenCancelled`, `bank.TestRedeleteResumesHalfDeletedBank`, `bank.TestDeleteFinalTxRechecksProcessingJobs`, `postgres.TestQueue/CancelBank`, `postgres.TestQueue/DeletingBankClaims`, `postgres.TestQueue/BankDeleteRemovesOperationsAndEvents`, `e2e.TestScenarios/BankDelete` |
@@ -118,6 +119,7 @@ Design: [consolidation.md](consolidation.md).
 | A replayed run is safe: scopes that already cite a fact are skipped | `observation.TestRunReplayAfterKillAtThirdScope` |
 | Dedup merges a near-duplicate create into its twin, or keeps it | `observation.TestRunDedupMerge`, `observation.TestRunDedupKeep`, `observation.TestRunDedupBelowThresholdSkipsCheck` |
 | The first matching strategy is a level between bank and request | `observation.TestRunStrategyOverridesBankNotRequest`, `config.TestForScopeStrategyBetweenBankAndRequest`, `config.TestMatchStrategy`, `observation.TestStrategyPreview` |
+| The strategy preview pages the bank's scopes, and the pages add up to the whole bank | `observation.TestStrategyPreview`, `memd.TestListPaging` |
 | The tick consolidates only banks with auto consolidation and observations on, after the reconcile grace | `observation.TestReconcileSkipsDisabledBanks`, `observation.TestReconcileGrace`, `postgres.TestUnconsolidatedBanks` |
 | The tick enqueues graph_maintenance for banks with graph work | `maintenance.TestMaintenanceEnqueuesGraphMaintenance`, `postgres.TestBanksWithGraphWork` |
 
@@ -131,6 +133,7 @@ Design: [recall.md](recall.md).
 | Every hit is re-checked against the request's bank and filters | `recall.TestRecallExtraArm` |
 | RRF fusion in arm order; boosts only decide the rerank cut | `recall.TestFuseRRFOrder`, `recall.TestFuseStrategyBoostRankSpace`, `recall.TestRecallFusionOrderGolden` |
 | A failing arm fails the recall | `recall.TestRecallFailingArmFailsRecall` |
+| An entity lists its 50 most recently updated observations and counts them all | `postgres.TestReads/entity_states_observation_cap`, `postgres.TestReads/entity_states` |
 | Packing skips an oversized result and returns the top one when nothing fits | `recall.TestPackSkipsOversized`, `recall.TestPackFloorWhenNothingFits` |
 | No time cue means no TIME_PARSE call | `timex.TestNoCueMakesNoLLMCall`, `arms.TestRecallNoCueNoTimeParse`, `arms.TestRecallExplicitWindowNoTimeParse` |
 
@@ -165,6 +168,7 @@ Design: [reflect-and-mental-models.md](reflect-and-mental-models.md#mental-model
 | The interval floor parks an automatic refresh; manual ones ignore it and release it | `mentalmodel.TestDecide`, `mentalmodel.TestAutomaticRunSkipsFreshOrFlooredModel`, `mentalmodel.TestFloorSkewTolerance` |
 | At most one queued refresh per model; a new request joins and upgrades it; refreshes never overlap | `mentalmodel.TestJoiningQueuedRefreshWithForceFullUpgrades`, `mentalmodel.TestWeakerJoinerKeepsUpgrade`, `postgres.TestQueue/UpgradeMergesPayloadAndOverrides`, `postgres.TestQueue/SerialKeyOneAtATime` |
 | PreviewMentalModelRefresh runs the pipeline and writes nothing | `mentalmodel.TestPreviewWritesNothing` |
+| A page over 1 MiB fails the refresh for good (content_too_large) and keeps the stored page | `mentalmodel.TestOversizedPageKeepsDocument` |
 
 ## Operations and the API
 
@@ -180,6 +184,9 @@ Design: [curation-and-operations.md](curation-and-operations.md).
 | Every RPC is wired | `memd.TestEveryRPCWired` |
 | Errors carry ErrorInfo reasons and BadRequest field violations; a batch item's error carries the same code, reason and fields (under `items[k]`) | `grpcapi.TestToStatus`, `grpcapi.TestToStatusFieldViolations`, `grpcapi.TestBacklogStatusAndItemError` |
 | Paging: a negative page_size or max_results is INVALID_ARGUMENT | `grpcapi.TestPagingInterceptor`, `operation.TestListEventsPageBounds` |
+| Paging: every RPC with page_size serves a size over 1000, rejects a malformed token naming page_token, and a one-item walk lists exactly one default page, in order | `memd.TestListPaging` |
+| A page of large items ends early under api.max_response_bytes, keeps at least one item and continues after the last one kept | `memd.TestListPaging`, `memory.TestListMemoriesResponseBudget` |
+| A read whose response passes api.max_response_bytes fails with RESPONSE_TOO_LARGE; a write never does | `grpcapi.TestResponseSizeInterceptor` |
 | FieldMask patches: implicit masks touch only populated leaves; reset needs a mask, `*` resets all | `grpcapi.TestFieldMaskImpliedLeaves`, `grpcapi.TestFieldMaskConfigPatch`, `grpcapi.TestResetMask`, `config.TestResetPaths`, `memd.TestConfigWritesValidated` |
 | Model routing: per slot, the most specific level yielding a binding wins, its own or its default | `config.TestModelResolution`, `config.TestMergePrecedence` |
 | Health needs no tenant; readiness runs the probes | `grpcapi.TestHealthWithoutTenant`, `grpcapi.TestServeHealth` |

@@ -174,8 +174,11 @@ One pipeline serves RefreshMentalModel, triggered refreshes and PreviewMentalMod
    where the scope reads them) is 0: outcome NO_NEW_FACTS with no model call; only `last_refreshed_at` advances
    (content, sources and `last_seq_seen` stay).
 5. **Draft** with the strategy (below).
-6. **Structured output.** With a spec schema and changed content, the page is projected through
-   STRUCTURED_OUTPUT; a failed projection fails the refresh.
+6. **Size check, then structured output.** A changed page over 1 MiB (`domain.MaxMentalModelContentBytes`) fails
+   the refresh for good (`content_too_large`, no retry) and the stored page stays, so one model always fits a
+   response; a delta page that keeps growing hits it first (set `max_content_tokens`, or refresh with
+   `force_full`). With a spec schema and changed content, the page is then projected through STRUCTURED_OUTPUT; a
+   failed projection fails the refresh.
 7. **Write** (one short transaction, no model call): `tx.Seq` first (always, NO_NEW_FACTS included, so the bank
    lock serializes it with the failure reconcile and UpdateMentalModel), re-read the model, and fail with a
    conflict (the job retries) if its version, content or watermark moved, or its source query, read scope (tags
@@ -253,7 +256,8 @@ call) at each interval floor until new in-scope facts arrive or a manual full re
   (the idempotence key), appends one `KIND_REFRESH_FAILED` history entry (capped separately from versions by
   `history_max_entries`), and a MENTAL_MODEL_REFRESH_FAILED event.
 - `failure_reason` is classified from the operation's error: `delta_ops_all_skipped`, `empty_candidate`,
-  `structured_output_failed`, `retrieval_failed` (anything unavailable), else `unexpected_error`.
+  `structured_output_failed`, `content_too_large`, `retrieval_failed` (anything unavailable), else
+  `unexpected_error`.
 - A paused model is skipped by every automatic trigger until a **manual** refresh succeeds (a manual NO_NEW_FACTS
   run counts). There is no automatic resume.
 
@@ -269,13 +273,15 @@ call) at each interval floor until new in-scope facts arrive or a manual full re
 - **Delete / DeleteMentalModelFolder** only delete (history goes by cascade). Folders are the `folder_path`
   prefix tree: a folder matches its own path and everything under `path/`. An empty folder path is
   INVALID_ARGUMENT.
-- **History** (`ListMentalModelHistory`) lists entries newest first, optionally of one kind, paged (100 per page
-  by default, at most 1000).
+- **History** (`ListMentalModelHistory`) lists entries newest first (`changed_at`, then id), optionally of one kind,
+  paged (100 per page by default, at most 1000) with an opaque offset token; a page ends early once its previous
+  contents reach `api.max_response_bytes`.
 - **Views.** `MENTAL_MODEL_VIEW_BASIC` = spec and status; `CONTENT` adds content and structured output; `FULL` adds
   `stale`, `source_memory_ids` and `last_trace`. Defaults: FULL for Get; BASIC for List; Create and Update return
   FULL.
-- **List** pages by id (100 per page by default, at most 1000), filtered by folder prefix and a flat tag filter
-  on the models' own tags.
+- **List** pages by id (100 per page by default, at most 1000; an opaque token), filtered by folder prefix and a
+  flat tag filter on the models' own tags. With the CONTENT or FULL view a page ends early once its models reach
+  `api.max_response_bytes`.
 
 ### Page search
 

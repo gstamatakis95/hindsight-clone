@@ -13,8 +13,9 @@ RetagDocument are `internal/document`.
 
 ## Ingest
 
-1. **Validate every item first.** More than `ingest.max_retain_items` items (100; RetainBatch takes bulk), a
-   document id that appears twice in one request, custom extraction mode
+1. **Validate every item first.** More than `ingest.max_retain_items` items (100; RetainBatch takes bulk), an
+   item's content over `ingest.max_document_bytes` (2 MiB, field `items[k].content`; it keeps every stored text
+   within one GetDocument response), a document id that appears twice in one request, custom extraction mode
    without a `custom_extraction_prompt`, and an `ALL_COMBINATIONS` scope fan-out over `max_combinations` (see
    [consolidation.md](consolidation.md#scopes); reason `TOO_MANY_SCOPES`) are INVALID_ARGUMENT, and nothing is
    stored. For an unknown bank, validation uses the tenant level merged with the overrides, so a rejected retain

@@ -106,9 +106,9 @@
 //     with the seq, which clears its stamps) unless it has no embedding yet because its rederive is pending.
 //     [ClearResult] reports the count and the queued operation. Clears do not queue mental-model refreshes;
 //     affected models go stale through the change seq.
-//   - [Service.PreviewConsolidationStrategies] evaluates draft strategies against the bank's existing scopes
-//     (the first 1000) without saving: per strategy, the scopes config.MatchStrategy would let it win and
-//     those an earlier strategy shadows. The winner of a scope applies whole; a pattern with unset mode is
+//   - [Service.PreviewConsolidationStrategies] evaluates draft strategies against one page of the bank's existing
+//     scopes (paged as ListObservationScopes pages them) without saving: per strategy, the page's scopes
+//     config.MatchStrategy would let it win and those an earlier strategy shadows. The winner of a scope applies whole; a pattern with unset mode is
 //     all_strict (the shared scope never matches); a pattern with no tags matches only under exact.
 //
 // # Maintenance sweep

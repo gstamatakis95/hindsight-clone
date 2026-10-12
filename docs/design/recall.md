@@ -154,7 +154,10 @@ nothing.
 
 ## Packing
 
-- `max_tokens` = 0 means 4096. Results are walked in rank order; one that doesn't fit is skipped and the walk
+- `max_tokens` = 0 means 4096; a Recall request's `max_tokens`, `chunks_max_tokens` and `source_facts_max_tokens`
+  are capped at the server's `api.max_recall_tokens` (32000) before anything runs (the candidate caps scale with
+  `max_tokens`), so a response stays under the response size limit. Reflect's tools call the engine with their own
+  budgets. Results are walked in rank order; one that doesn't fit is skipped and the walk
   continues, so one oversized result never evicts shorter ones behind it.
 - If nothing fits, the top result is returned whole, over budget: an empty answer would read as "nothing known".
 - Tokens are counted with the shared cl100k tokenizer.
@@ -165,7 +168,7 @@ nothing.
 |---|---|
 | `chunks` | Source chunks of the results, in result order, within `chunks_max_tokens` (default 8192). The chunk that crosses the budget is cut, marked `truncated`, and the walk stops. |
 | `source_facts` | For observations, their cited facts, within `source_facts_max_tokens` (default 4096); a fact that doesn't fit is skipped and `source_facts_truncated` is set. Bounded by the request's seq range. |
-| `entities` | Entity state of the results: entity id, canonical name, and the live observations attached to the entity or citing a fact attached to it. |
+| `entities` | Entity state of the results: entity id, canonical name, and the live observations attached to the entity or citing a fact attached to it: `observation_count` counts them all, `observation_ids` lists the 50 most recently updated (`domain.MaxEntityObservationIDs`; updated_at, then id, descending). |
 
 ## Stale observations
 
@@ -197,7 +200,7 @@ and the raw score per arm that returned it.
 | `recall.fuzzy_tag_min_similarity` | 0.45 |
 | `recall.arms` | empty (every registered arm) |
 | `recall.arm_boosts` | none (1 for every arm) |
-| `max_tokens` (request) | 4096 |
+| `max_tokens` (request) | 4096; at most `api.max_recall_tokens` (32000, server config file), as are the include budgets |
 | `budget` (request) | mid |
 | Vector arm floor when unset | 0.3 |
 | Graph seeds | top 20 at cosine ≥ 0.3 (not configurable) |

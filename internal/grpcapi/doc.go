@@ -42,6 +42,10 @@
 //     registered recall arms (config.CheckArms), with INVALID_ARGUMENT. A request's own arms and min_scores.arms
 //     are checked by the recall engine; overrides.recall.arms on Recall and Reflect is rejected outright, since
 //     the request's arms field picks the arms there. ListRecallArms lists the registered arms.
+//   - The response-size interceptor fails a read (a Get, List, Search, Preview or Export RPC, Recall, Reflect) whose
+//     encoded response passes Options.MaxResponseBytes (api.max_response_bytes) with RESOURCE_EXHAUSTED
+//     (RESPONSE_TOO_LARGE), so the client never hits its own receive limit. Writes pass untouched: their work is
+//     committed. The listings stay under the limit on their own by ending pages early.
 //
 // Tenant, org and bank ids must be non-empty, at most 256 bytes, not "." or "..", and free of '/' and control
 // characters, because blob keys are "{tenant}/{org}/{bank}/..." and one org's or bank's prefix must never cover

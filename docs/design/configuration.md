@@ -195,7 +195,7 @@ are defaulted by the package that reads the knob.
 | `mental_models.min_refresh_interval_seconds` | 0 (server) | No floor |
 | `mental_models.history_max_entries` | 50 (server) | Per kind |
 | `mental_models.max_delta_ratio` | unset | |
-| `mental_models.max_content_tokens` | unset | |
+| `mental_models.max_content_tokens` | unset | A length budget the refresh prompts carry; the stored page is capped at 1 MiB regardless |
 | `models.embed` | nomic-embed-text-v1.5 (server) | Server config file only |
 | `models.default` and the chat slots | unset | EXTRACT and REFLECT must be bound at the server level |
 
@@ -213,15 +213,16 @@ database.
 | `worker` | `poll_interval` (500ms), `heartbeat_interval` (15s; must be below 3/4 of `stale_after`), `stale_after` (2m: the reclaim threshold, and the runner's self-fence at 3/4 of it), `maintenance_interval` (60s) |
 | `retention` | `operations` (168h): finished operations; `events` (720h): lifecycle events; `deletion_receipts` (26280h, 3 years): receipts of completed org deletes, counted from completion |
 | `deletion` | `blob_grace` (`api.rpc_deadline`, at least 10m; `0s` = none): the least time between DeleteOrg and the org's blob sweep, so requests that passed their org check before the delete have written their blobs ([storage.md](storage.md#deleting-an-org)) |
-| `api` | `rpc_deadline` (120s): the deadline of calls that carry none; `0s` = none |
-| `ingest` | `max_batch_items` (500): items per RetainBatch call; `max_retain_items` (100): items per Retain call; `max_document_bytes` (2 MiB): one RetainBatch item's content; `max_request_bytes` (16 MiB): the gRPC receive limit for every request, and RetainBatch's summed content; `max_pending_per_bank` (5000) and `max_pending_per_org` (50000): the pending `retain_document` backlog over which RetainBatch is rejected (`INGEST_BACKLOG`); `retry_after` (10s): the delay that rejection's RetryInfo carries ([retain.md](retain.md#retainbatch)) |
+| `api` | `rpc_deadline` (120s): the deadline of calls that carry none; `0s` = none. `max_response_bytes` (3 MiB): the response size limit: a page of large items ends early under it, and a read that would pass it fails with `RESPONSE_TOO_LARGE`; keep it under the clients' receive limit (4 MiB by default in gRPC). `max_recall_tokens` (32000): the cap on a Recall request's `max_tokens` and include budgets ([curation-and-operations.md](curation-and-operations.md#common-rules)) |
+| `ingest` | `max_batch_items` (500): items per RetainBatch call; `max_retain_items` (100): items per Retain call; `max_document_bytes` (2 MiB): one item's content (Retain fails the call, RetainBatch rejects the item), so a stored text always fits a GetDocument response; `max_request_bytes` (16 MiB): the gRPC receive limit for every request, and RetainBatch's summed content; `max_pending_per_bank` (5000) and `max_pending_per_org` (50000): the pending `retain_document` backlog over which RetainBatch is rejected (`INGEST_BACKLOG`); `retry_after` (10s): the delay that rejection's RetryInfo carries ([retain.md](retain.md#retainbatch)) |
 | `observability` | `metrics_interval` (15s): how often the Postgres pool and job queue gauges are sampled (Datadog only) |
 
 Startup validation of the file: `config.ServerDefaults` over the `defaults` block must validate; EXTRACT and
 REFLECT must be bound; every `recall.arms` and `arm_boosts` name must be registered; `slot_concurrency` keys must
 be known slots with positive caps; every duration must be positive (`rpc_deadline` and `blob_grace` may be 0); `max_concurrent`
-must be positive; the heartbeat must be below 3/4 of `stale_after`; and every `ingest` setting must be positive,
-with `max_document_bytes` at most `max_request_bytes`.
+must be positive; the heartbeat must be below 3/4 of `stale_after`; every `ingest` setting must be positive, with
+`max_document_bytes` at most `max_request_bytes`; and `api.max_response_bytes` and `api.max_recall_tokens` must be
+positive, with `ingest.max_document_bytes` (plus a 512-byte item overhead) at most `api.max_response_bytes`.
 
 ## Process settings
 

@@ -22,12 +22,14 @@
 // Internally the Service delegates to four unexported parts, each with its own dependencies: the ingestor
 // (the API side of Retain and RetainBatch), the retainer (one document: the job and the inline run), the curator
 // (UpdateMemory, InvalidateMemory, RestoreMemory) and the rederiver (the rederive_memory job). Recall,
-// ListRecallArms and Reflect delegate to the recall engine and the reflect agent unchanged.
+// ListRecallArms and Reflect delegate to the recall engine and the reflect agent; Recall first caps the request's
+// max_tokens and include budgets at Deps.MaxRecallTokens (api.max_recall_tokens).
 //
 // # Retain
 //
 // [Service.Retain] takes a [RetainRequest] (items, document tags, request overrides, skip_consolidation,
-// run_async; at most IngestLimits.MaxRetainItems items) and:
+// run_async; at most IngestLimits.MaxRetainItems items, each at most IngestLimits.MaxDocumentBytes, else
+// INVALID_ARGUMENT before anything is stored) and:
 //
 //  1. Resolves the bank's effective config. An unknown bank is not created yet: validation uses the tenant
 //     level, and the write transaction creates the bank.
@@ -139,7 +141,8 @@
 // substring, document, entity (live units only), state (live, archived or both), a time range on a chosen
 // timestamp, and tags. Page size 0 means 100; larger sizes are capped at 1000. The page token is an opaque
 // keyset cursor; a malformed token, an unknown fact type or state is domain.ErrInvalidArgument. No total is
-// computed. [Service.GetMemory] reads one unit, live or archived. An unknown or tombstoned bank is
+// computed. A page ends early once its units reach Deps.MaxResponseBytes (domain.FitBytes), with the token after
+// the last unit kept. [Service.GetMemory] reads one unit, live or archived. An unknown or tombstoned bank is
 // domain.ErrNotFound.
 //
 // # Curation
