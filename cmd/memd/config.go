@@ -16,7 +16,9 @@ const (
 	modeAPI = "api"
 	// modeWorker runs the job runner and the maintenance tick.
 	modeWorker = "worker"
-	// modeAll runs both in one process.
+	// modeIngest runs the queue consumer (internal/ingestapi) over the source MEMD_INGEST_PROVIDER selects.
+	modeIngest = "ingest"
+	// modeAll runs the api and the worker in one process, plus the queue consumer when a provider is set.
 	modeAll = "all"
 )
 
@@ -46,6 +48,31 @@ const (
 	envDatadogEnabled   = "MEMD_DATADOG_ENABLED"
 	envDatadogProfiler  = "MEMD_DATADOG_PROFILER"
 	envDatadogMetrics   = "MEMD_DATADOG_METRICS"
+	envIngestProvider   = "MEMD_INGEST_PROVIDER"
+	envIngestTenant     = "MEMD_INGEST_TENANT"
+	envIngestOrg        = "MEMD_INGEST_ORG"
+	envIngestHealthAddr = "MEMD_INGEST_HEALTH_ADDR"
+	envKafkaBrokers     = "MEMD_INGEST_KAFKA_BROKERS"
+	envKafkaTopic       = "MEMD_INGEST_KAFKA_TOPIC"
+	envKafkaGroup       = "MEMD_INGEST_KAFKA_GROUP"
+	envKafkaDLQTopic    = "MEMD_INGEST_KAFKA_DLQ_TOPIC"
+	envKafkaClientID    = "MEMD_INGEST_KAFKA_CLIENT_ID"
+	envKafkaTLS         = "MEMD_INGEST_KAFKA_TLS"
+	envKafkaTLSCA       = "MEMD_INGEST_KAFKA_TLS_CA_FILE"
+	envKafkaTLSCert     = "MEMD_INGEST_KAFKA_TLS_CERT_FILE"
+	envKafkaTLSKey      = "MEMD_INGEST_KAFKA_TLS_KEY_FILE"
+	envKafkaSASLMech    = "MEMD_INGEST_KAFKA_SASL_MECHANISM"
+	envKafkaSASLUser    = "MEMD_INGEST_KAFKA_SASL_USERNAME"
+	//nolint:gosec // an environment variable name, not a credential
+	envKafkaSASLPass = "MEMD_INGEST_KAFKA_SASL_PASSWORD"
+)
+
+// Ingest providers (MEMD_INGEST_PROVIDER).
+const (
+	// ingestProviderNone runs no queue consumer: memd all skips it and memd ingest refuses to start.
+	ingestProviderNone = "none"
+	// ingestProviderKafka consumes a Kafka topic with a consumer group (internal/ingest/kafka).
+	ingestProviderKafka = "kafka"
 )
 
 // Log formats (MEMD_LOG_FORMAT). Unset, the format is json with Datadog enabled and text otherwise.
@@ -63,6 +90,7 @@ const (
 	defaultS3Region    = "us-east-1"
 	blobProviderS3     = "s3"
 	defaultWorkerSlots = 10
+	defaultKafkaGroup  = "memd-ingest"
 )
 
 // Config is memd's process configuration: environment variables, overridden by flags, plus the server config
@@ -119,6 +147,51 @@ type Config struct {
 	DatadogProfiler bool
 	// DatadogMetrics sends memd's own metrics to DogStatsD (default true); ignored unless DatadogEnabled.
 	DatadogMetrics bool
+	// Ingest is the queue consumer's deployment: the provider, its connection and the tenant pinning.
+	Ingest IngestEnv
+}
+
+// IngestEnv is the queue consumer's deployment settings (its behaviour is the server config file's
+// ingest.consumer section).
+type IngestEnv struct {
+	// Provider is none (no consumer) or kafka.
+	Provider string
+	// Tenant pins the source to one tenant (empty = every envelope names its tenant).
+	Tenant string
+	// Org pins the source to one org (empty = every envelope names its org).
+	Org string
+	// HealthAddr, when set, is where memd ingest serves grpc.health.v1.
+	HealthAddr string
+	// Kafka is the kafka provider's connection.
+	Kafka KafkaEnv
+}
+
+// KafkaEnv is the kafka provider's connection and credentials.
+type KafkaEnv struct {
+	// Brokers are the seed brokers, comma-separated host:port; required.
+	Brokers string
+	// Topic is the topic to consume; required.
+	Topic string
+	// Group is the consumer group every memd ingest process of the deployment shares.
+	Group string
+	// DLQTopic receives the dead letters; required, and it must exist.
+	DLQTopic string
+	// ClientID names the client to the brokers (empty = memd).
+	ClientID string
+	// TLS dials the brokers over TLS (implied by any of the TLS files).
+	TLS bool
+	// TLSCAFile is a PEM file of the CAs to trust instead of the system pool.
+	TLSCAFile string
+	// TLSCertFile is the PEM client certificate, for mutual TLS (with TLSKeyFile).
+	TLSCertFile string
+	// TLSKeyFile is the PEM key of the client certificate.
+	TLSKeyFile string
+	// SASLMechanism is PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512; empty = no SASL.
+	SASLMechanism string
+	// SASLUsername is the SASL user.
+	SASLUsername string
+	// SASLPassword is the SASL password.
+	SASLPassword string
 }
 
 // logFormat is the effective log format: LogFormat when set, else json with Datadog enabled (the agent then
@@ -201,6 +274,72 @@ var settings = []setting{
 		envDatadogMetrics, "memd's own metrics over DogStatsD (only with Datadog enabled)", "true",
 		boolean(func(c *Config) *bool { return &c.DatadogMetrics }),
 	},
+	{
+		envIngestProvider, "queue consumer source: none or kafka (ingest; all runs the consumer when set)",
+		ingestProviderNone, str(func(c *Config) *string { return &c.Ingest.Provider }),
+	},
+	{
+		envIngestTenant, "pin the queue to one tenant (empty = every envelope names its tenant)", "",
+		str(func(c *Config) *string { return &c.Ingest.Tenant }),
+	},
+	{
+		envIngestOrg, "pin the queue to one org (empty = every envelope names its org)", "",
+		str(func(c *Config) *string { return &c.Ingest.Org }),
+	},
+	{
+		envIngestHealthAddr, "queue consumer grpc.health listen address (empty = none)", "",
+		str(func(c *Config) *string { return &c.Ingest.HealthAddr }),
+	},
+	{
+		envKafkaBrokers, "Kafka seed brokers, comma-separated host:port", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.Brokers }),
+	},
+	{envKafkaTopic, "Kafka topic to consume", "", kafkaStr(func(k *KafkaEnv) *string { return &k.Topic })},
+	{
+		envKafkaGroup, "Kafka consumer group, shared by every memd ingest process", defaultKafkaGroup,
+		kafkaStr(func(k *KafkaEnv) *string { return &k.Group }),
+	},
+	{
+		envKafkaDLQTopic, "Kafka dead-letter topic (must exist)", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.DLQTopic }),
+	},
+	{
+		envKafkaClientID, "Kafka client id (empty = memd)", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.ClientID }),
+	},
+	{
+		envKafkaTLS, "dial the Kafka brokers over TLS (implied by a TLS file)", "false",
+		boolean(func(c *Config) *bool { return &c.Ingest.Kafka.TLS }),
+	},
+	{
+		envKafkaTLSCA, "Kafka TLS CA bundle, PEM (empty = the system pool)", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.TLSCAFile }),
+	},
+	{
+		envKafkaTLSCert, "Kafka TLS client certificate, PEM", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.TLSCertFile }),
+	},
+	{
+		envKafkaTLSKey, "Kafka TLS client key, PEM", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.TLSKeyFile }),
+	},
+	{
+		envKafkaSASLMech, "Kafka SASL mechanism: PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512 (empty = none)", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.SASLMechanism }),
+	},
+	{
+		envKafkaSASLUser, "Kafka SASL user", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.SASLUsername }),
+	},
+	{
+		envKafkaSASLPass, "Kafka SASL password", "",
+		kafkaStr(func(k *KafkaEnv) *string { return &k.SASLPassword }),
+	},
+}
+
+// kafkaStr sets a string field of the Kafka settings.
+func kafkaStr(field func(*KafkaEnv) *string) func(*Config, string) error {
+	return str(func(c *Config) *string { return field(&c.Ingest.Kafka) })
 }
 
 // str sets a string field.
@@ -261,8 +400,8 @@ var errUsage = errors.New("usage")
 
 // usage writes the command's usage.
 func usage(w io.Writer) {
-	_, _ = fmt.Fprintf(w, "usage: memd <%s|%s|%s> [flags]\n\nSettings (flag, environment variable, default):\n",
-		modeAPI, modeWorker, modeAll)
+	_, _ = fmt.Fprintf(w, "usage: memd <%s|%s|%s|%s> [flags]\n\nSettings (flag, environment variable, default):\n",
+		modeAPI, modeWorker, modeIngest, modeAll)
 	for _, s := range settings {
 		_, _ = fmt.Fprintf(w, "  -%s, %s (default %q)\n      %s\n", flagName(s.env), s.env, s.def, s.help)
 	}
@@ -339,18 +478,19 @@ func lookup(env func(string) string, key string) (string, bool) {
 func (c Config) Validate() error {
 	var errs []error
 	switch c.Mode {
-	case modeAPI, modeWorker, modeAll:
+	case modeAPI, modeWorker, modeIngest, modeAll:
 	default:
 		return fmt.Errorf("%w: unknown mode %q", errUsage, c.Mode)
 	}
 	if c.DSN == "" {
 		errs = append(errs, fmt.Errorf("%s is required", envDSN))
 	}
-	if c.GatewayURL == "" {
+	if c.GatewayURL == "" && c.Mode != modeIngest {
 		errs = append(errs, fmt.Errorf("%s is required", envGatewayURL))
 	}
 	errs = append(errs, c.validateBlob()...)
-	if c.Mode != modeWorker && c.GRPCAddr == "" {
+	errs = append(errs, c.validateIngest()...)
+	if (c.Mode == modeAPI || c.Mode == modeAll) && c.GRPCAddr == "" {
 		errs = append(errs, fmt.Errorf("%s is required in mode %s", envGRPCAddr, c.Mode))
 	}
 	if c.WorkerSlots <= 0 || c.DBMaxConns < 0 {
@@ -364,6 +504,46 @@ func (c Config) Validate() error {
 		return fmt.Errorf("memd: invalid config: %w", err)
 	}
 	return nil
+}
+
+// runsConsumer reports whether the mode runs the queue consumer: ingest always, all when a provider is set.
+func (c Config) runsConsumer() bool {
+	return c.Mode == modeIngest || (c.Mode == modeAll && c.Ingest.Provider != ingestProviderNone)
+}
+
+// validateIngest checks the provider and, when the mode runs the consumer, its settings: memd ingest needs a
+// provider, and kafka needs brokers, a topic, a group and a dead-letter topic. The pinned tenant and org are
+// checked with every envelope's ids.
+func (c Config) validateIngest() []error {
+	switch c.Ingest.Provider {
+	case ingestProviderNone, ingestProviderKafka:
+	default:
+		return []error{fmt.Errorf("%s: unknown ingest provider %q (supported: %s, %s)", envIngestProvider,
+			c.Ingest.Provider, ingestProviderNone, ingestProviderKafka)}
+	}
+	if c.Mode == modeIngest && c.Ingest.Provider == ingestProviderNone {
+		return []error{fmt.Errorf("%s must name a provider in mode %s (supported: %s)", envIngestProvider, modeIngest,
+			ingestProviderKafka)}
+	}
+	if !c.runsConsumer() {
+		return nil
+	}
+	k := c.Ingest.Kafka
+	var errs []error
+	for _, s := range []struct{ env, v string }{
+		{envKafkaBrokers, k.Brokers},
+		{envKafkaTopic, k.Topic},
+		{envKafkaGroup, k.Group},
+		{envKafkaDLQTopic, k.DLQTopic},
+	} {
+		if strings.TrimSpace(s.v) == "" {
+			errs = append(errs, fmt.Errorf("%s is required with %s=%s", s.env, envIngestProvider, ingestProviderKafka))
+		}
+	}
+	if (k.TLSCertFile == "") != (k.TLSKeyFile == "") {
+		errs = append(errs, fmt.Errorf("%s and %s go together", envKafkaTLSCert, envKafkaTLSKey))
+	}
+	return errs
 }
 
 // validateBlob checks the blob provider and its settings: s3 needs a bucket and static credentials.

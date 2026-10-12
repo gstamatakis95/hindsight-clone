@@ -9,6 +9,8 @@ import (
 	"memd/internal/config"
 	"memd/internal/domain"
 	"memd/internal/grpcapi"
+	"memd/internal/ingest/kafka"
+	"memd/internal/ingestapi"
 	"memd/internal/memory"
 	"os"
 	"strings"
@@ -61,7 +63,8 @@ type ServerFile struct {
 	Deletion DeletionFile `json:"deletion"`
 	// API sets the gRPC server's behaviour.
 	API APIFile `json:"api"`
-	// Ingest sets the request limits of Retain and RetainBatch and RetainBatch's backlog gate.
+	// Ingest sets the request limits of Retain and RetainBatch, RetainBatch's backlog gate and the queue
+	// consumer's behaviour (ingest.consumer).
 	Ingest IngestFile `json:"ingest"`
 	// Observability tunes the optional Datadog metrics (MEMD_DATADOG_ENABLED switches them on).
 	Observability ObservabilityFile `json:"observability"`
@@ -137,6 +140,80 @@ type IngestFile struct {
 	MaxPendingPerOrg int `json:"max_pending_per_org"`
 	// RetryAfter is the retry delay a backlog rejection carries (default 10s).
 	RetryAfter Duration `json:"retry_after"`
+	// Consumer is the queue consumer's behaviour (memd ingest).
+	Consumer ConsumerFile `json:"consumer"`
+}
+
+// ConsumerFile is the ingest.consumer section: how memd ingest batches, retries and polls (ingestapi.Config and
+// the provider's poll settings; unset = their defaults). Where it connects is the environment's MEMD_INGEST_*.
+type ConsumerFile struct {
+	// BatchSize is how many messages one poll asks for and the most items of one RetainBatch call (default 100);
+	// at most max_batch_items.
+	BatchSize int `json:"batch_size"`
+	// FlushInterval is how long the consumer keeps polling to fill a batch (default 500ms).
+	FlushInterval Duration `json:"flush_interval"`
+	// Concurrency is how many RetainBatch calls run at once (default 4).
+	Concurrency int `json:"concurrency"`
+	// MaxAttempts is the delivery count at which a still-failing message is dead-lettered (default 10).
+	MaxAttempts int `json:"max_attempts"`
+	// BackoffInitial is the redelivery delay after a first failure, doubled per delivery (default 1s).
+	BackoffInitial Duration `json:"backoff_initial"`
+	// BackoffMax caps the redelivery delay (default 5m).
+	BackoffMax Duration `json:"backoff_max"`
+	// ShutdownGrace bounds how long a stopping consumer retains and settles what it holds (default 20s).
+	ShutdownGrace Duration `json:"shutdown_grace"`
+	// PollWait is how long one poll waits for a message (Kafka; default 1s).
+	PollWait Duration `json:"poll_wait"`
+	// MaxBuffered is how many records of one partition the Kafka source holds before it pauses fetching that
+	// partition (default 10000).
+	MaxBuffered int `json:"max_buffered"`
+}
+
+// withDefaults fills the unset (zero) settings.
+func (f *ConsumerFile) withDefaults() {
+	fill := func(v *int, def int) {
+		if *v == 0 {
+			*v = def
+		}
+	}
+	fillD := func(d *Duration, def time.Duration) {
+		if *d == 0 {
+			*d = Duration(def)
+		}
+	}
+	fill(&f.BatchSize, ingestapi.DefaultBatchSize)
+	fill(&f.Concurrency, ingestapi.DefaultConcurrency)
+	fill(&f.MaxAttempts, ingestapi.DefaultMaxAttempts)
+	fill(&f.MaxBuffered, kafka.DefaultMaxBuffered)
+	fillD(&f.FlushInterval, ingestapi.DefaultFlushInterval)
+	fillD(&f.BackoffInitial, ingestapi.DefaultBackoffInitial)
+	fillD(&f.BackoffMax, ingestapi.DefaultBackoffMax)
+	fillD(&f.ShutdownGrace, ingestapi.DefaultShutdownGrace)
+	fillD(&f.PollWait, kafka.DefaultPollWait)
+}
+
+// validate checks the section: positive settings, a batch within ingest.max_batch_items, and an initial backoff
+// within the maximum.
+func (f ConsumerFile) validate(maxBatchItems int) []error {
+	var errs []error
+	for _, v := range []int{
+		f.BatchSize, f.Concurrency, f.MaxAttempts, f.MaxBuffered, int(f.FlushInterval), int(f.BackoffInitial),
+		int(f.BackoffMax), int(f.ShutdownGrace), int(f.PollWait),
+	} {
+		if v <= 0 {
+			errs = append(errs, errors.New("every ingest.consumer setting must be positive"))
+			break
+		}
+	}
+	if f.BatchSize > maxBatchItems {
+		errs = append(errs, fmt.Errorf("ingest.consumer.batch_size (%d) must not exceed ingest.max_batch_items (%d)",
+			f.BatchSize, maxBatchItems))
+	}
+	if f.BackoffInitial > f.BackoffMax {
+		errs = append(errs, fmt.Errorf("ingest.consumer.backoff_initial (%s) must not exceed backoff_max (%s)",
+			time.Duration(f.BackoffInitial), time.Duration(f.BackoffMax)))
+	}
+	return errs
 }
 
 // limits returns the section as memory.IngestLimits.
@@ -164,6 +241,7 @@ func (f *IngestFile) withDefaults() {
 	if f.RetryAfter == 0 {
 		f.RetryAfter = Duration(memory.DefaultIngestRetryAfter)
 	}
+	f.Consumer.withDefaults()
 }
 
 // validate checks the section: positive settings, and an item limit within the request limit.
@@ -182,7 +260,7 @@ func (f IngestFile) validate() []error {
 		errs = append(errs, fmt.Errorf("ingest.max_document_bytes (%d) must not exceed ingest.max_request_bytes (%d)",
 			f.MaxDocumentBytes, f.MaxRequestBytes))
 	}
-	return errs
+	return append(errs, f.Consumer.validate(f.MaxBatchItems)...)
 }
 
 // Duration is a time.Duration written as a Go duration string ("90s", "2m", "168h").

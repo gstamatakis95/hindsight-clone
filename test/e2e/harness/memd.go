@@ -32,6 +32,8 @@ const (
 	ModeWorker = "worker"
 	// ModeAll is both in one process.
 	ModeAll = "all"
+	// ModeIngest is the queue consumer; the harness serves its health on Proc.Addr.
+	ModeIngest = "ingest"
 )
 
 // Environment the harness passes to memd. cmd/memd reads these names; changing one means changing it here and
@@ -59,6 +61,8 @@ const (
 	EnvS3PathStyle = "MEMD_S3_PATH_STYLE"
 	// EnvConfig is the server config file (models, behaviour and operator settings).
 	EnvConfig = "MEMD_CONFIG"
+	// EnvIngestHealthAddr is where memd ingest serves grpc.health.v1.
+	EnvIngestHealthAddr = "MEMD_INGEST_HEALTH_ADDR"
 )
 
 // Slots is every bindable slot (domain.ModelSlot values); the harness binds each to gatewayemu.ModelFor(slot).
@@ -171,7 +175,7 @@ type MemdOptions struct {
 type Proc struct {
 	// Mode is the run mode.
 	Mode string
-	// Addr is the api's gRPC address (api and all modes).
+	// Addr is the api's gRPC address (api and all modes), or memd ingest's health address.
 	Addr string
 
 	t       testing.TB
@@ -186,8 +190,8 @@ type Proc struct {
 }
 
 // StartMemd starts memd from bin against the stack and waits until it is ready: the gRPC health check
-// SERVING for api and all, still running after a short grace for worker. The process is killed with the
-// test. It fails the test when memd exits early.
+// SERVING for api, all and ingest (on its health address), still running after a short grace for worker. The
+// process is killed with the test. It fails the test when memd exits early.
 func (s *Stack) StartMemd(t testing.TB, bin string, o MemdOptions) *Proc {
 	t.Helper()
 	if o.Mode == "" {
@@ -202,7 +206,11 @@ func (s *Stack) StartMemd(t testing.TB, bin string, o MemdOptions) *Proc {
 			t.Fatalf("harness: %v", err)
 		}
 		p.Addr = "127.0.0.1:" + strconv.Itoa(ports[0])
-		env[EnvGRPCAddr] = p.Addr
+		if o.Mode == ModeIngest {
+			env[EnvIngestHealthAddr] = p.Addr
+		} else {
+			env[EnvGRPCAddr] = p.Addr
+		}
 	}
 	maps.Copy(env, o.Env)
 	// Inherited MEMD_* settings (a developer's shell, the Makefile's MEMD_DSN) never reach the process.

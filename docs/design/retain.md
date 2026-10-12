@@ -64,7 +64,7 @@ pinned key, never at the document's current key.
 
 RetainBatch is bulk ingestion for producers with at-least-once delivery: queue consumers, sync jobs, backfills. It
 is always asynchronous, every item needs a `document_id`, and it returns one result per item, so one bad item never
-fails the call. `memory.Service.RetainBatch` is the one path: the RPC calls it, and so will the queue consumer.
+fails the call. `memory.Service.RetainBatch` is the one path: the RPC calls it, and so does the queue consumer.
 
 | Status | Meaning | Written |
 |---|---|---|
@@ -115,13 +115,62 @@ extraction. Ordering per document comes from the `doc:{id}` serial key (one run 
 
 ### Queue ingestion
 
-Queue sources sit behind `internal/ingest` ([architecture.md](architecture.md#ingest-boundary)). The consumer
-that will drive them decodes each message into one document, groups them by bank, calls RetainBatch's path, and
-settles each message from its item's status: Ack after the commit for ACCEPTED, UNCHANGED, STALE and SUPERSEDED,
-DeadLetter for REJECTED, Nack with backoff for FAILED, and Nack of the whole poll for the RetainBatch backlog
-rejection. It is not wired in yet, so the diagram shows it dashed.
+`memd ingest` (and `memd all` when `MEMD_INGEST_PROVIDER` is set) consumes a message queue and retains every message
+through RetainBatch's path. Queue sources sit behind `internal/ingest`
+([architecture.md](architecture.md#ingest-boundary)); Kafka is the provider (`MEMD_INGEST_PROVIDER=kafka`), and the
+consumer loop is `internal/ingestapi`.
 
-![Queue ingestion: broker, ingest.Source, the consumer loop, the commit point and the settlements](diagrams/ingest-queue.svg)
+![Queue ingestion: Kafka, ingest.Source, the consumer loop, the commit point and the settlements](diagrams/ingest-queue.svg)
+
+**The message.** One `IngestEnvelope` (defined in the proto, so producers can use the generated code) per message:
+`tenant_id`, `org_id`, `bank_id`, one `RetainItem` (`document_id` required, `revision` recommended), and optional
+`document_tags`, `overrides` and `skip_consolidation`, as RetainBatch takes them. The body is protojson, or binary
+protobuf with the message attribute (Kafka header) `content-type: application/x-protobuf`; unknown JSON fields are
+errors. Producers set the message key to the document id, so the versions of one document arrive in order.
+
+**Tenant pinning.** `MEMD_INGEST_TENANT` pins the source to one tenant: an envelope without `tenant_id` is that
+tenant's, and one naming another tenant is dead-lettered (`TENANT_MISMATCH`). `MEMD_INGEST_ORG` pins the org the same
+way (`ORG_MISMATCH`). An unpinned source requires `tenant_id` and trusts it, which is only safe when the broker's
+publish permissions are the tenant boundary (a topic per tenant, or ACLs).
+
+**The loop.**
+
+1. **Receive** up to `ingest.consumer.batch_size` (100) messages, polling again while messages keep arriving until
+   the batch is full or `flush_interval` (500 ms) has passed; an idle poll flushes at once.
+2. **Decode** each message. An undecodable body (`UNDECODABLE`), a pinning mismatch, or an envelope the RetainBatch
+   RPC would refuse (an invalid tenant, org or bank id, no item, an item that does not decode, invalid request
+   overrides: `INVALID_ARGUMENT`) is dead-lettered at once.
+3. **Group** the rest into RetainBatch calls by bank and request-level fields (document tags, overrides,
+   skip_consolidation, which a call applies to all its items), each of at most `batch_size` items and
+   `ingest.max_request_bytes` of content, and run up to `concurrency` (4) calls at once.
+4. **Settle** each message from its item's result. The error class decides before the status, because an org or bank
+   deletion error reaches a write as a REJECTED item too:
+
+| Outcome | Settlement |
+|---|---|
+| ACCEPTED, UNCHANGED, STALE, SUPERSEDED | Ack, after the write transaction committed |
+| REJECTED, or a permanent call error (invalid argument, failed precondition, not found) | DeadLetter, with the error's reason |
+| `ORG_DELETING`, or `ORG_NOT_FOUND` for an org that is not live and has a deletion receipt | Ack and drop (`ingest.dropped`): a deleted org's content must not come back, so it is neither retained nor copied to the dead-letter topic |
+| `INGEST_BACKLOG` (RESOURCE_EXHAUSTED) | Nack after its RetryInfo delay and pause receiving for that long; it never counts towards the attempts |
+| FAILED, a transient call error (UNAVAILABLE, a conflict, a deadline), `BANK_DELETING` (the bank may be re-created, as over the API), `ORG_NOT_FOUND` without a receipt (the org is not created yet) | Nack after `backoff_initial` (1 s) doubled per delivery up to `backoff_max` (5 m); DeadLetter (`MAX_ATTEMPTS`) once the delivery count reaches `max_attempts` (10) |
+
+A dead letter that fails (the dead-letter topic is unreachable) is nacked instead, so no message is held in flight.
+A live org wins over a receipt: receipts outlive the re-creation of their org id, so the consumer looks the org up
+first and drops only when it is still missing or deleting.
+
+**Delivery.** At-least-once end to end. The commit point is RetainBatch's write transaction (the document row and its
+`retain_document` job); nothing is acked before it. A crash, a rebalance or a lost Ack between the commit and the Ack
+redelivers a message that RetainBatch then finds UNCHANGED, joins in flight (ACCEPTED, the same operation) or finds
+STALE, so a redelivery never queues a second extraction. From the commit on, the durable job queue carries the work
+exactly as for an async Retain.
+
+**Shutdown.** On SIGTERM the consumer stops receiving, retains and settles the messages it already holds within
+`ingest.consumer.shutdown_grace` (20 s), then closes the source (the Kafka source commits its offsets and leaves the
+group). Whatever is still unsettled is redelivered to the next consumer.
+
+**Observability.** `memd.ingest.received`, `.acked`, `.nacked`, `.dead_lettered` and `.dropped` (tag `reason`) and
+`memd.ingest.batch.latency`, and one `memd.ingest.batch` span per RetainBatch call carrying the tenant, org and bank
+([architecture.md](architecture.md#observability)).
 
 ## The retain run
 

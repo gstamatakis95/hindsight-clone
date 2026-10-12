@@ -63,11 +63,16 @@ func run(ctx context.Context, args []string, env func(string) string, stdout, st
 		return runAPI(ctx, d)
 	case modeWorker:
 		return runWorker(ctx, d)
+	case modeIngest:
+		return runIngest(ctx, d)
 	default:
 		g, gctx := errgroup.WithContext(ctx)
 		g.Go(func() error { return runAPI(gctx, d) })
 		g.Go(func() error { return runWorker(gctx, d) })
-		return g.Wait() //nolint:wrapcheck // both modes wrap their own errors
+		if cfg.runsConsumer() {
+			g.Go(func() error { return runIngest(gctx, d) })
+		}
+		return g.Wait() //nolint:wrapcheck // every mode wraps its own errors
 	}
 }
 

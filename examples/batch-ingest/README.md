@@ -64,4 +64,5 @@ ticket-203 stored revision: 2
 
 ## With grpcurl
 
-[commands.md](commands.md) has the same calls as grpcurl commands.
+[commands.md](commands.md) has the same calls as grpcurl commands, and the same documents published to a Kafka topic
+that `memd ingest` consumes (with kcat).

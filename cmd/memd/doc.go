@@ -1,22 +1,25 @@
-// Command memd is the agent-memory gRPC service. One binary runs in one of three modes, chosen by its first
+// Command memd is the agent-memory gRPC service. One binary runs in one of four modes, chosen by its first
 // argument:
 //
 //	memd api    [flags]   gRPC server: Recall, Reflect, sync Retain and every admin RPC
 //	memd worker [flags]   the job runner and the maintenance tick
-//	memd all    [flags]   both in one process
+//	memd ingest [flags]   the queue consumer: retains the messages of the MEMD_INGEST_PROVIDER source
+//	memd all    [flags]   api and worker in one process, plus the queue consumer when a provider is set
 //
 // # Where it sits
 //
 // cmd/memd is the composition root, the only place concrete types meet. wire.go opens the infrastructure (the Postgres
 // pool and postgres.DB, the blob store MEMD_BLOB_PROVIDER selects, the AI gateway client), narrows each to its boundary
-// (store, graph, blob, ai) and runs the two modes. wire_services.go builds the shared libraries once (config resolver,
+// (store, graph, blob, ai) and runs the modes. wire_services.go builds the shared libraries once (config resolver,
 // ai.Router, ai.Tokenizer, timex, linking, recall with the arms recallArms registers, reflect), then one wire<Area>
 // function per service (memory, document, observation, mentalmodel, bank, config, operation, maintenance) builds it,
 // hands it to its gRPC handlers (internal/grpcapi), registers its job handlers (Service.RunXJob) for the internal/jobs
 // runner and sets its steps of the maintenance tick; wireMaintenance builds maintenance.Service last, with the
-// graph_maintenance handler. config.go reads the environment and flags and derives the worker id, configfile.go reads
-// the server config file. The readiness probes and the worker's health server live in internal/grpcapi. No service
-// imports this package; nothing here holds business logic.
+// graph_maintenance handler. wire_ingest.go builds the ingest.Source MEMD_INGEST_PROVIDER names (Kafka) and the
+// ingestapi.Consumer over it, the memory service (RetainBatch) and the org service (deletion receipts). config.go
+// reads the environment and flags and derives the worker id, configfile.go reads the server config file. The
+// readiness probes and the health server live in internal/grpcapi. No service imports this package; nothing here
+// holds business logic.
 //
 // # Startup
 //
@@ -31,12 +34,14 @@
 //     optional Datadog instrumentation starts (internal/observability); disabled, it installs nothing.
 //  3. The adapters open: Postgres (pinged within 30 s), blob storage and the gateway. The embedding model
 //     (defaults.models.embed, default nomic-embed-text-v1.5) must return 768 dimensions (memory_units.embedding is
-//     vector(768)), else startup fails.
+//     vector(768)), else startup fails; memd ingest makes no model call, so it skips the check and needs no
+//     gateway.
 //  4. The tokenizer (tiktoken cl100k_base, embedded) and the server level of the config hierarchy are built, then
 //     every service.
 //  5. The mode runs until SIGINT or SIGTERM. The api stops gracefully within 20 s; the worker stops claiming,
-//     lets running jobs finish within the runner's shutdown grace and releases the rest. In mode all an error
-//     in either half stops both.
+//     lets running jobs finish within the runner's shutdown grace and releases the rest; the queue consumer stops
+//     receiving, retains and settles what it holds within ingest.consumer.shutdown_grace and closes the source. In
+//     mode all an error in one part stops them all.
 //
 // The api also registers gRPC server reflection, so grpcurl can discover the services. The worker's id is
 // "<MEMD_WORKER_ID or hostname>-<uuid>", fresh per process, so two workers given the same MEMD_WORKER_ID
@@ -69,6 +74,20 @@
 //	MEMD_DATADOG_ENABLED      false      Datadog tracing, metrics, runtime metrics and log correlation
 //	MEMD_DATADOG_PROFILER     false      Datadog continuous profiler; only with Datadog enabled
 //	MEMD_DATADOG_METRICS      true       memd's own metrics over DogStatsD; only with Datadog enabled
+//	MEMD_INGEST_PROVIDER      "none"     queue consumer source: none or kafka; ingest needs one, all runs the
+//	                          consumer when one is set
+//	MEMD_INGEST_TENANT        ""         pin the queue to one tenant; empty = every envelope names its tenant
+//	MEMD_INGEST_ORG           ""         pin the queue to one org; empty = every envelope names its org
+//	MEMD_INGEST_HEALTH_ADDR   ""         where memd ingest serves grpc.health.v1; empty = nowhere
+//	MEMD_INGEST_KAFKA_BROKERS ""         seed brokers, comma-separated host:port; required with kafka
+//	MEMD_INGEST_KAFKA_TOPIC   ""         topic to consume; required with kafka
+//	MEMD_INGEST_KAFKA_GROUP   "memd-ingest"   consumer group of every memd ingest process
+//	MEMD_INGEST_KAFKA_DLQ_TOPIC ""       dead-letter topic; required with kafka, and it must exist
+//	MEMD_INGEST_KAFKA_CLIENT_ID ""       client id; empty = memd
+//	MEMD_INGEST_KAFKA_TLS     false      dial over TLS (implied by a TLS file); _TLS_CA_FILE, _TLS_CERT_FILE,
+//	                          _TLS_KEY_FILE are PEM files
+//	MEMD_INGEST_KAFKA_SASL_MECHANISM ""  PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512, with _SASL_USERNAME and
+//	                          _SASL_PASSWORD
 //
 // Logs go to stderr, except with MEMD_DATADOG_ENABLED, when they go to stdout (the stream the Datadog agent
 // collects without marking lines as errors). The json format (observability.NewJSONHandler) writes one object per
@@ -94,19 +113,24 @@
 //	worker:      poll_interval (500ms), heartbeat_interval (15s), stale_after (2m), maintenance_interval (60s)
 //	retention:   operations (168h), events (720h)
 //	api:         rpc_deadline (120s; 0s = none)
+//	ingest:      request limits and the backlog gate; ingest.consumer: batch_size (100), flush_interval (500ms),
+//	             concurrency (4), max_attempts (10), backoff_initial (1s), backoff_max (5m), shutdown_grace (20s),
+//	             poll_wait (1s), max_buffered (10000)
 //	observability: metrics_interval (15s): how often the Datadog pool and queue gauges are sampled
 //
 // # Wiring details
 //
 //   - Readiness probes: Postgres is pinged; the gateway is reachable when a GET of its base URL gets any HTTP
-//     response (no model call; the result is cached for 10 s on the injected clock).
+//     response (no model call; the result is cached for 10 s on the injected clock). memd ingest's health
+//     (MEMD_INGEST_HEALTH_ADDR) probes Postgres only.
 //   - The maintenance tick's cross-bank scans (unconsolidated banks, stalled deletes, banks with graph work,
 //     stranded facts, retain_batch settlement, cron models, failed refreshes) are store.Maintenance, which
 //     postgres.DB implements.
-//   - With Datadog on, the pgx pool, S3 client, gateway client, gRPC server, job runs (jobs.Config.TraceJob)
-//     and maintenance ticks (maintenance.Deps.TraceTick) are traced; gRPC and job spans carry the tenant as a tag.
-//     The same gRPC interceptor, job hook and gateway hooks (TraceCall, OnUsage) send the metrics, whose tags
-//     never name a tenant, bank or operation. run starts the gauge sampler (observability.Telemetry.StartSampler)
+//   - With Datadog on, the pgx pool, S3 client, gateway client, gRPC server, job runs (jobs.Config.TraceJob),
+//     maintenance ticks (maintenance.Deps.TraceTick) and the consumer's RetainBatch calls (ingestapi.Hooks) are
+//     traced; gRPC, job and ingest spans carry the tenant as a tag. The same gRPC interceptor, job hook, gateway
+//     hooks (TraceCall, OnUsage) and consumer hooks send the metrics, whose tags never name a tenant, bank or
+//     operation. run starts the gauge sampler (observability.Telemetry.StartSampler)
 //     after buildDeps and stops it before the pool closes: the pool's statistics in every mode, the job queue
 //     (store.Maintenance.QueueStats) in worker and all modes only, since the queue is global.
 //
@@ -120,7 +144,8 @@
 // behaviour through the real services (every RPC wired, config and spec-override validation, document retags,
 // reflect's based_on); and observability_test.go covers the Datadog wiring (disabled installs nothing, spans nest,
 // a retain emits the gRPC, gateway and job metrics with bounded tags, an unreachable agent still serves) and the
-// log format and stream switch. End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a
+// log format and stream switch. ingest_test.go delivers one queue message twice on the wired stack and checks it
+// is retained once. End-to-end tests (test/e2e) run the built binary against Postgres, MinIO and a
 // gateway emulator using these variable names. Design: docs/design/architecture.md#process-model and
 // docs/design/configuration.md.
 package main
